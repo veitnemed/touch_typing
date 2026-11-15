@@ -1,0 +1,526 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
+
+namespace TouchTypingStudio
+{
+    internal static class Program
+    {
+        [STAThread]
+        private static void Main(string[] args)
+        {
+            bool verify = Array.IndexOf(args, "--qa") >= 0;
+            var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
+            var store = new ProfileStore(verify);
+            app.DispatcherUnhandledException += delegate(object sender, DispatcherUnhandledExceptionEventArgs e)
+            {
+                MessageBox.Show("Не удалось продолжить.\n" + e.Exception.Message, "Код вслепую", MessageBoxButton.OK, MessageBoxImage.Error);
+                e.Handled = true;
+                app.Shutdown(1);
+            };
+            int render = Array.IndexOf(args, "--render-checks");
+            if (verify && render >= 0 && render + 1 < args.Length)
+            {
+                RenderChecks.Run(app, store, args[render + 1]);
+                return;
+            }
+            var window = new StudioWindow(store, Array.IndexOf(args, "--windows") >= 0, Array.IndexOf(args, "--resume") < 0);
+            app.Run(window);
+        }
+    }
+
+    internal static class Ui
+    {
+        private static readonly Dictionary<string, SolidColorBrush> BrushesByHex = new Dictionary<string, SolidColorBrush>();
+        public static readonly Brush Ink = Brush("#F1F1F4");
+        public static readonly Brush Muted = Brush("#ADB3C0");
+        public static readonly Brush Border = Brush("#383E4A");
+        public static readonly Brush Card = Brush("#282D38");
+        public static readonly Brush Night = Brush("#20232A");
+        public static readonly Brush Accent = Brush("#BFD6DD");
+        public static readonly Typeface Mono = new Typeface("Cascadia Mono, Consolas");
+
+        public static SolidColorBrush Brush(string color)
+        {
+            SolidColorBrush b;
+            if (BrushesByHex.TryGetValue(color, out b)) return b;
+            b = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
+            b.Freeze();
+            BrushesByHex[color] = b;
+            return b;
+        }
+
+        public static TextBlock Text(string text, double size = 15, Brush color = null, bool bold = false)
+        {
+            return new TextBlock
+            {
+                Text = text, FontSize = size, Foreground = color ?? Ink, TextWrapping = TextWrapping.Wrap,
+                FontWeight = bold ? FontWeights.SemiBold : FontWeights.Normal, LineHeight = 1.32 * size,
+                LineStackingStrategy = LineStackingStrategy.BlockLineHeight
+            };
+        }
+
+        public static Button Button(string text, Action click, bool primary = false)
+        {
+            var b = new Button
+            {
+                Content = text, FontSize = 14, FontWeight = FontWeights.SemiBold, MinHeight = 38,
+                Padding = new Thickness(12, 7, 12, 7), Margin = new Thickness(0, 0, 8, 5),
+                Foreground = primary ? Night : Ink, Background = primary ? Accent : Card,
+                BorderBrush = primary ? Accent : Border, BorderThickness = new Thickness(1),
+                Template = ButtonTemplate(), Cursor = Cursors.Hand
+            };
+            b.Click += delegate { click(); };
+            return b;
+        }
+
+        public static Button QuietButton(string text, Action click)
+        {
+            var b = Button(text, click);
+            b.Background = Brushes.Transparent;
+            b.BorderBrush = Brushes.Transparent;
+            b.MinHeight = 29;
+            b.Padding = new Thickness(8, 3, 8, 3);
+            b.Margin = new Thickness(0, 0, 6, 0);
+            return b;
+        }
+
+        private static ControlTemplate ButtonTemplate()
+        {
+            var template = new ControlTemplate(typeof(Button));
+            var border = new FrameworkElementFactory(typeof(Border), "Frame");
+            border.SetValue(System.Windows.Controls.Border.CornerRadiusProperty, new CornerRadius(8));
+            border.SetValue(System.Windows.Controls.Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
+            border.SetValue(System.Windows.Controls.Border.BorderBrushProperty, new TemplateBindingExtension(Control.BorderBrushProperty));
+            border.SetValue(System.Windows.Controls.Border.BorderThicknessProperty, new TemplateBindingExtension(Control.BorderThicknessProperty));
+            border.SetValue(System.Windows.Controls.Border.PaddingProperty, new TemplateBindingExtension(Control.PaddingProperty));
+            var text = new FrameworkElementFactory(typeof(ContentPresenter));
+            text.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            text.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            border.AppendChild(text);
+            template.VisualTree = border;
+            var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+            hover.Setters.Add(new Setter(System.Windows.Controls.Border.BorderBrushProperty, Accent, "Frame"));
+            template.Triggers.Add(hover);
+            var focus = new Trigger { Property = UIElement.IsKeyboardFocusedProperty, Value = true };
+            focus.Setters.Add(new Setter(System.Windows.Controls.Border.BorderBrushProperty, Brush("#FFFFFF"), "Frame"));
+            focus.Setters.Add(new Setter(System.Windows.Controls.Border.BorderThicknessProperty, new Thickness(2), "Frame"));
+            template.Triggers.Add(focus);
+            var disabled = new Trigger { Property = UIElement.IsEnabledProperty, Value = false };
+            disabled.Setters.Add(new Setter(UIElement.OpacityProperty, .46, "Frame"));
+            template.Triggers.Add(disabled);
+            return template;
+        }
+
+        public static Border Panel(UIElement content, Thickness padding, Brush fill = null)
+        {
+            return new Border
+            {
+                Child = content, Background = fill ?? Card, BorderBrush = Border, BorderThickness = new Thickness(1),
+                Padding = padding, CornerRadius = new CornerRadius(12), SnapsToDevicePixels = true
+            };
+        }
+
+        public static void Add(Panel p, UIElement control, double after = 0)
+        {
+            if (after != 0)
+            {
+                var f = (FrameworkElement)control;
+                f.Margin = new Thickness(f.Margin.Left, f.Margin.Top, f.Margin.Right, f.Margin.Bottom + after);
+            }
+            p.Children.Add(control);
+        }
+
+        public static TextBox Editor(string text, double size = 15)
+        {
+            var input = new TextBox
+            {
+                Text = text ?? "", Foreground = Ink, Background = Night, BorderBrush = Border, FontSize = size,
+                AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap, CaretBrush = Ink, Padding = new Thickness(10),
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
+            return input;
+        }
+
+        public static ScrollViewer Scroll(UIElement child)
+        {
+            return new ScrollViewer { Content = child, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Focusable = false };
+        }
+
+        public static void Name(DependencyObject control, string name) { AutomationProperties.SetName(control, name); }
+    }
+
+    internal sealed class StudioWindow : Window
+    {
+        private readonly ContentControl body = new ContentControl();
+        private readonly TextBlock footer;
+        private readonly Button typingButton, pythonDrillsButton, atlasButton, modesButton, windowsButton, planButton;
+        private readonly ProfileStore store;
+        private readonly TypingPage typing;
+        private readonly WindowsPage windows;
+        private string pickedRegion = "python";
+        private readonly Random drillRandom = new Random();
+        private int exerciseSalt;
+        private int currentMode;
+        private bool subPage;
+
+        public StudioWindow(ProfileStore store, bool windowsFirst, bool preferPython = true)
+        {
+            this.store = store;
+            Title = windowsFirst ? "Windows без мыши" : "Код вслепую";
+            Background = new LinearGradientBrush((Color)ColorConverter.ConvertFromString("#191E28"),
+                (Color)ColorConverter.ConvertFromString("#272C37"), 14);
+            Foreground = Ui.Ink;
+            FontFamily = new FontFamily("Segoe UI");
+            UseLayoutRounding = true;
+            SnapsToDevicePixels = true;
+            Width = Math.Min(1190, SystemParameters.WorkArea.Width - 30);
+            Height = Math.Min(900, SystemParameters.WorkArea.Height - 24);
+            MinWidth = Math.Min(680, Width);
+            MinHeight = Math.Min(510, Height);
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+
+            var shell = new DockPanel();
+            var top = new DockPanel { Background = Ui.Brush("#222427"), LastChildFill = true };
+            DockPanel.SetDock(top, Dock.Top);
+            var title = Ui.QuietButton("КОД ВСЛЕПУЮ", OpenPython);
+            title.FontSize = 17;
+            title.FontWeight = FontWeights.Bold;
+            title.Margin = new Thickness(20, 4, 12, 4);
+            title.ToolTip = "Открыть Python · Alt+1";
+            DockPanel.SetDock(title, Dock.Left);
+            top.Children.Add(title);
+            var nav = new WrapPanel { Margin = new Thickness(6, 6, 14, 6), HorizontalAlignment = HorizontalAlignment.Right };
+            typingButton = Ui.QuietButton("Python", OpenPython);
+            typingButton.ToolTip = "Открыть Python · Alt+1";
+            windowsButton = Ui.QuietButton("Windows", delegate { ShowMode(2); });
+            windowsButton.ToolTip = "Windows без мыши · Alt+2";
+            planButton = Ui.QuietButton("48 часов", delegate { ShowMode(3); });
+            planButton.ToolTip = "48 Hours Challenge · Alt+3";
+            Ui.Add(nav, typingButton);
+            pythonDrillsButton = Ui.QuietButton("Слова и код", delegate { ShowPythonDrills(); });
+            pythonDrillsButton.ToolTip = "Случайные упражнения Python · F11";
+            Ui.Add(nav, pythonDrillsButton);
+            atlasButton = Ui.QuietButton("Карта", delegate { ShowAtlas(); });
+            atlasButton.ToolTip = "Карта навыков · F2";
+            modesButton = Ui.QuietButton("Режимы", delegate { ShowModes(); });
+            Ui.Add(nav, atlasButton);
+            Ui.Add(nav, modesButton);
+            Ui.Add(nav, windowsButton);
+            Ui.Add(nav, planButton);
+            var menu = Ui.QuietButton("⋯", ShowMenu);
+            Ui.Name(menu, "Меню");
+            Ui.Add(nav, menu);
+            top.Children.Add(nav);
+            shell.Children.Add(top);
+            footer = Ui.Text("", 12, Ui.Brush("#FFCA82"));
+            footer.Margin = new Thickness(22, 2, 22, 5);
+            footer.Visibility = Visibility.Collapsed;
+            DockPanel.SetDock(footer, Dock.Bottom);
+            shell.Children.Add(footer);
+            shell.Children.Add(body);
+            Content = shell;
+
+            typing = new TypingPage(this, store, preferPython);
+            windows = new WindowsPage(this, store);
+            ShowMode(windowsFirst ? 2 : 1);
+            Loaded += delegate { WarnStorage(); };
+            Deactivated += delegate { if (body.Content == typing) typing.PauseForFocusLoss(); };
+            Activated += delegate
+            {
+                if (body.Content == windows) windows.RefreshOnOpen();
+            };
+            Closing += delegate { typing.Close(); windows.Close(); WarnStorage(); };
+            PreviewKeyDown += GlobalKeys;
+        }
+
+        public void WarnStorage()
+        {
+            footer.Text = store.Error ?? "";
+            footer.Visibility = store.Error == null ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        public void ShowMode(int mode)
+        {
+            currentMode = mode;
+            subPage = false;
+            if (mode != 1) typing.PauseForFocusLoss();
+            bool inTask = windows.HasRoute;
+            var selected = Ui.Brush("#343841");
+            typingButton.Background = mode == 1 ? selected : Brushes.Transparent;
+            windowsButton.Background = mode == 2 ? selected : Brushes.Transparent;
+            planButton.Background = mode == 3 ? selected : Brushes.Transparent;
+            atlasButton.Background = modesButton.Background = pythonDrillsButton.Background = Brushes.Transparent;
+            if (mode == 1)
+            {
+                body.Content = typing;
+                Title = "Код вслепую";
+                typing.FocusPractice();
+            }
+            else if (mode == 2)
+            {
+                body.Content = windows;
+                Title = "Windows без мыши";
+                windows.RefreshOnOpen();
+            }
+            else
+            {
+                var plan = new ChallengePage(this, store);
+                body.Content = plan;
+                Title = "48 часов · Код вслепую";
+                Dispatcher.BeginInvoke(new Action(delegate { plan.InitialFocus.Focus(); }), DispatcherPriority.Input);
+            }
+            if (inTask) windows.UpdateCard();
+            WarnStorage();
+        }
+
+        private void OpenPython()
+        {
+            ShowMode(1);
+            typing.OpenPython();
+        }
+
+        private void ShowMenu()
+        {
+            var panel = new StackPanel { Margin = new Thickness(32, 22, 32, 18), MaxWidth = 650 };
+            Ui.Add(panel, Ui.Text("Меню", 24, Ui.Ink, true), 15);
+            var history = Ui.Button("Результаты · F7", delegate { ShowMode(1); typing.HandleShortcut(Key.F7); });
+            Ui.Add(panel, history);
+            Ui.Add(panel, Ui.Button("Свой код · F3", OpenImport));
+            Ui.Add(panel, Ui.Button("Настройки обучения", ShowTrainingSettings));
+            Ui.Add(panel, Ui.Button("Параметры упражнения · F10", delegate { ShowMode(1); typing.HandleShortcut(Key.F10); }));
+            Ui.Add(panel, Ui.Button("Проверка клавиатуры и Python · F8", ShowSetup));
+            Ui.Add(panel, Ui.Button("Назад · Esc", ClosePanel));
+            OpenPanel(panel, history);
+        }
+
+        public void OpenLesson(string id)
+        {
+            if (body.Content != typing) ShowMode(1);
+            typing.Choose(Lessons.Find(id));
+        }
+
+        public void OpenImport() { ShowMode(1); typing.HandleShortcut(Key.F3); }
+
+        public void ShowPythonDrills(PythonDrillLevel selected = null)
+        {
+            var page = new PythonDrillPage(this, store.Read(), selected);
+            OpenPanel(page, page.InitialFocus);
+        }
+
+        public void OpenPythonDrill(PythonDrillLevel level)
+        {
+            string script = level.Create(drillRandom);
+            bool words = Array.IndexOf(PythonDrills.WordLevels, level) >= 0;
+            string section = words ? "Слова Python" : "Код Python";
+            pickedRegion = "python";
+            ShowMode(1);
+            typing.ChooseExercise(new Exercise
+            {
+                Kind = words ? ExerciseKind.PythonWords : ExerciseKind.PythonCode,
+                Title = section + "  ›  " + level.Title,
+                Text = script,
+                Layout = Layout.English,
+                Region = "python",
+                Task = ExerciseBank.Task(level.Id, script),
+                DrillLevel = level,
+                Instruction = level.HasRepairs ? "Когда в центре появится ⌫, нажмите Backspace и продолжайте набор." : null
+            });
+        }
+
+        public void ShowAtlas(string region = null)
+        {
+            if (region != null) pickedRegion = region;
+            var page = new AtlasPage(this, store.Read(), pickedRegion);
+            OpenPanel(page, page.InitialFocus);
+        }
+
+        public void ShowAnalytics()
+        {
+            var page = new AnalyticsPage(this, store.Read(), Atlas.Find(pickedRegion).Language);
+            OpenPanel(page, page.InitialFocus);
+        }
+
+        public void ShowModes(string region = null, string message = null)
+        {
+            if (region != null) pickedRegion = region;
+            var page = new ModesPage(this, store.Read(), pickedRegion, message);
+            OpenPanel(page, page.InitialFocus);
+        }
+
+        public void ShowTrainingSettings()
+        {
+            var page = new TrainingSettingsPage(this, store);
+            OpenPanel(page, page.InitialFocus);
+        }
+
+        public void OpenWaypoint(Waypoint node)
+        {
+            pickedRegion = node.Region.Id;
+            if (node.Kind == WaypointKind.Exam)
+            {
+                if (node.Region.Trial.Length == 0) OpenExercise(ExerciseKind.Boss, pickedRegion);
+                else
+                {
+                    var route = Atlas.ExamRoute(node.Region, store.Read());
+                    if (route == null) OpenShortcuts(pickedRegion);
+                    else StartWindowsRoute(route.Kind.ToString(), node.Region);
+                }
+            }
+            else if (node.Lesson != null)
+            {
+                ShowMode(1);
+                typing.Choose(node.Lesson, true);
+            }
+            else if (node.Route != null) StartWindowsRoute(node.Route.Kind.ToString());
+            else OpenExercise(node.Region.Branch, pickedRegion, true);
+        }
+
+        public void OpenExercise(ExerciseKind mode, string region = null, bool branch = false)
+        {
+            if (region != null) pickedRegion = region;
+            if (mode == ExerciseKind.Campaign) { ShowAtlas(); return; }
+            if (mode == ExerciseKind.Shortcuts) { OpenShortcuts(pickedRegion); return; }
+            if (mode == ExerciseKind.Free) { OpenImport(); return; }
+            var p = store.Read();
+            var territory = Atlas.Find(pickedRegion);
+            if (mode == ExerciseKind.Boss)
+            {
+                var boss = Atlas.Nodes.First(x => x.Region == territory && x.Kind == WaypointKind.Exam);
+                if (territory.Trial.Length > 0) { OpenWaypoint(boss); return; }
+            }
+            if (territory.Trial.Length > 0 && mode != ExerciseKind.Daily)
+                territory = Atlas.Find(mode == ExerciseKind.Python ? "python" : "qwerty");
+            var task = ExerciseBank.Create(mode, p, territory, DateTime.Now, exerciseSalt++ % 300);
+            if (task == null)
+            {
+                string reason = mode == ExerciseKind.Daily ? (p.RecallDates.Count == 0 ?
+                    "После зачёта первого уровня здесь появится первый повтор." :
+                    "Сегодня повторов нет. Следующий: " + p.RecallDates.Min(x => x.Due).ToString("dd.MM") + ".") :
+                    "Для этой раскладки пока мало данных. Пройдите обычный раунд, и здесь появятся трудные клавиши.";
+                ShowModes(territory.Id, reason);
+                return;
+            }
+            if (branch) task.Branch = pickedRegion;
+            ShowMode(1);
+            typing.ChooseExercise(task);
+        }
+
+        public void OpenTransfer(bool ru)
+        {
+            ShowMode(1);
+            typing.ChooseExercise(ExerciseBank.Transfer(store.Read(), ru));
+        }
+
+        internal void OpenChallengeTask(ChallengeTask task)
+        {
+            var p = store.Read();
+            string context = ChallengePlanner.Context(p, task);
+            if (task.Route != null) { StartWindowsRoute(task.Route, context: context); return; }
+            var selected = ChallengePlanner.ExerciseFor(p, task, DateTime.Now);
+            selected.Context = context;
+            ShowMode(1);
+            typing.ChooseExercise(selected);
+        }
+
+        internal void OpenShortcuts(string region)
+        {
+            var target = Atlas.Find(region).Id == "vscode" ? "vscode" : "windows";
+            var page = new ShortcutIndexPage(this, store.Read(), Atlas.Find(target));
+            OpenPanel(page, page.InitialFocus);
+        }
+
+        public void OpenPanel(UIElement element, UIElement initialFocus)
+        {
+            typing.PauseForFocusLoss();
+            subPage = true;
+            body.Content = element;
+            Brush selected = Ui.Brush("#343841");
+            typingButton.Background = windowsButton.Background = planButton.Background = Brushes.Transparent;
+            atlasButton.Background = element is AtlasPage ? selected : Brushes.Transparent;
+            modesButton.Background = element is ModesPage || element is ShortcutIndexPage ? selected : Brushes.Transparent;
+            pythonDrillsButton.Background = element is PythonDrillPage ? selected : Brushes.Transparent;
+            Dispatcher.BeginInvoke(new Action(delegate { if (body.Content == element) initialFocus.Focus(); }), DispatcherPriority.Input);
+        }
+
+        public void ClosePanel() { ShowMode(currentMode); }
+
+        internal void StartWindowsRoute(string id, Territory exam = null, string context = null)
+        {
+            ShowMode(2);
+            windows.ChooseRoute(id, exam, context);
+        }
+
+        private void GlobalKeys(object sender, KeyEventArgs e)
+        {
+            var key = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (subPage && key == Key.Escape)
+            {
+                ClosePanel();
+                e.Handled = true;
+                return;
+            }
+            if (Keyboard.Modifiers == ModifierKeys.Alt && key >= Key.D1 && key <= Key.D3)
+            {
+                if (key == Key.D1) OpenPython();
+                else ShowMode(key - Key.D1 + 1);
+                e.Handled = true;
+            }
+            if (Keyboard.Modifiers == ModifierKeys.None && key == Key.F8)
+            {
+                ShowSetup();
+                e.Handled = true;
+            }
+            if (!e.Handled && Keyboard.Modifiers == ModifierKeys.None)
+            {
+                if (key == Key.F11) { ShowPythonDrills(); e.Handled = true; }
+                else if (key == Key.F7 && body.Content != windows) { ShowAnalytics(); e.Handled = true; }
+                else if (key == Key.F2 && (body.Content == windows || body.Content is ModesPage || body.Content is AnalyticsPage ||
+                    body.Content is ChallengePage || body.Content is PythonDrillPage || body.Content is ShortcutIndexPage))
+                { ShowAtlas(); e.Handled = true; }
+                else if (key == Key.Escape && windows.HasRoute) e.Handled = windows.HandleKey(key);
+                else if (body.Content == windows) e.Handled = windows.HandleKey(key);
+                else if (body.Content == typing) e.Handled = typing.HandleShortcut(key);
+            }
+        }
+
+        private void ShowSetup()
+        {
+            var stack = new StackPanel { Margin = new Thickness(24), MaxWidth = 710 };
+            var details = RuntimeTools.Current;
+            var snapshot = store.Read();
+            bool f2 = snapshot.F2Seen;
+            var dpi = VisualTreeHelper.GetDpi(this);
+            Ui.Add(stack, Ui.Text("Проверьте клавиатуру", 24, Ui.Ink, true), 12);
+            Ui.Add(stack, Ui.Text("Раскладки Windows   " + Native.LayoutStatus(), 15), 7);
+            Ui.Add(stack, Ui.Text("Масштаб окна   " + Math.Round(dpi.DpiScaleX * 100) + "%", 15), 7);
+            Ui.Add(stack, Ui.Text("VS Code   " + (details.Code != null ? "найден" : "не найден"), 15), 7);
+            Ui.Add(stack, Ui.Text("Python   " + (details.Python ?? "не найден"), 14), 7);
+            Ui.Add(stack, Ui.Text("Задание Python запускается в отдельном окне VS Code.", 14, Ui.Muted), 10);
+            var prompt = Ui.Text(f2 ? "F2 получена." : "Нажмите F2. Если меняется яркость или громкость, попробуйте Fn+F2.", 15, Ui.Accent);
+            Ui.Add(stack, prompt, 12);
+            var done = Ui.Button("К тренировке · Enter", delegate
+            {
+                store.Update(p => p.F2Seen = f2);
+                ClosePanel();
+            }, true);
+            Ui.Add(stack, done);
+            stack.PreviewKeyDown += delegate(object s, KeyEventArgs e)
+            {
+                if (e.Key == Key.F2)
+                {
+                    f2 = true;
+                    prompt.Text = "F2 получена. Это клавиша переименования в Проводнике.";
+                    e.Handled = true;
+                }
+            };
+            OpenPanel(Ui.Scroll(stack), done);
+        }
+    }
+}

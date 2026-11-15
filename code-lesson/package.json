@@ -1,0 +1,22 @@
+{
+  "name": "touch-typing-lesson-command",
+  "displayName": "Touch Typing Lesson Command",
+  "version": "1.0.0",
+  "publisher": "local",
+  "private": true,
+  "engines": { "vscode": "^1.96.0" },
+  "main": "./lesson.js",
+  "activationEvents": ["onCommand:touchTypingStudio.runLesson"],
+  "capabilities": {
+    "untrustedWorkspaces": { "supported": true }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "touchTypingStudio.runLesson",
+        "title": "Python Lesson: Run Exercise",
+        "enablement": "editorLangId == python"
+      }
+    ]
+  }
+}
