@@ -33,6 +33,16 @@ namespace TouchTypingStudio
                 window.ShowHome();
                 window.UpdateLayout();
                 Save((FrameworkElement)window.Content, scale, Path.Combine(directory, "home-" + suffix + ".png"));
+                window.ShowDesktopTraining();
+                window.UpdateLayout();
+                Save((FrameworkElement)window.Content, scale, Path.Combine(directory, "desktop-start-" + suffix + ".png"));
+                var strip = new DesktopStrip(delegate { }, delegate { }, delegate { }, delegate { });
+                strip.Set(4, 43, "Подготовьте папку для отчёта", "Откройте папку проекта", "Ctrl + L",
+                    "Введите учебный путь в адресной строке и нажмите Enter.", "Проводник готов.", "Тачпад включён · Ctrl+Alt+F10", true, true);
+                strip.Measure(new Size(width, DesktopTrainingWindow.PanelHeight));
+                strip.Arrange(new Rect(0, 0, width, DesktopTrainingWindow.PanelHeight));
+                strip.UpdateLayout();
+                Save(strip, scale, Path.Combine(directory, "desktop-panel-" + suffix + ".png"));
                 window.OpenWorkbench(WorkbenchArea.Windows);
                 window.UpdateLayout();
                 Save((FrameworkElement)window.Content, scale, Path.Combine(directory, "workbench-" + suffix + ".png"));

@@ -34,13 +34,9 @@ namespace TouchTypingStudio
             Ui.Add(stack, typing, 15);
 
             Ui.Add(stack, Ui.Text("Работа без мыши", 19, Ui.Ink, true), 8);
-            var work = new UniformGrid { Columns = 3 };
-            AddCard(work, "Windows", "Рабочий стол, окна и файлы в изолированной среде.",
-                delegate { owner.OpenWorkbench(WorkbenchArea.Windows); });
-            AddCard(work, "Chrome", "Вкладки, адресная строка и навигация в учебном браузере.",
-                delegate { owner.OpenWorkbench(WorkbenchArea.Chrome); });
-            AddCard(work, "VS Code", "Поиск файлов, команды и правки в учебном редакторе.",
-                delegate { owner.OpenWorkbench(WorkbenchArea.Code); });
+            var work = new UniformGrid { Columns = 1 };
+            AddCard(work, "Windows без мыши", "Настоящий рабочий стол. Связанные задания в Проводнике, Блокноте, Chrome и VS Code.",
+                owner.ShowDesktopTraining);
             Ui.Add(stack, work, 8);
             Ui.Add(stack, Ui.Text("Tab — выбор · Enter — открыть · F2 — к режимам · F4 — клавиатура во время печати", 13, Ui.Muted));
             Content = stack;

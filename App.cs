@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 
@@ -165,6 +166,8 @@ namespace TouchTypingStudio
         private readonly ProfileStore store;
         private readonly TypingPage typing;
         private readonly WindowsPage windows;
+        private DesktopTrainingWindow liveDesktop;
+        private bool closing;
         private string pickedRegion = "python";
         private readonly Random drillRandom = new Random();
         private int exerciseSalt;
@@ -214,7 +217,7 @@ namespace TouchTypingStudio
 
             typing = new TypingPage(this, store, preferPython);
             windows = new WindowsPage(this, store);
-            if (windowsFirst) OpenWorkbench(WorkbenchArea.Windows);
+            if (windowsFirst) ShowDesktopTraining();
             else if (preferPython) ShowHome();
             else ShowMode(1);
             Loaded += delegate { WarnStorage(); };
@@ -223,7 +226,14 @@ namespace TouchTypingStudio
             {
                 if (body.Content == windows) windows.RefreshOnOpen();
             };
-            Closing += delegate { typing.Close(); windows.Close(); WarnStorage(); };
+            Closing += delegate
+            {
+                closing = true;
+                if (liveDesktop != null) liveDesktop.Close();
+                typing.Close();
+                windows.Close();
+                WarnStorage();
+            };
             PreviewKeyDown += GlobalKeys;
         }
 
@@ -285,6 +295,58 @@ namespace TouchTypingStudio
             var page = new PracticeSetsPage(this, store, kind);
             OpenPanel(page, page.InitialFocus);
             Title = "Свои наборы · Код вслепую";
+        }
+
+        public void ShowDesktopTraining()
+        {
+            ShowDesktopTraining(null, 0, TimeSpan.Zero, false);
+        }
+
+        private void ShowDesktopTraining(int? completed, int rejected, TimeSpan elapsed, bool restoreFailed)
+        {
+            currentMode = 0;
+            DesktopTrainingPage page = null;
+            page = new DesktopTrainingPage(this, store.Read(), delegate { StartDesktopTraining(page); }, completed, rejected, elapsed, restoreFailed);
+            OpenPanel(page, page.InitialFocus);
+            Title = "Windows без мыши · Код вслепую";
+        }
+
+        private void StartDesktopTraining(DesktopTrainingPage page)
+        {
+            if (liveDesktop != null) return;
+            DesktopTrainingWindow created = null;
+            bool launched = false;
+            try
+            {
+                created = new DesktopTrainingWindow(store.Root, new WindowInteropHelper(this).Handle);
+                liveDesktop = created;
+                created.Closed += delegate
+                {
+                    liveDesktop = null;
+                    if (closing || !launched) return;
+                    if (created.Completed >= 12 && created.Elapsed.TotalSeconds >= 1)
+                    {
+                        double speed = created.Completed / created.Elapsed.TotalMinutes;
+                        double accuracy = 100.0 * created.Completed / (created.Completed + created.Rejected);
+                        store.Update(p => PracticeRecords.Record(p, "desktop/live", speed, accuracy));
+                        WarnStorage();
+                    }
+                    ShowDesktopTraining(created.Completed, created.Rejected, created.Elapsed, created.RestoreFailed);
+                    WindowState = WindowState.Normal;
+                    Activate();
+                };
+                created.Show();
+                launched = true;
+                WindowState = WindowState.Minimized;
+            }
+            catch (Exception error)
+            {
+                if (!(error is System.IO.IOException) && !(error is UnauthorizedAccessException) &&
+                    !(error is InvalidOperationException) && !(error is System.ComponentModel.Win32Exception)) throw;
+                if (created != null) created.Close();
+                liveDesktop = null;
+                page.ShowError("Не удалось начать тренировку. " + error.Message);
+            }
         }
 
         public void OpenPracticeSet(PracticeSet set)
@@ -551,7 +613,7 @@ namespace TouchTypingStudio
             if (Keyboard.Modifiers == ModifierKeys.Alt && key >= Key.D1 && key <= Key.D4)
             {
                 if (key == Key.D1) OpenPython();
-                else OpenWorkbench(key == Key.D2 ? WorkbenchArea.Windows : key == Key.D3 ? WorkbenchArea.Chrome : WorkbenchArea.Code);
+                else ShowDesktopTraining();
                 e.Handled = true;
             }
             if (Keyboard.Modifiers == ModifierKeys.None && key == Key.F8)
