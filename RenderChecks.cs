@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -29,6 +30,12 @@ namespace TouchTypingStudio
                 string suffix = (scale * 100).ToString("0", CultureInfo.InvariantCulture);
                 window.Width = width;
                 window.Height = height;
+                window.ShowHome();
+                window.UpdateLayout();
+                Save((FrameworkElement)window.Content, scale, Path.Combine(directory, "home-" + suffix + ".png"));
+                window.OpenWorkbench(WorkbenchArea.Windows);
+                window.UpdateLayout();
+                Save((FrameworkElement)window.Content, scale, Path.Combine(directory, "workbench-" + suffix + ".png"));
                 foreach (int page in new[] { 1, 2 })
                 {
                     window.ShowMode(page);
@@ -64,6 +71,18 @@ namespace TouchTypingStudio
                     Save((FrameworkElement)window.Content, scale, Path.Combine(directory, "challenge.png"));
                 }
             }
+            window.OpenTyping(ContinuousKind.Russian, 1);
+            window.UpdateLayout();
+            Save((FrameworkElement)window.Content, 1.5, Path.Combine(directory, "continuous-russian.png"));
+            window.ShowPracticeSets(PracticeSetKind.Shortcuts);
+            window.UpdateLayout();
+            Save((FrameworkElement)window.Content, 1.5, Path.Combine(directory, "practice-sets.png"));
+            var preview = new PracticeResultsPage(new StudioProfile(), "Python",
+                new ContinuousTypingSnapshot(246, 7, 91, 97.2, new[] { new KeyValuePair<char, long>('(', 4) }),
+                new PracticeRecord { Speed = 180, Accuracy = 99.5 }, delegate { }, delegate { }, delegate { });
+            window.OpenPanel(preview, preview.InitialFocus);
+            window.UpdateLayout();
+            Save((FrameworkElement)window.Content, 1.5, Path.Combine(directory, "practice-results.png"));
             window.OpenPythonDrill(PythonDrills.WordLevels[0]);
             window.UpdateLayout();
             Save((FrameworkElement)window.Content, 1.5, Path.Combine(directory, "python-words.png"));

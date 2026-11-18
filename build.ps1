@@ -1,5 +1,8 @@
-﻿param([switch]$DesktopShortcut, [switch]$Stage)
+﻿param([switch]$DesktopShortcut, [switch]$Stage, [string]$StageDirectory)
 $ErrorActionPreference = 'Stop'
+if ($StageDirectory -and (-not $Stage -or $DesktopShortcut)) {
+    throw 'StageDirectory requires -Stage and cannot be combined with -DesktopShortcut.'
+}
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $framework = Split-Path $compiler
 $references = @(
@@ -9,14 +12,23 @@ $references = @(
 ) | ForEach-Object { '/reference:' + (Join-Path $framework $_) }
 $sources = Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.cs' -File | Select-Object -ExpandProperty FullName
 $appPath = Join-Path $PSScriptRoot 'TouchTyping.exe'
-$running = Get-Process -Name TouchTyping -ErrorAction SilentlyContinue | Where-Object Path -eq $appPath
-if ($Stage -or $running) {
+if ($StageDirectory) {
+    $stageFolder = Get-Item -LiteralPath $StageDirectory
+    if (-not $stageFolder.PSIsContainer) { throw 'StageDirectory must be a directory.' }
+    $appPath = Join-Path $stageFolder.FullName 'TouchTyping.exe'
+    if ((Test-Path -LiteralPath $appPath) -or (Test-Path -LiteralPath ($appPath + '.config'))) {
+        throw 'The staged executable or configuration already exists.'
+    }
+} elseif ($Stage -or (Get-Process -Name TouchTyping -ErrorAction SilentlyContinue | Where-Object Path -eq $appPath)) {
     # The running image is locked. Update the shortcuts to a sibling build for the next launch.
     $appPath = Join-Path $PSScriptRoot ('TouchTyping-' + (Get-Date -Format 'yyyyMMddHHmmssfff') + '.exe')
 }
-& $compiler /nologo /target:winexe /optimize+ /platform:anycpu /codepage:65001 `
+$compilerOutput = & $compiler /nologo /target:winexe /optimize+ /platform:anycpu /codepage:65001 `
     "/win32manifest:$PSScriptRoot\app.manifest" "/out:$appPath" @references @sources
-if ($LASTEXITCODE -ne 0) { throw 'TouchTyping compilation failed.' }
+if ($LASTEXITCODE -ne 0) {
+    throw ('TouchTyping compilation failed.' + [Environment]::NewLine + ($compilerOutput -join [Environment]::NewLine))
+}
+foreach ($diagnostic in $compilerOutput) { Write-Warning $diagnostic }
 $config = Join-Path $PSScriptRoot 'TouchTyping.exe.config'
 if ($appPath + '.config' -ne $config) { Copy-Item -LiteralPath $config -Destination ($appPath + '.config') }
 if ($Stage) {

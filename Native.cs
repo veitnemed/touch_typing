@@ -20,6 +20,8 @@ namespace TouchTypingStudio
         [DllImport("user32.dll")] private static extern int GetClassName(IntPtr hwnd, StringBuilder name, int length);
         [DllImport("user32.dll")] private static extern int GetWindowText(IntPtr hwnd, StringBuilder name, int length);
         [DllImport("user32.dll")] internal static extern bool IsWindow(IntPtr window);
+        [DllImport("user32.dll")] internal static extern bool IsWindowVisible(IntPtr window);
+        [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr window, WindowEnumerator callback, IntPtr data);
         [DllImport("user32.dll")] internal static extern short GetAsyncKeyState(int vk);
         [DllImport("user32.dll")] private static extern short GetKeyState(int vk);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int ToUnicodeEx(uint vk, uint scanCode,
@@ -41,6 +43,7 @@ namespace TouchTypingStudio
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
         internal delegate IntPtr Hook(int code, IntPtr message, IntPtr data);
+        private delegate bool WindowEnumerator(IntPtr window, IntPtr data);
 
         [StructLayout(LayoutKind.Sequential)]
         internal struct PhysicalPoint { public int X, Y; }
@@ -134,6 +137,25 @@ namespace TouchTypingStudio
         {
             var name = ClassName(hwnd);
             return name == "CabinetWClass" || name == "ExploreWClass";
+        }
+
+        internal static bool IsSettings(IntPtr hwnd)
+        {
+            if (IsProcess(hwnd, "SystemSettings")) return true;
+            if (!IsProcess(hwnd, "ApplicationFrameHost")) return false;
+
+            bool found = false;
+            EnumChildWindows(hwnd, delegate(IntPtr child, IntPtr data)
+            {
+                found = IsProcess(child, "SystemSettings");
+                return !found;
+            }, IntPtr.Zero);
+            return found;
+        }
+
+        internal static bool IsRunDialog(IntPtr hwnd)
+        {
+            return ClassName(hwnd) == "#32770" && IsProcess(hwnd, "explorer");
         }
 
         internal static bool AtScreenHalf(IntPtr window, bool left)
@@ -326,7 +348,8 @@ namespace TouchTypingStudio
         None, SwitchWindow, SwitchLayout, OpenExplorer, Address, NewFolder, Rename, Copy, Paste, Arrow,
         Find, Undo, Save, QuickOpen, Palette, Confirm, ExerciseCharacter, StartApp, CloseWindow, SelectAll, MoveWord,
         ParentFolder, ForwardFolder, BackFolder, Cut, SnapLeft, SnapRight, GoLine, Replace, Comment, MoveLine,
-        CloseEditor, ReopenEditor, SwitchEditor, ReplaceAll
+        CloseEditor, ReopenEditor, SwitchEditor, ReplaceAll,
+        RunDialog, WindowsSettings, TaskManager, Dismiss
     }
 
     internal struct InputChord
@@ -423,6 +446,8 @@ namespace TouchTypingStudio
             if (win && !ctrl && !alt && !shift)
             {
                 if (vk == 0x45) return Chord.OpenExplorer;
+                if (vk == 'R') return Chord.RunDialog;
+                if (vk == 'I') return Chord.WindowsSettings;
                 if (vk == 0x20) return Chord.SwitchLayout;
                 if (vk == 0x25) return Chord.SnapLeft;
                 if (vk == 0x27) return Chord.SnapRight;
@@ -445,6 +470,7 @@ namespace TouchTypingStudio
             {
                 if (shift)
                 {
+                    if (vk == 0x1B) return Chord.TaskManager;
                     if (vk == 'N') return Chord.NewFolder;
                     if (vk == 'P') return Chord.Palette;
                     if (vk == 'T') return Chord.ReopenEditor;
@@ -473,6 +499,7 @@ namespace TouchTypingStudio
             }
             else if (!shift)
             {
+                if (vk == 0x1B) return Chord.Dismiss;
                 if (vk == 0x71) return Chord.Rename;
                 if (vk == 0x0D) return Chord.Confirm;
                 if (vk >= 0x25 && vk <= 0x28) return Chord.Arrow;

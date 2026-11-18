@@ -30,10 +30,12 @@ namespace TouchTypingStudio
         private Layout lastLayout = Layout.Other;
         private readonly TextBlock headline, hint, layoutLabel, time, summary, status, editLine, modeNote, ghostNote;
         private readonly PracticeRibbon ribbon;
-        private readonly Border tape;
+        private readonly Border tape, clock;
         private readonly ProgressBar progress, ghostProgress;
         private readonly KeyboardPicture keyboard = new KeyboardPicture();
-        private readonly Button start, repeat, next, review, transfer, chooseDrill;
+        private readonly Button start, repeat, next, review, transfer, chooseDrill, keyboardToggle;
+        private readonly ComboBox difficulty;
+        private bool updatingDifficulty;
         private readonly WrapPanel actions;
         private readonly DispatcherTimer tick;
 
@@ -56,7 +58,7 @@ namespace TouchTypingStudio
             time.FontFamily = Ui.Mono.FontFamily;
             time.TextAlignment = TextAlignment.Center;
             time.TextWrapping = TextWrapping.NoWrap;
-            var clock = Ui.Panel(time, new Thickness(12, 5, 12, 5), Ui.Brush("#262A33"));
+            clock = Ui.Panel(time, new Thickness(12, 5, 12, 5), Ui.Brush("#262A33"));
             clock.HorizontalAlignment = HorizontalAlignment.Center;
             Ui.Add(stack, clock, 21);
 
@@ -64,6 +66,14 @@ namespace TouchTypingStudio
             var right = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
             DockPanel.SetDock(right, Dock.Right);
             start = Ui.QuietButton("Начать · Пробел", Start);
+            difficulty = new ComboBox { MinWidth = 133, MaxWidth = 190, Margin = new Thickness(0, 0, 7, 0),
+                VerticalAlignment = VerticalAlignment.Center };
+            Ui.Name(difficulty, "Сложность");
+            difficulty.SelectionChanged += delegate { if (!difficulty.IsDropDownOpen) ApplyDifficulty(); };
+            difficulty.DropDownClosed += delegate { ApplyDifficulty(); };
+            Ui.Add(right, difficulty);
+            keyboardToggle = Ui.QuietButton("Клавиатура · F4", ToggleKeys);
+            Ui.Add(right, keyboardToggle);
             Ui.Add(right, start);
             var options = Ui.QuietButton("⋯", ShowOptions);
             options.ToolTip = "Подсказки, полный фрагмент и закрепление · F10";
@@ -168,13 +178,10 @@ namespace TouchTypingStudio
             Restore(preferPython);
         }
 
-        public void OpenPython()
+        private ContinuousTyping Adaptive { get { return exercise == null ? null : exercise.Adaptive; } }
+        public bool IsContinuous(ContinuousKind kind)
         {
-            if (lesson != null && Atlas.ForLesson(lesson).Id == "python" && !reviewMode) { FocusPractice(); return; }
-            PauseForFocusLoss();
-            profile = store.Read();
-            Restore(true);
-            FocusPractice();
+            return Adaptive != null && Adaptive.Kind == kind && exercise.PracticeSet == null;
         }
 
         private void Restore(bool preferPython)
@@ -234,10 +241,38 @@ namespace TouchTypingStudio
             campaign = fromCampaign;
             exercise = activity;
             failed = false;
-            attempt = new TypingAttempt(text, draft);
+            attempt = Adaptive == null ? new TypingAttempt(text, draft) : Adaptive.Attempt;
             last = wrong = down = Key.None;
             status.Text = "";
+            ConfigureDifficulty();
             Render(true);
+        }
+
+        private void ConfigureDifficulty()
+        {
+            updatingDifficulty = true;
+            var course = Adaptive;
+            difficulty.Visibility = course != null && ContinuousTyping.Levels(course.Kind).Length > 1
+                ? Visibility.Visible : Visibility.Collapsed;
+            keyboardToggle.Visibility = course == null ? Visibility.Collapsed : Visibility.Visible;
+            if (course != null)
+            {
+                var levels = ContinuousTyping.Levels(course.Kind);
+                if (course.Kind == ContinuousKind.Python) levels = new[] { "Авто" }.Concat(levels).ToArray();
+                difficulty.ItemsSource = levels;
+                difficulty.SelectedIndex = course.Kind == ContinuousKind.Python
+                    ? course.AutoAdvance ? 0 : course.Level + 1 : course.Level;
+            }
+            updatingDifficulty = false;
+        }
+
+        private void ApplyDifficulty()
+        {
+            var course = Adaptive;
+            if (updatingDifficulty || course == null || difficulty.SelectedIndex < 0) return;
+            int level = course.Kind == ContinuousKind.Python ? difficulty.SelectedIndex - 1 : difficulty.SelectedIndex;
+            if (level == (course.AutoAdvance ? -1 : course.Level)) return;
+            owner.OpenTyping(course.Kind, level, exercise.PracticeSet);
         }
 
         public void FocusPractice()
@@ -256,7 +291,12 @@ namespace TouchTypingStudio
 
         private void Start()
         {
-            if (attempt.Running) { PauseForFocusLoss(); FocusPractice(); return; }
+            if (attempt.Running)
+            {
+                if (Adaptive != null) StopContinuous();
+                else { PauseForFocusLoss(); FocusPractice(); }
+                return;
+            }
             profile = store.Read();
             if (Done) Repeat();
             attempt.Start();
@@ -286,6 +326,15 @@ namespace TouchTypingStudio
 
         private void Repeat()
         {
+            if (Adaptive != null)
+            {
+                PauseForFocusLoss();
+                exercise.Adaptive = Adaptive.Restart();
+                Set(null, 0, Adaptive.Attempt.Target, name, null, activity: exercise);
+                owner.ClosePanel();
+                FocusPractice();
+                return;
+            }
             if (exercise != null && exercise.Kind == ExerciseKind.Ghost)
                 exercise.Ghost = TrainingProgress.Best(profile, exercise.Task, true, true);
             Set(lesson, variant, attempt.Target, name, null, reviewMode, campaign, exercise);
@@ -318,6 +367,7 @@ namespace TouchTypingStudio
 
         private void SpacedReview()
         {
+            if (Adaptive != null) return;
             PauseForFocusLoss();
             profile = store.Read();
             var region = Atlas.ForLesson(lesson) ?? Atlas.Find(exercise == null ? (PreferredLayout() == Layout.Russian ? "ru" : "qwerty") : exercise.Region);
@@ -381,6 +431,15 @@ namespace TouchTypingStudio
 
         private void SaveDraft(bool selection)
         {
+            if (Adaptive != null)
+            {
+                var course = Adaptive;
+                if (!course.HasPendingProgress) return;
+                profile = store.Update(p => course.SaveProgress(p, DateTime.Now));
+                if (store.Error == null) course.ProgressSaved();
+                owner.WarnStorage();
+                return;
+            }
             if (reviewMode || exercise != null) return;
             var draft = !attempt.Finished && (attempt.Position > 0 || attempt.Errors > 0) ? attempt.Draft(lesson == null ? "custom" : lesson.Id, variant) : null;
             string id = lesson == null ? "custom" : lesson.Id;
@@ -409,7 +468,8 @@ namespace TouchTypingStudio
             if (attempt.Running)
             {
                 UpdateStats();
-                if (DateTime.UtcNow - lastSave > TimeSpan.FromSeconds(8) && (attempt.Position > 0 || attempt.Errors > 0))
+                if (DateTime.UtcNow - lastSave > TimeSpan.FromSeconds(8) &&
+                    (Adaptive == null ? attempt.Position > 0 || attempt.Errors > 0 : Adaptive.HasPendingProgress))
                 {
                     lastSave = DateTime.UtcNow;
                     SaveDraft(false);
@@ -465,6 +525,12 @@ namespace TouchTypingStudio
             Key key = e.Key == Key.System ? e.SystemKey : e.Key;
             if (key == Key.Escape)
             {
+                if (Adaptive != null && Adaptive.Inputs > 0)
+                {
+                    StopContinuous();
+                    e.Handled = true;
+                    return;
+                }
                 PauseForFocusLoss();
                 if (Done && next.IsEnabled) next.Focus();
                 else start.Focus();
@@ -520,13 +586,22 @@ namespace TouchTypingStudio
         {
             char expected = attempt.Expected;
             var desired = TypingKeyboard.Hint(expected, PreferredLayout());
-            bool accepted = attempt.Enter(input, TrainingProgress.Locale(desired == null ? PreferredLayout() : desired.Layout));
+            var fragment = attempt;
+            bool accepted = Adaptive == null
+                ? attempt.Enter(input, TrainingProgress.Locale(desired == null ? PreferredLayout() : desired.Layout))
+                : Adaptive.Enter(input);
+            if (Adaptive != null) attempt = Adaptive.Attempt;
             last = accepted ? physical : Key.None;
             wrong = accepted ? Key.None : (physical == Key.None ? (desired == null ? Key.None : desired.Cap.Key) : physical);
             flashUntil = DateTime.UtcNow.AddMilliseconds(380);
-            status.Text = accepted ? "" :
+            status.Text = accepted || Adaptive != null ? "" :
                 "Ожидалось «" + CodeText.Display(expected) + "», получено «" + CodeText.Display(input) + "»." +
                 (desired != null && desired.Layout != Native.ActiveLayout() ? " Проверьте раскладку." : "");
+            if (attempt != fragment)
+            {
+                Render(true);
+                return;
+            }
             failed = exercise != null && exercise.Stops(attempt);
             if (Done) { attempt.Pause(); Complete(); Render(true); }
             else
@@ -537,6 +612,13 @@ namespace TouchTypingStudio
                 UpdateStats();
                 RenderKeyboard();
             }
+        }
+
+        private void StopContinuous()
+        {
+            var course = Adaptive;
+            PauseForFocusLoss();
+            owner.ShowTypingResults(course.Snapshot(), course, exercise.PracticeSet, delegate { owner.ClosePanel(); Start(); }, Repeat);
         }
 
         private void Complete()
@@ -601,7 +683,9 @@ namespace TouchTypingStudio
         private void Render(bool textChanged)
         {
             if (attempt == null) return;
-            if (lesson == null) headline.Text = name;
+            if (Adaptive != null)
+                headline.Text = exercise.PracticeSet == null ? Adaptive.Heading : exercise.PracticeSet.Name;
+            else if (lesson == null) headline.Text = name;
             else
             {
                 var region = Atlas.ForLesson(lesson);
@@ -614,8 +698,11 @@ namespace TouchTypingStudio
             }
             progress.Maximum = attempt.Target.Length;
             progress.Value = attempt.Position;
-            start.Content = attempt.Running ? "Пауза · Esc" :
+            clock.Visibility = progress.Visibility = Adaptive == null ? Visibility.Visible : Visibility.Collapsed;
+            start.Content = attempt.Running ? (Adaptive == null ? "Пауза · Esc" : "Результат · Esc") :
                 Done ? "Повторить · Пробел" : attempt.Position > 0 ? "Продолжить · Пробел" : "Начать · Пробел";
+            start.Focusable = Adaptive == null || !attempt.Running;
+            keyboardToggle.Focusable = Adaptive == null || !attempt.Running;
             next.IsEnabled = reviewMode || (Done && (exercise != null || lesson != null && TrainingProgress.Pass(profile, attempt.Accuracy)));
             next.Content = reviewMode ? "К упражнению · Enter" : exercise == null ? "Дальше · Enter" :
                 exercise.DrillLevel != null ? "Новый раунд · Enter" :
@@ -627,8 +714,12 @@ namespace TouchTypingStudio
             transfer.Visibility = attempt.Finished && exercise != null && exercise.Kind == ExerciseKind.Python ? Visibility.Visible : Visibility.Collapsed;
             chooseDrill.Visibility = Done && exercise != null && exercise.DrillLevel != null ? Visibility.Visible : Visibility.Collapsed;
             actions.Visibility = Done || reviewMode && !attempt.Running ? Visibility.Visible : Visibility.Collapsed;
-            modeNote.Text = exercise == null ? "" : exercise.Instruction;
-            modeNote.Visibility = !string.IsNullOrEmpty(modeNote.Text) && !attempt.Running && !Done ? Visibility.Visible : Visibility.Collapsed;
+            if (Adaptive != null) UpdateAdaptiveNote();
+            else
+            {
+                modeNote.Text = exercise == null ? "" : exercise.Instruction;
+                modeNote.Visibility = !string.IsNullOrEmpty(modeNote.Text) && !attempt.Running && !Done ? Visibility.Visible : Visibility.Collapsed;
+            }
             ghostProgress.Maximum = attempt.Target.Length;
             ghostProgress.Visibility = ghostNote.Visibility = exercise != null && exercise.Ghost != null ? Visibility.Visible : Visibility.Collapsed;
             UpdateStatus();
@@ -652,6 +743,11 @@ namespace TouchTypingStudio
 
         private void UpdateStats()
         {
+            summary.Visibility = Adaptive == null ? Visibility.Visible : Visibility.Collapsed;
+            if (Adaptive != null)
+            {
+                return;
+            }
             time.Text = TimeSpan.FromSeconds(attempt.Seconds).ToString(@"mm\:ss");
             int speed = attempt.Seconds < 1 ? 0 : (int)Math.Round(60 * attempt.Position / attempt.Seconds);
             summary.Text = string.Format("{0}/{1}   ·   Ошибки {2}   ·   {3}   ·   {4} сим/мин",
@@ -673,11 +769,18 @@ namespace TouchTypingStudio
             if (attempt == null) return;
             bool memory = exercise != null && exercise.Kind == ExerciseKind.Memory;
             string repaired = attempt.HasRepairs ? attempt.Written : null;
-            ribbon.Update(attempt.Target, attempt.Position, wrong != Key.None, memory, repaired);
+            string weakness = Adaptive == null ? null : Adaptive.Weakest;
+            if (Adaptive != null)
+            {
+                repaired = Adaptive.Prefix + (repaired ?? attempt.Target.Substring(0, attempt.Position));
+                UpdateAdaptiveNote();
+            }
+            ribbon.Update(attempt.Target, attempt.Position, wrong != Key.None, memory, repaired,
+                weakness == null ? '\0' : weakness[weakness.Length - 1]);
             editLine.Visibility = attempt.HasRepairs && !IsIndependent ? Visibility.Visible : Visibility.Collapsed;
             if (editLine.Visibility == Visibility.Visible)
             {
-                string written = repaired;
+                string written = attempt.Written;
                 int start = Math.Max(0, written.Length - 40);
                 editLine.Text = written.Length == 0 ? "После набора здесь появится результат исправлений." :
                     (start > 0 ? "… " : "") + PracticeRibbon.VisibleText(written.Substring(start));
@@ -685,6 +788,12 @@ namespace TouchTypingStudio
             }
             Ui.Name(tape, attempt.Finished ? "Фрагмент набран" : "Строка набора. Следующий символ: " + Spoken(attempt.Expected)
                 + (memory ? "." : ". " + attempt.Target.Substring(attempt.Position, Math.Min(100, attempt.Target.Length - attempt.Position))));
+        }
+
+        private void UpdateAdaptiveNote()
+        {
+            modeNote.Text = Adaptive.AutoAdvance ? "Сложность подстраивается во время набора." : "";
+            modeNote.Visibility = !attempt.Running && modeNote.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private static string Spoken(char c)
@@ -711,7 +820,8 @@ namespace TouchTypingStudio
                 100 * attempt.Position >= attempt.Target.Length * Math.Max(20, profile.Training.FadeFrom);
             bool fixedHelp = exercise != null && exercise.FixedGuidance;
             bool showKeys = (fixedHelp || profile.ShowKeys) && !recall && !Done;
-            bool showHands = (fixedHelp || profile.ShowHands) && !recall && !faded && !Done;
+            bool showHands = (fixedHelp || profile.ShowHands) && !recall && !faded && !Done && (Adaptive == null || showKeys);
+            keyboardToggle.Content = showKeys ? "Скрыть клавиатуру · F4" : "Показать клавиатуру · F4";
             bool tab = attempt.CanIndent();
             bool caps = Keyboard.IsKeyToggled(Key.CapsLock);
             string text = "";
@@ -732,7 +842,8 @@ namespace TouchTypingStudio
             }
             if (caps && !Done) text += "   ·   Caps Lock включён";
             hint.Text = text;
-            hint.Visibility = text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+            hint.Visibility = text.Length == 0 || (Adaptive != null && !showKeys && attempt.Expected != CodeText.Erase)
+                ? Visibility.Collapsed : Visibility.Visible;
             bool switchLayout = expected != null && expected.Layout != lastLayout;
             layoutLabel.Text = switchLayout ? CodeText.LanguageName(lastLayout) + " → " +
                 CodeText.LanguageName(expected.Layout) + "  ·  Win+Space" : CodeText.LanguageName(lastLayout);
@@ -754,6 +865,7 @@ namespace TouchTypingStudio
             profile = store.Update(p => p.ShowKeys = value);
             owner.WarnStorage();
             Render(false);
+            if (Adaptive != null) FocusPractice();
         }
 
         private void ToggleHands()

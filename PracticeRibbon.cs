@@ -11,6 +11,7 @@ namespace TouchTypingStudio
         private string repairedPrefix;
         private int position;
         private bool error, single;
+        private char practiceSymbol;
         private static readonly Brush Typed = Ui.Brush("#8D919E");
         private static readonly Brush Upcoming = Ui.Brush("#ECEAF0");
 
@@ -21,10 +22,11 @@ namespace TouchTypingStudio
             return text.Replace('\n', '↵').Replace('\t', '⇥');
         }
 
-        public void Update(string text, int at, bool failed, bool singleSymbol = false, string repaired = null)
+        public void Update(string text, int at, bool failed, bool singleSymbol = false, string repaired = null, char practice = '\0')
         {
             target = text;
             repairedPrefix = repaired;
+            practiceSymbol = practice;
             position = at;
             error = failed;
             single = singleSymbol;
@@ -64,7 +66,11 @@ namespace TouchTypingStudio
                 draw.PushClip(new RectangleGeometry(new Rect(middle, 0, width - middle, height)));
                 char symbol = target[position];
                 var current = Format(VisibleText(symbol.ToString()), size, Upcoming);
-                var next = Format(VisibleText(target.Substring(position + 1, Math.Min(columns, target.Length - position - 1))), size, Upcoming);
+                string tail = target.Substring(position + 1, Math.Min(columns, target.Length - position - 1));
+                var next = Format(VisibleText(tail), size, Upcoming);
+                if (practiceSymbol != '\0')
+                    for (int index = 0; index < tail.Length; index++)
+                        if (tail[index] == practiceSymbol) next.SetForegroundBrush(Ui.Brush("#FFD28E"), index, 1);
                 double top = (height - current.Height) / 2;
                 var accent = error ? Ui.Brush("#EB868C") : Ui.Brush("#B7CED6");
                 double glyphWidth = current.WidthIncludingTrailingWhitespace;

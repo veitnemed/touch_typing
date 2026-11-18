@@ -19,6 +19,9 @@ namespace TouchTypingStudio
         public string CustomName;
         public string SelectedLesson = "home-motion";
         public string PythonLesson;
+        public int AdaptivePythonLevel;
+        public List<PracticeSet> PracticeSets = new List<PracticeSet>();
+        public List<PracticeRecord> PracticeRecords = new List<PracticeRecord>();
         public int TypingCourse;
         public double CardX = double.NaN;
         public double CardY = double.NaN;

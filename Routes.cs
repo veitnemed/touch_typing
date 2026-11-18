@@ -8,16 +8,27 @@ namespace TouchTypingStudio
     internal enum RouteKind
     {
         Switch, Layout, Explorer, Rename, Edit, Python, StartMenu, CloseWindow, SelectText, NavigateWords,
-        Snap, FolderHistory, MoveFile, CodeLine, CodeComment, CodeReplace, CodeMoveLine, CodeTabs, CodeReopen
+        Snap, FolderHistory, MoveFile, CodeLine, CodeComment, CodeReplace, CodeMoveLine, CodeTabs, CodeReopen,
+        RunDialog, WindowsSettings, TaskManager
     }
 
     internal sealed class RouteSpec
     {
         public readonly RouteKind Kind;
         public readonly string Name, Goal, Category;
+        public readonly string Shortcuts;
+        public readonly Chord SystemChord;
         public bool InCode { get { return Category == "VS Code"; } }
-        public RouteSpec(RouteKind kind, string name, string goal, string category = "Windows")
-        { Kind = kind; Name = name; Goal = goal; Category = category; }
+        public RouteSpec(RouteKind kind, string name, string goal, string category = "Windows",
+            string shortcuts = "", Chord systemChord = Chord.None)
+        {
+            Kind = kind;
+            Name = name;
+            Goal = goal;
+            Category = category;
+            Shortcuts = shortcuts;
+            SystemChord = systemChord;
+        }
         public string PassId(int stage) { return Kind + "/" + stage; }
     }
 
@@ -25,18 +36,24 @@ namespace TouchTypingStudio
     {
         internal static readonly RouteSpec[] Routes =
         {
-            new RouteSpec(RouteKind.Switch, "Переключить окно", "Из первого учебного окна перейдите во второе."),
-            new RouteSpec(RouteKind.Layout, "Две раскладки", "Наберите две строки на разных раскладках в Блокноте."),
-            new RouteSpec(RouteKind.StartMenu, "Запуск через меню «Пуск»", "Найдите Блокнот из меню «Пуск» и вернитесь в тренажёр."),
-            new RouteSpec(RouteKind.CloseWindow, "Закрытие окна", "Закройте только учебный Блокнот через Alt+F4."),
-            new RouteSpec(RouteKind.Snap, "Два окна рядом", "Разместите два учебных окна по половинам экрана."),
-            new RouteSpec(RouteKind.Explorer, "Открыть путь и создать папку", "Откройте нужный путь и создайте подкаталог.", "Проводник"),
-            new RouteSpec(RouteKind.Rename, "Имя и копия файла", "Переименуйте учебный файл и скопируйте его в другую папку.", "Проводник"),
-            new RouteSpec(RouteKind.FolderHistory, "Навигация по папкам", "Сходите на уровень выше, вернитесь назад и вперёд.", "Проводник"),
-            new RouteSpec(RouteKind.MoveFile, "Перенос файла", "Перенесите файл в папку Archive, сохранив содержимое.", "Проводник"),
-            new RouteSpec(RouteKind.SelectText, "Замена всего текста", "Выделите всё, замените содержимое и сохраните файл.", "Текст"),
-            new RouteSpec(RouteKind.NavigateWords, "Редактировать слово", "Исправьте слово в середине строки. Используйте Ctrl+стрелки.", "Текст"),
-            new RouteSpec(RouteKind.Edit, "Найти, заменить, отменить", "Исправьте значение в Блокноте и сохраните результат.", "Текст"),
+            new RouteSpec(RouteKind.Switch, "Переключить окно", "Из первого учебного окна перейдите во второе.", shortcuts: "Alt+Tab"),
+            new RouteSpec(RouteKind.Layout, "Две раскладки", "Наберите две строки на разных раскладках в Блокноте.", shortcuts: "Win+Пробел"),
+            new RouteSpec(RouteKind.StartMenu, "Запуск через меню «Пуск»", "Найдите Блокнот из меню «Пуск» и вернитесь в тренажёр.", shortcuts: "Win или Ctrl+Esc"),
+            new RouteSpec(RouteKind.CloseWindow, "Закрытие окна", "Закройте только учебный Блокнот.", shortcuts: "Alt+F4"),
+            new RouteSpec(RouteKind.Snap, "Два окна рядом", "Разместите два учебных окна по половинам экрана.", shortcuts: "Win+← · Win+→"),
+            new RouteSpec(RouteKind.RunDialog, "Окно «Выполнить»", "Откройте окно «Выполнить» и закройте его с клавиатуры.", shortcuts: "Win+R · Esc",
+                systemChord: Chord.RunDialog),
+            new RouteSpec(RouteKind.WindowsSettings, "Параметры Windows", "Откройте приложение «Параметры» с клавиатуры.", shortcuts: "Win+I",
+                systemChord: Chord.WindowsSettings),
+            new RouteSpec(RouteKind.TaskManager, "Диспетчер задач", "Откройте Диспетчер задач с клавиатуры.", shortcuts: "Ctrl+Shift+Esc",
+                systemChord: Chord.TaskManager),
+            new RouteSpec(RouteKind.Explorer, "Открыть путь и создать папку", "Откройте нужный путь в Проводнике и создайте подкаталог.", "Проводник", "Win+E · Ctrl+L · Ctrl+Shift+N"),
+            new RouteSpec(RouteKind.Rename, "Имя и копия файла", "Переименуйте учебный файл и скопируйте его в другую папку.", "Проводник", "F2 · Ctrl+C · Ctrl+V"),
+            new RouteSpec(RouteKind.FolderHistory, "Навигация по папкам", "Сходите на уровень выше, вернитесь назад и вперёд.", "Проводник", "Alt+↑ · Alt+← · Alt+→"),
+            new RouteSpec(RouteKind.MoveFile, "Перенос файла", "Перенесите файл в папку Archive, сохранив содержимое.", "Проводник", "Ctrl+X · Ctrl+V"),
+            new RouteSpec(RouteKind.SelectText, "Замена всего текста", "Выделите всё, замените содержимое и сохраните файл.", "Текст", "Ctrl+A · Ctrl+S"),
+            new RouteSpec(RouteKind.NavigateWords, "Редактировать слово", "Исправьте слово в середине строки.", "Текст", "Ctrl+стрелки · Ctrl+Shift+стрелки"),
+            new RouteSpec(RouteKind.Edit, "Найти, заменить, отменить", "Исправьте значение в Блокноте и сохраните результат.", "Текст", "Ctrl+F · Ctrl+Z · Ctrl+S"),
             new RouteSpec(RouteKind.Python, "Открыть код, исправить, запустить", "Откройте, измените, сохраните и запустите учебный код.", "VS Code"),
             new RouteSpec(RouteKind.CodeLine, "Перейти к строке", "Найдите строку по номеру, измените значение и сохраните.", "VS Code"),
             new RouteSpec(RouteKind.CodeComment, "Временно убрать строку", "Отключите вывод с помощью комментария и сохраните код.", "VS Code"),
@@ -70,6 +87,7 @@ namespace TouchTypingStudio
         private readonly StringBuilder typedLine = new StringBuilder();
         public bool ExplorerWarmup { get; private set; }
         public bool HasSampleWindows { get { return Spec.Kind == RouteKind.Switch || Spec.Kind == RouteKind.Snap; } }
+        public bool IsSystemShortcut { get { return Spec.SystemChord != Chord.None; } }
         private DateTime actionAt;
 
         public RouteSession(RouteSpec spec, int stage, string root)
@@ -88,9 +106,13 @@ namespace TouchTypingStudio
             oldWord = new[] { "draft", "wait", "old" }[stage];
             trialWord = new[] { "test", "temp", "trial" }[stage];
             finalWord = new[] { "ready", "done", "saved" }[stage];
-            Directory.CreateDirectory(Folder);
-            Prepare();
+            if (!IsSystemShortcut)
+            {
+                Directory.CreateDirectory(Folder);
+                Prepare();
+            }
             if (spec.Kind == RouteKind.Explorer) Notice = "F6 в тренажёре — скопировать адрес. Затем Win+E.";
+            if (IsSystemShortcut) Notice = "Выполните действие из окна тренажёра.";
         }
 
         private void Prepare()
@@ -298,6 +320,12 @@ namespace TouchTypingStudio
                         "Подходит и Ctrl+Esc для открытия меню «Пуск»." };
                 case RouteKind.CloseWindow:
                     return new[] { "Убедитесь, что активен учебный Блокнот. Нажмите Alt+F4." };
+                case RouteKind.RunDialog:
+                    return new[] { "В тренажёре нажмите Win+R.", "Когда появится отметка об открытии окна «Выполнить», нажмите Esc." };
+                case RouteKind.WindowsSettings:
+                    return new[] { "В тренажёре нажмите Win+I. Дождитесь окна «Параметры»." };
+                case RouteKind.TaskManager:
+                    return new[] { "В тренажёре нажмите Ctrl+Shift+Esc. Дождитесь окна Диспетчера задач." };
                 case RouteKind.SelectText:
                     return new[] { "На EN нажмите Ctrl+A, введите «" + expected + "», затем Ctrl+S." };
                 case RouteKind.NavigateWords:
@@ -400,6 +428,12 @@ namespace TouchTypingStudio
         public void Key(InputChord e)
         {
             if (Passed) return;
+            if (IsSystemShortcut)
+            {
+                if (Step == 0 && e.Chord == Spec.SystemChord && e.Window == FromWindow) Observe();
+                if (Step == 1 && e.Chord == Chord.Dismiss && e.Window == ToWindow) Observe();
+                return;
+            }
             if (Spec.Kind == RouteKind.Switch)
             {
                 if (e.Chord == Chord.SwitchWindow && e.Window == FromWindow) Observe();
@@ -589,6 +623,11 @@ namespace TouchTypingStudio
         public void Validate(IntPtr active)
         {
             if (Passed) return;
+            if (IsSystemShortcut)
+            {
+                ValidateSystemShortcut(active);
+                return;
+            }
             if (Spec.Kind == RouteKind.Layout && layoutTarget != active && IsTarget(active))
                 layoutTarget = active;
             if (Spec.Kind == RouteKind.Switch)
@@ -714,6 +753,54 @@ namespace TouchTypingStudio
                 else if (Spec.Kind == RouteKind.Rename && Step == 3)
                     Notice = "В папке Copies пока нет файла " + ready + ".txt с исходным содержимым.";
                 else Notice = "Действие получено. Ожидаемый результат ещё не найден.";
+            }
+        }
+
+        private void ValidateSystemShortcut(IntPtr active)
+        {
+            if (Step == 1)
+            {
+                if (Native.IsWindowVisible(ToWindow)) return;
+                if (sawChord) Pass();
+                else
+                {
+                    Step = 0;
+                    sawChord = false;
+                    ToWindow = IntPtr.Zero;
+                    Notice = "Вернитесь в тренажёр и повторите открытие окна «Выполнить».";
+                }
+                return;
+            }
+            if (!sawChord) return;
+            if (active != FromWindow && SystemShortcutTargetIsOpen(active))
+            {
+                if (Spec.Kind != RouteKind.RunDialog) Pass();
+                else
+                {
+                    ToWindow = active;
+                    Advance();
+                    Notice = "Окно «Выполнить» распознано. Закройте его с клавиатуры.";
+                }
+            }
+            else if (DateTime.UtcNow - actionAt > TimeSpan.FromSeconds(10))
+            {
+                sawChord = false;
+                Notice = "Окно не найдено. Вернитесь в тренажёр и повторите сочетание.";
+            }
+            else
+            {
+                Notice = "Сочетание получено. Проверяю, открылось ли окно…";
+            }
+        }
+
+        private bool SystemShortcutTargetIsOpen(IntPtr active)
+        {
+            switch (Spec.Kind)
+            {
+                case RouteKind.RunDialog: return Native.IsRunDialog(active);
+                case RouteKind.WindowsSettings: return Native.IsSettings(active);
+                case RouteKind.TaskManager: return Native.IsProcess(active, "Taskmgr");
+                default: return false;
             }
         }
 

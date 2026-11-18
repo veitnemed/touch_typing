@@ -225,6 +225,7 @@ namespace TouchTypingStudio
                 var previous = store.Read().RouteResults.LastOrDefault(item => item.Route == Selected.Kind.ToString() &&
                     item.Stage == Stage && !item.Assisted);
                 info.Text = stagesHelp[Stage] + (previous == null ? "" : "\nПоследний проход — " + Duration(previous.Seconds));
+                if (Stage == 0 && Selected.Shortcuts.Length > 0) info.Text = Selected.Shortcuts + "\n" + info.Text;
                 if (exam != null) info.Text = "Экзамен · " + exam.Name + "\n" + info.Text;
             }
             stageButton.Content = StageNames[Stage] + "  ↻";
@@ -236,7 +237,7 @@ namespace TouchTypingStudio
             nextExam.Visibility = advance ? Visibility.Visible : Visibility.Collapsed;
             nextExam.Content = examNext == null ? "На карту · Enter" : "Следующий маршрут · Enter";
             stop.IsEnabled = hint.IsEnabled = copy.IsEnabled = running;
-            retry.IsEnabled = running && !route.HasSampleWindows && route.Spec.Kind != RouteKind.StartMenu &&
+            retry.IsEnabled = running && !route.HasSampleWindows && !route.IsSystemShortcut && route.Spec.Kind != RouteKind.StartMenu &&
                 (route.Spec.Kind != RouteKind.Explorer || route.Step == 0);
             retry.Content = running && route.Spec.Kind == RouteKind.Explorer
                 ? "Проводник для разминки · F7" : "Открыть учебное окно снова · F7";
@@ -424,7 +425,7 @@ namespace TouchTypingStudio
             try
             {
                 while (input.Events.Count > 0) route.Key(input.Events.Dequeue());
-                if (active == ownerHandle && !route.HasSampleWindows &&
+                if (active == ownerHandle && !route.HasSampleWindows && !route.IsSystemShortcut &&
                     route.Spec.Kind != RouteKind.CloseWindow && route.Spec.Kind != RouteKind.StartMenu)
                 {
                     UpdateCard();

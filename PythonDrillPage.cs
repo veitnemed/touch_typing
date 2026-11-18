@@ -15,7 +15,7 @@ namespace TouchTypingStudio
             Focusable = false;
             var stack = FlightUi.Sheet();
             Ui.Add(stack, Ui.Text("Слова и код Python", 31, Ui.Ink, true), 6);
-            Ui.Add(stack, Ui.Text("Выберите любой уровень. При открытии появится новый случайный раунд.", 15, Ui.Muted), 15);
+            Ui.Add(stack, Ui.Text("Выберите любой уровень, затем начните пробелом.", 15, Ui.Muted), 15);
 
             var columns = new Grid();
             columns.ColumnDefinitions.Add(new ColumnDefinition());
@@ -23,7 +23,7 @@ namespace TouchTypingStudio
             var buttons = new Dictionary<PythonDrillLevel, Button>();
             var words = Group(owner, profile, "Только слова", "Строчные английские буквы и пробелы.", PythonDrills.WordLevels, buttons);
             words.Margin = new Thickness(0, 0, 6, 0);
-            var code = Group(owner, profile, "Код и Backspace", "Слова, цифры, знаки и исправления в коде.", PythonDrills.CodeLevels, buttons);
+            var code = Group(owner, profile, "Адаптивный Python", "Новые фрагменты идут подряд. Следующая ступень зависит от точности.", PythonDrills.CodeLevels, buttons);
             code.Margin = new Thickness(6, 0, 0, 0);
             Grid.SetColumn(code, 1);
             columns.Children.Add(words);

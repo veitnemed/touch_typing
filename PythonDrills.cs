@@ -10,14 +10,17 @@ namespace TouchTypingStudio
 
         public readonly string Id, Title, Description;
         public readonly bool HasRepairs;
+        internal readonly Func<Random, string>[] Blocks;
 
-        public PythonDrillLevel(string id, string title, string description, Func<Random, string> create, bool hasRepairs = false)
+        public PythonDrillLevel(string id, string title, string description, Func<Random, string> create, bool hasRepairs = false,
+            Func<Random, string>[] blocks = null)
         {
             Id = id;
             Title = title;
             Description = description;
             this.create = create;
             HasRepairs = hasRepairs;
+            Blocks = blocks;
         }
 
         public string Create(Random random) { return create(random); }
@@ -140,7 +143,7 @@ namespace TouchTypingStudio
                     }
                 }
                 return string.Join("\n", lines);
-            }, hasRepairs);
+            }, hasRepairs, blocks);
         }
 
         private static T[] Shuffle<T>(Random random, T[] choices)

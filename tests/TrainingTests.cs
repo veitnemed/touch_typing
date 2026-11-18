@@ -25,9 +25,29 @@ namespace TouchTypingStudio
             StoreCompatibility();
             ExerciseModes();
             RandomPythonDrills();
+            PracticeRecordThreshold();
+            AdaptivePythonCourse();
+            EndlessTypingModes();
+            EndlessTypingSummary();
             DailyAndRecords();
             Challenge();
             Console.WriteLine("PASS: " + assertions + " checks across campaign, routes, input, storage, analytics, Python drills and 48 hours.");
+        }
+
+        private static void PracticeRecordThreshold()
+        {
+            var mistakes = new KeyValuePair<char, long>[0];
+            Check(!PracticeRecords.CanRecordTyping(new ContinuousTypingSnapshot(179, 0, 10, 100, mistakes)),
+                "A fast short attempt cannot claim a typing record");
+            Check(PracticeRecords.CanRecordTyping(new ContinuousTypingSnapshot(180, 0, 60, 100, mistakes)),
+                "A typing attempt counts from 180 characters");
+            var profile = new StudioProfile();
+            PracticeRecords.Record(profile, "typing/Python", 166, 95);
+            PracticeRecords.Record(profile, "typing/Python", 123, 99);
+            PracticeRecords.Record(profile, "set/custom", 220, 88);
+            var python = profile.PracticeRecords.Find(record => record.Id == "typing/Python");
+            Check(python.Speed == 166 && python.Accuracy == 99 && profile.PracticeRecords.Count == 2,
+                "Speed and accuracy records are independent per mode and custom set");
         }
 
         private static void AtlasAndCampaign()
@@ -257,6 +277,178 @@ namespace TouchTypingStudio
                 }
             }
             return attempt.Finished && attempt.Errors == 0 && attempt.Written == corrected.ToString();
+        }
+
+        private static void AdaptivePythonCourse()
+        {
+            var course = new AdaptivePython(new Random(76), 0, 95);
+            var first = course.Attempt;
+            first.Start();
+            int punctuation = first.Target.IndexOfAny(new[] { '(', '=', '\'', '+', ',' });
+            Check(punctuation >= 0, "Python exposes special characters at the first stage");
+            while (first.Position < punctuation) course.Enter(first.Expected);
+            Check(!course.Enter('@') && first.Position == punctuation && first.Running && course.Weakest != null,
+                "Misses update focus without stopping or advancing the input");
+            string weak = course.Weakest;
+            FinishPythonFragment(course);
+            Check(course.Attempt != first && course.Attempt.Running && course.Prefix.EndsWith(first.Written) &&
+                course.Focus == weak && course.Attempt.Target.Contains(weak),
+                "A focused fragment follows in the same session and preserves the visible prefix");
+            Check(course.Accuracy < 100 && course.Level == 0, "A miss remains visible in session accuracy");
+            FinishPythonFragment(course);
+            Check(course.Level == 0 && course.Focus == null, "A focused fragment does not itself advance the course");
+
+            var clean = new AdaptivePython(new Random(6), 0, 95);
+            clean.Attempt.Start();
+            for (int i = 0; i < 3; i++) FinishPythonFragment(clean);
+            Check(clean.Accuracy == 100 && clean.Level == 1 && clean.Attempt.Running,
+                "Three accurate normal fragments open the next level without pausing");
+
+            var low = new AdaptivePython(new Random(26), 2, 95);
+            low.Attempt.Start();
+            int blocks = 0;
+            for (int i = 0; i < 9; i++)
+            {
+                if (low.Focus == null)
+                {
+                    blocks++;
+                    for (int miss = 0; miss < 12; miss++) low.Enter('@');
+                }
+                FinishPythonFragment(low);
+            }
+            Check(blocks >= 3 && low.Level == 2 && low.Attempt.Running,
+                "Repeated low accuracy keeps the same level and continues training");
+
+            var layout = new AdaptivePython(new Random(6), 0, 95);
+            layout.Attempt.Start();
+            layout.Enter('я');
+            Check(layout.Weakest == null && layout.Accuracy == 0, "Wrong layout affects accuracy without scheduling a focus drill");
+
+            var repairs = new AdaptivePython(new Random(6), PythonDrills.CodeLevels.Length - 1, 95);
+            repairs.Attempt.Start();
+            for (int i = 0; i < 5; i++) FinishPythonFragment(repairs);
+            Check(repairs.Level == PythonDrills.CodeLevels.Length - 1 && repairs.Accuracy == 100 && repairs.Attempt.Running &&
+                !repairs.Prefix.Contains(CodeText.Erase), "The last stage keeps running and shows edited text");
+
+            var profile = new StudioProfile();
+            clean.SaveProgress(profile, Now);
+            clean.ProgressSaved();
+            clean.SaveProgress(profile, Now);
+            Check(profile.AdaptivePythonLevel == 1 && profile.Results.Count == 1 &&
+                profile.Results[0].Accuracy == 100 && profile.Motor.Count > 0, "Completed blocks save once with progress and motor evidence");
+        }
+
+        private static void FinishPythonFragment(ContinuousTyping course)
+        {
+            var fragment = course.Attempt;
+            while (!fragment.Finished)
+            {
+                char expected = fragment.Expected;
+                if (!course.Enter(expected == CodeText.Erase ? '\b' : expected))
+                    throw new InvalidOperationException("Python fragment rejected the expected key");
+            }
+        }
+
+        private static void EndlessTypingModes()
+        {
+            foreach (ContinuousKind kind in new[] { ContinuousKind.Russian, ContinuousKind.English })
+            {
+                var expectedLayout = kind == ContinuousKind.Russian ? Layout.Russian : Layout.English;
+                for (int level = 0; level < ContinuousTyping.Levels(kind).Length; level++)
+                {
+                    var course = new ContinuousTyping(new Random(35), kind, level, 95);
+                    course.Attempt.Start();
+                    for (int index = 0; index < 24; index++)
+                    {
+                        string text = course.Attempt.Target;
+                        Check(char.IsUpper(text[0]) && text.TrimEnd().Any(c => ".?!".Contains(c)) && text.EndsWith(" ") &&
+                            text.All(c => TypingKeyboard.Hint(c, expectedLayout) != null && TypingKeyboard.Hint(c, expectedLayout).Layout == expectedLayout),
+                            "Ordinary text stays writable in its own layout with uppercase and punctuation");
+                        FinishPythonFragment(course);
+                    }
+                    Check(course.Level == level && course.Accuracy == 100 && course.Attempt.Running,
+                        "Selected prose difficulty stays active and the next prompt starts immediately");
+                }
+            }
+
+            var symbols = new ContinuousTyping(new Random(4), ContinuousKind.Symbols, 1, 95, new[] { "#", "<=", "?>" });
+            symbols.Attempt.Start();
+            for (int index = 0; index < 30; index++)
+            {
+                Check(symbols.Attempt.Target.All(c => "#<=?> ".Contains(c)), "Edited symbols replace the default set");
+                FinishPythonFragment(symbols);
+            }
+
+            var custom = new ContinuousTyping(new Random(23), ContinuousKind.Custom, 0, 95, new[] { "Код.", "Hello!\r\n\tDone." });
+            custom.Attempt.Start();
+            var seen = new HashSet<string>();
+            for (int i = 0; i < 6; i++)
+            {
+                seen.Add(custom.Attempt.Target);
+                FinishPythonFragment(custom);
+            }
+            Check(seen.SetEquals(new[] { "Код. ", "Hello!\n    Done.\n" }) && custom.Attempt.Running,
+                "Custom sets cycle through exact supported multilingual content");
+            Check(ContinuousTyping.ValidateSnippets(ContinuousKind.Custom, new[] { "\t " }) != null &&
+                ContinuousTyping.ValidateSnippets(ContinuousKind.Symbols, new[] { "—" }) != null,
+                "The editor can report blank or unsupported custom input");
+            Check(custom.Restart().Inputs == 0 && !custom.Restart().Attempt.Running, "Restart keeps the difficulty and creates a fresh attempt");
+
+            var easy = new ContinuousTyping(new Random(17), ContinuousKind.Python, 0, 95);
+            var hard = new ContinuousTyping(new Random(17), ContinuousKind.Python, ContinuousTyping.Levels(ContinuousKind.Python).Length - 1, 95);
+            easy.Attempt.Start();
+            hard.Attempt.Start();
+            var basicSigns = new HashSet<char>();
+            var advancedSigns = new HashSet<char>();
+            for (int index = 0; index < 30; index++)
+            {
+                basicSigns.UnionWith(easy.Attempt.Target.Where(c => !char.IsLetterOrDigit(c) && !char.IsWhiteSpace(c)));
+                advancedSigns.UnionWith(hard.Attempt.Target.Where(c => !char.IsLetterOrDigit(c) && !char.IsWhiteSpace(c)));
+                Check(hard.Attempt.Target.Contains(CodeText.Erase), "Advanced Python includes deliberate Backspace practice");
+                FinishPythonFragment(easy);
+                FinishPythonFragment(hard);
+            }
+            Check(advancedSigns.Count > basicSigns.Count + 8 && hard.Accuracy == 100 && easy.Level == 0,
+                "Advanced Python has a broader symbol repertoire while a fixed difficulty stays fixed");
+        }
+
+        private static void EndlessTypingSummary()
+        {
+            var course = new ContinuousTyping(new Random(19), ContinuousKind.Custom, 0, 95, new[] { "Alpha." });
+            var initial = course.Snapshot();
+            Check(initial.Count == 0 && initial.Cpm == 0 && initial.Wpm == 0 && initial.Seconds == 0,
+                "A fresh session reports zero summary data");
+            course.Attempt.Start();
+            course.Enter('!');
+            course.Enter('!');
+            FinishPythonFragment(course);
+            course.SaveProgress(new StudioProfile(), Now);
+            course.ProgressSaved();
+            course.Enter('A');
+            course.Enter('!');
+            course.Attempt.Pause();
+
+            var snapshot = course.Snapshot();
+            Check(snapshot.Count == 8 && snapshot.Errors == 3 && snapshot.Seconds > 0 &&
+                snapshot.Accuracy == course.Accuracy && snapshot.Wpm == snapshot.Cpm / 5,
+                "Stop summary includes finished, saved and in-progress fragments");
+            Check(snapshot.TopMistakes.Length == 2 && snapshot.TopMistakes[0].Key == 'A' &&
+                snapshot.TopMistakes[0].Value == 2 && snapshot.TopMistakes[1].Key == 'l',
+                "Stop summary ranks the expected keys missed across the whole session");
+            Check(course.Snapshot().Seconds == snapshot.Seconds, "Stopped time stays fixed");
+            course.Attempt.Start();
+            course.Enter('l');
+            Check(course.Snapshot().Count == snapshot.Count + 1, "Resuming keeps the existing summary data");
+
+            var speed = new ContinuousTypingSnapshot(180, 0, 60, 100, new KeyValuePair<char, long>[0]);
+            Check(speed.Cpm == 180 && speed.Wpm == 36, "Speed uses accepted characters per minute and five characters per word");
+
+            var repair = new ContinuousTyping(new Random(22), ContinuousKind.Python, ContinuousTyping.Levels(ContinuousKind.Python).Length - 1, 95);
+            repair.Attempt.Start();
+            string target = repair.Attempt.Target;
+            FinishPythonFragment(repair);
+            Check(repair.Snapshot().Count == target.Count(character => character != CodeText.Erase),
+                "Scripted Backspace counts as input for accuracy but not as a typed character");
         }
 
         private static void Challenge()

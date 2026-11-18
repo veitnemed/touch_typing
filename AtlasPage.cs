@@ -125,14 +125,19 @@ namespace TouchTypingStudio
                 areas.Add(r, origin);
                 Waypoint[] nodes = Atlas.Nodes.Where(n => n.Region == r).ToArray();
                 var regular = nodes.Where(n => n.Kind == WaypointKind.Lesson || n.Kind == WaypointKind.Route).ToArray();
+                bool threeRows = regular.Length > 12;
+                int rowTop = threeRows ? 86 : 94;
+                int rowSpacing = threeRows ? 44 : 57;
+                int jitter = threeRows ? 2 : 5;
                 for (int n = 0; n < regular.Length; n++)
                 {
                     int row = n / 6, col = n % 6;
                     if (row % 2 == 1) col = 5 - col;
-                    positions[regular[n]] = new Point(origin.X + 44 + col * 54, origin.Y + 94 + row * 57 + ((col + i) % 3 - 1) * 5);
+                    positions[regular[n]] = new Point(origin.X + 44 + col * 54, origin.Y + rowTop + row * rowSpacing + ((col + i) % 3 - 1) * jitter);
                 }
-                positions[nodes[nodes.Length - 2]] = new Point(origin.X + 69, origin.Y + 206);
-                positions[nodes[nodes.Length - 1]] = new Point(origin.X + 314, origin.Y + 207);
+                int bottom = threeRows ? 215 : 206;
+                positions[nodes[nodes.Length - 2]] = new Point(origin.X + 69, origin.Y + bottom);
+                positions[nodes[nodes.Length - 1]] = new Point(origin.X + 314, origin.Y + bottom);
             }
             var art = new AtlasArt(profile, areas, positions, states);
             world.Children.Add(art);
@@ -387,7 +392,7 @@ namespace TouchTypingStudio
                     Text(d, deck.Name, p + new Vector(23, 33), 24, Ui.Ink);
                     var core = Atlas.Nodes.Where(x => x.Region == deck && (x.Kind == WaypointKind.Lesson || x.Kind == WaypointKind.Route)).ToArray();
                     string readout = core.Count(x => states[x] == WaypointState.Complete) + " / " + core.Length;
-                    Text(d, readout, p + new Vector(300, 53), 12, Ui.Brush(deck.Color), true);
+                    Text(d, readout, p + new Vector(300, core.Length > 12 ? 46 : 53), 12, Ui.Brush(deck.Color), true);
                     if (i % 3 < 2) d.DrawLine(guide, p + new Vector(360, 126), p + new Vector(380, 126));
                     if (i < 3) d.DrawLine(guide, p + new Vector(183, 235), p + new Vector(183, 255));
                 }

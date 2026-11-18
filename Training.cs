@@ -450,6 +450,8 @@ namespace TouchTypingStudio
         public BestRun Ghost;
         public Lesson Recall;
         public PythonDrillLevel DrillLevel;
+        public ContinuousTyping Adaptive;
+        public PracticeSet PracticeSet;
         public string Branch;
         public string Context;
 

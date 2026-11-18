@@ -71,6 +71,7 @@ namespace TouchTypingStudio
             var b = new Button
             {
                 Content = text, FontSize = 14, FontWeight = FontWeights.SemiBold, MinHeight = 38,
+                HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center,
                 Padding = new Thickness(12, 7, 12, 7), Margin = new Thickness(0, 0, 8, 5),
                 Foreground = primary ? Night : Ink, Background = primary ? Accent : Card,
                 BorderBrush = primary ? Accent : Border, BorderThickness = new Thickness(1),
@@ -101,8 +102,8 @@ namespace TouchTypingStudio
             border.SetValue(System.Windows.Controls.Border.BorderThicknessProperty, new TemplateBindingExtension(Control.BorderThicknessProperty));
             border.SetValue(System.Windows.Controls.Border.PaddingProperty, new TemplateBindingExtension(Control.PaddingProperty));
             var text = new FrameworkElementFactory(typeof(ContentPresenter));
-            text.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-            text.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            text.SetValue(FrameworkElement.HorizontalAlignmentProperty, new TemplateBindingExtension(Control.HorizontalContentAlignmentProperty));
+            text.SetValue(FrameworkElement.VerticalAlignmentProperty, new TemplateBindingExtension(Control.VerticalContentAlignmentProperty));
             border.AppendChild(text);
             template.VisualTree = border;
             var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
@@ -160,7 +161,7 @@ namespace TouchTypingStudio
     {
         private readonly ContentControl body = new ContentControl();
         private readonly TextBlock footer;
-        private readonly Button typingButton, pythonDrillsButton, atlasButton, modesButton, windowsButton, planButton;
+        private readonly Button homeButton, setsButton;
         private readonly ProfileStore store;
         private readonly TypingPage typing;
         private readonly WindowsPage windows;
@@ -189,34 +190,18 @@ namespace TouchTypingStudio
             var shell = new DockPanel();
             var top = new DockPanel { Background = Ui.Brush("#222427"), LastChildFill = true };
             DockPanel.SetDock(top, Dock.Top);
-            var title = Ui.QuietButton("КОД ВСЛЕПУЮ", OpenPython);
+            var title = Ui.QuietButton("КОД ВСЛЕПУЮ", ShowHome);
             title.FontSize = 17;
             title.FontWeight = FontWeights.Bold;
             title.Margin = new Thickness(20, 4, 12, 4);
-            title.ToolTip = "Открыть Python · Alt+1";
+            title.ToolTip = "Выбрать тренировку · F2";
             DockPanel.SetDock(title, Dock.Left);
             top.Children.Add(title);
             var nav = new WrapPanel { Margin = new Thickness(6, 6, 14, 6), HorizontalAlignment = HorizontalAlignment.Right };
-            typingButton = Ui.QuietButton("Python", OpenPython);
-            typingButton.ToolTip = "Открыть Python · Alt+1";
-            windowsButton = Ui.QuietButton("Windows", delegate { ShowMode(2); });
-            windowsButton.ToolTip = "Windows без мыши · Alt+2";
-            planButton = Ui.QuietButton("48 часов", delegate { ShowMode(3); });
-            planButton.ToolTip = "48 Hours Challenge · Alt+3";
-            Ui.Add(nav, typingButton);
-            pythonDrillsButton = Ui.QuietButton("Слова и код", delegate { ShowPythonDrills(); });
-            pythonDrillsButton.ToolTip = "Случайные упражнения Python · F11";
-            Ui.Add(nav, pythonDrillsButton);
-            atlasButton = Ui.QuietButton("Карта", delegate { ShowAtlas(); });
-            atlasButton.ToolTip = "Карта навыков · F2";
-            modesButton = Ui.QuietButton("Режимы", delegate { ShowModes(); });
-            Ui.Add(nav, atlasButton);
-            Ui.Add(nav, modesButton);
-            Ui.Add(nav, windowsButton);
-            Ui.Add(nav, planButton);
-            var menu = Ui.QuietButton("⋯", ShowMenu);
-            Ui.Name(menu, "Меню");
-            Ui.Add(nav, menu);
+            homeButton = Ui.QuietButton("Режимы · F2", ShowHome);
+            Ui.Add(nav, homeButton);
+            setsButton = Ui.QuietButton("Свои наборы", delegate { ShowPracticeSets(); });
+            Ui.Add(nav, setsButton);
             top.Children.Add(nav);
             shell.Children.Add(top);
             footer = Ui.Text("", 12, Ui.Brush("#FFCA82"));
@@ -229,7 +214,9 @@ namespace TouchTypingStudio
 
             typing = new TypingPage(this, store, preferPython);
             windows = new WindowsPage(this, store);
-            ShowMode(windowsFirst ? 2 : 1);
+            if (windowsFirst) OpenWorkbench(WorkbenchArea.Windows);
+            else if (preferPython) ShowHome();
+            else ShowMode(1);
             Loaded += delegate { WarnStorage(); };
             Deactivated += delegate { if (body.Content == typing) typing.PauseForFocusLoss(); };
             Activated += delegate
@@ -248,15 +235,13 @@ namespace TouchTypingStudio
 
         public void ShowMode(int mode)
         {
+            if (mode == 0) { ShowHome(); return; }
             currentMode = mode;
             subPage = false;
             if (mode != 1) typing.PauseForFocusLoss();
             bool inTask = windows.HasRoute;
-            var selected = Ui.Brush("#343841");
-            typingButton.Background = mode == 1 ? selected : Brushes.Transparent;
-            windowsButton.Background = mode == 2 ? selected : Brushes.Transparent;
-            planButton.Background = mode == 3 ? selected : Brushes.Transparent;
-            atlasButton.Background = modesButton.Background = pythonDrillsButton.Background = Brushes.Transparent;
+            setsButton.Background = Brushes.Transparent;
+            homeButton.Content = "Режимы · F2";
             if (mode == 1)
             {
                 body.Content = typing;
@@ -282,8 +267,56 @@ namespace TouchTypingStudio
 
         private void OpenPython()
         {
-            ShowMode(1);
-            typing.OpenPython();
+            OpenTyping(ContinuousKind.Python);
+        }
+
+        public void ShowHome()
+        {
+            currentMode = 0;
+            var page = new TrainingHome(this, store.Read());
+            OpenPanel(page, page.InitialFocus);
+            subPage = false;
+            Title = "Код вслепую";
+        }
+
+        public void ShowPracticeSets(PracticeSetKind kind = PracticeSetKind.Text)
+        {
+            currentMode = 0;
+            var page = new PracticeSetsPage(this, store, kind);
+            OpenPanel(page, page.InitialFocus);
+            Title = "Свои наборы · Код вслепую";
+        }
+
+        public void OpenPracticeSet(PracticeSet set)
+        {
+            if (set.Kind == PracticeSetKind.Shortcuts)
+            {
+                WorkbenchCustomTask[] custom;
+                if (PracticeSetInput.ParseShortcuts(set.Content, out custom) == null)
+                    OpenWorkbench(WorkbenchArea.Shortcuts, custom, set);
+                return;
+            }
+            OpenTyping(set.Kind == PracticeSetKind.Symbols ? ContinuousKind.Symbols : ContinuousKind.Custom, set: set);
+        }
+
+        public void OpenWorkbench(WorkbenchArea area, IEnumerable<WorkbenchCustomTask> custom = null, PracticeSet set = null)
+        {
+            currentMode = 0;
+            var page = new WorkbenchPage(area, custom, ShowHome, delegate { ShowPracticeSets(PracticeSetKind.Shortcuts); },
+                customOnly: set != null, saveResult: (mode, result) => SaveWorkbench(mode, result, set));
+            OpenPanel(page, page.InitialFocus);
+            subPage = false;
+            Title = "Работа без мыши · Код вслепую";
+        }
+
+        private WorkbenchRecords SaveWorkbench(WorkbenchArea mode, WorkbenchResults result, PracticeSet set)
+        {
+            string id = set == null ? "workbench/" + mode : "set/" + set.Id;
+            var saved = result.Commands < 12 ? store.Read() : store.Update(p =>
+                PracticeRecords.Record(p, id, result.CommandsPerMinute, result.Accuracy));
+            WarnStorage();
+            var best = saved.PracticeRecords.Find(record => record.Id == id);
+            return best == null ? new WorkbenchRecords(0, 0) : new WorkbenchRecords(best.Speed, best.Accuracy);
         }
 
         private void ShowMenu()
@@ -316,22 +349,67 @@ namespace TouchTypingStudio
 
         public void OpenPythonDrill(PythonDrillLevel level)
         {
+            int codeLevel = Array.IndexOf(PythonDrills.CodeLevels, level);
+            if (codeLevel >= 0)
+            {
+                OpenAdaptivePython(codeLevel);
+                return;
+            }
             string script = level.Create(drillRandom);
-            bool words = Array.IndexOf(PythonDrills.WordLevels, level) >= 0;
-            string section = words ? "Слова Python" : "Код Python";
             pickedRegion = "python";
             ShowMode(1);
             typing.ChooseExercise(new Exercise
             {
-                Kind = words ? ExerciseKind.PythonWords : ExerciseKind.PythonCode,
-                Title = section + "  ›  " + level.Title,
+                Kind = ExerciseKind.PythonWords,
+                Title = "Слова Python  ›  " + level.Title,
                 Text = script,
                 Layout = Layout.English,
                 Region = "python",
                 Task = ExerciseBank.Task(level.Id, script),
-                DrillLevel = level,
-                Instruction = level.HasRepairs ? "Когда в центре появится ⌫, нажмите Backspace и продолжайте набор." : null
+                DrillLevel = level
             });
+        }
+
+        private void OpenAdaptivePython(int level)
+        {
+            OpenTyping(ContinuousKind.Python, level);
+        }
+
+        public void OpenTyping(ContinuousKind kind, int? level = null, PracticeSet set = null)
+        {
+            if (!level.HasValue && set == null && typing.IsContinuous(kind))
+            {
+                ShowMode(1);
+                return;
+            }
+            var profile = store.Read();
+            int choice = level ?? (kind == ContinuousKind.Python ? -1 : 0);
+            var fragments = set == null ? null : PracticeSetInput.Fragments(set);
+            var course = new ContinuousTyping(drillRandom, kind, choice < 0 ? profile.AdaptivePythonLevel : choice,
+                profile.Training.Goal, fragments, choice < 0);
+            pickedRegion = "python";
+            ShowMode(1);
+            typing.ChooseExercise(new Exercise
+            {
+                Kind = kind == ContinuousKind.Python ? ExerciseKind.PythonCode : ExerciseKind.Free,
+                Title = course.Name,
+                Text = course.Attempt.Target,
+                Layout = course.Layout,
+                Region = "python",
+                Adaptive = course,
+                PracticeSet = set
+            });
+        }
+
+        internal void ShowTypingResults(ContinuousTypingSnapshot result, ContinuousTyping course, PracticeSet set, Action resume, Action restart)
+        {
+            string id = set == null ? "typing/" + course.Kind : "set/" + set.Id;
+            var saved = !PracticeRecords.CanRecordTyping(result) ? store.Read() : store.Update(p =>
+                PracticeRecords.Record(p, id, result.Cpm, result.Accuracy));
+            WarnStorage();
+            var best = saved.PracticeRecords.Find(record => record.Id == id);
+            var page = new PracticeResultsPage(saved, set == null ? course.Name : set.Name, result, best, resume, restart, ShowHome);
+            OpenPanel(page, page.InitialFocus);
         }
 
         public void ShowAtlas(string region = null)
@@ -441,11 +519,8 @@ namespace TouchTypingStudio
             typing.PauseForFocusLoss();
             subPage = true;
             body.Content = element;
-            Brush selected = Ui.Brush("#343841");
-            typingButton.Background = windowsButton.Background = planButton.Background = Brushes.Transparent;
-            atlasButton.Background = element is AtlasPage ? selected : Brushes.Transparent;
-            modesButton.Background = element is ModesPage || element is ShortcutIndexPage ? selected : Brushes.Transparent;
-            pythonDrillsButton.Background = element is PythonDrillPage ? selected : Brushes.Transparent;
+            homeButton.Content = element is WorkbenchPage ? "Режимы" : "Режимы · F2";
+            setsButton.Background = element is PracticeSetsPage ? Ui.Brush("#343841") : Brushes.Transparent;
             Dispatcher.BeginInvoke(new Action(delegate { if (body.Content == element) initialFocus.Focus(); }), DispatcherPriority.Input);
         }
 
@@ -459,17 +534,24 @@ namespace TouchTypingStudio
 
         private void GlobalKeys(object sender, KeyEventArgs e)
         {
+            if (body.Content is WorkbenchPage) return;
             var key = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (key == Key.F2 && Keyboard.Modifiers == ModifierKeys.None && !(body.Content is TrainingHome))
+            {
+                ShowHome();
+                e.Handled = true;
+                return;
+            }
             if (subPage && key == Key.Escape)
             {
                 ClosePanel();
                 e.Handled = true;
                 return;
             }
-            if (Keyboard.Modifiers == ModifierKeys.Alt && key >= Key.D1 && key <= Key.D3)
+            if (Keyboard.Modifiers == ModifierKeys.Alt && key >= Key.D1 && key <= Key.D4)
             {
                 if (key == Key.D1) OpenPython();
-                else ShowMode(key - Key.D1 + 1);
+                else OpenWorkbench(key == Key.D2 ? WorkbenchArea.Windows : key == Key.D3 ? WorkbenchArea.Chrome : WorkbenchArea.Code);
                 e.Handled = true;
             }
             if (Keyboard.Modifiers == ModifierKeys.None && key == Key.F8)
@@ -479,7 +561,7 @@ namespace TouchTypingStudio
             }
             if (!e.Handled && Keyboard.Modifiers == ModifierKeys.None)
             {
-                if (key == Key.F11) { ShowPythonDrills(); e.Handled = true; }
+                if (key == Key.F3 && !(body.Content is PracticeSetsPage)) { ShowPracticeSets(); e.Handled = true; }
                 else if (key == Key.F7 && body.Content != windows) { ShowAnalytics(); e.Handled = true; }
                 else if (key == Key.F2 && (body.Content == windows || body.Content is ModesPage || body.Content is AnalyticsPage ||
                     body.Content is ChallengePage || body.Content is PythonDrillPage || body.Content is ShortcutIndexPage))
