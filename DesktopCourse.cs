@@ -6,20 +6,25 @@ using System.Text;
 
 namespace TouchTypingStudio
 {
-    internal sealed class DesktopCourse
+    internal enum DesktopTrack { Workday, Console }
+
+    internal sealed partial class DesktopCourse : IDisposable
     {
         private sealed class Step
         {
-            public string Goal, Action, Shortcut, Detail, CopyText, Expected, Optional;
+            public string Goal, Action, Shortcut, Detail, CopyText, Expected, Optional, ConsoleTitle;
             public Func<IntPtr, bool> Source, Result;
             public Action<IntPtr> Accepted;
+            public bool QuickRetry;
+            public string CompletionPrefix, CompletionName;
+            public bool SawCompletion;
         }
 
-        private static readonly string[] Projects = { "Review", "Notes", "Agenda", "Delivery", "Report", "Briefing" };
         private readonly string token = Guid.NewGuid().ToString("N").Substring(0, 8);
         private readonly string chrome, code;
         private readonly List<Step> steps = new List<Step>();
-        private readonly Random random = new Random();
+        private readonly DesktopTrack track;
+        private readonly DesktopItinerary itinerary;
         private string optional;
         private int round, index;
         private DateTime listeningSince, commandAt, nextCheck;
@@ -27,6 +32,8 @@ namespace TouchTypingStudio
         private bool watchingStartSearch;
         private bool entered;
         private bool abortCheck;
+        private Action pendingLaunch;
+        private IDisposable ownedConsole;
 
         private Step Current { get { return steps[index]; } }
         public readonly string Folder;
@@ -34,17 +41,36 @@ namespace TouchTypingStudio
         public int Rejected { get; private set; }
         public int StageNumber { get { return index + 1; } }
         public int StageLength { get { return steps.Count; } }
+        public int RoundNumber { get { return round; } }
+        public int MissionStep { get { return 1 + steps.Take(index).Reverse().TakeWhile(step => step.Goal == Goal).Count(); } }
+        public int MissionLength { get { return MissionStep + steps.Skip(index + 1).TakeWhile(step => step.Goal == Goal).Count(); } }
         public string Goal { get { return Current.Goal; } }
         public string Action { get { return Current.Action; } }
-        public string Shortcut { get { return Current.Shortcut; } }
-        public string Detail { get { return Current.Detail; } }
-        public string CopyText { get { return Current.CopyText; } }
-        public string Notice { get; private set; }
-        public bool CanSkipOptional { get { return Current.Optional != null; } }
-        public string[] ObservedShortcuts { get { return new[] { Current.Shortcut }; } }
-
-        public DesktopCourse(string profileRoot)
+        private bool WaitingForTab { get { return Current.CompletionPrefix != null && !Current.SawCompletion; } }
+        public string Shortcut { get { return WaitingForTab ? "Tab" : Current.Shortcut; } }
+        public string Detail
         {
+            get
+            {
+                if (WaitingForTab)
+                    return "Наберите начало команды. Клавиша Tab подставит имя " + Current.CompletionName + ".";
+                if (Current.SawCompletion)
+                    return "Проверьте, что подставилось " + Current.CompletionName + ", и нажмите Enter. Если требуется, допишите имя вручную.";
+                return Current.Detail;
+            }
+        }
+        public string CopyText { get { return WaitingForTab ? Current.CompletionPrefix : Current.CopyText; } }
+        public bool IsConsoleCommand { get { return Current.ConsoleTitle != null; } }
+        public string Notice { get; private set; }
+        public string ProjectTitle { get; private set; }
+        public bool CanSkipOptional { get { return Current.Optional != null; } }
+        public string[] ObservedShortcuts { get { return Current.CompletionPrefix == null ?
+            new[] { Current.Shortcut } : new[] { "Tab", Current.Shortcut }; } }
+
+        public DesktopCourse(string profileRoot, DesktopTrack track = DesktopTrack.Workday)
+        {
+            this.track = track;
+            itinerary = new DesktopItinerary(profileRoot);
             Folder = Path.Combine(profileRoot, "DesktopPractice", DateTime.Now.ToString("yyyy-MM-dd") + "-" + token);
             Directory.CreateDirectory(Folder);
             chrome = DesktopCourseWindows.FindChrome();
@@ -56,12 +82,25 @@ namespace TouchTypingStudio
         public void Key(DesktopStroke input)
         {
             var step = Current;
-            if (input.Timestamp < listeningSince || !string.Equals(input.Chord, step.Shortcut, StringComparison.OrdinalIgnoreCase))
+            if (input.Timestamp < listeningSince) return;
+            if (WaitingForTab && input.Chord == "Enter")
+            {
+                Rejected++;
+                Notice = "Сначала наберите начало команды и дополните имя клавишей Tab.";
                 return;
+            }
+            if (!string.Equals(input.Chord, Shortcut, StringComparison.OrdinalIgnoreCase)) return;
             if (!Check(step.Source, input.Window))
             {
                 Rejected++;
-                Notice = "Сочетание зафиксировано. " + step.Expected;
+                Notice = step.ConsoleTitle == null ? "Сочетание зафиксировано. " + step.Expected :
+                    "Переключитесь через Alt+Tab в учебное окно " + step.ConsoleTitle + " и повторите команду.";
+                return;
+            }
+            if (WaitingForTab)
+            {
+                step.SawCompletion = true;
+                Notice = "Теперь выполните подставленную команду.";
                 return;
             }
             commandAt = DateTime.UtcNow;
@@ -89,7 +128,13 @@ namespace TouchTypingStudio
                 Ready("Шаг зачтён.");
                 return true;
             }
-            if (now - commandAt >= TimeSpan.FromSeconds(20))
+            if (step.QuickRetry && now - commandAt >= TimeSpan.FromSeconds(2))
+            {
+                entered = false;
+                Rejected++;
+                Notice = step.Expected + " Нажмите ↑, исправьте команду и нажмите Enter.";
+            }
+            else if (now - commandAt >= TimeSpan.FromSeconds(20))
             {
                 entered = false;
                 Rejected++;
@@ -103,8 +148,9 @@ namespace TouchTypingStudio
         // Clicking a control or result manually doesn't satisfy a keyboard step.
         public void RejectMouseAction()
         {
-            if (!entered) return;
+            if (!entered && !Current.SawCompletion) return;
             entered = false;
+            Current.SawCompletion = false;
             Rejected++;
             Notice = "Зафиксирован щелчок. Повторите шаг с клавиатуры.";
         }
@@ -114,6 +160,21 @@ namespace TouchTypingStudio
             BuildNextProject();
             Ready("Начат новый проект. Результаты и файлы предыдущих заданий сохранены.");
             return true;
+        }
+
+        public void ActivateMission()
+        {
+            var launch = pendingLaunch;
+            pendingLaunch = null;
+            if (launch != null) launch();
+        }
+
+        public void Dispose()
+        {
+            pendingLaunch = null;
+            if (ownedConsole == null) return;
+            ownedConsole.Dispose();
+            ownedConsole = null;
         }
 
         public bool SkipOptional()
@@ -128,25 +189,57 @@ namespace TouchTypingStudio
 
         private void BuildNextProject()
         {
+            Dispose();
             round++;
             index = 0;
             steps.Clear();
             explorer = noteWindow = browser = editor = settings = taskManager = runWindow = saveDialog = startMenu = IntPtr.Zero;
             watchingStartSearch = false;
-            string projectName = Projects[random.Next(Projects.Length)] + "-" + round.ToString("000") + "-" + token;
+            DesktopBriefing briefing = itinerary.NextBriefing();
+            ProjectTitle = briefing.Project;
+            string projectName = briefing.Slug + "-" + round.ToString("000") + "-" + token;
+            string lab = Path.Combine(Folder, "cmd-" + projectName);
+            MakeOwnedDirectory(lab);
+            var mission = new ConsoleMission(lab, itinerary.NextConsoleScenario(), briefing,
+                itinerary.NextVariant(900) + 100, itinerary.CompletedConsoleMissions);
+            if (track == DesktopTrack.Console)
+            {
+                BuildConsole(mission);
+                Ready("Введите команду в учебной командной строке и нажмите Enter.");
+                return;
+            }
             string project = Path.Combine(Folder, projectName);
-            string source = Path.Combine(project, "draft-" + token + ".txt");
-            string note = Path.Combine(project, "note-" + round.ToString("000") + "-" + token + ".txt");
-            string renamed = Path.Combine(project, "review-" + round.ToString("000") + "-" + token + ".txt");
+            string source = Path.Combine(project, "draft-" + briefing.Slug + ".txt");
+            string note = Path.Combine(project, "note-" + briefing.Slug + ".txt");
+            string renamed = Path.Combine(project, "review-" + briefing.Slug + ".txt");
             string copies = Path.Combine(project, "Copies");
-            string originalText = "Project " + projectName + "\nStatus: ready";
-            string editedText = "Project " + projectName + "\nStatus: reviewed";
+            string originalText = briefing.Team + " / " + briefing.Topic + "\nStatus: ready";
+            string editedText = briefing.Team + " / " + briefing.Topic + "\nStatus: reviewed";
             string browserPath = Path.Combine(Folder, "pages");
             string titleA = projectName + " / Board " + token;
             string titleB = projectName + " / Notes " + token;
             string board = Path.Combine(browserPath, "board-" + round + ".html");
             string brief = Path.Combine(browserPath, "notes-" + round + ".html");
 
+            int order = itinerary.NextWorkdayOrder(chrome != null);
+            Action consoleLab = () => BuildConsole(mission);
+            Action browserLab = () => BuildChrome(browserPath, board, brief, titleA, titleB, briefing);
+            if (order == 1) consoleLab();
+            if (order == 2) BuildSystem();
+            if (order == 3) browserLab();
+            BuildProjectFiles(projectName, project, source, note, renamed, copies, originalText);
+            if (order != 1) consoleLab();
+            if (round % 2 == 0 || code == null)
+                BuildNotepadRevision(Path.Combine(copies, Path.GetFileName(renamed)), originalText);
+            if (order != 3) browserLab();
+            BuildCode(project, renamed, originalText, editedText);
+            if (order != 2) BuildSystem();
+            Ready("Начните с указанного сочетания.");
+        }
+
+        private void BuildProjectFiles(string projectName, string project, string source, string note,
+            string renamed, string copies, string originalText)
+        {
             const string setup = "Откройте учебную папку и создайте проект";
             Add(setup, "Откройте Проводник", "Win+E", result: Native.IsExplorer,
                 accepted: hwnd => explorer = hwnd, expected: "Должно открыться настоящее окно Проводника.");
@@ -217,21 +310,84 @@ namespace TouchTypingStudio
                 commandSource: hwnd => AtFolder(hwnd, copies) && DesktopCourseWindows.ClipboardContainsOnly(renamed),
                 result: hwnd => AtFolder(hwnd, copies) && SameText(Path.Combine(copies, Path.GetFileName(renamed)), originalText),
                 expected: "В подпапке Copies должна появиться копия заметки.");
-
-            if (round % 2 == 0 || code == null)
-                BuildNotepadRevision(Path.Combine(copies, Path.GetFileName(renamed)), originalText);
-            BuildChrome(browserPath, board, brief, titleA, titleB);
-            BuildCode(project, renamed, originalText, editedText);
-            BuildSystem();
-            Ready("Начните с указанного сочетания.");
+            BuildExplorerExtension(project, renamed, originalText, itinerary.NextExplorerScenario());
         }
 
-        private void BuildChrome(string pages, string board, string brief, string titleA, string titleB)
+        private void BuildConsole(ConsoleMission mission)
+        {
+            string title = "CMD-" + token + "-" + round;
+            string target = Path.Combine(mission.Folder, "handoff", mission.Delivery);
+            string goal = mission.Title;
+            IntPtr console = IntPtr.Zero;
+            Func<IntPtr, bool> inConsole = hwnd =>
+            {
+                if (!DesktopCourseWindows.IsPracticeConsole(hwnd, title)) return false;
+                console = hwnd;
+                return true;
+            };
+            Action addManualLaunch = delegate
+            {
+                string launcher = DesktopCourseWindows.PracticeConsoleCommand(mission.Folder, title);
+                OpenRun(goal);
+                Add(goal, "Откройте командную строку в папке задания", "Enter", commandSource: hwnd => hwnd == runWindow,
+                    result: inConsole,
+                    detail: "Скопируйте адрес через Ctrl+Alt+C, вставьте в «Выполнить» через Ctrl+V и нажмите Enter.",
+                    copyText: launcher, expected: "Ожидаю окно " + title + ".");
+            };
+            if (track == DesktopTrack.Console)
+            {
+                pendingLaunch = delegate
+                {
+                    try { ownedConsole = DesktopCourseWindows.OpenPracticeConsole(mission.Folder, title); }
+                    catch (Exception error)
+                    {
+                        if (!(error is System.ComponentModel.Win32Exception) && !(error is InvalidOperationException) &&
+                            !(error is IOException) && !(error is UnauthorizedAccessException)) throw;
+                        int start = steps.Count;
+                        addManualLaunch();
+                        var fallback = steps.GetRange(start, steps.Count - start);
+                        steps.RemoveRange(start, fallback.Count);
+                        steps.InsertRange(index, fallback);
+                        Ready("Откройте учебную консоль через «Выполнить». " + error.Message);
+                    }
+                };
+            }
+            else addManualLaunch();
+            foreach (var task in mission.Commands)
+            {
+                var current = task;
+                Add(goal, current.Action, "Enter", commandSource: inConsole,
+                    result: hwnd => inConsole(hwnd) && current.Done(), detail: current.Detail, copyText: current.Command,
+                    expected: current.Retry);
+                steps[steps.Count - 1].ConsoleTitle = title;
+                steps[steps.Count - 1].QuickRetry = current.QuickRetry;
+                steps[steps.Count - 1].CompletionPrefix = current.CompletionPrefix;
+                steps[steps.Count - 1].CompletionName = current.CompletionName;
+            }
+            Add(goal, "Покажите готовый файл " + mission.Delivery + " в Проводнике", "Enter", commandSource: inConsole,
+                result: hwnd => Native.IsExplorer(hwnd) && SamePath(Native.ExplorerFolder(hwnd), Path.GetDirectoryName(target)) &&
+                    DesktopCourseWindows.SelectionContains(hwnd, target),
+                detail: "Параметр /select открывает папку и выделяет готовый файл. %cd% подставляет путь текущей папки.",
+                copyText: "explorer /select,\"%cd%\\handoff\\" + mission.Delivery + "\"",
+                expected: "В Проводнике должен быть выделен " + mission.Delivery + ".");
+            steps[steps.Count - 1].ConsoleTitle = title;
+            Add(goal, "Вернитесь из Проводника к командной строке", "Alt+Tab", result: inConsole,
+                detail: "Удерживайте Alt и выберите окно " + title + " клавишей Tab.",
+                expected: "Выберите учебное окно " + title + ".");
+            Add(goal, "Закройте командную строку и передайте результат", "Enter",
+                commandSource: hwnd => console != IntPtr.Zero && hwnd == console,
+                result: hwnd => !DesktopCourseWindows.IsPracticeConsole(console, title),
+                accepted: hwnd => itinerary.RecordConsoleMission(), detail: "Команда exit завершает текущий сеанс CMD.",
+                copyText: "exit", expected: "Ожидаю закрытие учебной командной строки.");
+            steps[steps.Count - 1].ConsoleTitle = title;
+        }
+
+        private void BuildChrome(string pages, string board, string brief, string titleA, string titleB, DesktopBriefing briefing)
         {
             if (chrome == null) return;
             MakeOwnedDirectory(pages);
-            WriteNew(board, Page(titleA, "Project board", "Check the notes for the review deadline."));
-            WriteNew(brief, Page(titleB, "Review notes", "Review deadline: Friday. Return to the project board."));
+            WriteNew(board, Page(titleA, briefing.Topic, "Read the notes from " + briefing.Team + "."));
+            WriteNew(brief, Page(titleB, briefing.Team, briefing.Keyword + " is the marker for the " + briefing.Topic + " handoff."));
             const string goal = "Проверьте учебные страницы в Chrome";
             optional = "Chrome";
             OpenRun(goal);
@@ -256,11 +412,11 @@ namespace TouchTypingStudio
             Add(goal, "Найдите слово на странице", "Ctrl+F", commandSource: IsChrome,
                 result: hwnd => IsChrome(hwnd) && DesktopCourseWindows.HasTextFocus(),
                 expected: "Откройте поле поиска в учебной вкладке.");
-            Add(goal, "Введите review и подтвердите поиск", "Enter", commandSource: IsChrome,
-                result: hwnd => IsChrome(hwnd) && DesktopCourseWindows.FocusedValueIs("review"),
-                copyText: "review", expected: "В открытом поле поиска ожидается review.");
+            Add(goal, "Найдите на странице " + briefing.Keyword, "Enter", commandSource: IsChrome,
+                result: hwnd => IsChrome(hwnd) && DesktopCourseWindows.FocusedValueIs(briefing.Keyword),
+                copyText: briefing.Keyword, expected: "В открытом поле поиска ожидается " + briefing.Keyword + ".");
             Add(goal, "Закройте поле поиска", "Esc", commandSource: IsChrome,
-                result: hwnd => IsChrome(hwnd) && !DesktopCourseWindows.FocusedValueIs("review"),
+                result: hwnd => IsChrome(hwnd) && !DesktopCourseWindows.FocusedValueIs(briefing.Keyword),
                 expected: "Закройте именно поле поиска в учебном Chrome.");
             Add(goal, "Переключитесь на страницу проекта", "Ctrl+Shift+Tab", commandSource: IsChrome,
                 result: hwnd => IsChrome(hwnd) && DesktopCourseWindows.WindowTitle(hwnd, "chrome", titleA),

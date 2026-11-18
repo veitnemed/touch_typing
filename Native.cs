@@ -18,7 +18,7 @@ namespace TouchTypingStudio
         [DllImport("user32.dll")] private static extern int GetKeyboardLayoutList(int count, [Out] IntPtr[] layouts);
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
         [DllImport("user32.dll")] private static extern int GetClassName(IntPtr hwnd, StringBuilder name, int length);
-        [DllImport("user32.dll")] private static extern int GetWindowText(IntPtr hwnd, StringBuilder name, int length);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd, StringBuilder name, int length);
         [DllImport("user32.dll")] internal static extern bool IsWindow(IntPtr window);
         [DllImport("user32.dll")] internal static extern bool IsWindowVisible(IntPtr window);
         [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr window, WindowEnumerator callback, IntPtr data);

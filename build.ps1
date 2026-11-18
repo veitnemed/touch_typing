@@ -6,7 +6,7 @@ if ($StageDirectory -and (-not $Stage -or $DesktopShortcut)) {
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $framework = Split-Path $compiler
 $references = @(
-    'System.dll', 'System.Core.dll', 'System.Xml.dll', 'Microsoft.CSharp.dll',
+    'System.dll', 'System.Core.dll', 'System.Xml.dll', 'System.IO.Compression.dll', 'Microsoft.CSharp.dll',
     'WPF\WindowsBase.dll', 'WPF\PresentationCore.dll', 'WPF\PresentationFramework.dll',
     'WPF\UIAutomationClient.dll', 'WPF\UIAutomationTypes.dll', 'System.Xaml.dll'
 ) | ForEach-Object { '/reference:' + (Join-Path $framework $_) }
@@ -47,13 +47,13 @@ foreach ($entry in $entries) {
     $shortcut.WorkingDirectory = $PSScriptRoot
     $shortcut.Arguments = $entry.Mode
     $shortcut.Save()
-}
-if ($DesktopShortcut) {
-    $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
-    $shortcut = $shell.CreateShortcut((Join-Path $desktop 'Код вслепую.lnk'))
-    $shortcut.TargetPath = $appPath
-    $shortcut.WorkingDirectory = $PSScriptRoot
-    $shortcut.Arguments = '--typing'
-    $shortcut.Save()
+    if ($DesktopShortcut) {
+        $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
+        $shortcut = $shell.CreateShortcut((Join-Path $desktop ($entry.Name + '.lnk')))
+        $shortcut.TargetPath = $appPath
+        $shortcut.WorkingDirectory = $PSScriptRoot
+        $shortcut.Arguments = $entry.Mode
+        $shortcut.Save()
+    }
 }
 Write-Output $appPath

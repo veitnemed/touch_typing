@@ -31,6 +31,8 @@ namespace TouchTypingStudio
             EndlessTypingSummary();
             DailyAndRecords();
             Challenge();
+            ConsoleMissionTests.Run();
+            DesktopItineraryTests.Run();
             Console.WriteLine("PASS: " + assertions + " checks across campaign, routes, input, storage, analytics, Python drills and 48 hours.");
         }
 

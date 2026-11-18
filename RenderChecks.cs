@@ -37,10 +37,13 @@ namespace TouchTypingStudio
                 window.UpdateLayout();
                 Save((FrameworkElement)window.Content, scale, Path.Combine(directory, "desktop-start-" + suffix + ".png"));
                 var strip = new DesktopStrip(delegate { }, delegate { }, delegate { }, delegate { });
-                strip.Set(4, 43, "Подготовьте папку для отчёта", "Откройте папку проекта", "Ctrl + L",
-                    "Введите учебный путь в адресной строке и нажмите Enter.", "Проводник готов.", "Тачпад включён · Ctrl+Alt+F10", true, true);
-                strip.Measure(new Size(width, DesktopTrainingWindow.PanelHeight));
-                strip.Arrange(new Rect(0, 0, width, DesktopTrainingWindow.PanelHeight));
+                strip.Set(2, 5, "Проверка сборки Python", "Сохраните строки о сбоях в отчёт", "Enter",
+                    "findstr выбирает строки с указанным словом. Знак > записывает их в файл.",
+                    "", "Тачпад включён · Ctrl+Alt+F10", true, true,
+                    "findstr FAILED build.log > report.txt", 1, false, "Командная строка", true);
+                double panelHeight = Math.Max(DesktopTrainingWindow.PanelHeight, strip.RequiredHeight(width));
+                strip.Measure(new Size(width, panelHeight));
+                strip.Arrange(new Rect(0, 0, width, panelHeight));
                 strip.UpdateLayout();
                 Save(strip, scale, Path.Combine(directory, "desktop-panel-" + suffix + ".png"));
                 window.OpenWorkbench(WorkbenchArea.Windows);

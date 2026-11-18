@@ -19,11 +19,20 @@ namespace TouchTypingStudio
             bool verify = Array.IndexOf(args, "--qa") >= 0;
             var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
             var store = new ProfileStore(verify);
+            bool errorPending = false;
             app.DispatcherUnhandledException += delegate(object sender, DispatcherUnhandledExceptionEventArgs e)
             {
-                MessageBox.Show("Не удалось продолжить.\n" + e.Exception.Message, "Код вслепую", MessageBoxButton.OK, MessageBoxImage.Error);
                 e.Handled = true;
-                app.Shutdown(1);
+                if (errorPending) return;
+                errorPending = true;
+                string message = e.Exception.Message;
+                // Layout and window creation can disable dispatcher processing. Open the
+                // modal dialog after that operation unwinds, and report only the first error.
+                app.Dispatcher.BeginInvoke(DispatcherPriority.Normal, new Action(delegate
+                {
+                    try { MessageBox.Show("Не удалось продолжить.\n" + message, "Код вслепую", MessageBoxButton.OK, MessageBoxImage.Error); }
+                    finally { app.Shutdown(1); }
+                }));
             };
             int render = Array.IndexOf(args, "--render-checks");
             if (verify && render >= 0 && render + 1 < args.Length)
@@ -31,7 +40,8 @@ namespace TouchTypingStudio
                 RenderChecks.Run(app, store, args[render + 1]);
                 return;
             }
-            var window = new StudioWindow(store, Array.IndexOf(args, "--windows") >= 0, Array.IndexOf(args, "--resume") < 0);
+            var window = new StudioWindow(store, Array.IndexOf(args, "--windows") >= 0, Array.IndexOf(args, "--resume") < 0,
+                verify && Array.IndexOf(args, "--qa-desktop-input") >= 0);
             app.Run(window);
         }
     }
@@ -167,6 +177,7 @@ namespace TouchTypingStudio
         private readonly TypingPage typing;
         private readonly WindowsPage windows;
         private DesktopTrainingWindow liveDesktop;
+        private readonly bool allowDesktopAutomation;
         private bool closing;
         private string pickedRegion = "python";
         private readonly Random drillRandom = new Random();
@@ -174,9 +185,10 @@ namespace TouchTypingStudio
         private int currentMode;
         private bool subPage;
 
-        public StudioWindow(ProfileStore store, bool windowsFirst, bool preferPython = true)
+        public StudioWindow(ProfileStore store, bool windowsFirst, bool preferPython = true, bool allowDesktopAutomation = false)
         {
             this.store = store;
+            this.allowDesktopAutomation = allowDesktopAutomation;
             Title = windowsFirst ? "Windows без мыши" : "Код вслепую";
             Background = new LinearGradientBrush((Color)ColorConverter.ConvertFromString("#191E28"),
                 (Color)ColorConverter.ConvertFromString("#272C37"), 14);
@@ -302,23 +314,25 @@ namespace TouchTypingStudio
             ShowDesktopTraining(null, 0, TimeSpan.Zero, false);
         }
 
-        private void ShowDesktopTraining(int? completed, int rejected, TimeSpan elapsed, bool restoreFailed)
+        private void ShowDesktopTraining(int? completed, int rejected, TimeSpan elapsed, bool restoreFailed,
+            DesktopTrack track = DesktopTrack.Console)
         {
             currentMode = 0;
             DesktopTrainingPage page = null;
-            page = new DesktopTrainingPage(this, store.Read(), delegate { StartDesktopTraining(page); }, completed, rejected, elapsed, restoreFailed);
+            page = new DesktopTrainingPage(this, store.Read(), selected => StartDesktopTraining(page, selected),
+                completed, rejected, elapsed, restoreFailed, track, store.Root);
             OpenPanel(page, page.InitialFocus);
             Title = "Windows без мыши · Код вслепую";
         }
 
-        private void StartDesktopTraining(DesktopTrainingPage page)
+        private void StartDesktopTraining(DesktopTrainingPage page, DesktopTrack track)
         {
             if (liveDesktop != null) return;
             DesktopTrainingWindow created = null;
             bool launched = false;
             try
             {
-                created = new DesktopTrainingWindow(store.Root, new WindowInteropHelper(this).Handle);
+                created = new DesktopTrainingWindow(store.Root, new WindowInteropHelper(this).Handle, track, allowDesktopAutomation);
                 liveDesktop = created;
                 created.Closed += delegate
                 {
@@ -328,16 +342,17 @@ namespace TouchTypingStudio
                     {
                         double speed = created.Completed / created.Elapsed.TotalMinutes;
                         double accuracy = 100.0 * created.Completed / (created.Completed + created.Rejected);
-                        store.Update(p => PracticeRecords.Record(p, "desktop/live", speed, accuracy));
+                        store.Update(p => PracticeRecords.Record(p, DesktopTrainingPage.RecordId(track), speed, accuracy));
                         WarnStorage();
                     }
-                    ShowDesktopTraining(created.Completed, created.Rejected, created.Elapsed, created.RestoreFailed);
+                    ShowDesktopTraining(created.Completed, created.Rejected, created.Elapsed, created.RestoreFailed, track);
                     WindowState = WindowState.Normal;
                     Activate();
                 };
                 created.Show();
                 launched = true;
                 WindowState = WindowState.Minimized;
+                created.ActivateMission();
             }
             catch (Exception error)
             {

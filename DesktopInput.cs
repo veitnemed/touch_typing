@@ -32,6 +32,7 @@ namespace TouchTypingStudio
         private static readonly int[] ModifierKeysToTrack =
             { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C };
         private readonly Dispatcher dispatcher = Dispatcher.CurrentDispatcher;
+        private readonly bool allowAutomation;
         private readonly Native.Hook keyboardCallback, mouseCallback;
         private readonly HashSet<int> modifiersDown = new HashSet<int>();
         private readonly HashSet<int> targetsDown = new HashSet<int>();
@@ -44,8 +45,9 @@ namespace TouchTypingStudio
         public IntPtr IgnoreWindow { get; set; }
         public int MouseClicks { get; private set; }
 
-        public DesktopInput()
+        public DesktopInput(bool allowAutomation = false)
         {
+            this.allowAutomation = allowAutomation;
             keyboardCallback = ObserveKey;
             mouseCallback = ObserveMouse;
             var module = Native.GetModuleHandle(null);
@@ -204,9 +206,9 @@ namespace TouchTypingStudio
 
         private IntPtr ObserveKey(int code, IntPtr message, IntPtr data)
         {
-            // LLKHF_INJECTED is set on simulated keystrokes, including the
-            // touchpad toggle issued by this application.
-            if (code == 0 && (Marshal.ReadInt32(data, 8) & 0x10) == 0)
+            // Production watches physical keys. The isolated QA profile can also
+            // receive the same Windows input events from the accessibility test driver.
+            if (code == 0 && (allowAutomation || (Marshal.ReadInt32(data, 8) & 0x10) == 0))
             {
                 int kind = message.ToInt32();
                 int key = Marshal.ReadInt32(data);

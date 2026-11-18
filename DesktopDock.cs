@@ -14,11 +14,18 @@ namespace TouchTypingStudio
         private readonly Window window;
         private readonly IntPtr hwnd, monitor;
         private readonly int notification;
-        private readonly int height;
+        private int height;
         private Rectangle placed;
         private bool registered, queued, disposed;
 
         public bool Reserved { get { return registered; } }
+
+        public void SetHeight(int value)
+        {
+            if (value == height || value < 1 || disposed) return;
+            height = value;
+            Reposition();
+        }
 
         public DesktopDock(Window window, IntPtr hwnd, IntPtr anchor, int height)
         {

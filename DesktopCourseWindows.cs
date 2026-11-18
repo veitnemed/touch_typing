@@ -1,6 +1,10 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Automation;
 using Microsoft.Win32;
@@ -33,7 +37,97 @@ namespace TouchTypingStudio
 
         public static bool InFileApp(IntPtr hwnd, string process, string file)
         {
-            return WindowTitle(hwnd, process, Path.GetFileName(file));
+            if (hwnd == IntPtr.Zero || !Native.IsProcess(hwnd, process)) return false;
+            string title = Native.Title(hwnd);
+            string name = Path.GetFileName(file);
+            if (!string.Equals(process, "notepad", StringComparison.OrdinalIgnoreCase))
+                return title.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0;
+
+            // Classic Notepad can use the Explorer display name with .txt hidden.
+            // A full caption segment also avoids passing a similarly named note.
+            string display = title.TrimStart('*', ' ', '●');
+            return DocumentCaption(display, name) ||
+                (string.Equals(Path.GetExtension(name), ".txt", StringComparison.OrdinalIgnoreCase) &&
+                 DocumentCaption(display, Path.GetFileNameWithoutExtension(name)));
+        }
+
+        private static bool DocumentCaption(string caption, string name)
+        {
+            return string.Equals(caption, name, StringComparison.OrdinalIgnoreCase) ||
+                caption.StartsWith(name + " - ", StringComparison.OrdinalIgnoreCase) ||
+                caption.StartsWith(name + " — ", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static string PracticeConsoleCommand(string workingDirectory, string title)
+        {
+            var console = PracticeConsoleStart(workingDirectory, title);
+            var directory = new DirectoryInfo(console.WorkingDirectory);
+
+            // The shell link carries the path as a working directory, separate from
+            // command syntax. Spaces, Cyrillic and &, %, ! in a profile path stay literal.
+            string shortcut = Path.Combine(directory.Parent.FullName, "cmd-" + title + ".lnk");
+            if (File.Exists(shortcut)) throw new IOException("Учебный ярлык уже существует.");
+            object shell = null, link = null;
+            try
+            {
+                shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", true));
+                link = ((dynamic)shell).CreateShortcut(shortcut);
+                dynamic properties = link;
+                properties.TargetPath = console.FileName;
+                properties.WorkingDirectory = directory.FullName;
+                properties.Arguments = console.Arguments;
+                properties.Description = "Командная строка в папке этого учебного задания";
+                properties.Save();
+            }
+            catch (COMException error)
+            {
+                throw new IOException("Windows не удалось создать ярлык учебной командной строки.", error);
+            }
+            finally { Release(link); Release(shell); }
+
+            string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData).TrimEnd('\\') + "\\";
+            if (shortcut.StartsWith(local, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(local.TrimEnd('\\'), Environment.GetEnvironmentVariable("LOCALAPPDATA"), StringComparison.OrdinalIgnoreCase))
+                shortcut = @"%LOCALAPPDATA%\" + shortcut.Substring(local.Length);
+            return "\"" + shortcut + "\"";
+        }
+
+        public static IDisposable OpenPracticeConsole(string workingDirectory, string title)
+        {
+            return new DesktopConsoleSession(Process.Start(PracticeConsoleStart(workingDirectory, title)), title);
+        }
+
+        private static ProcessStartInfo PracticeConsoleStart(string workingDirectory, string title)
+        {
+            if (string.IsNullOrEmpty(title) || title != title.Trim() ||
+                !Regex.IsMatch(title, @"\A[a-zA-Z0-9 ._-]{1,72}\z"))
+                throw new ArgumentException("Недопустимое имя учебного окна.", "title");
+
+            var directory = new DirectoryInfo(workingDirectory);
+            if (directory.Parent == null || !directory.Exists ||
+                (directory.Attributes & FileAttributes.ReparsePoint) != 0 ||
+                (directory.Parent.Attributes & FileAttributes.ReparsePoint) != 0)
+                throw new IOException("Учебная папка недоступна.");
+            return new ProcessStartInfo
+            {
+                FileName = Path.Combine(Environment.SystemDirectory, "cmd.exe"),
+                Arguments = "/d /e:on /v:off /k prompt CMD$G$S&title " + title,
+                WorkingDirectory = directory.FullName, UseShellExecute = false,
+                WindowStyle = ProcessWindowStyle.Normal
+            };
+        }
+
+        public static bool IsPracticeConsole(IntPtr hwnd, string expectedTitle)
+        {
+            if (hwnd == IntPtr.Zero || string.IsNullOrEmpty(expectedTitle)) return false;
+            string kind = Native.ClassName(hwnd);
+            if (kind != "ConsoleWindowClass" &&
+                (kind != "CASCADIA_HOSTING_WINDOW_CLASS" || !Native.IsProcess(hwnd, "WindowsTerminal")))
+                return false;
+            string title = Native.Title(hwnd);
+            // cmd can append a running external program to the title.
+            return string.Equals(title, expectedTitle, StringComparison.Ordinal) ||
+                title.StartsWith(expectedTitle + " - ", StringComparison.Ordinal);
         }
 
         public static bool WindowTitle(IntPtr hwnd, string process, string expected)
@@ -81,18 +175,19 @@ namespace TouchTypingStudio
             catch (COMException) { return false; }
         }
 
-        public static bool ClipboardContainsOnly(string expected)
+        public static bool ClipboardContainsOnly(params string[] expected)
         {
             try
             {
                 if (!Clipboard.ContainsFileDropList()) return false;
                 var files = Clipboard.GetFileDropList();
-                return files.Count == 1 && string.Equals(files[0], expected, StringComparison.OrdinalIgnoreCase);
+                return files.Count == expected.Length &&
+                    new HashSet<string>(expected, StringComparer.OrdinalIgnoreCase).SetEquals(files.Cast<string>());
             }
             catch (ExternalException) { return false; }
         }
 
-        public static bool SelectionContains(IntPtr hwnd, string expected)
+        public static bool SelectionContains(IntPtr hwnd, params string[] expected)
         {
             object shell = null, collection = null;
             try
@@ -102,18 +197,24 @@ namespace TouchTypingStudio
                 int count = ((dynamic)collection).Count;
                 for (int i = 0; i < count; i++)
                 {
-                    object child = null, document = null, selection = null, file = null;
+                    object child = null, document = null, selection = null;
                     try
                     {
                         child = ((dynamic)collection).Item(i);
                         if (child == null || (long)((dynamic)child).HWND != hwnd.ToInt64()) continue;
                         document = ((dynamic)child).Document;
                         selection = ((dynamic)document).SelectedItems();
-                        if ((int)((dynamic)selection).Count != 1) return false;
-                        file = ((dynamic)selection).Item(0);
-                        return file != null && string.Equals((string)((dynamic)file).Path, expected, StringComparison.OrdinalIgnoreCase);
+                        if ((int)((dynamic)selection).Count != expected.Length) return false;
+                        var wanted = new HashSet<string>(expected, StringComparer.OrdinalIgnoreCase);
+                        for (int j = 0; j < expected.Length; j++)
+                        {
+                            object file = ((dynamic)selection).Item(j);
+                            try { if (file == null || !wanted.Remove((string)((dynamic)file).Path)) return false; }
+                            finally { Release(file); }
+                        }
+                        return wanted.Count == 0;
                     }
-                    finally { Release(file); Release(selection); Release(document); Release(child); }
+                    finally { Release(selection); Release(document); Release(child); }
                 }
             }
             catch (COMException) { }
