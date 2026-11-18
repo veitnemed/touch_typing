@@ -12,7 +12,8 @@ namespace TouchTypingStudio
     {
         internal sealed class Prompt
         {
-            public string Action, Command, Detail, Retry;
+            public string Action, Command, Detail, Retry, SourceLabel, DestinationLabel, Outcome;
+            public string ReadCommand, TaskHint;
             public string CompletionPrefix, CompletionName;
             public Func<bool> Done;
             public bool QuickRetry;
@@ -35,12 +36,12 @@ namespace TouchTypingStudio
             keyword = briefing.Keyword;
             switch (recipe)
             {
-                case 0: BuildLogReport(); break;
+                case 0: BuildLogReport(batch); break;
                 case 1: BuildTicketQueue(); break;
                 case 2: BuildDataDelivery(); break;
                 case 3: BuildConfigRelease(); break;
-                case 4: BuildShiftNotes(); break;
-                case 5: BuildPriorityList(); break;
+                case 4: BuildShiftNotes(batch); break;
+                case 5: BuildPriorityList(batch); break;
                 default: throw new ArgumentOutOfRangeException("recipe");
             }
             if (completed >= 3) AddCount();
@@ -56,10 +57,19 @@ namespace TouchTypingStudio
             return name;
         }
 
-        private void Add(string action, string command, string detail, Func<bool> check, string retry, bool quickRetry = true)
+        private void Add(string action, string command, string source, string destination, string outcome, string detail,
+            Func<bool> check, string retry, bool quickRetry = true)
         {
-            Commands.Add(new Prompt { Action = action, Command = command, Detail = detail, Done = check,
+            Commands.Add(new Prompt { Action = action, Command = command, SourceLabel = source, DestinationLabel = destination,
+                Outcome = outcome, Detail = detail, Done = check,
                 Retry = retry, QuickRetry = quickRetry });
+        }
+
+        private void ReadFirst(string command, string question)
+        {
+            var step = Commands.Last();
+            step.ReadCommand = command;
+            step.TaskHint = question;
         }
 
         private bool Regular(string relative)
@@ -83,8 +93,10 @@ namespace TouchTypingStudio
         private void AddInventory(string extension, string output, string[] names, bool inHandoff = false)
         {
             string wildcard = (inHandoff ? @"handoff\" : "") + "*." + extension;
-            Add("Запишите имена " + wildcard + " в " + output, "dir /b " + wildcard + " > " + output,
-                "Маска * выбирает все совпадения. Ключ /b оставляет только имена, а > записывает их в файл.",
+            Add("Составьте опись файлов", "dir /b " + wildcard + " > " + output,
+                (inHandoff ? "Папка handoff" : "Папка задания") + ", файлы *." + extension, output,
+                "В описи будет " + names.Length + " строки, в том числе " + names[0] + ".",
+                "dir /b выводит имена. Знак > запишет этот список в " + output + ". Содержимое самих файлов останется на месте.",
                 () => ContainsLines(output, names, false), "Проверьте маску и имя списка " + output + ".");
         }
 
@@ -92,8 +104,8 @@ namespace TouchTypingStudio
         {
             const string destination = "handoff";
             string path = Path.Combine(Folder, destination);
-            Add("Создайте папку handoff для передачи", "md handoff",
-                "Команда md создаёт папку в текущем каталоге.",
+            Add("Подготовьте место для передачи", "md handoff", "Текущая папка задания", @"handoff\",
+                "Появится пустая папка для готового комплекта.", "md создаёт папку. На следующем шаге положите в неё файлы.",
                 () => Directory.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0,
                 "В папке задания ожидается подпапка handoff.");
         }
@@ -103,8 +115,9 @@ namespace TouchTypingStudio
             Delivery = file;
             deliveredLines = lines;
             string copy = Path.Combine("handoff", file);
-            Add("Положите " + file + " в папку handoff", @"copy /y " + file + @" handoff\",
-                "Укажите исходный файл и папку назначения. Ключ /y позволяет повторить копирование.",
+            Add("Передайте копию готового файла", @"copy /y " + file + @" handoff\", file, copy,
+                "Исходный файл останется на месте. В handoff будет передана его точная копия.",
+                "После copy /y идёт имя источника, затем папка для копии. Окончание \\ указывает папку. /y допускает запись поверх предыдущей копии.",
                 () => ContainsLines(file, lines, false) && Regular(copy) &&
                     File.ReadAllBytes(Path.Combine(Folder, file)).SequenceEqual(File.ReadAllBytes(Path.Combine(Folder, copy))),
                 "В handoff ожидается " + file + " с данными из этого задания.");
@@ -112,25 +125,39 @@ namespace TouchTypingStudio
 
         private void BatchCopy(string extension, params string[] files)
         {
-            Add("Скопируйте все *." + extension + " в handoff", "copy /y *." + extension + @" handoff\",
-                "Одна маска отправляет в папку сразу все подходящие файлы.",
-                () => files.All(name => ContainsLines(Path.Combine("handoff", name), inputs[name])),
-                "Проверьте, что все файлы *." + extension + " скопированы с содержимым.");
+            Add("Передайте группу файлов одной командой", "copy /y *." + extension + @" handoff\",
+                string.Join(", ", files), @"handoff\", "В handoff появятся " + files.Length + " файла с прежними именами.",
+                "Маска *." + extension + " выбирает сразу весь комплект. Например, " + files[0] + " будет скопирован в handoff\\" + files[0] + ".",
+                () => files.All(name => ContainsLines(name, inputs[name]) && ContainsLines(Path.Combine("handoff", name), inputs[name])) &&
+                    Directory.GetFileSystemEntries(Path.Combine(Folder, "handoff")).Length == files.Length,
+                "В handoff нужны только " + string.Join(", ", files) + ". Если туда попали другие файлы, переместите их в отдельную папку и повторите команду.");
         }
 
-        private void BuildLogReport()
+        private void BuildLogReport(int batch)
         {
             Title = "Найдите сбой в журналах сборки";
-            string first = Seed("build-" + number + ".log", "OK compiling " + topic, "ERROR " + keyword + " timeout " + number);
-            string second = Seed("worker-" + number + ".log", "ERROR " + team + " backlog " + number, "OK closed");
+            bool timeoutInBuild = batch % 2 == 0;
+            string first = Seed("build-" + number + ".log", "OK compiling " + topic,
+                "ERROR " + keyword + (timeoutInBuild ? " timeout " : " backlog ") + number);
+            string second = Seed("worker-" + number + ".log",
+                "ERROR " + team + (timeoutInBuild ? " backlog " : " timeout ") + number, "OK closed");
             Seed("readme.txt", "Operator notes");
             AddInventory("log", "index.txt", new[] { first, second });
             var errors = new[] { first + ":" + inputs[first][1], second + ":" + inputs[second][0] };
             Add("Соберите строки ERROR из всех журналов в errors.txt", "findstr /i ERROR *.log > errors.txt",
-                "findstr ищет сразу в нескольких файлах. Ключ /i разрешает любой регистр букв.",
+                first + ", " + second, "errors.txt", "В отчёте будут две строки ERROR с именами их журналов.",
+                "findstr /i ищет ERROR в каждом журнале. Знак > сохранит найденные строки в отчёт.",
                 () => ContainsLines("errors.txt", errors, false), "В errors.txt ожидаются обе ошибки с именами журналов.");
             AddFolder();
             Deliver("errors.txt", errors);
+            string journal = timeoutInBuild ? first : second;
+            const string attachment = @"handoff\incident.log";
+            Add("Приложите к отчёту журнал с тайм-аутом", "copy /y " + journal + " " + attachment,
+                first + ", " + second, attachment, "В комплекте появится полный исходный журнал с записью timeout.",
+                "В строке с timeout возьмите имя перед двоеточием. Наберите copy /y, пробел, это имя, пробел и handoff\\incident.log.",
+                () => ContainsLines(attachment, inputs[journal]) && ContainsLines(journal, inputs[journal]),
+                "Нужен полный журнал со словом timeout. Команда type errors.txt снова покажет имена. Повторный copy /y заменит вложение.");
+            ReadFirst("type errors.txt", "Откройте в CMD свой отчёт и найдите строку с timeout. Из какого журнала она взята?");
         }
 
         private void BuildTicketQueue()
@@ -139,11 +166,14 @@ namespace TouchTypingStudio
             string first = Seed("desk-" + number + ".ticket", "OPEN " + number + " " + topic, "CLOSED case " + number);
             string second = Seed("mail-" + number + ".ticket", "CLOSED " + team, "OPEN " + keyword + " " + team);
             var found = new[] { first + ":" + inputs[first][0], second + ":" + inputs[second][1] };
-            Add("Найдите обращения со статусом OPEN в *.ticket", "findstr /b OPEN *.ticket > open.txt",
-                "Ключ /b проверяет начало строки. Сохраните совпадения в open.txt вместе с именами источников.",
+            Add("Оставьте только незакрытые обращения", "findstr /b OPEN *.ticket > open.txt",
+                first + ", " + second, "open.txt", "В списке останутся две заявки, по одной из каждого файла.",
+                "Наберите findstr /b, пробел и найденную метку, затем пробел и *.ticket > open.txt. Ключ /b ищет метку в начале строки.",
                 () => ContainsLines("open.txt", found, false), "В open.txt ожидаются две строки со статусом OPEN.");
+            ReadFirst("type " + first, "Посмотрите две записи в первом файле. Какой меткой начинается обращение, которое ещё ждёт ответа?");
             Add("Отсортируйте открытые обращения в queue.txt", "sort /r /o queue.txt open.txt",
-                "Ключ /r задаёт обратный порядок, /o указывает файл для результата.",
+                "open.txt", "queue.txt", "Первым в очереди станет обращение из " + second + ".",
+                "sort читает open.txt. /r меняет порядок сортировки, /o указывает, куда записать очередь.",
                 () => ContainsLines("queue.txt", found.Reverse()), "В queue.txt сначала ожидается обращение из mail.");
             Commands.Last().CompletionPrefix = "sort /r /o queue.txt op";
             Commands.Last().CompletionName = "open.txt";
@@ -160,6 +190,11 @@ namespace TouchTypingStudio
             Seed("private-notes.txt", "Internal rough draft");
             var files = new[] { a, b, c };
             AddInventory("csv", "manifest.txt", files);
+            var inventory = Commands.Last();
+            inventory.Action = "Составьте опись только для таблиц";
+            inventory.SourceLabel = "Три таблицы в учебной папке";
+            inventory.Detail = "После dir /b введите маску из звёздочки, точки и расширения таблиц, затем пробел и > manifest.txt.";
+            ReadFirst("dir /b", "Посмотрите файлы в папке. Какое расширение общее у трёх таблиц с данными cost, time и units?");
             AddFolder();
             BatchCopy("csv", files);
             Deliver("manifest.txt", files);
@@ -177,44 +212,58 @@ namespace TouchTypingStudio
             BatchCopy("cfg", draft, target);
             string release = "release-" + number + ".cfg";
             Add("Переименуйте копию draft.cfg в " + release, @"ren handoff\draft.cfg " + release,
-                "У команды ren путь указывается в первом аргументе. Новое имя относится к той же папке.",
+                @"handoff\draft.cfg", @"handoff\" + release, "Копия получит имя выпуска. Исходный draft.cfg останется в папке задания.",
+                "ren принимает сначала путь к файлу, затем его новое имя внутри той же папки.",
                 () => !File.Exists(Path.Combine(Folder, "handoff", draft)) &&
                     ContainsLines(@"handoff\" + release, inputs[draft]) && ContainsLines(draft, inputs[draft]),
                 "Переименуйте файл внутри handoff. Исходный draft.cfg должен остаться на месте.");
             Delivery = "manifest.txt";
             deliveredLines = new[] { release, target };
             AddInventory("cfg", @"handoff\manifest.txt", deliveredLines, true);
+            var inventory = Commands.Last();
+            inventory.SourceLabel = "Файлы выпуска в handoff";
+            inventory.Action = "Включите в опись только конфигурации выпуска";
+            inventory.Detail = @"Наберите dir /b handoff\*, добавьте точку и расширение двух конфигураций, затем пробел и > handoff\manifest.txt.";
+            ReadFirst(@"dir /b handoff", "Посмотрите на готовую папку выпуска. Какую маску использовать для двух конфигураций в ней?");
         }
 
-        private void BuildShiftNotes()
+        private void BuildShiftNotes(int batch)
         {
             Title = "Передайте следующей смене незакрытые дела";
-            string a = Seed("morning.part", "DONE " + number, "TODO verify " + topic);
-            string b = Seed("evening.part", "TODO call " + team, "DONE " + keyword);
+            string pending = batch % 2 == 0 ? "TODO" : "NEXT";
+            string a = Seed("morning.part", "DONE " + number, pending + " verify " + topic);
+            string b = Seed("evening.part", pending + " call " + team, "DONE " + keyword);
             Add("Объедините morning.part и evening.part в brief.txt", "copy /y /b morning.part+evening.part brief.txt",
-                "Знак + склеивает файлы в указанном порядке. Каждая часть уже заканчивается переводом строки.",
+                a + ", " + b, "brief.txt", "В одной сводке будут четыре строки: сначала утренние, затем вечерние.",
+                "Знак + у команды copy объединяет содержимое в один файл. Обе исходные части останутся в папке.",
                 () => ContainsLines("brief.txt", inputs[a].Concat(inputs[b])), "В brief.txt ожидаются обе части в порядке смен.");
             string[] todos = { inputs[a][1], inputs[b][0] };
-            Add("Отберите строки TODO в next.txt", "findstr /b TODO brief.txt > next.txt",
-                "Префикс TODO отмечает дела для передачи. Ключ /b берёт совпадения в начале строки.",
-                () => ContainsLines("next.txt", todos), "В next.txt ожидаются только два незакрытых дела.");
+            Add("Оставьте дела для следующей смены", "findstr /b " + pending + " brief.txt > next.txt",
+                "brief.txt", "next.txt", "Следующая смена получит два дела: проверить " + topic + " и связаться с " + team + ".",
+                "После findstr /b наберите метку незакрытой строки из сводки, затем пробел и brief.txt > next.txt.",
+                () => ContainsLines("next.txt", todos), "В next.txt ожидаются два незакрытых дела. Посмотрите их метку через type brief.txt.");
+            ReadFirst("type brief.txt", "Посмотрите, какая метка стоит перед verify и call в этой сводке. DONE отмечает завершённые дела.");
             AddFolder();
             Deliver("next.txt", todos);
         }
 
-        private void BuildPriorityList()
+        private void BuildPriorityList(int batch)
         {
             Title = "Поставьте срочные задачи в начало очереди";
-            string a = Seed("team-" + number + ".todo", "P3 " + team, "P1 A-" + number + " " + topic, "P2 " + keyword);
-            string b = Seed("desk-" + number + ".todo", "P3 " + topic, "P1 Z-" + number + " " + team);
+            string priority = batch % 2 == 0 ? "P0" : "P1";
+            string a = Seed("team-" + number + ".todo", "P3 " + team, priority + " A-" + number + " " + topic, "P2 " + keyword);
+            string b = Seed("desk-" + number + ".todo", "P3 " + topic, priority + " Z-" + number + " " + team);
             string[] tasks = inputs[a].Concat(inputs[b]).OrderBy(x => x, StringComparer.Ordinal).ToArray();
             Add("Соберите две очереди *.todo в tasks.txt по приоритету", "type *.todo | sort > tasks.txt",
-                "type читает очереди. Знак | передаёт их строки на сортировку, а > сохраняет результат.",
-                () => ContainsLines("tasks.txt", tasks), "Проверьте, что в tasks.txt пять строк и первыми идут P1.");
-            string[] urgent = tasks.Where(line => line.StartsWith("P1 ")).ToArray();
-            Add("Сохраните срочные строки P1 в today.txt", "findstr /b P1 tasks.txt > today.txt",
-                "Команда оставит в today.txt только задачи с высшим приоритетом.",
-                () => ContainsLines("today.txt", urgent), "В today.txt ожидаются обе строки P1.");
+                a + ", " + b, "tasks.txt", "В очереди будет пять задач из двух списков, отсортированных по метке приоритета.",
+                "type читает две очереди. Знак | передаёт строки на сортировку, затем > записывает отсортированную очередь.",
+                () => ContainsLines("tasks.txt", tasks), "Проверьте, что в tasks.txt все пять строк по порядку приоритета.");
+            string[] urgent = tasks.Where(line => line.StartsWith(priority + " ", StringComparison.Ordinal)).ToArray();
+            Add("Выберите задачи с наивысшим приоритетом", "findstr /b " + priority + " tasks.txt > today.txt",
+                "tasks.txt", "today.txt", "В плане на сегодня останутся две самые срочные задачи.",
+                "Меньшая цифра означает более высокий приоритет. После findstr /b укажите выбранную метку, затем пробел и tasks.txt > today.txt.",
+                () => ContainsLines("today.txt", urgent), "В today.txt ожидаются обе строки с самой маленькой цифрой приоритета.");
+            ReadFirst("type tasks.txt", "Прочитайте отсортированную очередь. Какая метка с буквой P стоит у самых срочных задач?");
             AddFolder();
             Deliver("today.txt", urgent);
         }
@@ -222,7 +271,8 @@ namespace TouchTypingStudio
         private void AddCount()
         {
             Add("Посчитайте строки " + Delivery + " для передачи", @"type handoff\" + Delivery + " | find /v /c \"\" > handoff\\count.txt",
-                "type передаёт текст дальше по |. Конструкция find /v /c \"\" возвращает число строк, сохраните его в handoff\\count.txt.",
+                @"handoff\" + Delivery, @"handoff\count.txt", "В контрольном файле будет одно число — " + deliveredLines.Length + ".",
+                "type передаёт строки через |. find /v /c \"\" считает их, затем > сохраняет число в файл.",
                 () => ContainsLines(@"handoff\count.txt", new[] { deliveredLines.Length.ToString() }),
                 "В handoff\\count.txt ожидается число строк готового файла.");
         }
@@ -231,6 +281,7 @@ namespace TouchTypingStudio
         {
             bool tar = File.Exists(Path.Combine(Environment.SystemDirectory, "tar.exe"));
             Add("Упакуйте папку handoff в handoff.zip", ArchiveCommand(tar),
+                @"handoff\", "handoff.zip", "В одном архиве будут файлы комплекта и контрольное число строк.",
                 tar ? "Ключи -c и -f создают архив с указанным именем. Ключ -a выбирает ZIP по расширению." :
                     "PowerShell вызовет упаковщик .NET. Если имя архива уже занято, сначала переименуйте предыдущую копию.",
                 ArchiveMatches, "В handoff.zip ожидаются файлы комплекта и число строк.", false);

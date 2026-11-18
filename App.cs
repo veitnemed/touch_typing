@@ -202,13 +202,19 @@ namespace TouchTypingStudio
             MinHeight = Math.Min(510, Height);
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
-            var shell = new DockPanel();
-            var top = new DockPanel { Background = Ui.Brush("#222427"), LastChildFill = true };
-            DockPanel.SetDock(top, Dock.Top);
+            var shell = new DockPanel { Background = Ui.Brush("#20232A") };
+            var top = new DockPanel { Background = Ui.Brush("#22252B"), LastChildFill = true };
             var title = Ui.QuietButton("КОД ВСЛЕПУЮ", ShowHome);
-            title.FontSize = 17;
-            title.FontWeight = FontWeights.Bold;
-            title.Margin = new Thickness(20, 4, 12, 4);
+            var brand = new StackPanel { Orientation = Orientation.Horizontal };
+            var mark = new System.Windows.Controls.Primitives.UniformGrid { Columns = 2, Rows = 2,
+                Width = 22, Height = 22, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center };
+            foreach (string tint in new[] { "#DDACBA", "#D3B483", "#A9C8B0", "#91BBC7" })
+                mark.Children.Add(new Border { Background = Ui.Brush(tint), CornerRadius = new CornerRadius(2), Margin = new Thickness(1) });
+            brand.Children.Add(mark);
+            brand.Children.Add(Ui.Text("Код вслепую", 17, Ui.Ink, true));
+            title.Content = brand;
+            Ui.Name(title, "Код вслепую — к выбору тренировки");
+            title.Margin = new Thickness(15, 7, 12, 7);
             title.ToolTip = "Выбрать тренировку · F2";
             DockPanel.SetDock(title, Dock.Left);
             top.Children.Add(title);
@@ -218,7 +224,9 @@ namespace TouchTypingStudio
             setsButton = Ui.QuietButton("Свои наборы", delegate { ShowPracticeSets(); });
             Ui.Add(nav, setsButton);
             top.Children.Add(nav);
-            shell.Children.Add(top);
+            var header = new Border { Child = top, BorderBrush = Ui.Brush("#383D46"), BorderThickness = new Thickness(0, 0, 0, 1) };
+            DockPanel.SetDock(header, Dock.Top);
+            shell.Children.Add(header);
             footer = Ui.Text("", 12, Ui.Brush("#FFCA82"));
             footer.Margin = new Thickness(22, 2, 22, 5);
             footer.Visibility = Visibility.Collapsed;
@@ -315,7 +323,7 @@ namespace TouchTypingStudio
         }
 
         private void ShowDesktopTraining(int? completed, int rejected, TimeSpan elapsed, bool restoreFailed,
-            DesktopTrack track = DesktopTrack.Console)
+            DesktopTrack track = DesktopTrack.Workday)
         {
             currentMode = 0;
             DesktopTrainingPage page = null;
@@ -350,6 +358,12 @@ namespace TouchTypingStudio
                     Activate();
                 };
                 created.Show();
+                if (created.StartError != null)
+                {
+                    created.Close();
+                    page.ShowError(created.StartError);
+                    return;
+                }
                 launched = true;
                 WindowState = WindowState.Minimized;
                 created.ActivateMission();

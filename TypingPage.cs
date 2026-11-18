@@ -53,7 +53,7 @@ namespace TouchTypingStudio
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
             Focusable = false;
 
-            var stack = new StackPanel { Margin = new Thickness(32, 17, 32, 18), MaxWidth = 1450 };
+            var stack = new StackPanel { Margin = new Thickness(30, 26, 30, 22), MaxWidth = 1320 };
             time = Ui.Text("00:00", 19, Ui.Ink, true);
             time.FontFamily = Ui.Mono.FontFamily;
             time.TextAlignment = TextAlignment.Center;
@@ -62,10 +62,19 @@ namespace TouchTypingStudio
             clock.HorizontalAlignment = HorizontalAlignment.Center;
             Ui.Add(stack, clock, 21);
 
-            var controls = new DockPanel { Margin = new Thickness(0, 0, 0, 5), LastChildFill = true };
+            var controls = new Grid { Margin = new Thickness(2, 0, 0, 8) };
+            controls.ColumnDefinitions.Add(new ColumnDefinition());
+            controls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            controls.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            controls.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var right = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
-            DockPanel.SetDock(right, Dock.Right);
-            start = Ui.QuietButton("Начать · Пробел", Start);
+            Grid.SetColumn(right, 1);
+            start = Ui.Button("Начать · Пробел", Start, true);
+            start.Background = Ui.Brush("#B5DECD");
+            start.BorderBrush = start.Background;
+            start.MinHeight = 32;
+            start.Padding = new Thickness(12, 4, 12, 4);
+            start.Margin = new Thickness(0, 0, 4, 0);
             difficulty = new ComboBox { MinWidth = 133, MaxWidth = 190, Margin = new Thickness(0, 0, 7, 0),
                 VerticalAlignment = VerticalAlignment.Center };
             Ui.Name(difficulty, "Сложность");
@@ -80,27 +89,37 @@ namespace TouchTypingStudio
             Ui.Name(options, "Параметры упражнения");
             Ui.Add(right, options);
             controls.Children.Add(right);
-            headline = Ui.Text("", 16, Ui.Ink, true);
-            headline.Margin = new Thickness(7, 4, 12, 0);
+            headline = Ui.Text("", 20, Ui.Ink, true);
+            headline.Margin = new Thickness(0, 0, 10, 3);
+            headline.VerticalAlignment = VerticalAlignment.Center;
             controls.Children.Add(headline);
+            controls.SizeChanged += delegate
+            {
+                bool narrow = controls.ActualWidth < 790;
+                Grid.SetColumn(right, narrow ? 0 : 1);
+                Grid.SetColumnSpan(right, narrow ? 2 : 1);
+                Grid.SetRow(right, narrow ? 1 : 0);
+                Grid.SetColumnSpan(headline, narrow ? 2 : 1);
+                right.HorizontalAlignment = narrow ? HorizontalAlignment.Left : HorizontalAlignment.Right;
+            };
             Ui.Add(stack, controls);
 
-            ribbon = new PracticeRibbon { Height = 72 };
+            ribbon = new PracticeRibbon { Height = 90 };
             tape = Ui.Panel(ribbon, new Thickness(0), Ui.Brush("#181A1E"));
             tape.Focusable = true;
             tape.FocusVisualStyle = null;
             tape.ClipToBounds = true;
-            tape.BorderThickness = new Thickness(6);
-            tape.BorderBrush = Ui.Brush("#343A45");
+            tape.BorderThickness = new Thickness(4);
+            tape.BorderBrush = Ui.Brush("#414751");
             // The clip keeps the shifting ribbon inside the rounded opening.
             ribbon.SizeChanged += delegate
             {
                 ribbon.Clip = new RectangleGeometry(new Rect(0, 0, ribbon.ActualWidth, ribbon.ActualHeight), 6, 6);
             };
-            tape.GotKeyboardFocus += delegate { tape.BorderBrush = Ui.Brush("#444B58"); };
+            tape.GotKeyboardFocus += delegate { tape.BorderBrush = Ui.Brush("#68847C"); };
             tape.LostKeyboardFocus += delegate
             {
-                tape.BorderBrush = Ui.Brush("#343A45");
+                tape.BorderBrush = Ui.Brush("#414751");
                 PauseForFocusLoss();
             };
             tape.MouseLeftButtonDown += delegate { tape.Focus(); };
@@ -141,9 +160,9 @@ namespace TouchTypingStudio
             modeNote.TextAlignment = TextAlignment.Center;
             Ui.Add(stack, modeNote, 6);
 
-            keyboard.Margin = new Thickness(0, 0, 0, 4);
+            keyboard.Margin = new Thickness(0, 14, 0, 4);
             Ui.Add(stack, keyboard, 5);
-            hint = Ui.Text("", 13, Ui.Muted);
+            hint = Ui.Text("", 15, Ui.Brush("#C8D8CE"));
             hint.TextAlignment = TextAlignment.Center;
             Ui.Add(stack, hint, 6);
             editLine = Ui.Text("", 14, Ui.Ink);
@@ -684,7 +703,7 @@ namespace TouchTypingStudio
         {
             if (attempt == null) return;
             if (Adaptive != null)
-                headline.Text = exercise.PracticeSet == null ? Adaptive.Heading : exercise.PracticeSet.Name;
+                headline.Text = exercise.PracticeSet == null ? (Adaptive.AutoAdvance ? Adaptive.Heading : Adaptive.Name) : exercise.PracticeSet.Name;
             else if (lesson == null) headline.Text = name;
             else
             {

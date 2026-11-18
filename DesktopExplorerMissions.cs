@@ -60,7 +60,10 @@ namespace TouchTypingStudio
                 commandSource: hwnd => AtFolder(hwnd, inbox),
                 result: hwnd => AtFolder(hwnd, inbox) && DesktopCourseWindows.ClipboardContainsOnly(documents),
                 detail: batch ? "В буфер обмена попадут сразу два файла." : "Нажмите Home в списке файлов, чтобы выделить отчёт.",
-                expected: batch ? "Выделите оба документа в Inbox и скопируйте." : "Выделите учебный отчёт в Ready и вырежьте его.");
+                expected: batch ? "Выделите оба документа в Inbox и скопируйте." : "Выделите учебный отчёт в Ready и вырежьте его.",
+                sourceLabel: batch ? inboxName + " · 2 документа" : Path.Combine(inboxName, Path.GetFileName(first)),
+                destLabel: "Буфер обмена", outcome: batch ? "Оба файла можно будет вставить одной командой." :
+                    "После вставки в Archive отчёт переместится туда.");
             Add(task, "Вернитесь к папкам проекта", "Alt+Up",
                 commandSource: IsCurrentExplorer, result: hwnd => AtFolder(hwnd, project),
                 expected: "Проводник должен открыть родительскую папку.");
@@ -73,7 +76,11 @@ namespace TouchTypingStudio
                     (batch ? SameText(secondCopy, checklist) && SameText(first, originalText) && SameText(second, checklist)
                            : !File.Exists(first)),
                 expected: batch ? "В Send ожидаются две копии. Оригиналы остаются в Inbox." :
-                    "В Archive ожидается отчёт, а папка Ready должна освободиться.");
+                    "В Archive ожидается отчёт, а папка Ready должна освободиться.",
+                sourceLabel: batch ? inboxName + " · 2 документа" : Path.Combine(inboxName, Path.GetFileName(first)),
+                destLabel: batch ? outboxName : Path.Combine(outboxName, Path.GetFileName(first)),
+                outcome: batch ? "В Send появятся две копии. Оригиналы останутся в Inbox." :
+                    "Отчёт окажется в Archive. Папка Ready станет пустой.");
         }
 
         private void EnterExplorerChild(string goal, string child)

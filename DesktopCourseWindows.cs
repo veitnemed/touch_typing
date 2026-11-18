@@ -55,6 +55,7 @@ namespace TouchTypingStudio
         {
             return string.Equals(caption, name, StringComparison.OrdinalIgnoreCase) ||
                 caption.StartsWith(name + " - ", StringComparison.OrdinalIgnoreCase) ||
+                caption.StartsWith(name + " – ", StringComparison.OrdinalIgnoreCase) ||
                 caption.StartsWith(name + " — ", StringComparison.OrdinalIgnoreCase);
         }
 
@@ -169,6 +170,66 @@ namespace TouchTypingStudio
                 object value;
                 return focused != null && focused.TryGetCurrentPattern(ValuePattern.Pattern, out value) &&
                     string.Equals(((ValuePattern)value).Current.Value, expected, StringComparison.Ordinal);
+            }
+            catch (ElementNotAvailableException) { return false; }
+            catch (InvalidOperationException) { return false; }
+            catch (COMException) { return false; }
+        }
+
+        // The Windows-wide UIA focus can lag behind Chrome's tab or search box.
+        // Read focus from this training window's own accessibility tree.
+        public static bool ChromeEditFocused(IntPtr hwnd, string expected = null)
+        {
+            if (!Native.IsProcess(hwnd, "chrome")) return false;
+            try
+            {
+                var edit = FocusedWindowEdit(hwnd);
+                if (edit == null) return false;
+                if (expected == null) return true;
+                object pattern;
+                return edit.TryGetCurrentPattern(ValuePattern.Pattern, out pattern) &&
+                    string.Equals(((ValuePattern)pattern).Current.Value, expected, StringComparison.Ordinal);
+            }
+            catch (ElementNotAvailableException) { return false; }
+            catch (InvalidOperationException) { return false; }
+            catch (COMException) { return false; }
+        }
+
+        private static AutomationElement FocusedWindowEdit(IntPtr hwnd)
+        {
+            return AutomationElement.FromHandle(hwnd).FindFirst(TreeScope.Descendants, new AndCondition(
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
+                new PropertyCondition(AutomationElement.HasKeyboardFocusProperty, true)));
+        }
+
+        public static bool CodeQuickInputFocused(IntPtr hwnd)
+        {
+            if (!Native.IsProcess(hwnd, "Code")) return false;
+            try
+            {
+                var window = AutomationElement.FromHandle(hwnd);
+                // Go to Line can expose its selected suggestion as focused instead of the text field.
+                var focused = window.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.HasKeyboardFocusProperty, true));
+                for (var node = focused; node != null && !node.Equals(window); node = TreeWalker.RawViewWalker.GetParent(node))
+                    if ((node.Current.ClassName ?? "").IndexOf("quick-input", StringComparison.Ordinal) >= 0) return true;
+                return false;
+            }
+            catch (ElementNotAvailableException) { return false; }
+            catch (InvalidOperationException) { return false; }
+            catch (COMException) { return false; }
+        }
+
+        public static bool ChromePageFocused(IntPtr hwnd, string pageTitle)
+        {
+            if (!Native.IsProcess(hwnd, "chrome")) return false;
+            try
+            {
+                var window = AutomationElement.FromHandle(hwnd);
+                var page = window.FindFirst(TreeScope.Descendants, new AndCondition(
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Document),
+                    new PropertyCondition(AutomationElement.NameProperty, pageTitle)));
+                return page != null && (page.Current.HasKeyboardFocus || page.FindFirst(TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.HasKeyboardFocusProperty, true)) != null);
             }
             catch (ElementNotAvailableException) { return false; }
             catch (InvalidOperationException) { return false; }

@@ -11,49 +11,60 @@ namespace TouchTypingStudio
 
         public TrainingHome(StudioWindow owner, StudioProfile profile)
         {
-            Background = FlightUi.Backdrop(profile);
+            if (!string.IsNullOrEmpty(profile.Theme)) Background = FlightUi.Backdrop(profile);
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
-            var stack = FlightUi.Sheet();
-            Ui.Add(stack, Ui.Text("Выберите тренировку", 34, Ui.Ink, true), 5);
-            Ui.Add(stack, Ui.Text("Задания идут непрерывно. Результаты появятся после остановки.", 15, Ui.Muted), 22);
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
+            var stack = new StackPanel { MaxWidth = 1080, Margin = new Thickness(32, 27, 26, 24) };
+            Ui.Add(stack, Ui.Text("Выберите тренировку", 34, Ui.Ink, true), 17);
+            var main = new UniformGrid { Columns = 2 };
+            InitialFocus = AddCard(main, "Python", "Пишите код в английской раскладке. Сложность можно менять по ходу набора.",
+                delegate { owner.OpenTyping(ContinuousKind.Python); }, "#29363A", "#B2E2CF", "Alt + 1");
+            AddCard(main, "Windows без мыши", "Работайте с файлами и окнами своего компьютера по подсказкам нижней панели.",
+                owner.ShowDesktopTraining, "#323140", "#D9CBFA", "Alt + 2");
+            Ui.Add(stack, main, 16);
 
-            Ui.Add(stack, Ui.Text("Печать", 19, Ui.Ink, true), 8);
+            Ui.Add(stack, Ui.Text("Текст и символы", 19, Ui.Ink, true), 9);
             var typing = new UniformGrid { Columns = 3 };
-            InitialFocus = AddCard(typing, "Python", "Код, отступы, операторы и Backspace. Можно менять сложность.",
-                delegate { owner.OpenTyping(ContinuousKind.Python); });
-            AddCard(typing, "Русский текст", "Связные тексты с заглавными буквами и пунктуацией.",
-                delegate { owner.OpenTyping(ContinuousKind.Russian); });
-            AddCard(typing, "English text", "Обычные фразы и абзацы с заглавными буквами.",
-                delegate { owner.OpenTyping(ContinuousKind.English); });
-            AddCard(typing, "Спецсимволы", "Скобки, операторы, кавычки и знаки с Shift.",
-                delegate { owner.OpenTyping(ContinuousKind.Symbols); });
-            AddCard(typing, "Горячие клавиши", "Короткие задания на сочетания в учебном окне.",
-                delegate { owner.OpenWorkbench(WorkbenchArea.Shortcuts); });
-            AddCard(typing, "Свои наборы", "Добавьте текст, знаки или сочетания и тренируйте их.",
-                delegate { owner.ShowPracticeSets(); });
+            AddCard(typing, "Русский текст", "Фразы, заглавные буквы и пунктуация.",
+                delegate { owner.OpenTyping(ContinuousKind.Russian); }, "#292D36", "#C2DAF0");
+            AddCard(typing, "English text", "Английские фразы и абзацы.",
+                delegate { owner.OpenTyping(ContinuousKind.English); }, "#292D36", "#EDCEA8");
+            AddCard(typing, "Спецсимволы", "Скобки, операторы и знаки с Shift.",
+                delegate { owner.OpenTyping(ContinuousKind.Symbols); }, "#292D36", "#ECC4CC");
             Ui.Add(stack, typing, 15);
 
-            Ui.Add(stack, Ui.Text("Работа без мыши", 19, Ui.Ink, true), 8);
-            var work = new UniformGrid { Columns = 1 };
-            AddCard(work, "Windows без мыши", "Найти запись в командной строке, собрать отчёт или передать проект через Проводник, Chrome и VS Code.",
-                owner.ShowDesktopTraining);
-            Ui.Add(stack, work, 8);
-            Ui.Add(stack, Ui.Text("Tab — выбор · Enter — открыть · F2 — к режимам · F4 — клавиатура во время печати", 13, Ui.Muted));
+            var other = new WrapPanel();
+            Ui.Add(other, Ui.Button("Горячие клавиши", delegate { owner.OpenWorkbench(WorkbenchArea.Shortcuts); }));
+            Ui.Add(other, Ui.Button("Свои наборы", delegate { owner.ShowPracticeSets(); }));
+            Ui.Add(stack, other, 9);
+            Ui.Add(stack, Ui.Text("Tab — выбрать     Enter — открыть", 13, Ui.Muted));
             Content = stack;
         }
 
-        private static Button AddCard(Panel parent, string title, string detail, Action start)
+        private static Button AddCard(Panel parent, string title, string detail, Action start, string surface, string tint, string shortcut = null)
         {
             var entry = Ui.Button(title, start);
             var content = new StackPanel();
-            Ui.Add(content, Ui.Text(title, 20, Ui.Ink, true), 6);
-            Ui.Add(content, Ui.Text(detail, 13, Ui.Muted));
+            Ui.Add(content, Ui.Text(title, shortcut == null ? 19 : 27, Ui.Brush(tint), true), 6);
+            Ui.Add(content, Ui.Text(detail, 14, Ui.Brush("#D2D3DA")));
+            if (shortcut != null)
+            {
+                var key = Ui.Text(shortcut, 13, Ui.Brush(tint), true);
+                key.FontFamily = Ui.Mono.FontFamily;
+                var cap = Ui.Panel(key, new Thickness(9, 3, 9, 3), Ui.Brush("#20232B"));
+                cap.BorderBrush = Ui.Brush("#575967");
+                cap.CornerRadius = new CornerRadius(5);
+                cap.HorizontalAlignment = HorizontalAlignment.Left;
+                cap.Margin = new Thickness(0, 14, 0, 0);
+                Ui.Add(content, cap);
+            }
             entry.Content = content;
             entry.HorizontalContentAlignment = HorizontalAlignment.Left;
-            entry.Background = Ui.Brush("#19283B");
-            entry.BorderBrush = Ui.Brush("#34495F");
-            entry.Padding = new Thickness(14);
-            entry.MinHeight = 102;
+            entry.VerticalContentAlignment = VerticalAlignment.Center;
+            entry.Background = Ui.Brush(surface);
+            entry.BorderBrush = Ui.Brush("#444954");
+            entry.Padding = new Thickness(shortcut == null ? 15 : 20);
+            entry.MinHeight = shortcut == null ? 100 : 147;
             entry.Margin = new Thickness(0, 0, 9, 9);
             Ui.Name(entry, title);
             parent.Children.Add(entry);

@@ -12,8 +12,8 @@ namespace TouchTypingStudio
         private int position;
         private bool error, single;
         private char practiceSymbol;
-        private static readonly Brush Typed = Ui.Brush("#8D919E");
-        private static readonly Brush Upcoming = Ui.Brush("#ECEAF0");
+        private static readonly Brush Typed = Ui.Brush("#9097A5");
+        private static readonly Brush Upcoming = Ui.Brush("#D4D8DE");
 
         public PracticeRibbon() { ClipToBounds = true; }
 
@@ -38,9 +38,9 @@ namespace TouchTypingStudio
             double width = ActualWidth, height = ActualHeight;
             if (width < 2 || height < 2) return;
             double middle = Math.Floor(width / 2);
-            draw.DrawRectangle(Ui.Brush("#181A1E"), null, new Rect(0, 0, middle, height));
-            draw.DrawRectangle(Ui.Brush("#232731"), null, new Rect(middle, 0, width - middle, height));
-            double size = Math.Min(44, height * .68);
+            draw.DrawRectangle(Ui.Brush("#191C22"), null, new Rect(0, 0, middle, height));
+            draw.DrawRectangle(Ui.Brush("#252A33"), null, new Rect(middle, 0, width - middle, height));
+            double size = Math.Min(53, Math.Min(width / 14, height * .64));
             if (single && position < target.Length)
             {
                 var symbol = Format(VisibleText(target[position].ToString()), size, error ? Ui.Brush("#FFA6AE") : Upcoming);
@@ -65,17 +65,18 @@ namespace TouchTypingStudio
             {
                 draw.PushClip(new RectangleGeometry(new Rect(middle, 0, width - middle, height)));
                 char symbol = target[position];
-                var current = Format(VisibleText(symbol.ToString()), size, Upcoming);
+                var current = Format(VisibleText(symbol.ToString()), size, Ui.Brush("#F6F9F7"));
                 string tail = target.Substring(position + 1, Math.Min(columns, target.Length - position - 1));
                 var next = Format(VisibleText(tail), size, Upcoming);
                 if (practiceSymbol != '\0')
                     for (int index = 0; index < tail.Length; index++)
                         if (tail[index] == practiceSymbol) next.SetForegroundBrush(Ui.Brush("#FFD28E"), index, 1);
                 double top = (height - current.Height) / 2;
-                var accent = error ? Ui.Brush("#EB868C") : Ui.Brush("#B7CED6");
+                var accent = error ? Ui.Brush("#FFACAE") : Ui.Brush("#ACE4C9");
                 double glyphWidth = current.WidthIncludingTrailingWhitespace;
-                if (error) draw.DrawRectangle(Ui.Brush("#642F39"), null, new Rect(middle, 0, glyphWidth, height));
-                draw.DrawRectangle(accent, null, new Rect(middle + 2, height - 4, Math.Max(3, glyphWidth - 4), 2));
+                draw.DrawRoundedRectangle(error ? Ui.Brush("#66363E") : Ui.Brush("#374B45"), null,
+                    new Rect(middle, top, glyphWidth, current.Height), 3, 3);
+                draw.DrawRectangle(accent, null, new Rect(middle + 1, top + current.Height - 2, Math.Max(3, glyphWidth - 2), 2));
                 draw.DrawText(current, new Point(middle, top));
                 draw.DrawText(next, new Point(middle + glyphWidth, top));
                 draw.Pop();

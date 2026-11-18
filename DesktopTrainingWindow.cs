@@ -12,7 +12,7 @@ namespace TouchTypingStudio
 {
     internal sealed class DesktopTrainingWindow : Window
     {
-        internal const int PanelHeight = 166;
+        internal const int PanelHeight = 110;
         private const int StopKey = 0x5400, HintsKey = 0x5401, CopyKey = 0x5402, RecoverKey = 0x5403, SkipKey = 0x5404;
         private const uint CtrlAlt = 0x4003; // CTRL | ALT | MOD_NOREPEAT
         private readonly IntPtr anchor;
@@ -29,7 +29,7 @@ namespace TouchTypingStudio
         private DesktopInput input;
         private TouchpadSwitch touchpad;
         private string localNotice;
-        private bool hotkeyConflict;
+        private readonly System.Collections.Generic.List<string> unavailableKeys = new System.Collections.Generic.List<string>();
         private bool cleaned;
         private int mouseBaseline;
 
@@ -37,6 +37,7 @@ namespace TouchTypingStudio
         public int Rejected { get { return course.Rejected; } }
         public TimeSpan Elapsed { get { return elapsed.Elapsed; } }
         public bool RestoreFailed { get; private set; }
+        public string StartError { get; private set; }
 
         public DesktopTrainingWindow(string root, IntPtr anchor, DesktopTrack track = DesktopTrack.Workday, bool allowAutomation = false)
         {
@@ -88,7 +89,8 @@ namespace TouchTypingStudio
                 if (!(error is Win32Exception) && !(error is ArgumentException)) throw;
                 if (input != null) input.Dispose();
                 input = null;
-                localNotice = "Windows не разрешила отслеживать сочетания. " + error.Message;
+                StartError = error.Message + " Можно повторить запуск или выбрать «Горячие клавиши» на главном экране.";
+                return;
             }
             touchpad = new TouchpadSwitch(source.Handle);
             touchpad.StatusChanged += Render;
@@ -104,7 +106,8 @@ namespace TouchTypingStudio
 
         private void Register(int id, uint key)
         {
-            if (!Native.RegisterHotKey(source.Handle, id, CtrlAlt, key)) hotkeyConflict = true;
+            if (!Native.RegisterHotKey(source.Handle, id, CtrlAlt, key))
+                unavailableKeys.Add("Ctrl+Alt+" + (key >= 0x70 && key <= 0x7B ? "F" + (key - 0x6F) : ((char)key).ToString()));
         }
 
         private IntPtr Message(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -149,9 +152,9 @@ namespace TouchTypingStudio
 
         private void Skip()
         {
-            if (course.SkipOptional()) { localNotice = null; ActivateMission(); return; }
-            localNotice = "Этот шаг входит в основной маршрут.";
-            Render();
+            course.SkipMission();
+            localNotice = null;
+            ActivateMission();
         }
 
         private void Poll()
@@ -189,10 +192,13 @@ namespace TouchTypingStudio
         private void Copy()
         {
             if (course.CopyText == null) return;
+            if (course.IsConsoleCommand && !hints) return;
             try
             {
                 Clipboard.SetText(course.CopyText);
-                localNotice = "Скопировано. Вставьте текст в рабочее окно через Ctrl+V.";
+                localNotice = course.IsConsoleCommand
+                    ? "Команда в буфере обмена. Вставьте её в CMD через Ctrl+V."
+                    : "Текст в буфере обмена. Вставьте его в рабочее окно через Ctrl+V.";
             }
             catch (System.Runtime.InteropServices.ExternalException)
             {
@@ -213,13 +219,16 @@ namespace TouchTypingStudio
         {
             string device = touchpad == null ? "Тачпад · Ctrl+Alt+F10" : touchpad.Status;
             string notice = localNotice ?? course.Notice;
-            if (string.IsNullOrEmpty(notice) && hotkeyConflict)
-                notice = "Часть сочетаний панели занята другой программой. Используйте кнопки панели.";
-            if (string.IsNullOrEmpty(notice) && dock != null && !dock.Reserved)
-                notice = "Панель поверх окон. Windows не выделила для неё отдельное место.";
-            view.Set(course.MissionStep, course.MissionLength, course.Goal, course.Action, course.Shortcut, course.Detail, notice,
-                device, hints, course.CopyText != null, course.CopyText, course.RoundNumber, course.CanSkipOptional,
-                track == DesktopTrack.Console ? "Командная строка" : "Рабочий день", course.IsConsoleCommand);
+            if (unavailableKeys.Count != 0)
+                device = "Занято " + string.Join(", ", unavailableKeys) + ". Доступны кнопки панели. " + device;
+            if (dock != null && !dock.Reserved)
+                device += " · Панель поверх окон";
+            view.Set(course.MissionStep, course.MissionLength, course.Goal,
+                course.WaitingForWindow ? "Перейдите в открывшееся учебное окно" : course.Action,
+                course.WaitingForWindow ? "" : course.Shortcut, course.WaitingForWindow ? "" : course.Detail, notice,
+                device, hints, course.CopyText != null, course.CopyText,
+                track == DesktopTrack.Console ? "Командная строка" : "Рабочий день", course.IsConsoleCommand,
+                course.StepSource, course.StepDestination, course.StepOutcome);
             if (dock != null && ActualWidth > 0)
                 dock.SetHeight(Math.Max(PanelHeight, view.RequiredHeight(ActualWidth)));
         }
@@ -264,128 +273,210 @@ namespace TouchTypingStudio
 
     internal sealed class DesktopStrip : Border
     {
-        private readonly TextBlock stepCount, goal, action, keys, detail, notice, device, literal;
-        private readonly Border keycap, example;
-        private readonly Button hintButton, copyButton, skipButton;
-        private readonly Grid progress;
-        private readonly ColumnDefinition filled, remaining;
+        private readonly StackPanel content, keycaps;
+        private readonly Grid body;
+        private readonly StackPanel instruction;
+        private readonly Border flow, example, progressFill;
+        private readonly TextBlock routeText, goal, stepCount, action, detail, literal, entryLabel;
+        private readonly TextBlock from, to, outcome, notice, device;
+        private readonly Button hintButton, copyButton;
         private readonly WrapPanel controls;
-        private readonly StackPanel content;
-        private string previousDetail, previousExample;
+        private bool hasFlow, stacked, arranged;
+        private int lastStage, lastLength;
+        private string previousText, previousSample, previousChord;
 
         public DesktopStrip(Action hints, Action copy, Action recover, Action stop, Action skip = null)
         {
-            Background = Ui.Brush("#131D29");
-            BorderBrush = Ui.Brush("#475B6C");
+            Background = Ui.Brush("#20232B");
+            BorderBrush = Ui.Brush("#494E59");
             BorderThickness = new Thickness(0, 1, 0, 0);
-            Padding = new Thickness(18, 9, 18, 6);
-            content = new StackPanel();
+            Padding = new Thickness(20, 8, 20, 6);
+            SnapsToDevicePixels = true;
+            content = new StackPanel { MaxWidth = 1600 };
+            Child = content;
 
-            var header = new DockPanel { Margin = new Thickness(0, 0, 0, 5) };
-            stepCount = Ui.Text("", 13, Ui.Brush("#A8E6D0"), true);
-            stepCount.FontFamily = Ui.Mono.FontFamily;
-            stepCount.Margin = new Thickness(14, 0, 0, 0);
-            DockPanel.SetDock(stepCount, Dock.Right);
-            header.Children.Add(stepCount);
-            goal = Ui.Text("", 15, Ui.Brush("#AAC5DB"), true);
+            var header = new DockPanel();
+            var counter = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            stepCount = Ui.Text("", 12, Ui.Brush("#C5D0CC"));
+            counter.Children.Add(stepCount);
+            var track = new Border { Width = 60, Height = 3, CornerRadius = new CornerRadius(1.5),
+                Background = Ui.Brush("#454953"), Margin = new Thickness(8, 0, 0, 0) };
+            progressFill = new Border { Background = Ui.Brush("#9EDCC0"), CornerRadius = new CornerRadius(1.5),
+                HorizontalAlignment = HorizontalAlignment.Left };
+            track.Child = progressFill;
+            counter.Children.Add(track);
+            DockPanel.SetDock(counter, Dock.Right);
+            header.Children.Add(counter);
+            routeText = Ui.Text("", 13, Ui.Brush("#A5D8BF"), true);
+            routeText.Margin = new Thickness(0, 0, 12, 0);
+            DockPanel.SetDock(routeText, Dock.Left);
+            header.Children.Add(routeText);
+            goal = Ui.Text("", 15, Ui.Brush("#E9E7E3"), true);
+            goal.Margin = new Thickness(0, 0, 8, 0);
             header.Children.Add(goal);
-            Ui.Add(content, header);
+            Ui.Add(content, header, 6);
 
-            progress = new Grid { Height = 2, Background = Ui.Brush("#344758"), Margin = new Thickness(0, 0, 0, 6) };
-            filled = new ColumnDefinition();
-            remaining = new ColumnDefinition();
-            progress.ColumnDefinitions.Add(filled);
-            progress.ColumnDefinitions.Add(remaining);
-            progress.Children.Add(new Border { Background = Ui.Brush("#83CFB8") });
-            Ui.Add(content, progress);
+            body = new Grid();
+            body.ColumnDefinitions.Add(new ColumnDefinition());
+            body.ColumnDefinitions.Add(new ColumnDefinition());
+            body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            instruction = new StackPanel();
+            body.Children.Add(instruction);
+            var headline = new DockPanel();
+            keycaps = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(8, 1, 0, 0) };
+            DockPanel.SetDock(keycaps, Dock.Right);
+            headline.Children.Add(keycaps);
+            action = Ui.Text("", 22, Ui.Brush("#FFFDF7"), true);
+            headline.Children.Add(action);
+            Ui.Add(instruction, headline);
+            detail = Ui.Text("", 14, Ui.Brush("#BCC2CB"));
+            detail.Margin = new Thickness(0, 2, 0, 0);
+            Ui.Add(instruction, detail);
 
-            var instruction = new DockPanel { Margin = new Thickness(0, 0, 0, 2) };
-            keys = Ui.Text("", 19, Ui.Brush("#112C24"), true);
-            keys.FontFamily = Ui.Mono.FontFamily;
-            keycap = Ui.Panel(keys, new Thickness(10, 4, 10, 4), Ui.Brush("#A8E6D0"));
-            keycap.CornerRadius = new CornerRadius(5);
-            keycap.BorderBrush = Ui.Brush("#C8F3E4");
-            keycap.VerticalAlignment = VerticalAlignment.Top;
-            keycap.Margin = new Thickness(12, 0, 0, 0);
-            DockPanel.SetDock(keycap, Dock.Right);
-            instruction.Children.Add(keycap);
-            var words = new StackPanel();
-            action = Ui.Text("", 21, Ui.Ink, true);
-            Ui.Add(words, action);
-            detail = Ui.Text("", 14, Ui.Muted);
-            Ui.Add(words, detail);
-            instruction.Children.Add(words);
-            Ui.Add(content, instruction);
-
-            literal = Ui.Text("", 16, Ui.Brush("#C0EFE2"));
-            literal.FontFamily = Ui.Mono.FontFamily;
-            Ui.Name(literal, "Текст для ввода");
             var entry = new DockPanel();
-            var enter = Ui.Text("Введите", 13, Ui.Brush("#90A9AF"));
-            enter.Margin = new Thickness(0, 2, 12, 0);
-            DockPanel.SetDock(enter, Dock.Left);
-            entry.Children.Add(enter);
+            entryLabel = Ui.Text("", 12, Ui.Brush("#9FB9A9"), true);
+            entryLabel.Margin = new Thickness(0, 2, 10, 0);
+            DockPanel.SetDock(entryLabel, Dock.Left);
+            entry.Children.Add(entryLabel);
+            literal = Ui.Text("", 16, Ui.Brush("#D5F0DF"));
+            literal.FontFamily = Ui.Mono.FontFamily;
             entry.Children.Add(literal);
-            example = Ui.Panel(entry, new Thickness(9, 4, 9, 4), Ui.Brush("#09141D"));
-            example.CornerRadius = new CornerRadius(5);
-            example.BorderBrush = Ui.Brush("#374D58");
-            example.Margin = new Thickness(0, 3, 0, 3);
-            Ui.Add(content, example);
+            example = new Border { Child = entry, CornerRadius = new CornerRadius(4), Padding = new Thickness(9, 4, 9, 4),
+                Background = Ui.Brush("#171A1E"), BorderBrush = Ui.Brush("#434E49"), BorderThickness = new Thickness(2, 0, 0, 0),
+                Margin = new Thickness(0, 5, 0, 0) };
+            Ui.Add(instruction, example);
 
-            var tools = new DockPanel { LastChildFill = true };
-            device = Ui.Text("", 12, Ui.Brush("#A9CDE0"));
-            device.MaxWidth = 240;
+            var fileCard = new StackPanel();
+            var transfer = new Grid();
+            transfer.ColumnDefinitions.Add(new ColumnDefinition());
+            transfer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            transfer.ColumnDefinitions.Add(new ColumnDefinition());
+            from = PathBox(transfer, 0, "Источник", "#F0CF9C");
+            var arrow = Ui.Text("→", 20, Ui.Brush("#979BA5"));
+            arrow.Margin = new Thickness(10, 0, 10, 0);
+            arrow.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(arrow, 1);
+            transfer.Children.Add(arrow);
+            to = PathBox(transfer, 2, "Назначение", "#D4C2EA");
+            Ui.Add(fileCard, transfer);
+            outcome = Ui.Text("", 14, Ui.Brush("#E6E5E0"));
+            outcome.Margin = new Thickness(0, 6, 0, 0);
+            Ui.Add(fileCard, outcome);
+            flow = new Border { Child = fileCard, Background = Ui.Brush("#2B2F37"), CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(12, 7, 12, 8), VerticalAlignment = VerticalAlignment.Top };
+            body.Children.Add(flow);
+            Ui.Add(content, body);
+
+            notice = Ui.Text("", 13, Ui.Brush("#F4CA8E"), true);
+            notice.Margin = new Thickness(0, 4, 0, 0);
+            Ui.Add(content, notice);
+            var footer = new DockPanel { Margin = new Thickness(0, 7, 0, 0) };
+            device = Ui.Text("", 11, Ui.Brush("#ACB2BC"));
+            device.MaxWidth = 192;
             device.VerticalAlignment = VerticalAlignment.Center;
-            device.Margin = new Thickness(12, 2, 0, 2);
+            device.Margin = new Thickness(7, 0, 0, 0);
             DockPanel.SetDock(device, Dock.Right);
-            tools.Children.Add(device);
+            footer.Children.Add(device);
+            var modifiers = Ui.Text("Ctrl + Alt", 12, Ui.Brush("#A7B0BB"), true);
+            modifiers.VerticalAlignment = VerticalAlignment.Center;
+            var modifiersBox = new Border { Child = modifiers, BorderThickness = new Thickness(0, 0, 1, 0),
+                BorderBrush = Ui.Brush("#48505A"), Padding = new Thickness(0, 0, 9, 0),
+                Margin = new Thickness(0, 3, 8, 3), VerticalAlignment = VerticalAlignment.Top };
+            DockPanel.SetDock(modifiersBox, Dock.Left);
+            footer.Children.Add(modifiersBox);
             controls = new WrapPanel();
-            hintButton = Control("Скрыть клавиши", "Ctrl+Alt+F8", hints);
-            copyButton = Control("Копировать текст", "Ctrl+Alt+C", copy);
-            skipButton = Control("Пропустить", "Ctrl+Alt+F7", skip ?? delegate { });
+            hintButton = Control("Подсказка", "Ctrl+Alt+F8", hints);
+            copyButton = Control("Скопировать текст", "Ctrl+Alt+C", copy);
+            Control("К другой задаче", "Ctrl+Alt+F7", skip ?? delegate { });
             Control("Новый проект", "Ctrl+Alt+F9", recover);
             Control("Завершить", "Ctrl+Alt+F12", stop);
-            tools.Children.Add(controls);
-            Ui.Add(content, tools);
-            notice = Ui.Text("", 13, Ui.Brush("#FFD395"));
-            Ui.Add(content, notice);
-            Child = content;
+            footer.Children.Add(controls);
+            Ui.Add(content, footer);
         }
 
-        private Button Control(string title, string chord, Action action)
+        private static TextBlock PathBox(Grid parent, int column, string label, string color)
         {
-            var button = Ui.QuietButton(title, action);
+            var box = new StackPanel();
+            box.Children.Add(Ui.Text(label, 12, Ui.Brush(color), true));
+            var path = Ui.Text("", 15, Ui.Brush("#F4F0E9"));
+            path.FontFamily = Ui.Mono.FontFamily;
+            box.Children.Add(path);
+            Grid.SetColumn(box, column);
+            parent.Children.Add(box);
+            return path;
+        }
+
+        private Button Control(string label, string shortcut, Action click)
+        {
+            var button = Ui.QuietButton(label, click);
             button.FontSize = 12;
-            button.MinHeight = 23;
-            button.Padding = new Thickness(3, 2, 3, 2);
-            button.Margin = new Thickness(0, 1, 13, 0);
-            button.HorizontalContentAlignment = HorizontalAlignment.Left;
-            button.ToolTip = title + " · " + chord;
-            if (title == "Копировать текст" || title == "Завершить") button.Content = title + " · " + chord;
-            Ui.Name(button, title + " · " + chord);
+            button.Foreground = Ui.Brush("#CED1D7");
+            button.MinHeight = 21;
+            button.Padding = new Thickness(2, 1, 2, 1);
+            button.Margin = new Thickness(0, 0, 14, 0);
+            Label(button, label, shortcut);
             Ui.Add(controls, button);
             return button;
         }
 
-        public void Set(int stage, int length, string task, string next, string shortcut, string text, string hint,
-            string touch, bool visible, bool canCopy, string copyText = null, int round = 1, bool canSkip = false,
-            string route = "Рабочий день", bool commandExample = false)
+        private static void Label(Button button, string title, string chord)
         {
-            Change(stepCount, stage + " / " + length);
-            Change(goal, route + "  /  Проект " + round + "  ·  " + task);
-            if (filled.Width.Value != stage - 1 || remaining.Width.Value != length - stage + 1)
-            {
-                filled.Width = new GridLength(Math.Max(0, stage - 1), GridUnitType.Star);
-                remaining.Width = new GridLength(Math.Max(0, length - stage + 1), GridUnitType.Star);
-            }
-            Change(action, next);
-            Change(keys, shortcut);
-            keycap.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            string full = title + " · " + chord;
+            if (Equals(button.ToolTip, full)) return;
+            var row = new StackPanel { Orientation = Orientation.Horizontal };
+            var key = Ui.Text(chord.Substring(chord.LastIndexOf('+') + 1), 12, Ui.Brush("#DEE3DE"), true);
+            key.FontFamily = Ui.Mono.FontFamily;
+            row.Children.Add(new Border { Child = key, Background = Ui.Brush("#383E45"), CornerRadius = new CornerRadius(3),
+                Padding = new Thickness(3, 0, 3, 0), Margin = new Thickness(0, 0, 5, 0) });
+            row.Children.Add(Ui.Text(title, 12, Ui.Brush("#C1C6CE")));
+            button.Content = row;
+            Ui.Name(button, full);
+            button.ToolTip = full;
+        }
 
-            if (text != previousDetail || copyText != previousExample)
+        private void SetChord(string shortcut)
+        {
+            if (previousChord == shortcut) return;
+            previousChord = shortcut;
+            keycaps.Children.Clear();
+            var parts = (shortcut ?? "").Split(new[] { '+' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < parts.Length; i++)
             {
-                previousDetail = text;
-                previousExample = copyText;
+                bool main = i == parts.Length - 1;
+                var key = Ui.Text(parts[i].Trim(), 16, Ui.Brush(main ? "#12251B" : "#F0EFE7"), true);
+                key.FontFamily = Ui.Mono.FontFamily;
+                key.HorizontalAlignment = HorizontalAlignment.Center;
+                var cap = new Border { Child = key, Background = Ui.Brush(main ? "#AADFC2" : "#444B51"),
+                    BorderBrush = Ui.Brush(main ? "#78A78B" : "#30353D"), BorderThickness = new Thickness(0, 0, 0, 2),
+                    CornerRadius = new CornerRadius(5), MinWidth = 31, Padding = new Thickness(8, 2, 8, 2),
+                    Margin = new Thickness(i == 0 ? 0 : 4, 0, 0, 0) };
+                keycaps.Children.Add(cap);
+            }
+        }
+
+        public void Set(int stage, int length, string task, string next, string shortcut, string text, string hint,
+            string touch, bool visible, bool canCopy, string copyText = null,
+            string route = "Рабочий день", bool commandExample = false, string source = null, string dest = null, string result = null)
+        {
+            Change(routeText, route);
+            Change(goal, task);
+            Change(stepCount, "Шаг " + stage + " из " + length);
+            if (lastStage != stage || lastLength != length)
+            {
+                progressFill.Width = 60.0 * (stage - 1) / Math.Max(1, length);
+                lastStage = stage;
+                lastLength = length;
+            }
+
+            Change(action, next);
+            SetChord(shortcut);
+            keycaps.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            if (previousText != text || previousSample != copyText)
+            {
+                previousText = text;
+                previousSample = copyText;
                 string caption = (text ?? "").Replace("\r\n", "\n");
                 string sample = (copyText ?? "").Replace("\r\n", "\n");
                 if (sample.Length > 0 && caption.EndsWith("\n" + sample, StringComparison.Ordinal))
@@ -394,29 +485,45 @@ namespace TouchTypingStudio
                 detail.Visibility = caption.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
                 Change(literal, sample);
             }
-            // Payloads such as paths must stay available in recall mode. Console learners
-            // can recall the command from the mission and reveal it with the same hotkey.
-            bool showExample = !string.IsNullOrEmpty(copyText) && (visible || !commandExample);
-            example.Visibility = showExample ? Visibility.Visible : Visibility.Collapsed;
-            Change(notice, hint);
-            notice.Visibility = string.IsNullOrEmpty(hint) ? Visibility.Collapsed : Visibility.Visible;
-            notice.Foreground = (hint ?? "").StartsWith("Шаг зачтён", StringComparison.Ordinal)
-                ? Ui.Brush("#A8E6D0") : Ui.Brush("#FFD395");
+            Change(entryLabel, commandExample ? "В CMD" : "Введите");
+            example.Visibility = !string.IsNullOrEmpty(copyText) && (visible || !commandExample) ? Visibility.Visible : Visibility.Collapsed;
+            Change(from, source);
+            Change(to, dest);
+            Change(outcome, result);
+            outcome.Visibility = string.IsNullOrEmpty(result) ? Visibility.Collapsed : Visibility.Visible;
+            bool showFlow = !string.IsNullOrEmpty(source) && !string.IsNullOrEmpty(dest);
+            if (hasFlow != showFlow || !arranged) ArrangeSections(showFlow, stacked);
+
+            // Progress and the next action already signal a successful or newly started step.
+            bool showNotice = !string.IsNullOrWhiteSpace(hint) && hint != "Шаг зачтён." &&
+                hint != "Начните с указанного сочетания." && hint != "Введите команду в учебной командной строке и нажмите Enter.";
+            Change(notice, showNotice ? hint : "");
+            notice.Visibility = showNotice ? Visibility.Visible : Visibility.Collapsed;
             Change(device, touch);
-            string toggleLabel = (visible ? "Скрыть" : "Показать") + " подсказку · Ctrl+Alt+F8";
-            if (!Equals(hintButton.Content, toggleLabel))
-            {
-                hintButton.Content = toggleLabel;
-                Ui.Name(hintButton, toggleLabel);
-                hintButton.ToolTip = toggleLabel;
-            }
-            copyButton.Visibility = canCopy ? Visibility.Visible : Visibility.Collapsed;
-            skipButton.Visibility = canSkip ? Visibility.Visible : Visibility.Collapsed;
+            Label(hintButton, visible ? "Скрыть подсказку" : "Вернуть подсказку", "Ctrl+Alt+F8");
+            Label(copyButton, commandExample ? "Скопировать команду" : "Скопировать текст", "Ctrl+Alt+C");
+            copyButton.Visibility = canCopy && (visible || !commandExample) ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void ArrangeSections(bool showFlow, bool narrow)
+        {
+            hasFlow = showFlow;
+            stacked = narrow;
+            arranged = true;
+            flow.Visibility = hasFlow ? Visibility.Visible : Visibility.Collapsed;
+            bool beside = hasFlow && !stacked;
+            body.ColumnDefinitions[0].Width = new GridLength(beside ? 6 : 1, GridUnitType.Star);
+            body.ColumnDefinitions[1].Width = beside ? new GridLength(4, GridUnitType.Star) : new GridLength(0);
+            Grid.SetRow(flow, beside ? 0 : 1);
+            Grid.SetColumn(flow, beside ? 1 : 0);
+            flow.Margin = beside ? new Thickness(18, 0, 0, 0) : new Thickness(0, 5, 0, 0);
         }
 
         public int RequiredHeight(double width)
         {
-            double available = Math.Max(1, width - Padding.Left - Padding.Right - BorderThickness.Left - BorderThickness.Right);
+            double available = Math.Min(content.MaxWidth, Math.Max(1, width - Padding.Left - Padding.Right - BorderThickness.Left - BorderThickness.Right));
+            bool narrow = available < 710;
+            if (narrow != stacked) ArrangeSections(hasFlow, narrow);
             content.Measure(new Size(available, double.PositiveInfinity));
             return (int)Math.Ceiling(content.DesiredSize.Height + Padding.Top + Padding.Bottom + BorderThickness.Top + BorderThickness.Bottom);
         }

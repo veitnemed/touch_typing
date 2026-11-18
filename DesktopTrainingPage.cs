@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
+using System.Windows.Media;
 
 namespace TouchTypingStudio
 {
@@ -13,14 +13,14 @@ namespace TouchTypingStudio
 
         public DesktopTrainingPage(StudioWindow owner, StudioProfile profile, Action<DesktopTrack> start,
             int? completed = null, int rejected = 0, TimeSpan elapsed = default(TimeSpan), bool restoreFailed = false,
-            DesktopTrack track = DesktopTrack.Console, string profileRoot = null)
+            DesktopTrack track = DesktopTrack.Workday, string profileRoot = null)
         {
-            Background = FlightUi.Backdrop(profile);
+            Background = new LinearGradientBrush(Color.FromRgb(29, 32, 39), Color.FromRgb(41, 46, 56), 24);
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
             Focusable = false;
-            var sheet = FlightUi.Sheet();
-            Ui.Add(sheet, Ui.Text("Windows без мыши", 34, Ui.Ink, true), 6);
-            Ui.Add(sheet, Ui.Text("Выберите маршрут. Откроется ваш рабочий стол, а внизу появится первое задание.",
+            var sheet = new StackPanel { MaxWidth = 912, Margin = new Thickness(32, 25, 32, 23) };
+            Ui.Add(sheet, Ui.Text("Windows без мыши", 38, Ui.Ink, true), 5);
+            Ui.Add(sheet, Ui.Text("Выполняйте поручения в своих рабочих окнах. Задание будет видно внизу экрана.",
                 16, Ui.Muted), 22);
 
             if (completed.HasValue)
@@ -43,23 +43,23 @@ namespace TouchTypingStudio
                 if (record != null)
                     Ui.Add(session, Ui.Text("Лучшая скорость " + record.Speed.ToString("0.0") + " действий/мин  ·  " +
                         "Лучшая точность " + record.Accuracy.ToString("0.0") + "%", 14, Ui.Accent));
-                Ui.Add(sheet, Ui.Panel(session, new Thickness(16), Ui.Brush("#19293C")), 15);
+                Ui.Add(sheet, Ui.Panel(session, new Thickness(16), Ui.Brush("#30363F")), 15);
             }
 
-            var routes = new UniformGrid { Columns = 2 };
-            var console = Route(routes, "Командная строка",
-                "Отберите файлы, найдите сбой в журналах или соберите отчёт. В курсе 6 типов поручений и 30 рабочих тем.",
-                "CMD  /  Проводник", "#A8E6D0", delegate { start(DesktopTrack.Console); }, ConsoleProgress(profileRoot));
+            var routes = new StackPanel();
             var workday = Route(routes, "Рабочий день",
-                "Создайте проект, сохраните заметку и внесите правки. Первый шаг меняется от проекта к проекту, а созданные файлы пригодятся дальше.",
-                "Windows  /  Chrome  /  VS Code  /  CMD", "#A7D6F6", delegate { start(DesktopTrack.Workday); });
-            Ui.Add(sheet, routes, 10);
-            Ui.Add(sheet, Ui.Text("Tab — выбрать маршрут    Enter — начать    Ctrl+Alt+F12 — завершить", 14, Ui.Muted), 16);
+                "Передайте файл коллеге, вернитесь к заметке, сравните две вкладки и сохраните правку в редакторе.",
+                true, delegate { start(DesktopTrack.Workday); });
+            var console = Route(routes, "Командная строка",
+                "Когда файлов много, одна команда может выбрать нужные строки и собрать общий отчёт.",
+                false, delegate { start(DesktopTrack.Console); }, ConsoleProgress(profileRoot));
+            Ui.Add(sheet, routes, 9);
+            Ui.Add(sheet, Ui.Text("Tab — выбор     Enter — начать     Ctrl+Alt+F7 — другое задание", 14, Ui.Muted), 18);
 
             var controls = new StackPanel { Margin = new Thickness(8, 10, 0, 6) };
             AddControl(controls, "Ctrl+Alt+F8", "Скрыть или показать сочетание клавиш и образец команды");
             AddControl(controls, "Ctrl+Alt+C", "Скопировать точный текст шага");
-            AddControl(controls, "Ctrl+Alt+F7", "Пропустить необязательное приложение");
+            AddControl(controls, "Ctrl+Alt+F7", "Перейти к другому заданию, сохранив выполненные действия");
             AddControl(controls, "Ctrl+Alt+F9", "Перейти к новому проекту и сохранить учебные файлы");
             AddControl(controls, "Ctrl+Alt+F10", "Выключить или включить тачпад");
             AddControl(controls, "Ctrl+Alt+F12", "Завершить и посмотреть результат");
@@ -104,33 +104,45 @@ namespace TouchTypingStudio
             notice.BringIntoView();
         }
 
-        private static Button Route(Panel routes, string name, string example, string apps, string accent, Action go,
+        private static Button Route(Panel routes, string name, string example, bool workday, Action go,
             string progress = null)
         {
             var card = Ui.Button(name, go);
             card.HorizontalContentAlignment = HorizontalAlignment.Stretch;
             card.VerticalContentAlignment = VerticalAlignment.Stretch;
-            card.Background = Ui.Brush("#19293C");
-            card.BorderBrush = Ui.Brush("#394F63");
-            card.Padding = new Thickness(18, 15, 18, 16);
+            card.Background = Ui.Brush(workday ? "#C0DBCC" : "#30353E");
+            card.BorderBrush = Ui.Brush(workday ? "#8FAE9D" : "#494F58");
+            card.Padding = new Thickness(21, workday ? 22 : 16, 22, workday ? 22 : 16);
+            card.Margin = new Thickness(0, 0, 0, 10);
             var content = new DockPanel();
-            var tag = Ui.Text(apps, 12, Ui.Brush(accent), true);
-            tag.FontFamily = Ui.Mono.FontFamily;
-            tag.Margin = new Thickness(0, 0, 0, 8);
-            DockPanel.SetDock(tag, Dock.Top);
-            content.Children.Add(tag);
-            var title = Ui.Text(name, 22, Ui.Ink, true);
-            title.Margin = new Thickness(0, 0, 0, 7);
-            DockPanel.SetDock(title, Dock.Top);
-            content.Children.Add(title);
+            var keys = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(16, 0, 0, 0) };
+            foreach (var key in (workday ? new[] { "Alt", "Tab" } : new[] { ">_" }))
+            {
+                var glyph = Ui.Text(key, workday ? 19 : 17, Ui.Brush(workday ? "#214236" : "#E8CED6"), true);
+                glyph.FontFamily = Ui.Mono.FontFamily;
+                glyph.TextAlignment = TextAlignment.Center;
+                var cap = Ui.Panel(glyph, new Thickness(10, 5, 10, 6), Ui.Brush(workday ? "#DBEBE1" : "#403B46"));
+                cap.CornerRadius = new CornerRadius(6);
+                cap.BorderBrush = Ui.Brush(workday ? "#799588" : "#635766");
+                cap.BorderThickness = new Thickness(1, 1, 1, 3);
+                cap.Margin = new Thickness(2, 0, 2, 0);
+                keys.Children.Add(cap);
+            }
+            DockPanel.SetDock(keys, Dock.Right);
+            content.Children.Add(keys);
+            var body = new StackPanel();
+            if (workday)
+                Ui.Add(body, Ui.Text("Проводник   /   Блокнот   /   Chrome   /   VS Code", 12, Ui.Brush("#385B4B"), true), 4);
+            Ui.Add(body, Ui.Text(name, workday ? 29 : 21, workday ? Ui.Brush("#182C23") : Ui.Ink, true), 4);
+            Ui.Add(body, Ui.Text(example, 15, workday ? Ui.Brush("#2D473B") : Ui.Muted));
             if (!string.IsNullOrEmpty(progress))
             {
-                var counter = Ui.Text(progress, 13, Ui.Brush(accent));
-                counter.Margin = new Thickness(0, 10, 0, 0);
-                DockPanel.SetDock(counter, Dock.Bottom);
-                content.Children.Add(counter);
+                var counter = Ui.Text(progress, 12, Ui.Brush("#D8BFCB"));
+                counter.Margin = new Thickness(0, 8, 0, 0);
+                body.Children.Add(counter);
             }
-            content.Children.Add(Ui.Text(example, 14, Ui.Muted));
+            content.Children.Add(body);
             card.Content = content;
             Ui.Name(card, name);
             Ui.Add(routes, card);

@@ -16,6 +16,7 @@ namespace TouchTypingStudio
             Directory.CreateDirectory(root);
             int commands = 0;
             int completions = 0;
+            int inspections = 0;
             var brief = new DesktopBriefing("qa", "Учебная смена", "wheel", "RETRY", "studio");
             try
             {
@@ -31,6 +32,8 @@ namespace TouchTypingStudio
                         throw new InvalidOperationException("Advanced console skills did not unlock.");
                     foreach (var step in advanced.Commands)
                     {
+                        if (new[] { step.SourceLabel, step.DestinationLabel, step.Outcome }.Any(string.IsNullOrWhiteSpace))
+                            throw new InvalidOperationException("Missing learner context: " + step.Action);
                         if (step.Done()) throw new InvalidOperationException("Premature completion: " + step.Command);
                         if (step.Command.Contains("handoff.zip"))
                         {
@@ -40,6 +43,18 @@ namespace TouchTypingStudio
                             File.Delete(path);
                         }
                         string command = step.Command;
+                        if (step.ReadCommand != null)
+                        {
+                            string[] visible = Execute(folder, step.ReadCommand).Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                            if (visible.Length < 2 || step.Done() || string.IsNullOrWhiteSpace(step.TaskHint))
+                                throw new InvalidOperationException("Inspection must display useful input and leave the outcome pending.");
+                            string incorrect;
+                            command = DecideFromOutput(recipe, visible, out incorrect);
+                            Execute(folder, incorrect);
+                            if (step.Done()) throw new InvalidOperationException("Wrong decision accepted: " + incorrect);
+                            commands += 2;
+                            inspections++;
+                        }
                         if (step.CompletionPrefix != null)
                         {
                             int argument = step.CompletionPrefix.LastIndexOf(' ') + 1;
@@ -52,6 +67,14 @@ namespace TouchTypingStudio
                         }
                         Execute(folder, command);
                         if (!step.Done()) throw new InvalidOperationException("Missing result: " + step.Command);
+                        if (command.StartsWith("copy /y *.", StringComparison.Ordinal))
+                        {
+                            string extra = Path.Combine(folder, "handoff", "scratch.txt");
+                            File.WriteAllText(extra, "not part of the handoff");
+                            if (step.Done()) throw new InvalidOperationException("Unrequested file included in a batch handoff.");
+                            File.Move(extra, Path.Combine(folder, "scratch.txt"));
+                            if (!step.Done()) throw new InvalidOperationException("Corrected batch handoff rejected.");
+                        }
                         commands++;
                     }
                     if (recipe == 0 && File.Exists(Path.Combine(Environment.SystemDirectory, "tar.exe")))
@@ -72,8 +95,11 @@ namespace TouchTypingStudio
                         throw new InvalidOperationException("Intermediate console skills did not unlock.");
                 }
                 if (completions != 2) throw new InvalidOperationException("Expected two filename completion prompts.");
+                if (inspections != 6) throw new InvalidOperationException("Each recipe needs an inspection and a choice.");
                 CheckCompletionSequence(root);
+                CheckInspectionSequence(root);
                 Console.WriteLine("PASS: " + commands + " commands executed in real cmd.exe across six console missions, including ZIP handoffs.");
+                Console.WriteLine("PASS: six read-only inspections, answers derived from actual console output, wrong file/rows rejected, correction accepted.");
                 Console.WriteLine("PASS: two unique CMD completions, scoped Tab/Enter order, mouse reset and required output.");
             }
             finally { Directory.Delete(root, true); }
@@ -122,7 +148,73 @@ namespace TouchTypingStudio
             throw new InvalidOperationException("Console deck never offered a Tab prompt.");
         }
 
-        private static void Execute(string folder, string command)
+        private static string DecideFromOutput(int recipe, string[] visible, out string wrong)
+        {
+            switch (recipe)
+            {
+                case 0:
+                    string journal = visible.Single(line => line.Contains(" timeout ")).Split(':')[0];
+                    string other = visible.Single(line => line.Contains(" backlog ")).Split(':')[0];
+                    wrong = @"copy /y " + other + @" handoff\incident.log";
+                    return @"copy /y " + journal + @" handoff\incident.log";
+                case 1:
+                    string open = visible.Single(line => !line.StartsWith("CLOSED ")).Split(' ')[0];
+                    wrong = "findstr /b CLOSED *.ticket > open.txt";
+                    return "findstr /b " + open + " *.ticket > open.txt";
+                case 2:
+                    string tableExtension = Path.GetExtension(visible.Single(name => name.StartsWith("cost-")));
+                    wrong = "dir /b *.txt > manifest.txt";
+                    return "dir /b *" + tableExtension + " > manifest.txt";
+                case 3:
+                    string configExtension = Path.GetExtension(visible.Single(name => name.StartsWith("release-")));
+                    wrong = @"dir /b handoff\release-* > handoff\manifest.txt";
+                    return @"dir /b handoff\*" + configExtension + @" > handoff\manifest.txt";
+                case 4:
+                    string outstanding = visible.Single(line => line.Contains(" verify ")).Split(' ')[0];
+                    wrong = "findstr /b DONE brief.txt > next.txt";
+                    return "findstr /b " + outstanding + " brief.txt > next.txt";
+                case 5:
+                    string highestPriority = visible.First().Split(' ')[0];
+                    wrong = "findstr /b P3 tasks.txt > today.txt";
+                    return "findstr /b " + highestPriority + " tasks.txt > today.txt";
+                default: throw new ArgumentOutOfRangeException("recipe");
+            }
+        }
+
+        private static void CheckInspectionSequence(string root)
+        {
+            const BindingFlags fields = BindingFlags.Instance | BindingFlags.NonPublic;
+            var target = new IntPtr(25);
+            using (var course = new DesktopCourse(root, DesktopTrack.Console))
+            {
+                var steps = (IList)typeof(DesktopCourse).GetField("steps", fields).GetValue(course);
+                for (int i = 0; i < steps.Count; i++)
+                {
+                    var step = steps[i];
+                    var type = step.GetType();
+                    string inspect = (string)type.GetField("ReadCommand").GetValue(step);
+                    if (inspect == null) continue;
+                    bool ready = false;
+                    typeof(DesktopCourse).GetField("index", fields).SetValue(course, i);
+                    type.GetField("Source").SetValue(step, new Func<IntPtr, bool>(w => w == target));
+                    type.GetField("Result").SetValue(step, new Func<IntPtr, bool>(w => w == target && ready));
+                    var enter = new DesktopStroke { Chord = "Enter", Window = target, Timestamp = DateTime.UtcNow };
+                    if (course.CopyText != inspect) throw new Exception("Inspection example must show the read-only command.");
+                    course.Key(enter);
+                    if (course.Poll(target) || course.Rejected != 0 || course.Completed != 0 || course.CopyText != null)
+                        throw new Exception("Looking at files changed the score or revealed the answer.");
+                    course.Key(enter);
+                    if (course.Poll(target)) throw new Exception("Unanswered inspection was credited.");
+                    ready = true;
+                    course.Key(enter);
+                    if (!course.Poll(target) || course.Completed != 1) throw new Exception("Completed decision was not credited.");
+                    return;
+                }
+            }
+            throw new Exception("Missing read-and-decide prompt in actual route.");
+        }
+
+        private static string Execute(string folder, string command)
         {
             using (var child = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), "/d /c " + command)
             {
@@ -137,6 +229,7 @@ namespace TouchTypingStudio
                 }
                 if (child.ExitCode != 0)
                     throw new InvalidOperationException(command + " exited " + child.ExitCode + ": " + child.StandardError.ReadToEnd());
+                return child.StandardOutput.ReadToEnd();
             }
         }
     }

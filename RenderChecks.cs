@@ -40,12 +40,14 @@ namespace TouchTypingStudio
                 strip.Set(2, 5, "Проверка сборки Python", "Сохраните строки о сбоях в отчёт", "Enter",
                     "findstr выбирает строки с указанным словом. Знак > записывает их в файл.",
                     "", "Тачпад включён · Ctrl+Alt+F10", true, true,
-                    "findstr FAILED build.log > report.txt", 1, false, "Командная строка", true);
-                double panelHeight = Math.Max(DesktopTrainingWindow.PanelHeight, strip.RequiredHeight(width));
-                strip.Measure(new Size(width, panelHeight));
-                strip.Arrange(new Rect(0, 0, width, panelHeight));
-                strip.UpdateLayout();
-                Save(strip, scale, Path.Combine(directory, "desktop-panel-" + suffix + ".png"));
+                    "findstr FAILED build.log > report.txt", "Командная строка", true,
+                    "build.log", "report.txt", "В отчёте останутся только строки со словом FAILED.");
+                SaveStrip(strip, 1920 / scale, scale, Path.Combine(directory, "desktop-panel-" + suffix + ".png"));
+                strip.Set(5, 7, "Разложите файлы проекта", "Вставьте копию заметки", "Ctrl+V",
+                    "Папка Copies уже открыта. Вставьте туда скопированный файл.", "", "Тачпад включён · Ctrl+Alt+F10",
+                    true, false, source: "review-release.txt", dest: @"Copies\review-release.txt",
+                    result: "У заметки появится копия с таким же содержимым.");
+                SaveStrip(strip, 1920 / scale, scale, Path.Combine(directory, "explorer-panel-" + suffix + ".png"));
                 window.OpenWorkbench(WorkbenchArea.Windows);
                 window.UpdateLayout();
                 Save((FrameworkElement)window.Content, scale, Path.Combine(directory, "workbench-" + suffix + ".png"));
@@ -151,6 +153,15 @@ namespace TouchTypingStudio
             return p;
         }
 
+        private static void SaveStrip(DesktopStrip strip, double width, double scale, string path)
+        {
+            double height = Math.Max(DesktopTrainingWindow.PanelHeight, strip.RequiredHeight(width));
+            strip.Measure(new Size(width, height));
+            strip.Arrange(new Rect(0, 0, width, height));
+            strip.UpdateLayout();
+            Save(strip, scale, path);
+        }
+
         private static void Save(FrameworkElement content, double scale, string path)
         {
             double width = content.ActualWidth, height = content.ActualHeight;
@@ -160,7 +171,9 @@ namespace TouchTypingStudio
             using (var surface = draw.RenderOpen())
             {
                 surface.DrawRectangle(Ui.Night, null, new Rect(0, 0, width, height));
-                surface.DrawRectangle(new VisualBrush(content), null, new Rect(0, 0, width, height));
+                var bounds = new Rect(0, 0, width, height);
+                var contentBrush = new VisualBrush(content) { ViewboxUnits = BrushMappingMode.Absolute, Viewbox = bounds };
+                surface.DrawRectangle(contentBrush, null, bounds);
             }
             bitmap.Render(draw);
             var encoder = new PngBitmapEncoder();

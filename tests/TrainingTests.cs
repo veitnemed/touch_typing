@@ -32,6 +32,8 @@ namespace TouchTypingStudio
             DailyAndRecords();
             Challenge();
             ConsoleMissionTests.Run();
+            DesktopSwitchTests.Run();
+            WorkdayNavigationTests.Run();
             DesktopItineraryTests.Run();
             Console.WriteLine("PASS: " + assertions + " checks across campaign, routes, input, storage, analytics, Python drills and 48 hours.");
         }
