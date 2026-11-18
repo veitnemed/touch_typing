@@ -87,9 +87,13 @@ namespace TouchTypingStudio
         {
             string name = Path.GetFileName(child);
             Add(goal, "Откройте папку " + name, "Enter",
-                commandSource: IsCurrentExplorer, result: hwnd => AtFolder(hwnd, child),
+                commandSource: IsCurrentExplorer,
+                // Explorer can open each folder in a new window. Keep observing the
+                // source until the foreground window actually displays the destination.
+                result: hwnd => Native.IsExplorer(hwnd) && SamePath(Native.ExplorerFolder(hwnd), child),
+                accepted: hwnd => explorer = hwnd,
                 detail: "В списке файлов наберите " + name + ", чтобы выделить папку, затем нажмите Enter.",
-                expected: "В том же Проводнике выделите " + name + " и откройте её.");
+                expected: "Откройте учебную папку " + name + " и оставьте её окно активным.");
         }
     }
 }

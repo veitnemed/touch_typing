@@ -37,12 +37,16 @@ namespace TouchTypingStudio
         private readonly bool allowAutomation;
         private readonly Native.Hook keyboardCallback, mouseCallback;
         private delegate void WinEvent(IntPtr hook, uint kind, IntPtr hwnd, int childObject, int child, uint thread, uint time);
-        private readonly WinEvent switchEndCallback;
+        private readonly WinEvent switchCallback;
         [DllImport("user32.dll")] private static extern IntPtr SetWinEventHook(uint first, uint last,
             IntPtr module, WinEvent callback, uint process, uint thread, uint flags);
         [DllImport("user32.dll")] private static extern bool UnhookWinEvent(IntPtr hook);
-        private IntPtr switchEndHook, systemSwitchOrigin;
-        private int systemSwitchClicks;
+        private const uint ForegroundEvent = 0x03, SwitchStart = 0x14, SwitchEnd = 0x15;
+        private IntPtr switchHook, foregroundHook, foregroundApp;
+        private readonly DesktopSwitchGesture systemGesture = new DesktopSwitchGesture();
+        private DispatcherTimer switchGrace;
+        private IntPtr releasedOrigin;
+        private int releasedClicks;
         private readonly HashSet<int> modifiersDown = new HashSet<int>();
         private readonly HashSet<int> targetsDown = new HashSet<int>();
         private readonly Queue<DesktopStroke> matches = new Queue<DesktopStroke>();
@@ -61,7 +65,7 @@ namespace TouchTypingStudio
             this.allowAutomation = allowAutomation;
             keyboardCallback = ObserveKey;
             mouseCallback = ObserveMouse;
-            switchEndCallback = OnSystemSwitchEnd;
+            switchCallback = OnSystemSwitch;
             Exception failure = null;
             // Shell and UI Automation calls on the WPF thread may take seconds.
             // Windows silently removes low-level hooks if their owner stops pumping.
@@ -123,17 +127,13 @@ namespace TouchTypingStudio
                 StopSystemSwitchObserver();
                 if (watchSwitch)
                 {
-                    IntPtr origin = Native.GetForegroundWindow();
-                    // Task Manager can run at a higher integrity level than the trainer.
-                    // Windows itself reports the Alt+Tab destination even when keystrokes
-                    // from that window are unavailable to a normal user process.
-                    if (Native.IsProcess(origin, "Taskmgr"))
-                    {
-                        systemSwitchOrigin = origin;
-                        systemSwitchClicks = MouseClicks;
-                        const uint switchEnd = 0x0015;
-                        switchEndHook = SetWinEventHook(switchEnd, switchEnd, IntPtr.Zero, switchEndCallback, 0, 0, 0);
-                    }
+                    foregroundApp = Native.GetForegroundWindow();
+                    ArmSystemSwitch(foregroundApp);
+                    foregroundHook = SetWinEventHook(ForegroundEvent, ForegroundEvent, IntPtr.Zero, switchCallback, 0, 0, 0);
+                    switchHook = SetWinEventHook(SwitchStart, SwitchEnd, IntPtr.Zero, switchCallback, 0, 0, 0);
+                    switchGrace = new DispatcherTimer(DispatcherPriority.Background, dispatcher)
+                        { Interval = TimeSpan.FromMilliseconds(150) };
+                    switchGrace.Tick += FlushReleasedSwitch;
                 }
                 targetsDown.Clear();
                 bareKey = 0;
@@ -279,7 +279,10 @@ namespace TouchTypingStudio
             {
                 if (!modifiersDown.Add(key)) return;
                 if (watchSwitch && modifier == ModifierKeys.Alt && altOrigin == IntPtr.Zero)
+                {
+                    ClearReleasedSwitch();
                     altOrigin = Native.GetForegroundWindow();
+                }
                 bareKey = 0;
                 // A modifier activated by itself is counted on release, once
                 // we know that it was not part of a different combination.
@@ -297,7 +300,12 @@ namespace TouchTypingStudio
             bareKey = 0;
             if (watchSwitch)
             {
-                if (key == 0x1B) switching.Cancel();
+                if (key == 0x1B)
+                {
+                    switching.Cancel();
+                    systemGesture.Cancel();
+                    ClearReleasedSwitch();
+                }
                 if (key == 0x09)
                 {
                     ModifierKeys pressed = ModifiersDown();
@@ -334,8 +342,11 @@ namespace TouchTypingStudio
                 altOrigin = IntPtr.Zero;
                 if (origin != IntPtr.Zero)
                 {
-                    systemSwitchOrigin = IntPtr.Zero;
-                    Record("Alt+Tab", origin);
+                    // SWITCHEND carries the selected HWND and can arrive just after Alt-up.
+                    // On shells which omit the event, fall back to the raw gesture.
+                    releasedOrigin = origin;
+                    releasedClicks = MouseClicks;
+                    switchGrace.Start();
                 }
             }
             if (key != bareKey) return;
@@ -349,20 +360,85 @@ namespace TouchTypingStudio
                 }
         }
 
-        private void OnSystemSwitchEnd(IntPtr hook, uint kind, IntPtr hwnd, int childObject, int child, uint thread, uint time)
+        private void OnSystemSwitch(IntPtr hook, uint kind, IntPtr hwnd, int childObject, int child, uint thread, uint time)
         {
-            if (hook != switchEndHook || systemSwitchOrigin == IntPtr.Zero) return;
-            IntPtr from = systemSwitchOrigin;
-            systemSwitchOrigin = IntPtr.Zero;
-            if (systemSwitchClicks != MouseClicks || hwnd == IntPtr.Zero || hwnd == from) return;
-            switching.Cancel();
-            Record("Alt+Tab", from, hwnd);
+            if (hook == foregroundHook && kind == ForegroundEvent)
+            {
+                if (hwnd != IntPtr.Zero && !IsSwitcher(hwnd) && hwnd != foregroundApp)
+                {
+                    foregroundApp = hwnd;
+                    // Some shells send SWITCHEND alone. Preserve the prior Task Manager
+                    // origin until the selected foreground's SWITCHEND has been delivered.
+                    if (IsTaskManager(hwnd)) systemGesture.Restart(hwnd, MouseClicks);
+                }
+                return;
+            }
+            if (hook != switchHook || !watchSwitch) return;
+            if (kind == SwitchStart)
+            {
+                // Task Manager may run elevated, so its raw keys can be unavailable.
+                // Re-evaluate the origin and mouse baseline for each selection attempt.
+                ArmSystemSwitch(foregroundApp);
+                return;
+            }
+            if (kind != SwitchEnd || hwnd == IntPtr.Zero) return;
+            IntPtr from = switching.Release(MouseClicks);
+            if (from == IntPtr.Zero && releasedClicks == MouseClicks) from = releasedOrigin;
+            IntPtr elevated = systemGesture.Release(MouseClicks);
+            if (from == IntPtr.Zero) from = elevated;
+            if (from != IntPtr.Zero)
+            {
+                ClearReleasedSwitch();
+                if (hwnd != from) Record("Alt+Tab", from, hwnd);
+            }
+            if (IsTaskManager(hwnd)) systemGesture.Restart(hwnd, MouseClicks);
+        }
+
+        private void ArmSystemSwitch(IntPtr origin)
+        {
+            systemGesture.Restart(IsTaskManager(origin) ? origin : IntPtr.Zero, MouseClicks);
+        }
+
+        private static bool IsTaskManager(IntPtr window)
+        {
+            if (Native.ClassName(window) == "TaskManagerWindow") return true;
+            try { return Native.IsProcess(window, "Taskmgr"); }
+            catch (Win32Exception) { return false; }
+        }
+
+        private void FlushReleasedSwitch(object sender, EventArgs args)
+        {
+            IntPtr from = releasedOrigin;
+            bool keyboardOnly = releasedClicks == MouseClicks;
+            ClearReleasedSwitch();
+            systemGesture.Cancel();
+            if (from == IntPtr.Zero || !keyboardOnly) return;
+            IntPtr to = Native.GetForegroundWindow();
+            if (to == from || IsSwitcher(to)) to = IntPtr.Zero;
+            Record("Alt+Tab", from, to);
+        }
+
+        private static bool IsSwitcher(IntPtr window)
+        {
+            string kind = Native.ClassName(window);
+            return kind == "MultitaskingViewFrame" || kind == "TaskSwitcherWnd" || kind == "XamlExplorerHostIslandWindow";
+        }
+
+        private void ClearReleasedSwitch()
+        {
+            releasedOrigin = IntPtr.Zero;
+            if (switchGrace != null) switchGrace.Stop();
         }
 
         private void StopSystemSwitchObserver()
         {
-            if (switchEndHook != IntPtr.Zero) UnhookWinEvent(switchEndHook);
-            switchEndHook = systemSwitchOrigin = IntPtr.Zero;
+            ClearReleasedSwitch();
+            if (switchGrace != null) switchGrace.Tick -= FlushReleasedSwitch;
+            switchGrace = null;
+            systemGesture.Cancel();
+            if (switchHook != IntPtr.Zero) UnhookWinEvent(switchHook);
+            if (foregroundHook != IntPtr.Zero) UnhookWinEvent(foregroundHook);
+            switchHook = foregroundHook = foregroundApp = IntPtr.Zero;
         }
 
         private void Record(string chord, IntPtr target, IntPtr destination = default(IntPtr))
@@ -416,7 +492,11 @@ namespace TouchTypingStudio
 
         public void Start(IntPtr window, int clicks)
         {
-            if (origin != IntPtr.Zero) return;
+            if (origin == IntPtr.Zero) Restart(window, clicks);
+        }
+
+        public void Restart(IntPtr window, int clicks)
+        {
             origin = window;
             clicksAtStart = clicks;
         }

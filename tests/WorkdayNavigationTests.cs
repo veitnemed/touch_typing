@@ -71,6 +71,23 @@ namespace TouchTypingStudio
                     if (!course.Poll(target) || course.Completed != 1) throw new Exception("First valid shortcut was dropped");
                     course.SkipMission();
                     if (course.Completed != 1) throw new Exception("Skipping changed the confirmed score");
+
+                    // When Explorer opens folders in separate windows, later copy/move
+                    // steps must use the verified destination window as their source.
+                    var explorer = type.GetField("explorer", Fields);
+                    explorer.SetValue(course, target);
+                    type.GetMethod("EnterExplorerChild", Fields).Invoke(course,
+                        new object[] { "Open child", Path.Combine(root, "Inbox") });
+                    object openFolder = steps[steps.Count - 1];
+                    var source = (Func<IntPtr, bool>)stepType.GetField("Source").GetValue(openFolder);
+                    var result = (Func<IntPtr, bool>)stepType.GetField("Result").GetValue(openFolder);
+                    var accepted = (Action<IntPtr>)stepType.GetField("Accepted").GetValue(openFolder);
+                    var destination = new IntPtr(456);
+                    if (source(IntPtr.Zero) || result(IntPtr.Zero) || accepted == null)
+                        throw new Exception("Explorer folder entry did not validate its source and bind its destination");
+                    accepted(destination);
+                    if ((IntPtr)explorer.GetValue(course) != destination)
+                        throw new Exception("Explorer continued observing the window left behind by folder navigation");
                 }
                 using (var console = new DesktopCourse(root, DesktopTrack.Console))
                 {

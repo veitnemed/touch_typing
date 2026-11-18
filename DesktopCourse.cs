@@ -130,10 +130,10 @@ namespace TouchTypingStudio
                 Notice = "Найдите ответ в выводе команды.";
                 return;
             }
-            commandAt = DateTime.UtcNow;
-            nextCheck = commandAt;
             switchOrigin = step.Shortcut == "Alt+Tab" ? input.Window : IntPtr.Zero;
             switchDestination = input.SwitchDestination;
+            commandAt = switchOrigin == IntPtr.Zero ? DateTime.UtcNow : input.Timestamp;
+            nextCheck = DateTime.MinValue;
             entered = true;
             Notice = step.Result == null ? "Сочетание принято в учебном окне." : "Сочетание принято. Проверяю результат.";
         }
@@ -156,6 +156,21 @@ namespace TouchTypingStudio
             nextCheck = now.AddMilliseconds(300);
             var step = Current;
             bool switching = step.Shortcut == "Alt+Tab";
+            if (switching)
+            {
+                // If the shell identified the selected window, wait for that exact window
+                // to activate. Without an identity only the immediate activation is evidence.
+                TimeSpan elapsed = now - commandAt;
+                bool selectionExpired = elapsed >= TimeSpan.FromSeconds(1.2) &&
+                    (switchDestination == IntPtr.Zero || !Check(step.Result, switchDestination));
+                if (selectionExpired || elapsed >= TimeSpan.FromSeconds(20))
+                {
+                    entered = false;
+                    Rejected++;
+                    Notice = step.Expected + " Повторите Alt+Tab. Удерживайте Alt, выберите нужное окно и отпустите Alt.";
+                    return false;
+                }
+            }
             bool changedWindow = switchOrigin != IntPtr.Zero && active != IntPtr.Zero && active != switchOrigin &&
                 (switchDestination == IntPtr.Zero || active == switchDestination);
             if ((!switching || changedWindow) && Check(step.Result, active))
@@ -173,13 +188,7 @@ namespace TouchTypingStudio
             }
             if (switching && active != IntPtr.Zero && now - commandAt >= TimeSpan.FromSeconds(1.2))
             {
-                Notice = (active == switchOrigin ? "Вы вернулись в исходное окно. " : "Открылось другое окно. ") +
-                    step.Expected + " Удерживайте Alt, перебирайте окна клавишей Tab и отпустите Alt на нужном.";
-                if (now - commandAt >= TimeSpan.FromSeconds(20))
-                {
-                    entered = false;
-                    Rejected++;
-                }
+                Notice = "Ожидаю переключение в выбранное окно. " + step.Expected;
             }
             else if (step.QuickRetry && now - commandAt >= TimeSpan.FromSeconds(2))
             {
