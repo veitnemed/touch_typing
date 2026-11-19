@@ -6,7 +6,7 @@
   "private": true,
   "engines": { "vscode": "^1.96.0" },
   "main": "./lesson.js",
-  "activationEvents": ["workspaceContains:review-*.txt", "workspaceContains:summary.py", "onCommand:touchTypingStudio.runLesson"],
+  "activationEvents": ["workspaceContains:review-*.txt", "workspaceContains:summary.py", "workspaceContains:*-source.txt", "onCommand:touchTypingStudio.runLesson"],
   "capabilities": {
     "untrustedWorkspaces": { "supported": true }
   },
