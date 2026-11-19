@@ -25,6 +25,14 @@ namespace TouchTypingStudio
                 }
             }
 
+            string terminal = DesktopCourse.TerminalJournal("audit-7");
+            string marked = DesktopCourse.TerminalTransfer(terminal, true);
+            if (terminal.Split('\n').Length != 70 || DesktopCourse.TerminalTransfer(terminal, false) != terminal ||
+                marked.Split('\n').Length != 3 || marked.Contains("record 04") ||
+                Regex.Matches(marked, @"\[SEND\]").Count != 3 ||
+                marked == DesktopCourse.TerminalTransfer(DesktopCourse.TerminalJournal("audit-8"), true))
+                throw new Exception("Terminal transfer variants must have distinct, round-specific targets.");
+
             string chrome = DesktopCourseWindows.FindChrome();
             if (chrome == null) { Console.WriteLine("SKIP: Chrome form rendering (Chrome not installed)."); return; }
             string root = Path.Combine(Path.GetTempPath(), "WorkdayChrome-" + Guid.NewGuid().ToString("N"));
@@ -55,6 +63,37 @@ namespace TouchTypingStudio
                 File.WriteAllText(path, card.Replace("</main>", probe + "</main>"), new UTF8Encoding(false));
                 CheckPage(chrome, root, path);
 
+                const string receiptTitle = "Local receipt";
+                const string journal = "audit-7  record 01\naudit-7  record 02";
+                string receipt = DesktopCourse.TerminalReceipt(receiptTitle, journal);
+                const string capturePaste = @"<script>
+                    const addListener=EventTarget.prototype.addEventListener;
+                    EventTarget.prototype.addEventListener=function(type,callback,...args){
+                        if(type==='paste' && this.id==='receipt') window.testPaste=callback;
+                        return addListener.call(this,type,callback,...args);
+                    };
+                    </script>";
+                const string pasteProbe = @"<output id=qa></output><script>
+                    function insert(text,isTrusted){
+                        window.testPaste({isTrusted,preventDefault(){},clipboardData:{getData(){return text;}}});
+                    }
+                    const box=document.querySelector('textarea');
+                    insert('audit-6  record 01',true);
+                    let wrong=document.title==='Local receipt' && box.value==='';
+                    insert('audit-7  record 01\r\naudit-7  record 02\r\n',false);
+                    let synthetic=document.title==='Local receipt' && box.value==='';
+                    insert('audit-7  record 01\r\naudit-7  record 02\r\n',true);
+                    let correct=document.title==='Local receipt / Pasted' && box.value.includes('record 02');
+                    box.value='changed';box.dispatchEvent(new Event('input'));
+                    let reset=document.title==='Local receipt';
+                    document.getElementById('qa').textContent=wrong && synthetic && correct && reset &&
+                        document.querySelector('form')===null?'PASS':'FAIL';
+                    </script>";
+                string receiptPath = Path.Combine(root, "receipt.html");
+                File.WriteAllText(receiptPath, receipt.Replace("<label", capturePaste + "<label").Replace("</main>", pasteProbe + "</main>"),
+                    new UTF8Encoding(false));
+                CheckPage(chrome, root, receiptPath);
+
                 string decks = Path.Combine(root, "практика со ссылками", "DesktopPractice", "decks");
                 Directory.CreateDirectory(decks);
                 File.WriteAllText(Path.Combine(decks, "browser.txt"), "0 1");
@@ -76,7 +115,13 @@ namespace TouchTypingStudio
                         </script>";
                     File.WriteAllText(catalog, File.ReadAllText(catalog).Replace("</main>", linkProbe + "</main>"), new UTF8Encoding(false));
                     CheckPage(chrome, root, catalog);
-                    if (!File.ReadAllText(guide).Contains("Рабочая инструкция")) throw new Exception("The selected document is missing");
+                    string results = File.ReadAllText(catalog);
+                    string instruction = File.ReadAllText(guide);
+                    if (Regex.Matches(results, @"<a ").Count != 3 || !results.Contains("board-1.archive.html") ||
+                        !results.Contains("board-1.contacts.html") || !instruction.Contains("Рабочая инструкция") ||
+                        !instruction.Contains("id=next href='board-1.checklist.html'") ||
+                        !File.ReadAllText(Path.Combine(Path.GetDirectoryName(guide), "board-1.checklist.html")).Contains(" / Checklist"))
+                        throw new Exception("Search requires real distractors, the exact guide and a distinct follow-on destination");
                 }
                 Console.WriteLine("PASS: Chrome journal number and time, corrections, focused catalog link, staged document and exact clipboard-address comparison (headless).");
             }

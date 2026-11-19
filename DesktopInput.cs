@@ -13,7 +13,9 @@ namespace TouchTypingStudio
         public string Chord;
         public IntPtr Window;
         public IntPtr SwitchDestination;
-        public uint ClipboardSequence;
+        public uint ClipboardSequence, ProcessId;
+        public string WindowTitle;
+        public bool MarkedWindow;
         public DateTime Timestamp;
         public int MouseClicks;
     }
@@ -53,8 +55,9 @@ namespace TouchTypingStudio
         private readonly Queue<DesktopStroke> matches = new Queue<DesktopStroke>();
         private readonly DesktopSwitchGesture switching = new DesktopSwitchGesture();
         private ExpectedChord[] expected = new ExpectedChord[0];
-        private IntPtr keyboardHook, mouseHook, bareWindow, altOrigin;
+        private IntPtr keyboardHook, mouseHook, bareWindow, altOrigin, titleWindow;
         private int bareKey;
+        private string windowMarker;
         private bool disposed, watchSwitch;
         private int mouseClicks;
 
@@ -109,6 +112,11 @@ namespace TouchTypingStudio
 
         public void Watch(params string[] chords)
         {
+            WatchWindow(IntPtr.Zero, null, chords);
+        }
+
+        public void WatchWindow(IntPtr observedWindow, string marker, params string[] chords)
+        {
             if (disposed) throw new ObjectDisposedException("DesktopInput");
             var watch = new List<ExpectedChord>();
             foreach (string chord in chords ?? new string[0])
@@ -121,6 +129,8 @@ namespace TouchTypingStudio
             }
             dispatcher.Invoke(new Action(delegate
             {
+                titleWindow = observedWindow;
+                windowMarker = marker;
                 expected = watch.ToArray();
                 watchSwitch = watch.Exists(c => c.Key == 0x09 && c.Modifiers == ModifierKeys.Alt);
                 switching.Cancel();
@@ -450,7 +460,11 @@ namespace TouchTypingStudio
                 matches.Enqueue(new DesktopStroke
                 {
                     Chord = chord, Window = target, SwitchDestination = destination,
-                    ClipboardSequence = chord == "Alt" || chord == "Ctrl+Shift+C" ? Native.GetClipboardSequenceNumber() : 0,
+                    ProcessId = chord == "Alt+F4" ? Native.WindowProcessId(target) : 0,
+                    WindowTitle = target != IntPtr.Zero && target == titleWindow ? Native.Title(target) : null,
+                    MarkedWindow = target != IntPtr.Zero && target == titleWindow && windowMarker != null &&
+                        Native.HasWindowMark(target, windowMarker),
+                    ClipboardSequence = chord == "Alt" || chord == "Ctrl+Shift+C" || chord == "Ctrl+C" || chord == "Ctrl+V" ? Native.GetClipboardSequenceNumber() : 0,
                     Timestamp = DateTime.UtcNow, MouseClicks = MouseClicks
                 });
             }

@@ -120,6 +120,50 @@ namespace TouchTypingStudio
             return name.ToString();
         }
 
+        [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+
+        internal static uint WindowProcessId(IntPtr window)
+        {
+            uint pid;
+            return GetWindowThreadProcessId(window, out pid) == 0 ? 0 : pid;
+        }
+
+        internal static bool WindowBelongsTo(IntPtr window, Process process)
+        {
+            if (window == IntPtr.Zero || process == null) return false;
+            uint pid;
+            if (GetWindowThreadProcessId(window, out pid) == 0) return false;
+            try { return pid == (uint)process.Id && !process.HasExited; }
+            catch (InvalidOperationException) { return false; }
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool SetProp(IntPtr hwnd, string name, IntPtr value);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetProp(IntPtr hwnd, string name);
+
+        internal static bool MarkWindow(IntPtr window, string marker)
+        {
+            return SetProp(window, marker, new IntPtr(1));
+        }
+
+        internal static bool HasWindowMark(IntPtr window, string marker)
+        {
+            return GetProp(window, marker) == new IntPtr(1);
+        }
+
+        internal static void CloseOwnedWindow(IntPtr window, Process process, string marker)
+        {
+            if (WindowBelongsTo(window, process) && HasWindowMark(window, marker))
+                PostMessage(window, 0x0010, IntPtr.Zero, IntPtr.Zero);
+        }
+
+        internal static bool SameWindowProcess(IntPtr first, IntPtr second)
+        {
+            if (first == IntPtr.Zero || second == IntPtr.Zero) return false;
+            uint firstPid, secondPid;
+            return GetWindowThreadProcessId(first, out firstPid) != 0 &&
+                GetWindowThreadProcessId(second, out secondPid) != 0 && firstPid == secondPid;
+        }
+
         internal static bool IsProcess(IntPtr hwnd, string processName)
         {
             uint pid;

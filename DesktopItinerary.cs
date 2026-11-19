@@ -71,6 +71,8 @@ namespace TouchTypingStudio
         public int NextBrowserScenario() { return Draw("browser", 2); }
         public int NextExplorerScenario() { return Draw("explorer", 3); }
         public int NextQuickJob() { return Draw("quick-jobs", 6); }
+        public int NextTerminalTransfer() { return Draw("terminal-transfer", 2); }
+        public int NextEditorFileLayout() { return Draw("editor-files", 2); }
         public int NextEditorScenario() { return Draw("editor", 2); }
         public int NextWorkdayOrder(bool chromeAvailable) { return Draw(chromeAvailable ? "day-with-browser" : "day", chromeAvailable ? 4 : 3); }
         public int NextVariant(int maximum) { return random.Next(maximum); }

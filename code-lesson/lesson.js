@@ -19,12 +19,14 @@ function watchWorkdayEditor(context) {
     const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!root || !folder || folder.scheme !== "file" || path.relative(root, path.dirname(folder.fsPath)) !== "") return;
     const project = path.basename(folder.fsPath);
-    const match = /^(?:editor-)?([a-z]+)-\d{3,}-[0-9a-f]{8}$/.exec(project);
+    const match = /^(?:editor-|files-)?([a-z]+)-\d{3,}-[0-9a-f]{8}$/.exec(project);
     if (!match) return;
     const name = "review-" + match[1] + ".txt";
     const target = path.join(folder.fsPath, name);
     const script = path.join(folder.fsPath, "summary.py");
     const status = path.join(root, ".editor-" + project);
+    const fileLab = project.startsWith("files-");
+    const block = "count = 4\nprint(count)";
     const staging = status + "." + process.pid + ".tmp";
     let last;
     let retry;
@@ -32,7 +34,32 @@ function watchWorkdayEditor(context) {
         const editor = vscode.window.activeTextEditor;
         let snapshot = "-\nother";
         const active = editor?.document.uri.scheme === "file" ? editor.document.uri.fsPath : undefined;
-        if (active && path.relative(target, active) === "") {
+        if (fileLab && active && path.relative(folder.fsPath, path.dirname(active)) === "") {
+            const filename = path.basename(active);
+            const document = editor.document;
+            let state = "other";
+            if (/^[ac]-source\.txt$/.test(filename) && editor.selections.length === 1 && !document.isDirty) {
+                const text = document.getText();
+                const excerpt = /^# BEGIN TRANSFER(\r?\n)([^\r\n]+\r?\n[^\r\n]+)\r?\n# END TRANSFER\r?$/gm;
+                const match = excerpt.exec(text);
+                if (match && !excerpt.exec(text)) {
+                    const start = match.index + "# BEGIN TRANSFER".length + match[1].length;
+                    const end = start + match[2].length;
+                    if (editor.selection.start.isEqual(document.positionAt(start)) &&
+                        editor.selection.end.isEqual(document.positionAt(end)) &&
+                        document.getText(editor.selection).replace(/\r\n/g, "\n") === block) state = "block";
+                }
+            }
+            if (/^[ac]-target\.txt$/.test(filename)) {
+                const value = document.getText().replace(/\r\n/g, "\n");
+                const sourceDirty = vscode.workspace.textDocuments.some(candidate => candidate.isDirty &&
+                    candidate.uri.scheme === "file" && path.relative(folder.fsPath, path.dirname(candidate.uri.fsPath)) === "" &&
+                    /^[ac]-source\.txt$/.test(path.basename(candidate.uri.fsPath)));
+                if (value === "# Черновик\n" + block) state = "pasted";
+                if (!sourceDirty && value === "# Копия\n" + block) state = "revised";
+            }
+            if (/^[ac]-(source|target)\.txt$/.test(filename)) snapshot = filename + "\n" + state;
+        } else if (active && path.relative(target, active) === "") {
             const selection = editor.selection;
             let state = "other";
             if (editor.selections.length === 1 && editor.document.lineCount >= 2 &&
@@ -73,8 +100,35 @@ function watchWorkdayEditor(context) {
     report();
 }
 
+async function openWorkdayFiles(context) {
+    const root = process.env.TOUCH_TYPING_WORKDAY_ROOT;
+    const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!root || !folder || folder.scheme !== "file" || path.relative(root, path.dirname(folder.fsPath)) !== "") return;
+    const project = path.basename(folder.fsPath);
+    if (!/^files-[a-z]+-\d{3,}-[0-9a-f]{8}$/.test(project)) return;
+    const source = await fs.readFile(path.join(folder.fsPath, ".workday-source"), "utf8");
+    if (!/^[ac]-source\.txt$/.test(source)) return;
+    const document = await vscode.workspace.openTextDocument(path.join(folder.fsPath, source));
+    await vscode.window.showTextDocument(document);
+    const output = await fs.readFile(path.join(root, ".terminal-" + project), "utf8").catch(error => {
+        if (error.code !== "ENOENT") throw error;
+    });
+    if (!output) return;
+    const write = new vscode.EventEmitter();
+    const terminal = vscode.window.createTerminal({
+        name: "Учебный журнал",
+        pty: {
+            onDidWrite: write.event,
+            open() { write.fire(output.replace(/\n/g, "\r\n")); },
+            close() { write.dispose(); }
+        }
+    });
+    context.subscriptions.push(terminal, write);
+}
+
 function activate(context) {
     watchWorkdayEditor(context);
+    openWorkdayFiles(context).catch(error => console.error("Workday files:", error.message));
     const output = vscode.window.createOutputChannel("Python Lesson");
     context.subscriptions.push(output);
     context.subscriptions.push(vscode.commands.registerCommand("touchTypingStudio.runLesson", async () => {
