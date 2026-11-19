@@ -38,6 +38,21 @@ namespace TouchTypingStudio
                             if (round == 1) course.Recover();
                         }
                     }
+                    if (RuntimeTools.Current.Code != null)
+                    {
+                        int round = course.RoundNumber;
+                        while (course.RoundNumber == round && !course.Goal.Contains("дерево VS Code")) course.SkipMission();
+                        if (course.RoundNumber != round) throw new Exception("The new file lab is missing");
+                        string originalDirection = FileLabDirection(course);
+                        course.Recover();
+                        course.SkipMission();
+                        course.SkipMission();
+                        if (course.RoundNumber != round + 1 || !course.Goal.Contains("дерево VS Code") ||
+                            FileLabDirection(course) == originalDirection)
+                            throw new Exception("Recovery must repeat the file lab earlier with its opposite layout");
+                    }
+                    if (RuntimeTools.Current.Code != null && DesktopCourseWindows.FindChrome() != null)
+                        CheckTerminalRecovery(root);
                     var prepare = typeof(DesktopCourse).GetMethod("PrepareCodeNote", BindingFlags.Instance | BindingFlags.NonPublic);
                     string project = Path.Combine(course.Folder, "test-001-01234567");
                     string original = Path.Combine(project, "review-test.txt");
@@ -60,6 +75,46 @@ namespace TouchTypingStudio
                 Console.WriteLine("PASS: editor reachable after skips, independent note, existing and locked handoffs.");
             }
             finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
+
+        private static void CheckTerminalRecovery(string root)
+        {
+            const BindingFlags fields = BindingFlags.Instance | BindingFlags.NonPublic;
+            using (var course = new DesktopCourse(root))
+            {
+                var index = typeof(DesktopCourse).GetField("index", fields);
+                var steps = (IList)typeof(DesktopCourse).GetField("steps", fields).GetValue(course);
+                var marker = steps[0].GetType().GetField("TerminalHandoff");
+                var variant = typeof(DesktopCourse).GetField("markedTerminal", fields);
+                var priority = typeof(DesktopCourse).GetField("repeatFileLab", fields);
+                int terminal = 0;
+                while (terminal < steps.Count && !(bool)marker.GetValue(steps[terminal])) terminal++;
+                if (terminal == steps.Count) throw new Exception("No terminal transfer to recover");
+                index.SetValue(course, terminal);
+                course.SkipMission();
+                if ((bool)priority.GetValue(course) || course.Rejected != 0 || course.Completed != 0)
+                    throw new Exception("Skipping terminal transfer should not schedule recovery or affect progress");
+                index.SetValue(course, terminal);
+                bool marked = (bool)variant.GetValue(course);
+                course.Recover();
+                course.SkipMission();
+                course.SkipMission();
+                if (!course.Goal.Contains("дерево VS Code") || (bool)variant.GetValue(course) != marked ||
+                    course.Rejected != 0 || course.Completed != 0)
+                    throw new Exception("Explicit terminal recovery must repeat its own variant without scoring it");
+            }
+        }
+
+        private static string FileLabDirection(DesktopCourse course)
+        {
+            var steps = (IList)typeof(DesktopCourse).GetField("steps", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(course);
+            object focus = steps[course.StageNumber - 1], select = steps[course.StageNumber], open = steps[course.StageNumber + 1];
+            var shortcut = focus.GetType().GetField("Shortcut");
+            var needTree = open.GetType().GetField("ObserveBefore");
+            if ((string)shortcut.GetValue(focus) != "Ctrl+Shift+E" || (string)shortcut.GetValue(open) != "Enter" ||
+                needTree.GetValue(open) == null)
+                throw new Exception("Tree practice must require a focused target before Enter");
+            return (string)shortcut.GetValue(select);
         }
     }
 }

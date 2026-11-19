@@ -15,6 +15,32 @@ namespace TouchTypingStudio
                 "Russian Windows 10 Notepad uses an en dash and can hide .txt in the caption");
             Require(!(bool)caption.Invoke(null, new object[] { "status-devices-old – Блокнот", "status-devices" }),
                 "An unrelated longer filename matched");
+            Require(DesktopCourse.MatchesShortcut("Ctrl+1", "Ctrl+Tab", new[] { "Ctrl+1" }),
+                "An independent keyboard route should be accepted");
+            Require(!DesktopCourse.MatchesShortcut("Ctrl+1", "Ctrl+Tab", null),
+                "Guided practice should require its stated shortcut");
+            Require(!DesktopCourse.MatchesShortcut("Ctrl+2", "Ctrl+Tab", new[] { "Ctrl+1" }),
+                "An unrelated keyboard route should be rejected");
+            Require(DesktopCourseWindows.IsChromeCaption("Project / Notes - Google Chrome", "Project / Notes") &&
+                !DesktopCourseWindows.IsChromeCaption("Project / Notes copy - Google Chrome", "Project / Notes"),
+                "Only the exact source tab caption should initiate a switch");
+            Require(!DesktopCourseWindows.CanReadNewClipboard(2, 2, true, true) &&
+                !DesktopCourseWindows.CanReadNewClipboard(0, 3, true, true) &&
+                !DesktopCourseWindows.CanReadNewClipboard(2, 3, false, true) &&
+                !DesktopCourseWindows.CanReadNewClipboard(2, 3, true, false) &&
+                DesktopCourseWindows.CanReadNewClipboard(2, 3, true, true),
+                "Reading the clipboard requires a new sequence, foreground and the matching owner");
+            string marker = "TouchTypingStudio.Test." + Guid.NewGuid().ToString("N");
+            using (var owned = new System.Windows.Interop.HwndSource(new System.Windows.Interop.HwndSourceParameters("Owned practice test")))
+            using (var other = new System.Windows.Interop.HwndSource(new System.Windows.Interop.HwndSourceParameters("Unmarked test")))
+            using (var process = System.Diagnostics.Process.GetCurrentProcess())
+            {
+                Require(Native.WindowBelongsTo(owned.Handle, process) && Native.WindowBelongsTo(other.Handle, process),
+                    "Both fixtures should be from the same process");
+                Require(Native.MarkWindow(owned.Handle, marker) && Native.HasWindowMark(owned.Handle, marker) &&
+                    !Native.HasWindowMark(other.Handle, marker),
+                    "A same-process window does not inherit practice ownership");
+            }
             var first = new IntPtr(71);
             var target = new IntPtr(83);
             var switcher = new IntPtr(90);
