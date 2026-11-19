@@ -1,4 +1,5 @@
 const { execFile } = require("node:child_process");
+const { writeFileSync, renameSync } = require("node:fs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { promisify } = require("node:util");
@@ -11,7 +12,69 @@ const exercises = new Map([
     ["draft.py", "def scale(value):\n    return value * 4\n\nprint(scale(4))\n"]
 ]);
 
+// Only the isolated Workday window receives this root. Report an exercise state
+// for its named training files, without collecting editor text from other files.
+function watchWorkdayEditor(context) {
+    const root = process.env.TOUCH_TYPING_WORKDAY_ROOT;
+    const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!root || !folder || folder.scheme !== "file" || path.relative(root, path.dirname(folder.fsPath)) !== "") return;
+    const project = path.basename(folder.fsPath);
+    const match = /^(?:editor-)?([a-z]+)-\d{3,}-[0-9a-f]{8}$/.exec(project);
+    if (!match) return;
+    const name = "review-" + match[1] + ".txt";
+    const target = path.join(folder.fsPath, name);
+    const script = path.join(folder.fsPath, "summary.py");
+    const status = path.join(root, ".editor-" + project);
+    const staging = status + "." + process.pid + ".tmp";
+    let last;
+    let retry;
+    const report = () => {
+        const editor = vscode.window.activeTextEditor;
+        let snapshot = "-\nother";
+        const active = editor?.document.uri.scheme === "file" ? editor.document.uri.fsPath : undefined;
+        if (active && path.relative(target, active) === "") {
+            const selection = editor.selection;
+            let state = "other";
+            if (editor.selections.length === 1 && editor.document.lineCount >= 2 &&
+                selection.start.line === 1 && selection.start.character === 0 && selection.end.line === 1) {
+                const line = editor.document.lineAt(1).text;
+                if (line === "Status: ready")
+                    state = selection.isEmpty ? "start" : selection.end.character === line.length ? "selected" : "other";
+            }
+            snapshot = name + "\n" + state;
+        } else if (active && path.relative(script, active) === "") {
+            const ranges = editor.selections;
+            const word = (range, line, column) => range.start.line === line && range.end.line === line &&
+                range.start.character === column && range.end.character === column + 5 && editor.document.getText(range) === "count";
+            let state = "other";
+            if (ranges.length === 1 && ranges[0].isEmpty && ranges[0].start.line === 0 && ranges[0].start.character === 0)
+                state = "variable-start";
+            else if (ranges.length === 1 && word(ranges[0], 0, 0))
+                state = "variable-one";
+            else if (ranges.length === 2 && ranges.some(s => word(s, 0, 0)) && ranges.some(s => word(s, 1, 6)))
+                state = "variable-both";
+            snapshot = "summary.py\n" + state;
+        }
+        if (snapshot === last) return;
+        try {
+            writeFileSync(staging, snapshot);
+            renameSync(staging, status);
+            last = snapshot;
+        } catch (error) {
+            // A temporary Windows sharing violation must recover even if the user
+            // is waiting for the current step and makes no further selection.
+            if (!retry && ["EBUSY", "EPERM", "EACCES"].includes(error.code))
+                retry = setTimeout(() => { retry = undefined; report(); }, 350);
+        }
+    };
+    context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(report),
+        vscode.window.onDidChangeTextEditorSelection(report), vscode.workspace.onDidChangeTextDocument(report),
+        { dispose() { clearTimeout(retry); } });
+    report();
+}
+
 function activate(context) {
+    watchWorkdayEditor(context);
     const output = vscode.window.createOutputChannel("Python Lesson");
     context.subscriptions.push(output);
     context.subscriptions.push(vscode.commands.registerCommand("touchTypingStudio.runLesson", async () => {

@@ -27,6 +27,7 @@ namespace TouchTypingStudio
                 }
                 VerifyDeck(root, 6, d => d.NextConsoleScenario());
                 VerifyDeck(root, 3, d => d.NextExplorerScenario());
+                VerifyDeck(root, 6, d => d.NextQuickJob());
                 VerifyDeck(root, 4, d => d.NextWorkdayOrder(true));
                 VerifyDeck(root, 3, d => d.NextWorkdayOrder(false));
                 File.WriteAllText(Path.Combine(root, "DesktopPractice", "decks", "console.txt"), "4 2 2");

@@ -20,7 +20,7 @@ namespace TouchTypingStudio
             Focusable = false;
             var sheet = new StackPanel { MaxWidth = 912, Margin = new Thickness(32, 25, 32, 23) };
             Ui.Add(sheet, Ui.Text("Windows без мыши", 38, Ui.Ink, true), 5);
-            Ui.Add(sheet, Ui.Text("Выполняйте поручения в своих рабочих окнах. Задание будет видно внизу экрана.",
+            Ui.Add(sheet, Ui.Text("Выберите маршрут. Задание останется внизу экрана, пока вы работаете в Windows.",
                 16, Ui.Muted), 22);
 
             if (completed.HasValue)
@@ -115,22 +115,11 @@ namespace TouchTypingStudio
             card.Padding = new Thickness(21, workday ? 22 : 16, 22, workday ? 22 : 16);
             card.Margin = new Thickness(0, 0, 0, 10);
             var content = new DockPanel();
-            var keys = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(16, 0, 0, 0) };
-            foreach (var key in (workday ? new[] { "Alt", "Tab" } : new[] { ">_" }))
-            {
-                var glyph = Ui.Text(key, workday ? 19 : 17, Ui.Brush(workday ? "#214236" : "#E8CED6"), true);
-                glyph.FontFamily = Ui.Mono.FontFamily;
-                glyph.TextAlignment = TextAlignment.Center;
-                var cap = Ui.Panel(glyph, new Thickness(10, 5, 10, 6), Ui.Brush(workday ? "#DBEBE1" : "#403B46"));
-                cap.CornerRadius = new CornerRadius(6);
-                cap.BorderBrush = Ui.Brush(workday ? "#799588" : "#635766");
-                cap.BorderThickness = new Thickness(1, 1, 1, 3);
-                cap.Margin = new Thickness(2, 0, 2, 0);
-                keys.Children.Add(cap);
-            }
-            DockPanel.SetDock(keys, Dock.Right);
-            content.Children.Add(keys);
+            var begin = Ui.Text("Начать  →", 16, Ui.Brush(workday ? "#214236" : "#E1E5EC"), true);
+            begin.VerticalAlignment = VerticalAlignment.Center;
+            begin.Margin = new Thickness(18, 0, 0, 0);
+            DockPanel.SetDock(begin, Dock.Right);
+            content.Children.Add(begin);
             var body = new StackPanel();
             if (workday)
                 Ui.Add(body, Ui.Text("Проводник   /   Блокнот   /   Chrome   /   VS Code", 12, Ui.Brush("#385B4B"), true), 4);

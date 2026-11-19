@@ -48,6 +48,11 @@ namespace TouchTypingStudio
                     true, false, source: "review-release.txt", dest: @"Copies\review-release.txt",
                     result: "У заметки появится копия с таким же содержимым.");
                 SaveStrip(strip, 1920 / scale, scale, Path.Combine(directory, "explorer-panel-" + suffix + ".png"));
+                strip.Set(2, 3, "Найдите материалы проекта", "Откройте учебный журнал", "Enter",
+                    "Вставьте адрес в строку браузера.", "", "", true, true,
+                    @"C:\Users\Учебная учётная запись\AppData\Local\TouchTypingStudio\DesktopPractice\example-project\browser\journal.html",
+                    source: "Учебный журнал", dest: "Chrome", completed: 3);
+                SaveStrip(strip, 1920 / scale, scale, Path.Combine(directory, "workday-address-" + suffix + ".png"));
                 window.OpenWorkbench(WorkbenchArea.Windows);
                 window.UpdateLayout();
                 Save((FrameworkElement)window.Content, scale, Path.Combine(directory, "workbench-" + suffix + ".png"));

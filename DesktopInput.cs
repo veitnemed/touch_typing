@@ -13,6 +13,7 @@ namespace TouchTypingStudio
         public string Chord;
         public IntPtr Window;
         public IntPtr SwitchDestination;
+        public uint ClipboardSequence;
         public DateTime Timestamp;
         public int MouseClicks;
     }
@@ -449,6 +450,7 @@ namespace TouchTypingStudio
                 matches.Enqueue(new DesktopStroke
                 {
                     Chord = chord, Window = target, SwitchDestination = destination,
+                    ClipboardSequence = chord == "Alt" || chord == "Ctrl+Shift+C" ? Native.GetClipboardSequenceNumber() : 0,
                     Timestamp = DateTime.UtcNow, MouseClicks = MouseClicks
                 });
             }

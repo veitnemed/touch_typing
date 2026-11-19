@@ -68,7 +68,10 @@ namespace TouchTypingStudio
 
         public DesktopBriefing NextBriefing() { return Briefings[Draw("briefings", Briefings.Length)]; }
         public int NextConsoleScenario() { return Draw("console", 6); }
+        public int NextBrowserScenario() { return Draw("browser", 2); }
         public int NextExplorerScenario() { return Draw("explorer", 3); }
+        public int NextQuickJob() { return Draw("quick-jobs", 6); }
+        public int NextEditorScenario() { return Draw("editor", 2); }
         public int NextWorkdayOrder(bool chromeAvailable) { return Draw(chromeAvailable ? "day-with-browser" : "day", chromeAvailable ? 4 : 3); }
         public int NextVariant(int maximum) { return random.Next(maximum); }
 

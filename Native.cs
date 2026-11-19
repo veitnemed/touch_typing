@@ -14,6 +14,7 @@ namespace TouchTypingStudio
     internal static class Native
     {
         [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] internal static extern uint GetClipboardSequenceNumber();
         [DllImport("user32.dll")] private static extern IntPtr GetKeyboardLayout(uint thread);
         [DllImport("user32.dll")] private static extern int GetKeyboardLayoutList(int count, [Out] IntPtr[] layouts);
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);

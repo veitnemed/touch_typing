@@ -146,6 +146,12 @@ namespace TouchTypingStudio
             return GetWindow(active, owner) == editor || GetAncestor(active, rootOwner) == editor;
         }
 
+        public static bool InExplorerSurface(IntPtr active, IntPtr explorer)
+        {
+            return active != IntPtr.Zero && explorer != IntPtr.Zero &&
+                (active == explorer || GetAncestor(active, 3) == explorer);
+        }
+
         public static bool HasTextFocus()
         {
             try
@@ -178,28 +184,36 @@ namespace TouchTypingStudio
 
         // The Windows-wide UIA focus can lag behind Chrome's tab or search box.
         // Read focus from this training window's own accessibility tree.
-        public static bool ChromeEditFocused(IntPtr hwnd, string expected = null)
+        public static bool ChromeEditFocused(IntPtr hwnd, bool addressBar, string expected = null)
         {
             if (!Native.IsProcess(hwnd, "chrome")) return false;
             try
             {
-                var edit = FocusedWindowEdit(hwnd);
+                var window = AutomationElement.FromHandle(hwnd);
+                var edit = window.FindFirst(TreeScope.Descendants, new AndCondition(
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
+                    new PropertyCondition(AutomationElement.HasKeyboardFocusProperty, true)));
                 if (edit == null) return false;
+                // A page input, the omnibox and the Find widget are all UIA Edit controls.
+                // Chrome exposes Ctrl+L on its omnibox even in a translated interface.
+                bool location = string.Equals(edit.Current.AcceleratorKey, "Ctrl+L", StringComparison.OrdinalIgnoreCase);
+                for (var node = edit; node != null && !node.Equals(window); node = TreeWalker.RawViewWalker.GetParent(node))
+                {
+                    if (node.Current.ControlType == ControlType.Document) return false;
+                    string kind = node.Current.ClassName ?? "";
+                    if (kind.IndexOf("Omnibox", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        kind.IndexOf("LocationBar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        node.Current.ControlType == ControlType.ComboBox) location = true;
+                }
+                if (location != addressBar) return false;
                 if (expected == null) return true;
                 object pattern;
                 return edit.TryGetCurrentPattern(ValuePattern.Pattern, out pattern) &&
-                    string.Equals(((ValuePattern)pattern).Current.Value, expected, StringComparison.Ordinal);
+                    string.Equals(((ValuePattern)pattern).Current.Value, expected, StringComparison.OrdinalIgnoreCase);
             }
             catch (ElementNotAvailableException) { return false; }
             catch (InvalidOperationException) { return false; }
             catch (COMException) { return false; }
-        }
-
-        private static AutomationElement FocusedWindowEdit(IntPtr hwnd)
-        {
-            return AutomationElement.FromHandle(hwnd).FindFirst(TreeScope.Descendants, new AndCondition(
-                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
-                new PropertyCondition(AutomationElement.HasKeyboardFocusProperty, true)));
         }
 
         public static bool CodeQuickInputFocused(IntPtr hwnd)

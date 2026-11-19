@@ -33,9 +33,21 @@ namespace TouchTypingStudio
             Challenge();
             ConsoleMissionTests.Run();
             DesktopSwitchTests.Run();
+            WorkdayAddresses();
             WorkdayNavigationTests.Run();
+            WorkdayEditorTests.Run();
             DesktopItineraryTests.Run();
+            ChromeMissionTests.Run();
             Console.WriteLine("PASS: " + assertions + " checks across campaign, routes, input, storage, analytics, Python drills and 48 hours.");
+        }
+
+        private static void WorkdayAddresses()
+        {
+            const string path = @"C:\Users\Имя с пробелом\folder\отчёт #1.txt";
+            Check(DesktopStrip.ShortAddress(path) == "отчёт #1.txt", "Show filename for a long Windows path");
+            Check(DesktopStrip.ShortAddress(new Uri(path).AbsoluteUri) == "отчёт #1.txt", "Show filename for a pasted Chrome file URL");
+            Check(DesktopStrip.ShortAddress("Find text\r\nSave changes") == null, "Keep multiline practice text visible");
+            Check(DesktopStrip.ShortAddress("Status: reviewed") == null, "Keep plain instructions as text");
         }
 
         private static void PracticeRecordThreshold()
