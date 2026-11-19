@@ -53,6 +53,14 @@ namespace TouchTypingStudio
                     @"C:\Users\Учебная учётная запись\AppData\Local\TouchTypingStudio\DesktopPractice\example-project\browser\journal.html",
                     source: "Учебный журнал", dest: "Chrome", completed: 3);
                 SaveStrip(strip, 1920 / scale, scale, Path.Combine(directory, "workday-address-" + suffix + ".png"));
+                strip.Set(4, 8, "Перенос выделенного фрагмента в учебную копию",
+                    "Выделите только две строки между BEGIN TRANSFER и END TRANSFER", "Ctrl+Shift+Right",
+                    "Перейдите к отмеченному фрагменту в исходном файле.", "", "", true, false);
+                SaveStrip(strip, 640 / scale, scale, Path.Combine(directory, "workday-narrow-" + suffix + ".png"));
+                strip.Set(4, 8, "Перенос выделенного фрагмента в учебную копию",
+                    "Дождитесь учебного окна с контрольным списком передачи материалов", "", "",
+                    "Буфер заменён. Начните новый проект или повторно откройте окно.", "", false, false, canReopen: true);
+                SaveStrip(strip, 640 / scale, scale, Path.Combine(directory, "workday-recovery-" + suffix + ".png"));
                 window.OpenWorkbench(WorkbenchArea.Windows);
                 window.UpdateLayout();
                 Save((FrameworkElement)window.Content, scale, Path.Combine(directory, "workbench-" + suffix + ".png"));

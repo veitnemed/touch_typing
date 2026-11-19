@@ -77,6 +77,7 @@ namespace TouchTypingStudio
                 result: hwnd => AtFolder(hwnd, from) && DesktopCourseWindows.ClipboardContainsOnly(files),
                 detail: batch ? "Оба оригинала должны остаться во входящих." : "Если курсор в поиске, нажимайте Tab или F6 до списка файлов. Нажмите Home для выбора approved.txt, затем Ctrl+X.",
                 expected: "В " + Path.GetFileName(from) + " перейдите в список через Tab или F6, выделите документы и повторите сочетание.");
+            steps.Last().FreshCopy = true;
             OpenPracticeFolder(steps[first], from);
             Add(goal, "Перейдите к папкам отправки", "Alt+Up", commandSource: IsCurrentExplorer,
                 result: hwnd => Native.IsExplorer(hwnd) && SamePath(Native.ExplorerFolder(hwnd), desk),

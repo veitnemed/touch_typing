@@ -137,6 +137,12 @@ namespace TouchTypingStudio
                 Native.Title(hwnd).IndexOf(expected, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+        internal static bool IsChromeCaption(string caption, string expected)
+        {
+            return caption == expected || caption == expected + " - Google Chrome" ||
+                caption == expected + " – Google Chrome" || caption == expected + " - Chromium";
+        }
+
         public static bool EditorDialog(IntPtr active, IntPtr editor)
         {
             if (active == IntPtr.Zero || editor == IntPtr.Zero || active == editor || Native.ClassName(active) != "#32770")
@@ -216,6 +222,61 @@ namespace TouchTypingStudio
             catch (COMException) { return false; }
         }
 
+        public static bool CodeExplorerRowFocused(IntPtr hwnd, string file)
+        {
+            return CodeFocusMatches(hwnd, (focused, node) =>
+            {
+                if (node.Current.ControlType != ControlType.Tree) return false;
+                string identity = (node.Current.ClassName ?? "") + " " + (node.Current.AutomationId ?? "");
+                if (identity.IndexOf("explorer", StringComparison.OrdinalIgnoreCase) < 0 &&
+                    !string.Equals(node.Current.Name, "Files Explorer", StringComparison.Ordinal)) return false;
+                if (focused.Current.ControlType != ControlType.TreeItem) return false;
+                if (file == null) return true;
+                return string.Equals(focused.Current.Name, file, StringComparison.OrdinalIgnoreCase);
+            });
+        }
+
+        public static bool CodeEditorFocused(IntPtr hwnd)
+        {
+            return CodeFocusMatches(hwnd, (focused, node) =>
+                (node.Current.ClassName ?? "").Split(' ').Contains("monaco-editor"));
+        }
+
+        public static bool CodeAccessibleViewFocused(IntPtr hwnd)
+        {
+            return CodeFocusMatches(hwnd, (focused, node) =>
+                (node.Current.ClassName ?? "").Split(' ').Contains("accessible-view") ||
+                (node.Current.ControlType == ControlType.Edit &&
+                 (node.Current.Name ?? "").StartsWith("Accessible View", StringComparison.Ordinal)));
+        }
+
+        public static bool CodeTerminalFocused(IntPtr hwnd)
+        {
+            return CodeFocusMatches(hwnd, (focused, node) =>
+                (node.Current.ClassName ?? "").Split(' ').Any(name => name == "xterm" || name == "terminal-wrapper"));
+        }
+
+        private static bool CodeFocusMatches(IntPtr hwnd, Func<AutomationElement, AutomationElement, bool> matches)
+        {
+            if (Native.GetForegroundWindow() != hwnd || !Native.IsProcess(hwnd, "Code")) return false;
+            try
+            {
+                var window = AutomationElement.FromHandle(hwnd);
+                var focused = AutomationElement.FocusedElement;
+                for (var node = focused; node != null; node = TreeWalker.RawViewWalker.GetParent(node))
+                {
+                    if (!node.Equals(window)) continue;
+                    for (node = focused; node != null && !node.Equals(window); node = TreeWalker.RawViewWalker.GetParent(node))
+                        if (matches(focused, node)) return true;
+                    return false;
+                }
+                return false;
+            }
+            catch (ElementNotAvailableException) { return false; }
+            catch (InvalidOperationException) { return false; }
+            catch (COMException) { return false; }
+        }
+
         public static bool CodeQuickInputFocused(IntPtr hwnd)
         {
             if (!Native.IsProcess(hwnd, "Code")) return false;
@@ -248,6 +309,21 @@ namespace TouchTypingStudio
             catch (ElementNotAvailableException) { return false; }
             catch (InvalidOperationException) { return false; }
             catch (COMException) { return false; }
+        }
+
+        [DllImport("user32.dll")] private static extern IntPtr GetClipboardOwner();
+
+        internal static bool FreshClipboardFrom(IntPtr window, uint before)
+        {
+            uint after = Native.GetClipboardSequenceNumber();
+            return before != 0 && after != 0 && before != after &&
+                CanReadNewClipboard(before, after, Native.GetForegroundWindow() == window,
+                    Native.SameWindowProcess(window, GetClipboardOwner()));
+        }
+
+        internal static bool CanReadNewClipboard(uint before, uint after, bool foreground, bool sameOwner)
+        {
+            return before != 0 && after != 0 && before != after && foreground && sameOwner;
         }
 
         public static bool ClipboardContainsOnly(params string[] expected)

@@ -10,6 +10,8 @@ namespace TouchTypingStudio
     {
         public readonly UIElement InitialFocus;
         private readonly TextBlock notice;
+        private readonly ComboBox workdayLevel;
+        public WorkdayLevel StartLevel { get { return (WorkdayLevel)workdayLevel.SelectedIndex; } }
 
         public DesktopTrainingPage(StudioWindow owner, StudioProfile profile, Action<DesktopTrack> start,
             int? completed = null, int rejected = 0, TimeSpan elapsed = default(TimeSpan), bool restoreFailed = false,
@@ -47,6 +49,14 @@ namespace TouchTypingStudio
             }
 
             var routes = new StackPanel();
+            workdayLevel = new ComboBox { MinWidth = 240, HorizontalAlignment = HorizontalAlignment.Left };
+            workdayLevel.Items.Add("Вводный · короткое задание");
+            workdayLevel.Items.Add("Обычный · смешанный маршрут");
+            workdayLevel.Items.Add("Сложный · сразу к длинной задаче");
+            workdayLevel.SelectedIndex = (int)WorkdayLevel.Standard;
+            Ui.Name(workdayLevel, "Стартовый уровень Рабочего дня");
+            Ui.Add(routes, Ui.Text("Стартовый уровень Рабочего дня", 14, Ui.Muted), 3);
+            Ui.Add(routes, workdayLevel, 7);
             var workday = Route(routes, "Рабочий день",
                 "Передайте файл коллеге, вернитесь к заметке, сравните две вкладки и сохраните правку в редакторе.",
                 true, delegate { start(DesktopTrack.Workday); });

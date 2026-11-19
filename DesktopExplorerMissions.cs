@@ -68,6 +68,7 @@ namespace TouchTypingStudio
                 sourceLabel: batch ? inboxName + " · 2 документа" : Path.Combine(inboxName, Path.GetFileName(first)),
                 destLabel: "Буфер обмена", outcome: batch ? "Оба файла можно будет вставить одной командой." :
                     "После вставки в Archive отчёт переместится туда.");
+            steps.Last().FreshCopy = true;
             Add(task, "Вернитесь к папкам проекта", "Alt+Up",
                 commandSource: IsCurrentExplorer, result: hwnd => AtFolder(hwnd, project),
                 expected: "Проводник должен открыть родительскую папку.");
@@ -98,8 +99,8 @@ namespace TouchTypingStudio
             Add(goal, ribbon ? "Выберите файл и откройте ленту Проводника" : "Скопируйте путь выделенного файла",
                 ribbon ? "Alt" : "Ctrl+Shift+C",
                 commandSource: hwnd => AtFolder(hwnd, folder) && DesktopCourseWindows.SelectionContains(hwnd, file),
-                result: hwnd => HasFreshClipboardPath(clipboardBeforePath, file) && AtFolder(hwnd, folder) &&
-                    DesktopCourseWindows.SelectionContains(hwnd, file),
+                result: hwnd => AtFolder(hwnd, folder) && DesktopCourseWindows.SelectionContains(hwnd, file) &&
+                    DesktopCourseWindows.FreshClipboardFrom(hwnd, clipboardBeforePath) && HasFreshClipboardPath(clipboardBeforePath, file),
                 detail: ribbon ? "Выделите " + fileName + " стрелками. Нажмите и отпустите Alt. По буквам на ленте выберите «Главная» и «Копировать путь»." :
                     "В списке Copies выделите " + fileName + " стрелками, затем нажмите сочетание.",
                 expected: "В папке Copies выделите " + fileName + " и повторите копирование пути.",

@@ -340,7 +340,7 @@ namespace TouchTypingStudio
             bool launched = false;
             try
             {
-                created = new DesktopTrainingWindow(store.Root, new WindowInteropHelper(this).Handle, track, allowDesktopAutomation);
+                created = new DesktopTrainingWindow(store.Root, new WindowInteropHelper(this).Handle, track, allowDesktopAutomation, page.StartLevel);
                 liveDesktop = created;
                 created.Closed += delegate
                 {
