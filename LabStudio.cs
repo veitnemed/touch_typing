@@ -265,12 +265,13 @@ namespace TouchTypingStudio
                 return;
             }
             RestorePausedLabView();
-            StopLabCapture();
             try
             {
-                labCapture = new LabKeyboardCapture(new WindowInteropHelper(this).Handle, Dispatcher, CaptureLabKey);
+                if (labCapture == null)
+                    labCapture = new LabKeyboardCapture(new WindowInteropHelper(this).Handle, Dispatcher, CaptureLabKey);
                 var next = Request("lab-resume");
-                if (!next.Exists) { StopLabCapture(); return; }
+                if (!next.Exists) { labCapture.Suspend(); return; }
+                labCapture.Resume();
                 paused = false;
                 pressed.Clear();
                 RenderLab(next);
@@ -293,7 +294,7 @@ namespace TouchTypingStudio
 
         private void PauseLab()
         {
-            StopLabCapture();
+            if (labCapture != null) labCapture.Suspend();
             if (!labActive || paused) return;
             paused = true;
             pressed.Clear();

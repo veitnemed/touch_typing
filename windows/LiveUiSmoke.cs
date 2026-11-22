@@ -259,19 +259,26 @@ internal static class LiveUiSmoke
 
         Send(new[] { left.Down() });
         Wait(110);
+        var ctrl = Parse("LCtrl").Single();
+        Send(new[] { ctrl.Down() });
         try
         {
-            CheckFocusLoss();
+            CheckFocusLoss(delegate { Send(new[] { ctrl.Up() }); });
             Send(new[] { left.Down() });
             Key("Delete");
             Check(Find("LabDesktop").Current.HelpText == initial + "a", "Held pre-pause arrow is ignored after focus regain");
         }
-        finally { Send(new[] { left.Up() }); }
+        finally { Send(new[] { left.Up(), ctrl.Up() }); }
         Key("Right");
         Key("Backspace");
         Until(delegate { return Find("LabDesktop").Current.HelpText == initial; }, "fresh editing keys work after focus recovery");
         Check(true, "Native terminal caret, repeated deletion and focus recovery");
 
+        Chord("Ctrl+A");
+        Send(Character('z'));
+        Until(delegate { return Find("LabDesktop").Current.HelpText == "z"; }, "modifier released in the other window does not stick");
+        Chord("Ctrl+U");
+        Until(delegate { return Find("LabDesktop").Current.HelpText == ""; }, "fresh Ctrl chord works after external release");
         foreach (var character in "echo qa") Send(Character(character));
         Until(delegate { return Find("LabDesktop").Current.HelpText == "echo qa"; }, "terminal history fixture");
         Key("Enter");
@@ -286,7 +293,7 @@ internal static class LiveUiSmoke
         Check(true, "Native terminal history restores a draft");
     }
 
-    private static void CheckFocusLoss()
+    private static void CheckFocusLoss(Action whileAway = null)
     {
         if (focusProbe == IntPtr.Zero)
             focusProbe = CreateWindowEx(0, "STATIC", "TouchTyping UI check focus probe", 0x10cf0000,
@@ -294,6 +301,12 @@ internal static class LiveUiSmoke
         Check(focusProbe != IntPtr.Zero, "The test owns its focus probe");
         SetForegroundWindow(focusProbe);
         Until(delegate { return Exists("LabPauseResult"); }, "pause on focus loss");
+        if (whileAway != null)
+        {
+            Check(GetForegroundWindow() == focusProbe, "External key release occurs in the separate probe window");
+            whileAway();
+            Wait(80);
+        }
         Focus();
         Check(Exists("LabPauseResult"), "Returning focus keeps the lesson paused");
         Key("F8");

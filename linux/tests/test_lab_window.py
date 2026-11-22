@@ -289,6 +289,11 @@ class LabWindowTest(Studio):
             lab.level.set_selected(1)
             lab.limit.set_selected(0)
             lab.start()
+            for _ in range(45):
+                yield
+            if lab.state['paused'] and not self.window.is_active():
+                # Only the disposable headless test session may accept its own prompt.
+                yield from chord('Enter')
             for _ in range(140):
                 if lab.active and not lab.state['paused']:
                     break

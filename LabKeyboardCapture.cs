@@ -7,7 +7,8 @@ using System.Windows.Threading;
 
 namespace TouchTypingStudio
 {
-    // Installed only while the foreground lesson owns input. The callback stays short,
+    // Suppresses input only while the foreground lesson owns it. While paused, the
+    // hook only observes release of previously captured keys. The callback stays short,
     // and all engine work runs on the UI queue after the native event has returned.
     internal sealed class LabKeyboardCapture : IDisposable
     {
@@ -19,7 +20,8 @@ namespace TouchTypingStudio
         private readonly HashSet<int> held = new HashSet<int>();
         private readonly HashSet<int> carried = new HashSet<int>();
         private IntPtr handle;
-        private bool disposed;
+        private bool disposed, suspended;
+        private int generation;
 
         internal LabKeyboardCapture(IntPtr window, Dispatcher dispatcher, Action<int, int, bool, bool, bool, string> receive)
         {
@@ -37,14 +39,22 @@ namespace TouchTypingStudio
 
         private IntPtr Capture(int code, IntPtr message, IntPtr pointer)
         {
-            if (code < 0 || disposed || GetForegroundWindow() != window)
+            if (code < 0 || disposed)
                 return CallNextHookEx(handle, code, message, pointer);
             int kind = message.ToInt32();
             if (kind != 0x100 && kind != 0x101 && kind != 0x104 && kind != 0x105)
                 return CallNextHookEx(handle, code, message, pointer);
+            bool down = kind == 0x100 || kind == 0x104;
+            bool passive = suspended || GetForegroundWindow() != window;
+            if (passive && down) return CallNextHookEx(handle, code, message, pointer);
             var stroke = (Stroke)Marshal.PtrToStructure(pointer, typeof(Stroke));
             int vk = (int)stroke.VirtualKey;
-            bool down = kind == 0x100 || kind == 0x104;
+            if (passive)
+            {
+                held.Remove(vk);
+                carried.Remove(vk);
+                return CallNextHookEx(handle, code, message, pointer);
+            }
             if (carried.Contains(vk))
             {
                 if (!down) carried.Remove(vk);
@@ -65,11 +75,32 @@ namespace TouchTypingStudio
             }
             int scan = (int)stroke.ScanCode;
             bool extended = (stroke.Flags & 1) != 0;
+            int receivedIn = generation;
             dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(delegate
             {
-                if (!disposed && GetForegroundWindow() == window) receive(vk, scan, extended, down, repeat, text);
+                if (!disposed && !suspended && receivedIn == generation && GetForegroundWindow() == window) receive(vk, scan, extended, down, repeat, text);
             }));
             return new IntPtr(1);
+        }
+
+        internal void Suspend()
+        {
+            if (suspended || disposed) return;
+            suspended = true;
+            generation++;
+            carried.UnionWith(held);
+            held.Clear();
+            Array.Clear(keys, 0, keys.Length);
+        }
+
+        internal void Resume()
+        {
+            if (!suspended || disposed) return;
+            // The OS async state omits keydowns suppressed by our hook. Keep the
+            // carried set from the prior session and add only genuinely visible keys.
+            for (int vk = 8; vk < keys.Length; vk++)
+                if ((GetAsyncKeyState(vk) & 0x8000) != 0) carried.Add(vk);
+            suspended = false;
         }
 
         public void Dispose()

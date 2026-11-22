@@ -41,9 +41,17 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'UI smoke runner compilation failed.' }
     $arguments = @($Application)
     if ($FullSession) { $arguments += '--full-session' }
-    & $test @arguments 2>&1 | Tee-Object -FilePath $log -Append
-    $report.exitCode = $LASTEXITCODE
-    if ($LASTEXITCODE -ne 0) { throw 'Native UI smoke failed. See the last reported assertion.' }
+    # Windows PowerShell 5 wraps native stderr as errors. Do not abort the
+    # pipeline on the first diagnostic line; the native exit code is the gate.
+    $oldPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $test @arguments 2>&1 | Tee-Object -FilePath $log -Append
+        $report.exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $oldPreference
+    }
+    if ($report.exitCode -ne 0) { throw 'Native UI smoke failed. See the last reported assertion.' }
     $report.status = 'passed'
 } catch {
     $report.status = 'failed'

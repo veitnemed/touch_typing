@@ -118,7 +118,7 @@ jobs:
         run: |
           tar -xzf "$RUNNER_TEMP/candidate/touch-typing-linux-x64.tar.gz" -C "$RUNNER_TEMP/candidate"
           bash "$RUNNER_TEMP/candidate/touch-typing-linux-x64/check.sh" --terminal-only --output "$RUNNER_TEMP/linux-evidence" || {
-            tail -80 "$RUNNER_TEMP/linux-evidence/"*.log
+            tail -n 80 -- "$RUNNER_TEMP/linux-evidence/"*.log
             exit 1
           }
       - uses: actions/upload-artifact@v4
