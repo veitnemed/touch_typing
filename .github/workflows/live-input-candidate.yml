@@ -111,13 +111,16 @@ jobs:
       - name: Install GNOME test session dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gnome-shell gsettings-desktop-schemas gir1.2-gtk-4.0 python3-gi dbus-x11 fonts-dejavu-core libgl1-mesa-dri
+          sudo apt-get install -y --no-install-recommends gnome-shell gsettings-desktop-schemas gir1.2-gtk-4.0 python3-gi python3-gi-cairo python3-cairo dbus-x11 fonts-dejavu-core libgl1-mesa-dri
       - name: Send keys through isolated GNOME Wayland to the packaged GTK window
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: |
           tar -xzf "$RUNNER_TEMP/candidate/touch-typing-linux-x64.tar.gz" -C "$RUNNER_TEMP/candidate"
-          bash "$RUNNER_TEMP/candidate/touch-typing-linux-x64/check.sh" --terminal-only --output "$RUNNER_TEMP/linux-evidence"
+          bash "$RUNNER_TEMP/candidate/touch-typing-linux-x64/check.sh" --terminal-only --output "$RUNNER_TEMP/linux-evidence" || {
+            tail -80 "$RUNNER_TEMP/linux-evidence/"*.log
+            exit 1
+          }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

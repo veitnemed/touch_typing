@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Automation;
@@ -29,8 +30,22 @@ internal static class LiveUiSmoke
             window = AutomationElement.FromHandle(trainer);
             Check(window.Current.ProcessId == app.Id, "The automation root belongs to the new QA process");
             Focus();
-                Chord("Ctrl+F5");
+            Chord("Ctrl+F5");
             Check(Exists("LabStart") && !Exists("LabClock"), "Modified F5 keeps the class chooser open");
+            // Keep key/cursor evidence independent of later window-close assertions.
+            Invoke("LabClass-terminal");
+            Select("LabMode", 0);
+            Select("LabDuration", 4);
+            Key("F5");
+            Until(delegate { return Exists("LabClock") && Name("LabPause").StartsWith("Пауза"); }, "focused terminal lesson");
+            CheckPasteLayouts();
+            CheckTerminalCursorRepeat();
+            Key("F10");
+            Until(delegate { return Exists("LabResult"); }, "focused terminal result");
+            Invoke("LabChooseClass");
+            Until(delegate { return Exists("LabStart"); }, "class chooser after focused terminal lesson");
+            Console.WriteLine("PASS: focused terminal native input assertions");
+
             string[] apps = { "ubuntu", "chrome", "code", "terminal", "workday" };
             foreach (string name in apps)
                 foreach (int mode in new[] { 0, 1 })
@@ -60,7 +75,7 @@ internal static class LiveUiSmoke
                     Check(Exists("LabPauseResult"), "Enter does not resume the paused lesson");
                     Key("Space");
                     Until(delegate { return !Exists("LabPauseResult") && Name("LabPause").StartsWith("Пауза"); }, "resumed lesson");
-                    PostMessage(trainer, 0x10, IntPtr.Zero, IntPtr.Zero);
+                    RequestClose();
                     Until(delegate { return ExitDialog() != null; }, "save-and-close confirmation");
                     Check(!app.HasExited && Exists("LabPauseResult"), "Closing pauses the lesson and releases input");
                     InvokeDialog("LabExitCancel");
@@ -119,7 +134,7 @@ internal static class LiveUiSmoke
             Select("LabDuration", 4);
             Key("F5");
             Until(delegate { return Exists("LabClock"); }, "lesson before save-and-close");
-            PostMessage(trainer, 0x10, IntPtr.Zero, IntPtr.Zero);
+            RequestClose();
             Until(delegate { return ExitDialog() != null; }, "save-and-close dialog");
             InvokeDialog("LabExitSave");
             var closing = Stopwatch.StartNew();
@@ -131,6 +146,8 @@ internal static class LiveUiSmoke
         catch (Exception error)
         {
             Console.Error.WriteLine("FAIL: " + error);
+            try { DumpProcessWindows(); }
+            catch (Exception diagnosticError) { Console.Error.WriteLine("Window diagnostics failed: " + diagnosticError.Message); }
             return 1;
         }
         finally
@@ -297,12 +314,61 @@ internal static class LiveUiSmoke
     }
     private static bool Exists(string id)
     { return window.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, id)) != null; }
+    private static void RequestClose()
+    {
+        if (!PostMessage(trainer, 0x10, IntPtr.Zero, IntPtr.Zero))
+            throw new InvalidOperationException("WM_CLOSE could not be queued: Win32 " + Marshal.GetLastWin32Error());
+    }
+    private static List<IntPtr> ProcessWindows()
+    {
+        var handles = new List<IntPtr>();
+        EnumWindows(delegate(IntPtr handle, IntPtr ignored)
+        {
+            uint process;
+            GetWindowThreadProcessId(handle, out process);
+            if (process == (uint)app.Id) handles.Add(handle);
+            return true;
+        }, IntPtr.Zero);
+        return handles;
+    }
+    private static string WindowTitle(IntPtr handle)
+    {
+        var text = new StringBuilder(256);
+        GetWindowText(handle, text, text.Capacity);
+        return text.ToString();
+    }
     private static AutomationElement ExitDialog()
     {
-        return AutomationElement.RootElement.FindFirst(TreeScope.Children,
-            new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty, app.Id),
-                new OrCondition(new PropertyCondition(AutomationElement.AutomationIdProperty, "LabExitDialog"),
-                    new PropertyCondition(AutomationElement.NameProperty, "Завершить занятие?"))));
+        // Owned modal windows aren't consistently exposed as children of the UIA desktop.
+        foreach (var handle in ProcessWindows())
+        {
+            if (handle == trainer || !IsWindowVisible(handle) || WindowTitle(handle) != "Завершить занятие?") continue;
+            try
+            {
+                var dialog = AutomationElement.FromHandle(handle);
+                if (dialog != null && dialog.Current.ProcessId == app.Id &&
+                    dialog.FindFirst(TreeScope.Descendants,
+                        new PropertyCondition(AutomationElement.AutomationIdProperty, "LabExitCancel")) != null)
+                    return dialog;
+            }
+            catch (ElementNotAvailableException) { /* closing between enumeration and query */ }
+        }
+        return null;
+    }
+    private static void DumpProcessWindows()
+    {
+        if (app == null) return;
+        app.Refresh();
+        Console.Error.WriteLine("QA process exited=" + app.HasExited +
+            "; trainer=0x" + trainer.ToInt64().ToString("x") +
+            "; foreground=0x" + GetForegroundWindow().ToInt64().ToString("x"));
+        if (app.HasExited) { Console.Error.WriteLine("QA exit code=" + app.ExitCode); return; }
+        foreach (var handle in ProcessWindows())
+            Console.Error.WriteLine("QA HWND 0x" + handle.ToInt64().ToString("x") +
+                " visible=" + IsWindowVisible(handle) + " enabled=" + IsWindowEnabled(handle) +
+                " title=" + WindowTitle(handle));
+        if (window != null)
+            Console.Error.WriteLine("QA lesson clock=" + Exists("LabClock") + "; paused=" + Exists("LabPauseResult"));
     }
     private static void InvokeDialog(string id)
     {
@@ -447,7 +513,12 @@ internal static class LiveUiSmoke
     [DllImport("user32.dll")] private static extern uint SendInput(uint count, Input[] inputs, int size);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
-    [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr window, uint message, IntPtr w, IntPtr l);
+    private delegate bool EnumWindowProc(IntPtr window, IntPtr ignored);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowProc callback, IntPtr ignored);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, StringBuilder text, int max);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr window);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool PostMessage(IntPtr window, uint message, IntPtr w, IntPtr l);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr CreateWindowEx(uint extra, string type, string title, uint style, int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr parameter);
     [DllImport("user32.dll")] private static extern bool DestroyWindow(IntPtr window);
     [DllImport("user32.dll")] private static extern bool PeekMessage(out Message message, IntPtr window, uint first, uint last, uint remove);
