@@ -16,12 +16,13 @@ internal sealed class LabRun
     private readonly HashSet<string> held = [];
     private readonly List<LabPoint> points = [];
     private readonly List<LiveEvent> trace = [];
-    private bool restoring, replayLegacyUrl;
+    private bool restoring, replayLegacyUrl, replayLegacyReport;
     private const string ExactUrlEvent = "@exact-url";
+    private const string StrictReportEvent = "@strict-report";
     private int variant;
     private string initialLayout;
     private bool initialVirtual;
-    internal bool HasDraft => trace.Any(item => item.Key != ExactUrlEvent);
+    internal bool HasDraft => trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask;
@@ -90,17 +91,19 @@ internal sealed class LabRun
         if (draft != null)
         {
             Resume();
-            replayLegacyUrl = true;
+            replayLegacyUrl = replayLegacyReport = true;
             foreach (var e in JsonSerializer.Deserialize<LiveEvent[]>(draft.Trace) ?? [])
             {
                 if (e.Key.StartsWith("@held/")) { held.Add(e.Key[6..]); superUsed = e.Down; }
                 else if (e.Key == "@release") { Pause(); Resume(); }
                 else if (e.Key == "@hint") Hint();
                 else if (e.Key == ExactUrlEvent) { replayLegacyUrl = false; trace.Add(e); }
+                else if (e.Key == StrictReportEvent) { replayLegacyReport = false; trace.Add(e); }
                 else Input(e.Key, e.Down, e.Text);
             }
             if (replayLegacyUrl) trace.Add(new(ExactUrlEvent));
-            replayLegacyUrl = false;
+            if (replayLegacyReport) trace.Add(new(StrictReportEvent));
+            replayLegacyUrl = replayLegacyReport = false;
             Pause(); restoring = false; Solved = Errors = taskInBlock = 0; Block = 1; activeMilliseconds = 0;
             points.Clear(); Attempts.Clear(); LastKey = ""; Feedback = "ready";
         }
@@ -229,7 +232,7 @@ internal sealed class LabRun
     {
         if (mission == null) return;
         var eligible = Guidance == "independent" ? pending.TakeWhile(goal => goal.Phase == pending[0].Phase) : pending.Take(1);
-        watching = eligible.Select(goal => (goal, LiveCourse.Evidence(goal.Task, Scene, verifyReport: goal.VerifyReport))).ToList();
+        watching = eligible.Select(goal => (goal, LiveCourse.Evidence(goal.Task, Scene, verifyReport: goal.VerifyReport && !replayLegacyReport))).ToList();
     }
 
     private ShortcutAttempt Observe(string key, string equivalentCommand = null, bool acceptExistingUrlSelection = false)
@@ -237,9 +240,15 @@ internal sealed class LabRun
         if (mission == null || watching == null || Scene.Switcher) return null;
         foreach (var (goal, before) in watching)
         {
-            if (before == goal.Target && !(acceptExistingUrlSelection && goal.Task.Id == "url")) continue;
-            if (LiveCourse.Evidence(goal.Task, Scene, goal.Task == Task ? equivalentCommand : null, goal.VerifyReport) != goal.Target) continue;
-            if (goal.VerifyReport) verifiedReport = Scene.ReadReportArtifact();
+            bool strictReport = goal.VerifyReport && !replayLegacyReport;
+            string target = goal.VerifyReport && replayLegacyReport ? goal.LegacyTarget : goal.Target;
+            if (before == target && !(acceptExistingUrlSelection && goal.Task.Id == "url")) continue;
+            string command = goal.Task == Task ? equivalentCommand : null;
+            if (LiveCourse.Evidence(goal.Task, Scene, command, strictReport) != target) continue;
+            // Published drafts retain earned progress, but a report receipt is only issued
+            // when the reconstructed workspace also meets today's verification rules.
+            if (goal.VerifyReport && (strictReport || LiveCourse.Evidence(goal.Task, Scene, command, verifyReport: true) == goal.Target))
+                verifiedReport = Scene.ReadReportArtifact();
             Task = goal.Task;
             pending.Remove(goal);
             return Pass(key);
@@ -291,7 +300,11 @@ internal sealed class LabRun
             if (!restoring) variant = random.Next(3);
             requestedMission = null; used.Add(mission.Id); trace.Clear();
             verifiedReport = null;
-            if (!restoring) trace.Add(new(ExactUrlEvent));
+            if (!restoring)
+            {
+                trace.Add(new(ExactUrlEvent));
+                trace.Add(new(StrictReportEvent));
+            }
             initialLayout = Scene.Layout;
             initialVirtual = Scene.LayoutIsVirtual;
             foreach (string key in held) trace.Add(new("@held/" + key, superUsed));

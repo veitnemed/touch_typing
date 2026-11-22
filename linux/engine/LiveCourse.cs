@@ -7,7 +7,7 @@ namespace TouchTypingStudio;
 
 internal sealed record LivePhase(string Title, string Route);
 internal sealed record LiveMission(string App, int Level, string Id, string Title, LivePhase[] Phases);
-internal sealed record LiveGoal(int Phase, LabTask Task, string Target, bool VerifyReport = false);
+internal sealed record LiveGoal(int Phase, LabTask Task, string Target, bool VerifyReport = false, string LegacyTarget = null);
 
 internal static partial class LiveCourse
 {
@@ -56,7 +56,7 @@ internal static partial class LiveCourse
                 else if (!Demonstrate(task, trial)) throw new InvalidOperationException(mission.Id + ": недоступно " + token);
                 string proof = Evidence(task, trial, verifyReport: verifyReport);
                 if (original == proof) { trial = before; continue; }
-                goals.Add(new(phase, task, proof, verifyReport));
+                goals.Add(new(phase, task, proof, verifyReport, verifyReport ? Evidence(task, trial) : null));
             }
         }
         if (goals.Count < 20) throw new InvalidOperationException(mission.Id + ": меньше 20 результатов");
