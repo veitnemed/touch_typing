@@ -1,0 +1,53 @@
+name: Publish TouchTyping input preview
+on:
+  push:
+    branches: [release/v1.8.0-preview.1]
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: touchtyping-v180-preview-1
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE_SHA: 56a0bb63fea0c7bbfc584dc321cd8e0714aedbbf
+      RUN: '45065985483'
+      REPO: 'veitnemed/touch_typing'
+      TAG: 'v1.8.0-preview.1'
+    steps:
+      - name: Verify same green source SHA and publish only its exact archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/actions/runs/$RUN" | jq -e --arg sha "$CANDIDATE_SHA" '
+            .head_sha == $sha and .head_branch == "feature/live-input-reliability"
+            and .status == "completed" and .conclusion == "success"
+            and .path == ".github/workflows/live-input-candidate.yml"' >/dev/null
+          gh api "repos/$REPO/actions/runs/$RUN/jobs?per_page=50" | jq -e '
+            .jobs as $j | ["engine","windows-package","windows-window","linux-window"] |
+            all(. as $name | any($j[]; .name==$name and .conclusion=="success"))' >/dev/null
+          mkdir -p "$RUNNER_TEMP/preview"
+          cd "$RUNNER_TEMP/preview"
+          for artifact in windows-x64-candidate linux-x64-candidate; do
+            gh run download "$RUN" --repo "$REPO" --name "$artifact" --dir .
+          done
+          sha256sum -c SHA256SUMS.txt
+          echo 'cc017c247b8dcc3ef697a300886c5c39915f0baf38e6ee1ad1f259d3a19f8c56  touch-typing-linux-x64.tar.gz' | sha256sum -c
+          echo 'd24b8f30b4d489dea6bdfe3e3058510fd87551c61bceba9bf7e24b7c2849a4d4  touch-typing-windows-x64.zip' | sha256sum -c
+          unzip -tq touch-typing-windows-x64.zip
+          tar -tzf touch-typing-linux-x64.tar.gz >/dev/null
+          mv touch-typing-windows-x64.zip "touch-typing-$TAG-windows-x64.zip"
+          mv touch-typing-linux-x64.tar.gz "touch-typing-$TAG-linux-x64.tar.gz"
+          sha256sum "touch-typing-$TAG-windows-x64.zip" "touch-typing-$TAG-linux-x64.tar.gz" > SHA256SUMS.txt
+          cat > notes.md <<'NOTES'
+          Первый предварительный выпуск после v1.7.0. В Live исправлены удержание стрелок и Delete, возврат к вводу после переключения окон, зачёт Ctrl+L и видимость каретки/выделения в длинных строках и поиске Chrome. Windows: распакуйте ZIP и запустите `Start-Live.cmd`. Linux: распакуйте архив и запустите `install.sh`.
+          
+          Сборки x64 взяты без пересборки из [прошедшего прогона](https://github.com/veitnemed/touch_typing/actions/runs/45065985483) на `56a0bb63fea0c7bbfc584dc321cd8e0714aedbbf`. Проверены окна Ubuntu 24.04 / GNOME Wayland и Windows Server 2025 (UI Automation / SendInput, 222 проверки). Это не приёмка на физической клавиатуре или на клиентской Windows 10/11. Миграция всех типов профилей, полный сквозной проект и адаптивный маршрут в этот выпуск не входят.
+          NOTES
+          gh release create "$TAG" --repo "$REPO" --target "$CANDIDATE_SHA" --prerelease --latest=false \
+            --title "TouchTyping $TAG: ввод и фокус в Live" --notes-file notes.md \
+            "touch-typing-$TAG-windows-x64.zip" "touch-typing-$TAG-linux-x64.tar.gz" SHA256SUMS.txt
