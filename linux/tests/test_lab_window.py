@@ -13,11 +13,18 @@ from platform_linux import PHYSICAL
 
 class LabWindowTest(Studio):
     def __init__(self):
+        self.received = {}
         super().__init__(smoke='-', smoke_size=(960,600) if '--small' in sys.argv else (1380,900))
     def key_pressed(self, controller, keyval, keycode, modifiers):
         from gi.repository import Gdk
         self.last_character = chr(Gdk.keyval_to_unicode(keyval)) if Gdk.keyval_to_unicode(keyval) else ""
-        return super().key_pressed(controller,keyval,keycode,modifiers)
+        result = super().key_pressed(controller,keyval,keycode,modifiers)
+        self.received[(keycode, True)] = self.received.get((keycode, True), 0) + 1
+        return result
+    def key_released(self, controller, keyval, keycode, modifiers):
+        result = super().key_released(controller, keyval, keycode, modifiers)
+        self.received[(keycode, False)] = self.received.get((keycode, False), 0) + 1
+        return result
     def call(self, operation, **payload):
         if operation == "lab-start":
             payload["seed"] = int(os.environ.get("TOUCH_TYPING_QA_SEED", "7"))
@@ -38,7 +45,7 @@ class LabWindowTest(Studio):
             next(self.steps)
             return GLib.SOURCE_CONTINUE
         except StopIteration:
-            print('PASS native GTK four lab classes, capture, task state, RU/EN, pause, results and screenshots',flush=True)
+            print('PASS native GTK Live classes, capture, task state, RU/EN, pause, results and screenshots',flush=True)
         except Exception:
             traceback.print_exc()
             self.smoke_failure=True
@@ -59,14 +66,20 @@ class LabWindowTest(Studio):
         def chord(label):
             parts=label.split('+')
             parts=[{'Ctrl':'LCtrl','Shift':'LShift','Alt':'LAlt','Super':'LSuper'}.get(p,p) for p in parts]
-            for key in parts:
-                event(key,True)
+            for key, down in [(k, True) for k in parts] + [(k, False) for k in reversed(parts)]:
+                observed = (keycodes[key] + 8, down)
+                count = self.received.get(observed, 0)
+                captured = self.lab and self.lab.active and not self.lab.state["paused"]
+                event(key, down)
                 yield
-            for key in reversed(parts):
-                event(key,False)
-                yield
-        def capture_png(path):
-            paintable=__import__('gi').repository.Gtk.WidgetPaintable.new(self.window)
+                if captured:
+                    for _ in range(100):
+                        if self.received.get(observed, 0) != count or not self.lab.active or self.lab.state["paused"]:
+                            break
+                        yield
+                    assert self.received.get(observed, 0) != count or not self.lab.active or self.lab.state["paused"], ("undelivered key", key, down)
+        def capture_png(path, widget=None):
+            paintable=__import__('gi').repository.Gtk.WidgetPaintable.new(widget or self.window)
             snapshot=__import__('gi').repository.Gtk.Snapshot()
             paintable.snapshot(snapshot,paintable.get_intrinsic_width(),paintable.get_intrinsic_height())
             self.window.get_renderer().render_texture(snapshot.to_node(),None).save_to_png(str(path))
@@ -76,7 +89,7 @@ class LabWindowTest(Studio):
                 self.window.present()
                 yield
             self.navigate('lab')
-            for index in ([1] if '--timed' in sys.argv else range(4)):
+            for index in ([1] if '--timed' in sys.argv else range(5)):
                 desired = "RU" if index in (1, 2) else "EN"
                 for _ in range(20):yield
                 yield from chord('A')
@@ -93,6 +106,7 @@ class LabWindowTest(Studio):
                 assert self.layout == desired, (self.layout, desired)
                 self.lab.picker.set_selected(index)
                 self.lab.level.set_selected(1)
+                self.lab.limit.set_selected(4 if '--timed' in sys.argv else 0)
                 self.lab.start()
                 assert 'RSuper' not in self.lab.guide.board.cells
                 assert self.lab.guide.board.cells['LSuper'][0].get_label() == '⊞'
@@ -106,14 +120,47 @@ class LabWindowTest(Studio):
                     if not self.lab.state['paused']:break
                     yield
                 assert not self.lab.state['paused'], self.lab.status.get_label()
+                if index in (1, 2) and '--timed' not in sys.argv:
+                    from gi.repository import GdkPixbuf
+                    def selection(name):
+                        path = Path(os.environ['TOUCH_TYPING_QA_OUTPUT']) / (name + '.png')
+                        capture_png(path, self.lab.desktop)
+                        pixbuf = GdkPixbuf.Pixbuf.new_from_file(str(path))
+                        pixels = pixbuf.get_pixels()
+                        channels = pixbuf.get_n_channels()
+                        return sum(pixels[i:i+3] == bytes((53, 98, 155))
+                                   for i in range(0, len(pixels) - 2, channels))
+                    yield from chord('Ctrl+L')
+                    for _ in range(3):yield
+                    highlighted = selection('chrome-address' if index == 1 else 'code-line')
+                    assert highlighted > 30, ('missing visible selection', index, highlighted)
+                    yield from chord('Left')
+                    for _ in range(3):yield
+                    assert selection('chrome-caret' if index == 1 else 'code-caret') < highlighted
+                    if index == 1:
+                        before = self.lab.state['scene']['windows'][0]['input']
+                        clip = self.lab.state['scene']['clipboard']
+                        yield from chord('Ctrl+X')
+                        assert self.lab.state['scene']['windows'][0]['input'] == before
+                        assert self.lab.state['scene']['clipboard'] == clip
+                        yield from chord('Ctrl+L' if self.lab.state['task']['id'] == 'copy' else 'Esc')
+                    else:
+                        yield from chord('Ctrl+J')
+                        assert self.lab.state['scene']['windows'][0]['panel']
+                        yield from chord('Ctrl+J')
                 for _ in range(100000 if '--timed' in sys.argv else 24):
                     lab=self.lab
                     if not lab.active:break
                     task=lab.state['task']
                     old=lab.state['solved']
                     if task['keys']:
-                        yield from chord(task['keys'])
+                        for _ in range(28):
+                            yield from chord(task['keys'])
+                            if not lab.active or lab.state['solved'] != old:
+                                break
                     else:
+                        if task['id'].startswith('open-') and not lab.state['scene']['overview']:
+                            yield from chord('Super')
                         layout=self.lab.state['scene']['layout']
                         mapping={' ':('Space',False),'\n':('Enter',False)}
                         for items in self.library['keyboard']:
@@ -150,6 +197,27 @@ class LabWindowTest(Studio):
                     if widget.get_visible():
                         found,bounds=widget.compute_bounds(self.window)
                         assert found and bounds.get_y()+bounds.get_height()<=self.window.get_height(), (index,bounds,self.window.get_height())
+                if index == 3:
+                    yield from chord('Ctrl+C')
+                    for key in ('A','B','C','D','Left','Left'):
+                        yield from chord(key)
+                    assert lab.state['scene']['terminalInput'] == 'abcd'
+                    yield from chord('Delete')
+                    assert lab.state['scene']['terminalInput'] == 'abd'
+                    capture_png(Path(os.environ['TOUCH_TYPING_QA_OUTPUT']) / 'terminal-delete.png', lab.desktop)
+                    yield from chord('Backspace')
+                    assert lab.state['scene']['terminalInput'] == 'ad'
+                if index == 1:
+                    yield from chord('Print')
+                    yield from chord('Enter')
+                    scene = lab.state['scene']
+                    assert scene['clipboardMime'] == 'image/png'
+                    payload = next(f['content'] for f in scene['terminal']['files'] if f['path'].endswith('/'+scene['clipboard']))
+                    import base64, struct
+                    width, height = struct.unpack('>II', base64.b64decode(payload.split(',')[1])[16:24])
+                    assert 120 < width <= 501 and height > 50, (width, height)
+                    yield from chord('Alt+F4')
+                    assert self.window.get_visible() and lab.active and not lab.state['scene']['windows']
                 yield from chord('F8')
                 assert self.lab.state['paused']
                 self.lab.stop()

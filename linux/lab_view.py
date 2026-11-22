@@ -1,7 +1,10 @@
 """Native snapshots of the simulated Ubuntu desktop and application windows."""
+import base64
+from pathlib import Path
+
 import gi
 gi.require_version("Gsk", "4.0")
-from gi.repository import Gdk, Graphene, Gsk, Gtk, Pango
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Graphene, Gsk, Gtk, Pango
 
 
 def ink(value):
@@ -16,7 +19,19 @@ class DesktopView(Gtk.Widget):
     def __init__(self):
         super().__init__()
         self.scene = {}
+        self.icons = {}
+        self.wallpaper = None
+        for candidate in ("ubuntu-default-greyscale-wallpaper.png", "warty-final-ubuntu.png"):
+            path = Path("/usr/share/backgrounds") / candidate
+            if path.is_file():
+                try:
+                    pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(path), 1480, 900, True)
+                    self.wallpaper = Gdk.Texture.new_for_pixbuf(pixbuf)
+                    break
+                except GLib.Error:
+                    continue
         self.presentation_app = "ubuntu"
+        self.set_overflow(Gtk.Overflow.HIDDEN)
         self.set_size_request(400, 200)
         self.set_hexpand(True)
         self.set_vexpand(True)
@@ -64,7 +79,71 @@ class DesktopView(Gtk.Widget):
         self.snapshot.append_layout(layout, ink(color))
         self.snapshot.restore()
 
+    @staticmethod
+    def units(value):
+        return len(value.encode("utf-16-le")) // 2
+
+    def field(self, value, window, x, y, width, size, color, offset=0, focused=True, mono=True):
+        """Draw one line using the same shaped layout for its text, selection and caret."""
+        if width <= 0:
+            return
+        layout = self.create_pango_layout(value)
+        font = Pango.FontDescription.from_string("DejaVu Sans Mono" if mono else "Noto Sans")
+        font.set_absolute_size(size * Pango.SCALE)
+        layout.set_font_description(font)
+        encoded = value.encode("utf-16-le")
+        def edge(position):
+            length = min(len(encoded), max(0, (position - offset) * 2))
+            byte = len(encoded[:length].decode("utf-16-le", errors="ignore").encode())
+            return layout.get_cursor_pos(byte)[0].x / Pango.SCALE
+        caret = window.get("cursor", 0)
+        anchor = window.get("anchor", caret)
+        left, right = sorted((edge(caret), edge(anchor)))
+        draw_caret = focused and offset <= caret <= offset + len(encoded) // 2
+        x_shift = max(0, edge(caret) - width + 3) if draw_caret else 0
+        self.snapshot.push_clip(self.rect(x, y, width, size * 1.7))
+        x -= x_shift
+        if focused and offset >= 0:
+            for match in window.get("matches", []):
+                start, end = edge(match), edge(match + abs(anchor - caret))
+                if end > start:
+                    self.fill("#385677", x + start, y, end - start, size * 1.45)
+        if focused and right > left:
+            self.fill("#35629b", x + left, y, right - left, size * 1.45)
+        point = Graphene.Point()
+        point.init(x, y)
+        self.snapshot.save()
+        self.snapshot.translate(point)
+        self.snapshot.append_layout(layout, ink(color))
+        self.snapshot.restore()
+        if draw_caret:
+            self.fill(color, x + edge(caret), y + 1, 1.5, size * 1.35)
+        self.snapshot.pop()
+
     def app_icon(self, app, x, y, size=30):
+        if app not in self.icons:
+            names = {"chrome": ["google-chrome", "chromium", "web-browser"], "code": ["code", "com.microsoft.VSCode"],
+                     "files": ["org.gnome.Nautilus", "system-file-manager"], "terminal": ["org.gnome.Ptyxis", "utilities-terminal"]}
+            theme = Gtk.IconTheme.get_for_display(self.get_display())
+            candidates = names.get(app, [app])
+            try:
+                desktop = Gio.DesktopAppInfo.new(app + ".desktop")
+            except TypeError:
+                desktop = None
+            if desktop and desktop.get_icon():
+                self.icons[app] = theme.lookup_by_gicon(desktop.get_icon(), 48, 1, Gtk.TextDirection.LTR, Gtk.IconLookupFlags(0))
+            else:
+                name = next((n for n in candidates if theme.has_icon(n)), None)
+                self.icons[app] = theme.lookup_icon(name, None, 48, 1, Gtk.TextDirection.LTR, Gtk.IconLookupFlags(0)) if name else None
+        paintable = self.icons[app]
+        if paintable:
+            point = Graphene.Point()
+            point.init(x, y)
+            self.snapshot.save()
+            self.snapshot.translate(point)
+            paintable.snapshot(self.snapshot, size, size)
+            self.snapshot.restore()
+            return
         colors = {"chrome": "#4285f4", "code": "#007acc", "terminal": "#4a2347", "ubuntu": "#e95420"}
         self.fill(colors.get(app, "#555763"), x, y, size, size, 7)
         if app == "chrome":
@@ -77,45 +156,70 @@ class DesktopView(Gtk.Widget):
             self.label({"code": "‹›", "terminal": ">_", "ubuntu": "●"}.get(app, "□"),
                        x + 4, y + size * .13, size * .55, bold=True)
 
+    def capture_png(self):
+        paintable = Gtk.WidgetPaintable.new(self)
+        snap = Gtk.Snapshot()
+        scale = min(1, 500 / max(1, self.get_width()))
+        snap.scale(scale, scale)
+        paintable.snapshot(snap, self.get_width(), self.get_height())
+        node = snap.to_node()
+        if node is None:
+            return ""
+        texture = self.get_native().get_renderer().render_texture(node, None)
+        return base64.b64encode(texture.save_to_png_bytes().get_data()).decode("ascii")
+
     def do_snapshot(self, snapshot):
         self.snapshot = snapshot
         width, height = self.get_width(), self.get_height()
-        if self.presentation_app in ("chrome", "code"):
+        if self.presentation_app in ("chrome", "code") and not self.scene.get("overview") and not self.scene.get("showDesktop") and not self.scene.get("switcher") and any(v.get("active") and v.get("app") == self.presentation_app for v in self.scene.get("windows", [])):
             self.fill("#202124" if self.presentation_app == "chrome" else "#1f1f1f", 0, 0, width, height)
             windows = [window for window in self.scene.get("windows", [])
                        if window.get("app") == self.presentation_app and window.get("state") != "minimized"]
             current = next((window for window in windows if window.get("active")), windows[-1] if windows else None)
             if current:
-                self.draw_window(current, 0, 0, width, height)
+                self.draw_window(current, 0, -27, width, height + 27)
             else:
                 self.label("Окно закрыто. Откройте приложение сочетанием из задания.",
                            24, height * .48, 15, width=width - 48)
             self.draw_capture_feedback(width, height)
             self.snapshot = None
             return
-        self.fill("#31152e", 0, 0, width, height, 8)
-        self.fill("#492443", width * .45, 0, width * .55, height)
-        self.fill("#5d2c4c", width * .7, height * .45, width * .3, height * .55)
+        self.fill("#351d32", 0, 0, width, height)
+        if self.wallpaper:
+            scale = max(width / self.wallpaper.get_width(), height / self.wallpaper.get_height())
+            ww, wh = self.wallpaper.get_width() * scale, self.wallpaper.get_height() * scale
+            self.snapshot.append_texture(self.wallpaper, self.rect((width - ww) / 2, (height - wh) / 2, ww, wh))
         self.fill("#261f2b", 0, 0, width, 25)
         workspace = self.scene.get("workspace", 0)
         self.label("Деятельность", 12, 4, 11, bold=True)
         self.label("Рабочий стол " + str(workspace + 1), width / 2 - 55, 4, 11)
         self.label(self.scene.get("layout", "EN").lower() + "    ◉    ◖    ⏻", width - 125, 4, 11)
         self.fill("#241e2c", 0, 25, 51, height - 25)
-        for index, app in enumerate(("chrome", "code", "terminal", "files")):
-            self.app_icon(app, 10, 39 + index * 45, 31)
+        for index, app in enumerate(self.scene.get("dock", [])):
+            spacing = min(43, (height - 40) / max(1, len(self.scene.get("dock", []))))
+            self.app_icon(app, 12, 32 + index * spacing, min(30, spacing - 4))
         windows = [window for window in self.scene.get("windows", [])
                    if window.get("workspace", 0) == workspace and window.get("state") != "minimized"
                    and not self.scene.get("showDesktop")]
-        for index, window in enumerate(sorted(windows, key=lambda item: bool(item.get("active")))):
+        windows.sort(key=lambda item: bool(item.get("active")))
+        if windows and not self.scene.get("overview"):
+            active = windows[-1]
+            state = active.get("state")
+            if state in ("maximized", "fullscreen"):
+                windows = [active]
+            elif state in ("left", "right"):
+                other_side = "right" if state == "left" else "left"
+                windows = [v for v in windows[:-1] if v.get("state") == other_side][-1:] + [active]
+            else:
+                windows = windows[-2:]
+        for index, window in enumerate(windows):
             x, y, w, h = self.window_bounds(window, index, width, height)
             if self.scene.get("overview"):
-                w, h = (width - 115) / 2, (height - 90) * .65
+                rows = (len(windows) + 1) // 2
+                w, h = (width - 115) / 2, (height - 83) / max(1, rows) - 10
                 x = 65 + index % 2 * (w + 12)
-                y = 55 + min(index // 2, 2) * 20
+                y = 66 + (index // 2) * (h + 9)
             self.draw_window(window, x, y, w, h)
-        if not windows:
-            self.label("Рабочий стол " + str(workspace + 1), width * .37, height * .47, 21, "#d9c7d5")
         if self.scene.get("overview"):
             self.fill("#24232e", width * .27, 30, width * .48, 27, 13)
             self.label("Поиск приложений  " + str(self.scene.get("search", "")), width * .29, 35, 11)
@@ -126,11 +230,12 @@ class DesktopView(Gtk.Widget):
         if switcher:
             self.fill("#292833", width * .25, height * .35, width * .5, 90, 12)
             self.label("Переключение окон", width * .28, height * .35 + 8, 12)
-            selected_app = next((window.get("app") for window in windows if window.get("active")), "")
-            for i, app in enumerate(("chrome", "code", "terminal")):
-                if app == selected_app:
-                    self.fill("#818498", width * .3 + i * 75 - 6, height * .35 + 29, 47, 47, 8)
-                self.app_icon(app, width * .3 + i * 75, height * .35 + 35, 35)
+            choices = [v for v in self.scene.get("windows", []) if v.get("workspace") == workspace]
+            for i, candidate in enumerate(choices):
+                left = width / 2 + (i - len(choices) / 2) * 75 + 15
+                if candidate["id"] == self.scene.get("switchTarget"):
+                    self.fill("#818498", left - 6, height * .35 + 29, 47, 47, 8)
+                self.app_icon(candidate["app"], left, height * .35 + 35, 35)
         self.draw_capture_feedback(width, height)
         self.snapshot = None
 
@@ -172,11 +277,53 @@ class DesktopView(Gtk.Widget):
         self.label("×", x + w - 21, y + 3, 15)
         if app == "chrome":
             self.chrome(window, x, y + 27, w, h - 27)
+        elif app == "files":
+            self.files(window, x, y + 27, w, h - 27)
         elif app == "code":
             self.code(window, x, y + 27, w, h - 27)
         else:
             self.terminal(window, x, y + 27, w, h - 27)
         self.snapshot.pop()
+
+    def files(self, window, x, y, w, h):
+        if window.get("focus") == "image-preview" and window.get("imagePreview"):
+            data = base64.b64decode(window["imagePreview"].split(",", 1)[1])
+            texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(data))
+            self.fill("#242427", x, y, w, h)
+            scale = min((w - 20) / texture.get_width(), (h - 20) / texture.get_height())
+            iw, ih = texture.get_width() * scale, texture.get_height() * scale
+            self.snapshot.append_texture(texture, self.rect(x + (w - iw) / 2, y + (h - ih) / 2, iw, ih))
+            return
+        sidebar = min(178, w * .23)
+        self.fill("#f7f6f5", x, y, w, h)
+        self.fill("#eeecea", x, y, sidebar, h)
+        self.label("Места", x + 16, y + 16, 13, "#57504d", bold=True)
+        names = [("Домашняя папка", "/home/student"), ("Загрузки", "/home/student/Downloads"),
+                 ("Изображения", "/home/student/Pictures"), ("Проект", "/home/student/project")]
+        for i, (name, path) in enumerate(names):
+            ty = y + 53 + i * 35
+            if window.get("folder") == path:
+                self.fill("#e2d6cf", x + 7, ty - 6, sidebar - 14, 31, 6)
+            self.label(name, x + 16, ty, 12, "#37302c", width=sidebar - 28)
+        left = x + sidebar + 22
+        self.label(window.get("folder", "").replace("/home/student", "Домашняя папка", 1).replace("/", "  ›  "),
+                   left, y + 13, 14, "#302c29", width=w - sidebar - 38, bold=True)
+        self.fill("#dedad6", x + sidebar, y + 41, w - sidebar, 1)
+        entries = window.get("entries", [])
+        first = max(0, window.get("item", -1) - max(1, int((h - 52) / 37)) + 1)
+        for i, entry in enumerate(entries[first:], first):
+            ty = y + 51 + (i - first) * 37
+            if ty + 34 > y + h:
+                break
+            if i == window.get("item"):
+                self.fill("#f1d9c9", left - 9, ty - 2, w - sidebar - 26, 33, 6)
+            folder = entry["kind"] == "folder"
+            if folder:
+                self.fill("#bc7439", left + 1, ty + 4, 10, 7, 2)
+            self.fill("#d99a56" if folder else "#9dadbd", left, ty + 8, 22 if folder else 16, 15, 3)
+            self.label(entry["title"], left + 34, ty + 4, 14, "#35302d", width=w - sidebar - 76)
+        if not entries:
+            self.label("Папка пуста", left, y + 62, 14, "#817872")
 
     def chrome(self, window, x, y, w, h):
         self.fill("#202124", x, y, w, h)
@@ -185,32 +332,55 @@ class DesktopView(Gtk.Widget):
         for i, tab in enumerate(tabs):
             self.fill("#3c4043" if i == window.get("activeTab", 0) else "#292a2d",
                       x + 6 + tab_w * i, y + 2, tab_w - 3, 26, 7)
-            self.label(tab.get("title", "Новая вкладка"), x + 15 + tab_w * i, y + 8, 10,
-                       width=tab_w - 34)
+            self.label(tab["title"], x + 15 + tab_w * i, y + 8, 10, width=tab_w - 33)
             self.label("×", x + tab_w * (i + 1) - 12, y + 7, 12)
-        self.label("+", x + min(w - 25, 12 + tab_w * len(tabs)), y + 6, 16)
+        self.label("+", x + min(w - 22, 12 + tab_w * len(tabs)), y + 6, 16)
         self.fill("#303134", x, y + 29, w, 33)
         self.label("‹   ›   ↻", x + 9, y + 35, 15)
-        self.fill("#202124", x + 83, y + 34, w - 121, 24, 12)
-        address = window.get("input", "") if window.get("focus") in ("address", "url") else window.get("url", "")
-        self.label("⌕  " + address + ("│" if window.get("focus") in ("address", "url") else ""),
-                   x + 96, y + 39, 10, width=w - 146)
-        self.label("⋮", x + w - 21, y + 35, 18)
+        self.fill("#202124", x + 79, y + 32, w - 112, 27, 14)
+        editing = window["focus"] == "url"
+        address = window["input"] if editing else window["url"]
+        self.field(address, window, x + 94, y + 36, w - 144, 13, "#e6e8ec", focused=editing, mono=False)
+        self.label("⋮", x + w - 21, y + 35, 16)
+        body_top = 62
         if window.get("bookmarks"):
-            self.fill("#303134", x, y + 62, w, 20)
-            self.label("★ Документация Python      ★ piling-main", x + 12, y + 65, 10)
-        body_top = 82 if window.get("bookmarks") else 62
-        self.fill("#f7f9fc", x, y + body_top, w, max(1, h - body_top))
+            self.fill("#303134", x, y + 62, w, 23)
+            self.label("    ".join(window.get("savedBookmarks", [])), x + 15, y + 65, 10, width=w - 30)
+            body_top += 23
+        self.fill("#f8f9fb", x, y + body_top, w, max(1, h - body_top))
         body = window.get("body", "")
-        active = window.get("activeTab", 0)
-        tab = tabs[active] if isinstance(active, int) and 0 <= active < len(tabs) else {}
-        self.label(tab.get("title", "Учебная страница"), x + 28, y + 87, 22, "#202124", width=w - 60, bold=True)
-        self.label(window.get("url", ""), x + 29, y + 121, 10, "#68717f", width=w - 65)
-        self.fill("#dce6f5", x + 28, y + 145, w - 58, 2)
-        for i, line in enumerate((body or tab.get("body", "")).splitlines()[:12]):
-            if y + 162 + i * 21 > y + h - 10:
+        tab = tabs[window["activeTab"]] if tabs else {}
+        scale = window.get("zoom", 100) / 100
+        left = x + min(w * .075, 72)
+        available = w - (left - x) * 2
+        top = y + body_top + 24
+        self.label(tab.get("title", "Новая вкладка"), left, top, 23 * scale, "#222936", width=available, bold=True)
+        body_field = dict(window, cursor=window.get("bodyCursor", 0), anchor=window.get("bodyAnchor", 0))
+        offset = 0
+        top += 45 * scale
+        for line in body.splitlines():
+            if top + 20 >= y + h:
                 break
-            self.label(line, x + 30, y + 162 + i * 21, 12, "#263143", width=w - 66)
+            self.field(line, body_field, left, top, available, 14 * scale, "#334154", offset=offset,
+                       focused=body_field["cursor"] != body_field["anchor"], mono=False)
+            top += 23 * scale
+            offset += self.units(line) + 1
+        top += 12
+        entries = window.get("entries", [])
+        visible = max(1, int((y + h - body_top - y - 18) / (33 * scale)))
+        if window.get("item", -1) >= 0:
+            top = min(top, max(y + body_top + 8, y + h - min(len(entries), visible) * 33 * scale))
+        start = max(0, window.get("item", -1) - visible + 1)
+        if entries and top < y + body_top + 85:
+            self.fill("#f8f9fb", x, top - 4, w, y + h - top + 4)
+        for i, entry in enumerate(entries[start:], start):
+            if top + 30 > y + h:
+                break
+            selected = i == window.get("item") and window.get("focus") == "body"
+            if selected:
+                self.fill("#d8e8ff", left - 8, top - 4, min(available + 8, 440), 31, 5)
+            self.label(entry["title"], left, top, 14 * scale, "#205496", width=available)
+            top += 34 * scale
         if window.get("zoom", 100) != 100:
             self.fill("#303134", x + w - 160, y + body_top + 2, 150, 25, 5)
             self.label("Масштаб  " + str(window["zoom"]) + "%", x + w - 147, y + body_top + 8, 10)
@@ -227,10 +397,22 @@ class DesktopView(Gtk.Widget):
         sidebar = 155 if window.get("sidebar", True) and w > 450 else 0
         if sidebar:
             self.fill("#181818", x + 35, y, sidebar, h - 19)
-            self.label("ПРОВОДНИК", x + 46, y + 10, 9, "#b9b9b9")
-            self.label("⌄ PILING-MAIN", x + 43, y + 39, 10, bold=True)
-            for i, name in enumerate(("⌄ src", "   fft.py", "   signal.py", "   vectors.py", "  README.md")):
-                self.label(name, x + 47, y + 65 + 22 * i, 11, "#c0c5ce", width=sidebar - 15)
+            self.label({"extensions": "РАСШИРЕНИЯ", "project-search": "ПОИСК" , "changes": "ИЗМЕНЕНИЯ"}.get(window.get("view"), "ПРОВОДНИК"), x + 46, y + 10, 9, "#b9b9b9")
+            view = window.get("view", "explorer")
+            tabs = window.get("tabs", [])
+            if view == "changes":
+                shown = window.get("changedFiles", [])
+                if not shown:
+                    shown = ["Изменений нет"]
+            elif view == "extensions":
+                shown = ["Python", "Pylance"]
+            elif view == "project-search":
+                shown = window.get("searchResults", [])
+            else:
+                shown = window.get("projectFiles", [])
+            self.label("PILING-MAIN" if view == "explorer" else "", x + 46, y + 36, 10, "#aeb1b8")
+            for i, name in enumerate(shown):
+                self.label(name, x + 47, y + 60 + 23 * i, 12, "#c6ccd4", width=sidebar - 15)
         editor_x = x + 35 + sidebar
         editor_w = w - 35 - sidebar
         self.fill("#181818", editor_x, y, editor_w, 28)
@@ -238,46 +420,75 @@ class DesktopView(Gtk.Widget):
         for i, tab in enumerate(tabs[:4]):
             self.fill("#252526" if i == window.get("activeTab", 0) else "#181818", editor_x + i * 115, y, 113, 28)
             self.label("Py  " + tab.get("title", "fft.py"), editor_x + 10 + i * 115, y + 8, 10, "#d5bd7c", width=100)
-        self.label("src  ›  " + window.get("title", "fft.py"), editor_x + 12, y + 35, 10, "#a2a2a2", width=editor_w - 20)
-        for i, line in enumerate(window.get("body", "").splitlines()[:18]):
-            line_y = y + 59 + i * 19
-            if line_y > y + h - 25:
-                break
-            self.label(str(i + 1), editor_x + 9, line_y, 11, "#707070", mono=True)
-            shade = "#6a9955" if line.strip().startswith("#") else "#c586c0" if line.strip().startswith(("def ", "return ", "import ", "from ")) else "#d4d4d4"
-            self.label(line, editor_x + 35, line_y, 12, shade, width=editor_w - 45, mono=True)
-        if window.get("selected"):
-            self.fill("rgba(52, 103, 168, .28)", editor_x + 31, y + 57, editor_w - 40, min(h - 80, 74))
-        cursor = max(0, window.get("cursor", 0))
-        prefix = window.get("body", "")[:cursor]
-        row_number = prefix.count("\n")
-        column = len(prefix.rsplit("\n", 1)[-1])
-        if window.get("focus", "body") == "body":
-            self.fill("#e9e9e9", editor_x + 35 + min(column, 65) * 7.2, y + 59 + min(row_number, 12) * 19, 1, 15)
-        if window.get("split"):
-            self.fill("#464646", editor_x + editor_w / 2, y + 29, 1, h - 48)
-        focus = window.get("focus", "editor")
-        if focus in ("palette", "quickopen", "quick-open", "find", "replace", "search", "project-search", "goto-line"):
-            self.fill("#303031", x + w * .2, y + 7, w * .65, 76, 5)
-            self.fill("#202020", x + w * .2 + 6, y + 13, w * .65 - 12, 24, 2)
-            self.label(("> " if focus == "palette" else "") + window.get("input", "") + "│", x + w * .2 + 12, y + 18, 12, width=w * .65 - 30)
-            self.label({"palette": "Палитра команд", "quickopen": "Перейти к файлу", "quick-open": "Перейти к файлу", "project-search": "Поиск по проекту", "goto-line": "Перейти к строке", "find": "Найти", "replace": "Найти и заменить", "search": "Поиск в файлах"}[focus],
-                       x + w * .2 + 12, y + 51, 11, "#aeb7c4")
-        if focus == "terminal":
+        name = tabs[window["activeTab"]]["title"] if tabs else ""
+        split = window.get("split", False)
+        pane = editor_w / 2 if split else editor_w
+        current = editor_x + (pane if split and window.get("group") == 1 else 0)
+        lines_visible = max(1, int(((h * .54 if window.get("panel") else h - 20) - 56) / 22))
+        def document(name, body, left, active):
+            self.label(name, left + 12, y + 35, 11, "#a2a2a2", width=pane - 22)
+            cursor = window.get("bodyCursor", 0) if active else 0
+            line_num = body.encode("utf-16-le")[:cursor * 2].decode("utf-16-le", "ignore").count("\n")
+            first = max(0, line_num - lines_visible + 1)
+            offset = 0
+            field = dict(window, cursor=cursor, anchor=window.get("bodyAnchor", cursor) if active else cursor)
+            for i, line in enumerate(body.split("\n")):
+                if i >= first + lines_visible:
+                    break
+                if i >= first:
+                    ly = y + 57 + (i - first) * 22
+                    self.label(str(i + 1), left + 9, ly, 11, "#90949b", mono=True)
+                    self.field(line, field, left + 43, ly, pane - 56, 14,
+                               "#93b484" if line.lstrip().startswith("#") else "#d2dce6", offset=offset,
+                               focused=active and (window.get("focus") == "body" or field["cursor"] != field["anchor"]))
+                offset += self.units(line) + 1
+        document(name, window.get("body", ""), current, True)
+        if split:
+            other = window.get("otherTab") or {}
+            document(other.get("title", ""), other.get("body", ""), editor_x if current != editor_x else editor_x + pane, False)
+            self.fill("#464646", editor_x + pane, y + 29, 1, max(1, (h * .54 if window.get("panel") else h - 19) - 29))
+        if window.get("panel"):
             self.fill("#181818", editor_x, y + h * .54, editor_w, h * .46 - 19)
             self.label("ТЕРМИНАЛ     ВЫВОД     ПРОБЛЕМЫ", editor_x + 10, y + h * .54 + 6, 9)
-            self.label("student@ubuntu:~/project$ " + self.scene.get("terminalInput", "") + "│", editor_x + 10, y + h * .54 + 30, 11, "#a9d4a1", width=editor_w - 20, mono=True)
+            self.terminal(window, editor_x, y + h * .54 + 27, editor_w, h * .46 - 46, embedded=True)
+        focus = window.get("focus", "editor")
+        if focus in ("palette", "quick-open", "symbols", "find", "replace-find", "replace-with", "project-search", "goto-line"):
+            titles = {"palette": "Палитра команд", "quick-open": "Открыть файл", "symbols": "Символы файла",
+                      "find": "Найти", "replace-find": "Найти для замены", "replace-with": "Заменить на",
+                      "project-search": "Поиск по проекту", "goto-line": "Перейти к строке"}
+            px, pw = x + w * .17, w * .66
+            choices = [e["title"] for e in window.get("entries", [])] if focus in ("quick-open", "symbols") else []
+            if focus == "palette":
+                choices = ["Форматировать документ", "Переключить боковую панель", "Разделить редактор"]
+            selected = window.get("optionIndex", 0)
+            visible = min(6, len(choices), max(1, int((h - 72) / 25)))
+            first = max(0, selected - visible + 1)
+            self.fill("#141519", px - 1, y + 6, pw + 2, 52 + visible * 25, 7)
+            self.fill("#2a2c31", px, y + 5, pw, 51 + visible * 25, 7)
+            self.label(titles[focus], px + 12, y + 10, 10, "#b4bfcd")
+            self.field(window.get("input", ""), window, px + 12, y + 26, pw - 24, 13, "#eef1f8", mono=False)
+            for index in range(first, min(len(choices), first + visible)):
+                iy = y + 52 + (index - first) * 25
+                if index == selected:
+                    self.fill("#234d72", px + 5, iy - 2, pw - 10, 24, 4)
+                self.label(choices[index], px + 14, iy, 13, width=pw - 28)
         self.fill("#007acc", x, y + h - 19, w, 19)
         self.label("⑂ main    ✓ 0   ⚠ 0", x + 9, y + h - 16, 9)
         self.label("UTF-8    Python    " + self.scene.get("layout", "EN"), x + max(170, w - 170), y + h - 16, 9)
 
-    def terminal(self, window, x, y, w, h):
-        self.fill("#300a24", x, y, w, h)
+    def terminal(self, window, x, y, w, h, embedded=False):
+        self.fill("#181818" if embedded else "#291726", x, y, w, h)
         terminal = self.scene.get("terminal", {})
-        output = terminal.get("output", [])
-        if isinstance(output, str):
-            output = output.splitlines()
-        lines = list(output) + ["user@ubuntu:" + terminal.get("cwd", "~") + "$ " + self.scene.get("terminalInput", window.get("input", "")) + "▏"]
-        visible = max(1, int((h - 15) / 18))
-        for i, line in enumerate(lines[-visible:]):
-            self.label(str(line), x + 12, y + 9 + i * 18, 11, "#f0e9ed", width=w - 24, mono=True)
+        visible = max(0, int((h - 38) / 21))
+        output = "\n".join(terminal.get("output", [])).splitlines()
+        recent = output[-visible:] if visible else []
+        for i, line in enumerate(recent):
+            self.label(line, x + 16, y + 9 + i * 21, 13, "#dccfdc", width=w - 32, mono=True)
+        value = self.scene.get("terminalInput", "")
+        prefix = "student@ubuntu:" + terminal.get("cwd", "~").replace("/home/student", "~", 1) + "$ "
+        if window.get("focus") == "reverse-search":
+            prefix = "Поиск «" + window.get("query", "") + "»  ›  "
+        shift = self.units(prefix)
+        field = dict(window, cursor=shift + window.get("cursor", 0), anchor=shift + window.get("anchor", 0))
+        self.field(prefix + value, field, x + 16, y + 10 + len(recent) * 21, w - 32, 13, "#e5efe4",
+                   focused=not embedded or window.get("focus") == "terminal")

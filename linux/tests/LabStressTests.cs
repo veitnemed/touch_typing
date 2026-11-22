@@ -52,7 +52,7 @@ internal static class LabStressTests
             foreach (string modifier in modifiers) Event(modifier, true);
             if (chord.Trigger != null)
             {
-                Event(chord.Trigger, true, "М");
+                Event(chord.Trigger, true, chord.Modifiers.Count() > 0 ? "М" : "");
                 int accepted = Run.Solved;
                 for (int repeat = 0; repeat < repeats; repeat++)
                 { Event(chord.Trigger, true, "V"); Check(Run.Solved == accepted, "Autorepeat cannot add a second success"); }
@@ -78,7 +78,11 @@ internal static class LabStressTests
             Release();
             var task = Run.Task;
             int before = Run.Solved;
-            if (task.Keys.Length > 0) Chord(task.Keys, reverseModifiers: Random.Next(2) == 0, repeats: 3);
+            if (task.Keys.Length > 0)
+            {
+                for (int i = 0; i < 32 && Run.Solved == before; i++)
+                    Chord(task.Keys, reverseModifiers: Random.Next(2) == 0, repeats: 3);
+            }
             else
             {
                 var window = Run.Scene.Active;
@@ -132,8 +136,11 @@ internal static class LabStressTests
                 }
                 if (cycle % 13 == 0)
                 {
-                    var choices = LabCatalog.Shortcuts.Where(task => task.Id != "overview").ToArray();
-                    driver.Chord(choices[driver.Random.Next(choices.Length)].Keys);
+                    // Interrupt the current action, then recover before resuming it.
+                    driver.Event("LAlt", true);
+                    driver.Run.Pause();
+                    driver.Run.Resume();
+                    driver.Check(driver.Run.Held.Length == 0, "Interrupted modifier cannot stick");
                     recoveries++;
                 }
                 driver.Complete();
@@ -167,9 +174,9 @@ internal static class LabStressTests
                 var paste = LabCatalog.Resolve("V", [ctrl, shift], scene);
                 Assert(paste?.Id == "terminal-paste", "Physical V resolves in " + layout);
                 Assert(scene.Apply(paste.Action) && scene.TerminalInput == "pwd", "Physical paste changes virtual terminal in " + layout);
-                var cut = LabCatalog.Resolve("X", [ctrl, shift], scene);
-                Assert(cut?.Id == "terminal-cut", "Physical X resolves in " + layout);
-                Assert(scene.Apply(cut.Action) && scene.TerminalInput.Length == 0, "Retained modifiers perform subsequent cut");
+                var erase = LabCatalog.Resolve("U", [ctrl], scene);
+                Assert(erase?.Id == "terminal-erase", "Ctrl+U resolves in " + layout);
+                Assert(scene.Apply(erase.Action) && scene.TerminalInput.Length == 0, "Readline removes command before caret");
             }
         }
         var unicode = new LabScene("code", "RU");

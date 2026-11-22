@@ -343,6 +343,11 @@ namespace TouchTypingStudio
 
             var live = Stack();
             live.Children.Add(Label("Live", 18, Ink, true));
+            foreach (var skill in library.Items("liveSkills"))
+            {
+                live.Children.Add(Label(skill.S("title") + (skill.B("confirmed") ? "  ✓" : ""), 14, Ink, true));
+                live.Children.Add(LibraryNote(skill.N("accuracy").ToString("0.#") + "% · " + skill.I("milliseconds") + " мс · самостоятельно " + skill.I("independent") + " · с подсказкой " + skill.I("hints")));
+            }
             if (attempts.Length == 0) live.Children.Add(LibraryNote("Здесь появятся результаты после первой попытки."));
             foreach (var attempted in attempts.OrderBy(item => item.D("score").N("accuracy")).ThenBy(item => item.D("skill").S("title")))
             {

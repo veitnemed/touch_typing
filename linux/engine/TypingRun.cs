@@ -10,7 +10,7 @@ internal sealed record ProjectExercise(string Path, string Name, int Tier, strin
 internal sealed class TypingRun
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private static readonly ProjectExercise[] Project = JsonSerializer.Deserialize<ProjectExercise[]>(
+    internal static readonly ProjectExercise[] Project = JsonSerializer.Deserialize<ProjectExercise[]>(
         typeof(TypingRun).Assembly.GetManifestResourceStream("TouchTyping.Engine.piling-python.json")!, Json);
     private readonly Lesson lesson;
     private readonly int variant;

@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 
 namespace TouchTypingStudio;
+
+internal sealed record LiveEvent(string Key, bool Down = false, string Text = "");
 
 internal sealed record LabPoint(int Second, bool Correct, string Key, string Task, int Milliseconds);
 
@@ -12,17 +15,42 @@ internal sealed class LabRun
     private readonly Random random;
     private readonly HashSet<string> held = [];
     private readonly List<LabPoint> points = [];
-    private readonly Queue<string> repeat = new();
+    private readonly List<LiveEvent> trace = [];
+    private bool restoring;
+    private int variant;
+    private string initialLayout;
+    private bool initialVirtual;
+    internal bool HasDraft => trace.Count > 0;
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask;
     private double? activeSince;
     private bool stopped, superUsed;
-    private int taskInBlock, completedScenarios;
+    private int taskInBlock;
     internal readonly string Session = Guid.NewGuid().ToString("N");
     internal readonly string App, Mode;
-    internal readonly int Level, TimeLimit;
-    internal readonly LabScene Scene;
+    internal readonly int Level, TimeLimit, ActionLimit;
+    internal readonly string Guidance;
+    internal bool HintVisible { get; private set; }
+    private bool hadError;
+    internal bool ShowGuide => Guidance == "guided" || HintVisible;
+    internal void Hint()
+    {
+        if (!HintVisible && !ShowGuide) trace.Add(new("@hint"));
+        HintVisible = true;
+    }
+    private int Elapsed => (int)((activeMilliseconds + (activeSince is double since ? Math.Max(0, clock() - since) : 0)) / 1000);
+    internal LabScene Scene { get; private set; }
+    private LiveMission mission;
+    private List<LiveGoal> pending;
+    private List<(LiveGoal Goal, string Before)> watching;
+    private string requestedMission;
+    private readonly string[] dockProfile;
+    private readonly string layoutBinding;
+    internal string MissionId => mission?.Id;
+    internal string PhaseTitle => mission == null || pending.Count == 0 ? "" : mission.Phases[pending[0].Phase].Title;
+    private int missionLength;
+    internal string[] Objectives => mission == null ? [] : mission.Phases.Skip(pending[0].Phase).Select(phase => phase.Title).ToArray();
     internal readonly List<ShortcutAttempt> Attempts = [];
     internal LabTask Task { get; private set; }
     internal bool Paused { get; private set; } = true;
@@ -33,30 +61,52 @@ internal sealed class LabRun
     internal int Solved { get; private set; }
     internal int Errors { get; private set; }
     internal int Block { get; private set; } = 1;
-    internal string ScenarioTitle => scenario?.Title ?? "";
-    internal int ScenarioStep => scenario == null ? 0 : scenarioStep + 1;
-    internal int ScenarioLength => scenario?.Steps.Length ?? 0;
-    private LabScenario scenario;
-    private int scenarioStep;
-    internal int Seconds => Math.Min(TimeLimit, (int)((activeMilliseconds + (activeSince is double since ? Math.Max(0, clock() - since) : 0)) / 1000));
-    internal bool Finished => stopped || Seconds >= TimeLimit;
-    internal int Remaining => Math.Max(0, TimeLimit - Seconds);
+    internal string ScenarioTitle => mission?.Title ?? "";
+    internal int ScenarioStep => missionLength - pending.Count + 1;
+    internal int ScenarioLength => missionLength;
+    internal int Seconds => TimeLimit > 0 ? Math.Min(Elapsed, TimeLimit) : Elapsed;
+    private bool ReachedLimit => TimeLimit > 0 && Seconds >= TimeLimit || ActionLimit > 0 && Solved >= ActionLimit;
+    internal bool Finished => stopped || !restoring && ReachedLimit;
+    internal int Remaining => TimeLimit == 0 ? 0 : Math.Max(0, TimeLimit - Seconds);
     internal string[] Held => held.ToArray();
 
     internal LabRun(string app, string mode, int level, int seconds, string layout, IEnumerable<ShortcutAttempt> history,
-        Random random = null, Func<double> clock = null)
+        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null)
     {
         if (!LabCatalog.Apps.Contains(app)) throw new ArgumentException("Выберите Ubuntu, Chrome, VS Code или Терминал.");
         if (mode is not ("drill" or "sandbox")) throw new ArgumentException("Выберите тренировку или учебный рабочий стол.");
-        App = app; Mode = mode; Level = Math.Clamp(level, 0, 2); TimeLimit = Math.Clamp(seconds, 1, 180);
+        App = app; Mode = mode; Level = Math.Clamp(level, 0, 2); ActionLimit = Math.Max(0, actionLimit); TimeLimit = ActionLimit > 0 ? 0 : Math.Max(seconds, 0);
+        Guidance = guidance == "independent" ? guidance : "guided";
         this.random = random ?? Random.Shared; this.clock = clock ?? (() => Environment.TickCount64);
         past = history.Where(attempt => attempt.Skill?.StartsWith("lab/" + app + "/", StringComparison.Ordinal) == true).ToArray();
-        Scene = new LabScene(app, layout); Next();
+        requestedMission = draft?.Mission ?? missionId; dockProfile = draft?.Dock ?? dock; layoutBinding = draft?.LayoutKey ?? layoutKey;
+        variant = draft?.Variant ?? -1; restoring = draft != null;
+        Scene = new LabScene(app == "workday" ? "ubuntu" : app, draft?.Layout ?? layout) { LayoutKey = layoutKey, LayoutIsVirtual = draft?.VirtualLayout ?? false };
+        if (dock != null) Scene.Dock = dock;
+        Next();
+        if (draft != null)
+        {
+            Resume();
+            foreach (var e in JsonSerializer.Deserialize<LiveEvent[]>(draft.Trace) ?? [])
+            {
+                if (e.Key.StartsWith("@held/")) { held.Add(e.Key[6..]); superUsed = e.Down; }
+                else if (e.Key == "@release") { Pause(); Resume(); }
+                else if (e.Key == "@hint") Hint();
+                else Input(e.Key, e.Down, e.Text);
+            }
+            Pause(); restoring = false; Solved = Errors = taskInBlock = 0; Block = 1; activeMilliseconds = 0;
+            points.Clear(); Attempts.Clear(); LastKey = ""; Feedback = "ready";
+        }
     }
+
+    internal LiveDraft Draft() => new() { App = App, Level = Level, Mission = MissionId, Layout = initialLayout, Guidance = Guidance,
+        Dock = Scene.Dock, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, Trace = JsonSerializer.Serialize(trace) };
 
     internal void Pause()
     {
         if (activeSince is double since) activeMilliseconds += Math.Max(0, clock() - since);
+        if (!Paused && held.Count > 0) trace.Add(new("@release"));
+        Scene.Switcher = false; Scene.SwitchTarget = null;
         activeSince = null; Paused = true; held.Clear(); superUsed = false;
     }
     internal void Resume()
@@ -72,12 +122,14 @@ internal sealed class LabRun
     internal ShortcutAttempt Input(string key, bool pressed, string text)
     {
         if (Finished || Paused || string.IsNullOrEmpty(key)) return null;
+        if (pressed == held.Contains(key)) return null;
+        trace.Add(new(key, pressed, text));
         if (!pressed)
         {
             if (!held.Remove(key)) return null;
-            if (KeyChord.Family(key) == "Alt" && Scene.Switcher) Scene.Switcher = false;
+            if (KeyChord.Family(key) == "Alt" && Scene.Switcher) { Watch(); Scene.CommitSwitch(); return Observe(key); }
             if (KeyChord.Family(key) == "Super" && !superUsed && held.Count == 0)
-                return Perform(LabCatalog.Shortcuts.First(task => task.Id == "overview"), key);
+                { Watch(); return Perform(LabCatalog.Shortcuts.First(task => task.Id == "overview"), key); }
             return null;
         }
         if (!held.Add(key)) return null;
@@ -88,57 +140,37 @@ internal sealed class LabRun
         }
         if (held.Any(item => KeyChord.Family(item) == "Super")) superUsed = true;
         bool commandModifiers = held.Any(item => KeyChord.Family(item) is "Ctrl" or "Alt" or "Super");
-        var actual = LabCatalog.Resolve(key, held, Scene);
-        if (Task.Action == "command" && actual?.Id is "terminal-erase" or "terminal-home" or "terminal-end" or
-            "terminal-kill" or "terminal-cancel" or "terminal-paste")
+        Watch();
+        var actual = Scene.Overview && !commandModifiers && key != "Esc" ? null : LabCatalog.Resolve(key, held, Scene);
+        string before = Scene.Overview ? Scene.Search : Scene.Active?.App == "terminal" || Scene.Active?.Focus is "terminal" or "reverse-search" ? Scene.TerminalInput : Scene.Active?.Input ?? "";
+        bool submitting = Task.Action == "command" && key == "Enter" && !commandModifiers;
+        bool matches = submitting && Scene.Terminal.MatchesCommand(before, Task.Text);
+        if (actual != null && !submitting)
         {
-            if (!Scene.Apply(actual.Action)) return Miss(key, "Не удалось исправить строку команды.");
-            Status = "Строка изменена. Дополните команду из задания и нажмите Enter.";
-            return null;
+            if (actual.Id == "screenshot") Scene.StartCapture(text);
+            return Perform(actual, key);
         }
-        if (Task.Keys.Length > 0)
+        bool shift = held.Any(item => KeyChord.Family(item) == "Shift");
+        bool word = held.Any(item => KeyChord.Family(item) == "Ctrl") && !held.Any(item => KeyChord.Family(item) is "Alt" or "Super");
+        bool navigation = key is "Left" or "Right" or "Home" or "End";
+        if (commandModifiers && !(word && navigation))
         {
-            if (actual != null) return Perform(actual, key);
+            // Cutting an empty selection in an ordinary field is a valid no-op.
+            if (word && key == "X" && Scene.Active?.Focus == "url") return null;
+            return Miss(key, WrongKeyMessage(key));
         }
-        if (commandModifiers) return Miss(key, "Это сочетание не выполнило действие. Проверьте задание и удерживаемые клавиши.");
-        if (Task.Keys.Length > 0) return Miss(key, WrongKeyMessage(key));
-        string entered = VirtualText(key, text);
-        string before = Scene.Overview ? Scene.Search : Scene.Active?.App == "terminal" || Scene.Active?.Focus == "terminal" ? Scene.TerminalInput : Scene.Active?.Input ?? "";
-        bool equivalentCommand = Task.Action == "command" && key == "Enter" && Scene.Terminal.MatchesCommand(before, Task.Text);
-        if (Task.Action == "command" && key == "Enter" && before != Task.Text && !equivalentCommand)
-            return Miss(key, "Команда отличается от задания. Исправьте строку и нажмите Enter.");
-        bool changed = Scene.Text(key, entered);
-        if (Task.Keys.Length == 0)
-        {
-            bool complete = Task.Action == "type-code" ? Scene.Active?.Body == Task.Text : key == "Enter" && (before == Task.Text || equivalentCommand);
-            if (complete && changed && VerifyTextResult()) return Pass(key);
-            if (key == "Enter")
-            {
-                var failed = Miss(key, "Результат не совпал с заданием. Исправьте строку и повторите Enter.");
-                return failed;
-            }
-            Status = "Ввод принят. " + (Task.Action == "type-code" ? "Допечатайте строку из задания." : "Для выполнения нажмите Enter.");
-            Feedback = "ready"; return null;
-        }
-        return Miss(key, WrongKeyMessage(key));
+        bool changed = Scene.Text(key, VirtualText(key, text), shift, word);
+        var passed = Observe(key, matches && Scene.Terminal.LastSuccess ? Task.Text : null);
+        if (passed != null) return passed;
+        if (submitting && !Scene.Terminal.LastSuccess) return Miss(key, Scene.Active.Status);
+        if (!changed) return Miss(key, "Здесь эта клавиша не выполняет действие.");
+        Feedback = "ready"; LastKey = ""; Status = ""; return null;
     }
 
     private string WrongKeyMessage(string key) =>
         Task.Keys == "F11" && key == "Print"
-            ? "Получена клавиша PrtSc, а задание ждёт F11. На MateBook попробуйте Fn+F11 или переключите Fn Lock. Снимок не сделан."
-            : "Нажата «" + key + "». Ожидается " + Task.Keys + ". Исправьте нажатие.";
-
-    private bool VerifyTextResult() => Task.Action switch
-    {
-        "command" => Scene.Terminal.LastSuccess,
-        "find-text" => Scene.Active?.Body.Contains(Task.Text, StringComparison.OrdinalIgnoreCase) == true && Scene.Active.Find == Task.Text,
-        "navigate" => Scene.Active?.Url.TrimEnd('/') == Task.Text.TrimEnd('/'),
-        "open-file" => Scene.Active?.Tab?.Title == Task.Text,
-        "launch" => Scene.Active?.App == Task.Text && !Scene.Overview,
-        "goto-number" => Scene.Active?.Cursor == 0,
-        "type-code" => Scene.Active?.Body == Task.Text,
-        _ => true
-    };
+            ? "Получена клавиша PrtSc. Для F11 на MateBook попробуйте Fn+F11 или переключите Fn Lock."
+            : !ShowGuide || Task.Keys.Length == 0 ? "Клавиша «" + key + "» здесь не выполняет действие." : "Нажата «" + key + "». Подсказка: " + Task.Keys + ".";
 
     private string VirtualText(string key, string fallback)
     {
@@ -153,11 +185,37 @@ internal sealed class LabRun
 
     private ShortcutAttempt Perform(LabTask actual, string key)
     {
-        if (actual.Id != Task.Id) return Miss(key, WrongKeyMessage(key));
+
+        if (actual.Id == "screenshot" && ShowGuide && Task.Keys == "F11") return Miss(key, WrongKeyMessage(key));
         bool eligible = LabCatalog.Available(actual, Scene);
         bool changed = eligible && Scene.Apply(actual.Action);
-        if (changed) return Pass(key);
+        if (changed && mission != null)
+        {
+            var passed = Observe(key);
+            if (passed != null) return passed;
+        }
+        if (changed) { Status = ""; LastKey = ""; Feedback = "ready"; return null; }
         return Miss(key, "Действие сейчас недоступно. " + Task.Title + ".");
+    }
+
+    private void Watch()
+    {
+        if (mission == null) return;
+        var eligible = Guidance == "independent" ? pending.TakeWhile(goal => goal.Phase == pending[0].Phase) : pending.Take(1);
+        watching = eligible.Select(goal => (goal, LiveCourse.Evidence(goal.Task, Scene))).ToList();
+    }
+
+    private ShortcutAttempt Observe(string key, string equivalentCommand = null)
+    {
+        if (mission == null || watching == null || Scene.Switcher) return null;
+        foreach (var (goal, before) in watching)
+        {
+            if (before == goal.Target || LiveCourse.Evidence(goal.Task, Scene, goal.Task == Task ? equivalentCommand : null) != goal.Target) continue;
+            Task = goal.Task;
+            pending.Remove(goal);
+            return Pass(key);
+        }
+        return null;
     }
 
     private ShortcutAttempt Pass(string key)
@@ -165,17 +223,15 @@ internal sealed class LabRun
         var attempt = Record(true, key);
         Solved++; taskInBlock++;
         string result = Task.Title + " — выполнено.";
-        if (taskInBlock == 20) { Block++; taskInBlock = 0; used.Clear(); result += " Начался следующий блок."; }
-        LastKey = ""; scenarioStep++;
-        if (scenarioStep >= scenario.Steps.Length) { completedScenarios++; scenario = null; }
+        if (taskInBlock == 20) { Block++; taskInBlock = 0; }
+        LastKey = "";
         Next(); Status = result; Feedback = "good";
         return attempt;
     }
 
     private ShortcutAttempt Miss(string key, string message)
     {
-        Errors++; Feedback = "error"; Status = message; LastKey = key;
-        if (scenario != null && !repeat.Contains(scenario.Id)) repeat.Enqueue(scenario.Id);
+        hadError = true; Errors++; Feedback = "error"; Status = message; LastKey = key;
         return Record(false, key);
     }
 
@@ -183,50 +239,54 @@ internal sealed class LabRun
     {
         int milliseconds = (int)Math.Clamp(clock() - sinceTask, 1, 60000);
         var attempt = new ShortcutAttempt { Skill = "lab/" + App + "/" + Task.Id, Session = Session, Verification = "lab-scene",
-            Date = DateTime.Now, Correct = correct, Milliseconds = milliseconds, MistakeKey = correct ? null : key, InputMode = "exact" };
+            Date = DateTime.Now, Correct = correct, Milliseconds = milliseconds, MistakeKey = correct ? null : key, InputMode = "exact", Mission = MissionId, Assisted = ShowGuide, Independent = Guidance == "independent", FirstTry = correct && !hadError };
         Attempts.Add(attempt); points.Add(new LabPoint(Seconds, correct, key, Task.Id, milliseconds));
         return attempt;
     }
 
     private void Next()
     {
-        if (scenario == null)
+        var courses = LiveCourse.Missions.Where(m => m.App == App && m.Level == Level).ToArray();
+        if (mission == null || pending.Count == 0)
         {
-            var candidates = LabScenarios.Eligible(App, Scene, Level);
-            if (candidates.Length == 0) throw new InvalidOperationException("В учебной сцене нет доступных связанных заданий.");
-            LabScenario weak = null;
-            if (completedScenarios % 3 == 2)
-                for (int index = repeat.Count; index > 0; index--)
-                {
-                    string id = repeat.Dequeue();
-                    weak = candidates.FirstOrDefault(item => item.Id == id);
-                    if (weak != null) break;
-                    repeat.Enqueue(id);
-                }
-            var unseen = candidates.Where(item => !used.Contains(item.Id)).ToArray();
-            if (unseen.Length == 0) unseen = candidates;
-            var errors = past.Where(attempt => !attempt.Correct).GroupBy(attempt => attempt.Skill)
-                .ToDictionary(group => group.Key, group => group.Count());
-            scenario = weak ?? unseen.OrderBy(item => random.NextDouble() / (1 + item.Steps.Sum(step =>
-                errors.GetValueOrDefault("lab/" + App + "/" + step.Id)))).First();
-            scenarioStep = 0; used.Add(scenario.Id);
+            var last = mission?.Id;
+            var available = courses.Where(m => !used.Contains(m.Id)).ToArray();
+            if (available.Length == 0) { used.Clear(); available = courses.Where(m => m.Id != last || courses.Length == 1).ToArray(); }
+            var recent = past.Concat(Attempts).Where(a => a.Mission != null).Select(a => a.Mission).Reverse().Distinct().Take(2).ToHashSet();
+            var fresh = available.Where(m => !recent.Contains(m.Id)).ToArray();
+            if (fresh.Length > 0) available = fresh;
+            var weak = past.Concat(Attempts).TakeLast(60).Where(a => !a.Correct).Select(a => a.Skill.Split('/').Last()).ToHashSet();
+            mission = string.IsNullOrEmpty(requestedMission) ? available.OrderBy(m => random.NextDouble() /
+                (1 + m.Phases.Sum(phase => phase.Route.Split(' ').Count(weak.Contains)))).First()
+                : courses.FirstOrDefault(m => m.Id == requestedMission) ?? throw new ArgumentException("Поручение недоступно для выбранного уровня.");
+            if (!restoring) variant = random.Next(3);
+            requestedMission = null; used.Add(mission.Id); trace.Clear();
+            initialLayout = Scene.Layout;
+            initialVirtual = Scene.LayoutIsVirtual;
+            foreach (string key in held) trace.Add(new("@held/" + key, superUsed));
+            Scene = new LabScene(App == "workday" ? "ubuntu" : App, initialLayout) { LayoutKey = layoutBinding, LayoutIsVirtual = initialVirtual };
+            if (dockProfile != null) Scene.Dock = dockProfile;
+            Scene.PrepareCase(variant, App);
+            pending = LiveCourse.Compile(mission, Scene);
+            missionLength = pending.Count;
+            Scene.PrepareHistory(pending.Where(goal => goal.Task.Action == "command" && goal.Task.Text.Length > 12).Select(goal => goal.Task.Text));
         }
-        Task = scenario.Steps[scenarioStep]; sinceTask = clock();
-        if (Task.Action == "command") { Scene.TerminalInput = ""; Scene.Active.Cursor = 0; }
+        Task = pending[0].Task;
+        sinceTask = clock(); HintVisible = hadError = false;
     }
 
     internal LabSessionRecord SessionRecord() => new() { Session = Session, App = App, Mode = Mode, Level = Level, Date = DateTime.Now,
-        Seconds = Seconds, Solved = Solved, Errors = Errors, Completed = TimeLimit == 180 && Seconds >= 180 };
+        Seconds = Seconds, Solved = Solved, Errors = Errors, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Guidance = Guidance, Completed = ReachedLimit };
 
     internal object Result(IEnumerable<LabSessionRecord> sessions, IEnumerable<LabSessionRecord> records = null)
     {
-        var matching = sessions.Concat(records ?? []).GroupBy(item => item.Session).Select(group => group.First()).Where(item => item.App == App && item.Mode == Mode && item.Level == Level).ToArray();
+        var matching = sessions.Concat(records ?? []).GroupBy(item => item.Session).Select(group => group.First()).Where(item => item.App == App && item.Mode == Mode && item.Level == Level && item.TimeLimit == TimeLimit && item.ActionLimit == ActionLimit && item.Guidance == Guidance).ToArray();
         var previousBest = matching.Where(item => item.Session != Session && item.Completed)
             .OrderByDescending(item => item.Solved).ThenBy(item => item.Errors).FirstOrDefault();
         int previousRecord = previousBest?.Solved ?? 0;
-        bool complete = TimeLimit == 180 && Seconds >= 180;
+        bool complete = ReachedLimit;
         bool better = complete && (previousBest == null || Solved > previousBest.Solved || Solved == previousBest.Solved && Errors < previousBest.Errors);
-        return new { App, Mode, Level, Solved, Errors, Seconds, completed = complete,
+        return new { App, Mode, Level, Solved, Errors, Seconds, TimeLimit, ActionLimit, Guidance, completed = complete,
             accuracy = Solved + Errors == 0 ? 0 : Math.Round(100.0 * Solved / (Solved + Errors), 1),
             record = Math.Max(previousRecord, complete ? Solved : 0), previousRecord, previousRecordErrors = previousBest?.Errors ?? 0, newRecord = better,
             series = points, weak = points.Where(point => !point.Correct).GroupBy(point => point.Task).Select(group =>
@@ -244,9 +304,9 @@ internal static class LabSessionRecords
         profile.LabSessions.Add(record);
         // Read legacy history before pruning so its best completed run survives migration.
         profile.LabRecords = profile.LabRecords.Concat(profile.LabSessions)
-            .Where(item => item.Completed && item.Seconds >= 180 && LabCatalog.Apps.Contains(item.App) &&
+            .Where(item => item.Completed && (item.ActionLimit > 0 ? item.Solved >= item.ActionLimit : item.TimeLimit > 0 && item.Seconds >= item.TimeLimit) && LabCatalog.Apps.Contains(item.App) &&
                 item.Mode is "drill" or "sandbox" && item.Level is >= 0 and <= 2)
-            .GroupBy(item => new { item.App, item.Mode, item.Level })
+            .GroupBy(item => new { item.App, item.Mode, item.Level, item.Guidance, item.TimeLimit, item.ActionLimit })
             .Select(group => group.OrderByDescending(item => item.Solved).ThenBy(item => item.Errors)
                 .ThenBy(item => item.Date).First()).ToList();
         if (profile.LabSessions.Count > 500)

@@ -1,5 +1,7 @@
 using System;
 using System.Globalization;
+using System.IO;
+using System.Windows.Media.Imaging;
 using System.Linq;
 using System.Windows;
 using System.Windows.Media;
@@ -28,6 +30,7 @@ namespace TouchTypingStudio
                 (app == "chrome" ? "Учебный Chrome" : app == "code" ? "Учебный VS Code" : "Учебный рабочий стол Ubuntu") +
                 ". Раскладка " + scene.S("layout") + ". " +
                 string.Join(". ", scene.Items("windows").Where(w => w.B("active")).Select(w => w.S("title") + ". " + w.S("status"))));
+            System.Windows.Automation.AutomationProperties.SetHelpText(this, scene.S("terminalInput"));
             InvalidateVisual();
         }
 
@@ -35,7 +38,8 @@ namespace TouchTypingStudio
         {
             if (ActualWidth < 1 || ActualHeight < 1) return;
             context = dc;
-            if (classApp == "chrome" || classApp == "code")
+            if ((classApp == "chrome" || classApp == "code") && !scene.B("overview") && !scene.B("showDesktop") && !scene.B("switcher") &&
+                scene.Items("windows").Any(item => item.B("active") && item.S("app") == classApp && item.S("state") != "minimized"))
             {
                 DrawImmersive(dc);
                 context = null;
@@ -137,7 +141,7 @@ namespace TouchTypingStudio
         private void DrawDock()
         {
             Rounded(6, 122, 49, 278, "#E819171F", 13);
-            string[] apps = { "chrome", "code", "terminal", "files", "apps" };
+            string[] apps = scene.Items("dock").Select(item => item.Value()).ToArray();
             for (int i = 0; i < apps.Length; i++)
             {
                 Icon(apps[i], 16, 134 + i * 51, 29);
@@ -183,8 +187,8 @@ namespace TouchTypingStudio
             Rectangle(0, 64, w, 38, "#414652");
             Text("‹   ›   ⟳", 13, 71, 17, "#CDD5E2");
             Rounded(95, 70, w - 142, 26, window.S("focus") == "url" ? "#D8E9FD" : "#252A34", 13);
-            Text("◈   " + (window.S("focus") == "url" ? window.S("input", window.S("url")) : window.S("url", "https://practice.local")),
-                109, 76, 11, window.S("focus") == "url" ? "#1F3E5F" : "#D4DCEB", w - 180);
+            Field(window.S("focus") == "url" ? window.S("input") : window.S("url"), window, 109, 76, w - 180, 12,
+                window.S("focus") == "url" ? "#1F3E5F" : "#D4DCEB", 0, window.S("focus") == "url");
             Text("⋮", w - 24, 68, 21, "#D6DDE9");
             double left = Math.Max(28, w * .075);
             double pageScale = window.N("zoom", 100) / 100;
@@ -194,8 +198,24 @@ namespace TouchTypingStudio
             Text(active == null ? "Рабочие материалы" : active.S("title", "Рабочие материалы"), left, 122, 25 * pageScale, "#202A3B", w - left * 2);
             Text(window.S("url"), left, 159, 11, "#52657C", w - left * 2);
             Rectangle(left, 185, Math.Max(10, w - left * 2), 1, "#E1E7EF");
-            Text(body.Length > 0 ? body : "Документация проекта\n\nОткройте нужную вкладку или страницу.\nВсе действия выполняются внутри учебного рабочего стола.",
-                left, 200, 14 * pageScale, "#34445D", w - left * 2, 7);
+            int offset = 0;
+            double lineY = 194;
+            foreach (string line in body.Split('\n'))
+            {
+                Field(line, window, left, lineY, w - left * 2, 14 * pageScale, "#34445D", offset,
+                    window.I("bodyAnchor") != window.I("bodyCursor"), true);
+                lineY += 22 * pageScale; offset += line.Length + 1;
+            }
+            lineY += 15;
+            int index = 0;
+            foreach (var entry in window.Items("entries"))
+            {
+                if (lineY + 22 > h - 24) break;
+                if (index == window.I("item", -1) && window.S("focus") == "body")
+                    Rounded(left - 7, lineY - 4, Math.Min(440, w - left * 2), 28, "#D8E8FF", 5);
+                Text(entry.S("title"), left, lineY, 14 * pageScale, "#205496", w - left * 2);
+                lineY += 33 * pageScale; index++;
+            }
             if (window.B("bookmarks"))
             {
                 Rectangle(0, 101, w, 25, "#E5EAF0");
@@ -225,8 +245,14 @@ namespace TouchTypingStudio
             if (sidebar)
             {
                 Rectangle(44, 29, x - 44, h - 50, "#252526");
-                Text("EXPLORER", 60, 44, 10, "#B4BAC4");
-                Text("⌄  PILING-MAIN\n  ⌄  src\n       ◇  main.py\n       ◇  signals.py\n       ◇  config.py\n  ›  tests\n     README.md\n     requirements.txt", 55, 76, 12, "#C6CDD5", x - 62, 12, true);
+                string view = window.S("view");
+                string heading = view == "changes" ? "ИЗМЕНЕНИЯ" : view == "project-search" ? "ПОИСК" :
+                    view == "extensions" ? "РАСШИРЕНИЯ" : "PILING-MAIN";
+                Text(heading, 58, 44, 11, "#B4BAC4");
+                var names = view == "extensions" ? new[] { "Python", "Pylance" } :
+                    window.Items(view == "changes" ? "changedFiles" : view == "project-search" ? "searchResults" : "projectFiles").Select(item => item.Value()).ToArray();
+                for (int i = 0; i < names.Length && 78 + i * 23 < h - 42; i++)
+                    Text(names[i], 58, 76 + i * 23, 12, "#C6CDD5", x - 66);
             }
             var tabs = window.Items("tabs").ToArray();
             if (tabs.Length == 0) tabs = new[] { new Data(new System.Collections.Generic.Dictionary<string, object> { { "title", "main.py" } }) };
@@ -240,60 +266,66 @@ namespace TouchTypingStudio
                 x + 15, 69, 10, "#8F98A7", w - x - 25);
             string code = window.S("body");
             if (window.S("focus") == "editor" && window.S("input").Length > 0) code = window.S("input");
-            if (code.Length == 0) code = "import numpy as np\n\ndef fft(signal):\n    fft_values = np.fft.fft(signal)\n    return np.fft.fftshift(fft_values)\n\nresult = fft(signal)";
+
             string[] lines = code.Split('\n');
             double editorWidth = window.B("split") ? (w - x) / 2 : w - x;
-            for (int i = 0; i < Math.Min(lines.Length, 13); i++)
+            double primary = x + (window.B("split") && window.I("group") == 1 ? editorWidth : 0);
+            int caret = Math.Max(0, Math.Min(window.I("bodyCursor"), code.Length));
+            int caretLine = code.Substring(0, caret).Count(c => c == '\n');
+            int visible = Math.Max(1, (int)(((window.B("panel") ? h * .55 : h - 22) - 92) / 21));
+            int first = window.S("focus") == "body" ? Math.Max(0, caretLine - visible + 1) : 0;
+            int offset = 0;
+            for (int i = 0; i < Math.Min(lines.Length, first + visible); i++)
             {
-                Text((i + 1).ToString(), x + 10, 94 + i * 20, 11, "#707987", 24, 1, true);
-                string line = lines[i];
-                string ink = line.TrimStart().StartsWith("#") ? "#6A9955" : line.Contains("def ") || line.Contains("import ") ? "#C586C0" : "#C7D9E7";
-                Text(line, x + 42, 94 + i * 20, 12, ink, editorWidth - 48, 1, true);
+                if (i >= first)
+                {
+                    double row = 94 + (i - first) * 21;
+                    Text((i + 1).ToString(), primary + 10, row, 11, "#89909A", 24, 1, true);
+                    Field(lines[i], window, primary + 42, row, editorWidth - 48, 13,
+                        lines[i].TrimStart().StartsWith("#") ? "#93B484" : "#D2DCE6", offset, window.S("focus") == "body" || window.I("bodyAnchor") != window.I("bodyCursor"), true);
+                }
+                offset += lines[i].Length + 1;
             }
-            if (window.B("selected"))
-                Rectangle(x + 40, 93, Math.Max(20, Math.Min(editorWidth - 50, 420)), 20, "#664F7099");
-            if (window.S("focus") == "body")
-            {
-                int cursor = window.I("cursor");
-                int before = Math.Min(cursor, code.Length);
-                string prefix = code.Substring(0, before);
-                int line = prefix.Count(character => character == '\n');
-                int column = prefix.Length - prefix.LastIndexOf('\n') - 1;
-                Rectangle(x + 42 + Math.Min(70, column) * 7.2, 95 + Math.Min(12, line) * 20, 1, 15, "#F0F0F0");
-            }
-            if (window.S("focus") == "terminal")
+            if (window.B("panel"))
             {
                 double terminalY = Math.Max(155, h * .55);
                 Rectangle(x, terminalY, w - x, h - terminalY - 21, "#181818");
                 Text("TERMINAL      OUTPUT      PROBLEMS", x + 15, terminalY + 8, 10, "#AAB0BD");
                 string output = string.Join("\n", scene.D("terminal").Items("output").Select(line => line.Value()).Reverse().Take(4).Reverse());
                 Text(output, x + 15, terminalY + 30, 11, "#B7C5D4", w - x - 30, 4, true);
-                Text("student@ubuntu:~$ " + scene.S("terminalInput") + "▌", x + 15, h - 47, 12, "#E9EFF6", w - x - 30, 1, true);
+                TerminalField(window, x + 15, h - 47, w - x - 30);
             }
             if (window.B("split"))
             {
-                Rectangle(x + editorWidth, 60, 1, h - 81, "#414854");
-                Text("◇  main.py", x + editorWidth + 13, 76, 11, "#BFD0DF");
-                Text(code, x + editorWidth + 20, 105, 12, "#C7D9E7", editorWidth - 35, 11, true);
+                double secondary = primary == x ? x + editorWidth : x;
+                Rectangle(x + editorWidth, 60, 1, Math.Max(1, (window.B("panel") ? h * .55 : h - 21) - 60), "#414854");
+                Data other = window.D("otherTab");
+                Text(other.S("title"), secondary + 14, 73, 11, "#BFD0DF", editorWidth - 28);
+                Text(other.S("body"), secondary + 18, 94, 12, "#C7D9E7", editorWidth - 32, visible, true);
             }
             Rectangle(0, h - 21, w, 21, "#0879B9");
             Text("⑂ main    ◉ 0   ⚠ 0      " + window.S("status", "Готово"), 13, h - 17, 10, "#FFFFFF", w - 205);
             Text("UTF-8    Python    ◉", w - 164, h - 17, 10, "#FFFFFF");
             string focus = window.S("focus");
-            if (focus == "palette" || focus == "quick-open" || focus == "goto-line")
+            if (new[] { "palette", "quick-open", "goto-line", "symbols", "find", "project-search", "replace-find", "replace-with" }.Contains(focus))
             {
+                string title = focus == "palette" ? "Палитра команд" : focus == "symbols" ? "Символы файла" :
+                    focus == "replace-find" ? "Найти для замены" : focus == "replace-with" ? "Заменить на" :
+                    focus == "quick-open" ? "Открыть файл" : focus == "goto-line" ? "Перейти к строке" : "Поиск";
+                string[] options = focus == "palette" ? new[] { "Форматировать документ", "Переключить боковую панель", "Разделить редактор" } :
+                    window.Items("entries").Select(item => item.S("title")).ToArray();
+                int index = window.I("optionIndex"), shown = Math.Min(options.Length, Math.Min(6, Math.Max(1, (int)((h - 115) / 25))));
+                int start = Math.Max(0, index - shown + 1);
                 double pw = Math.Min(570, w - 105), px = (w - pw) / 2;
-                Rounded(px, 40, pw, 166, "#252526", 5);
-                Rounded(px + 7, 47, pw - 14, 31, "#3C3C3C", 3);
-                Text((focus == "palette" ? "> " : "⌕  ") + window.S("input"), px + 16, 57, 13, "#EEEEF3", pw - 40);
-                Rectangle(px + 7, 84, pw - 14, 26, "#094771");
-                Text(focus == "quick-open" ? "◇  main.py          src" : "Форматировать документ", px + 17, 91, 12, "#FFFFFF");
-                Text(focus == "quick-open" ? "◇  signals.py\n◇  config.py\nREADME.md" : "Разделить редактор\nПоказать терминал\nПереключить боковую панель", px + 17, 122, 12, "#C8CED8", pw - 35, 3);
-            }
-            else if (focus == "find" || focus == "project-search" || window.S("find").Length > 0)
-            {
-                Rounded(Math.Max(x + 4, w - 362), 63, Math.Min(345, w - x - 8), 36, "#252526", 3);
-                Text("⌕  " + (focus == "find" ? window.S("input") : window.S("find")), Math.Max(x + 15, w - 348), 74, 12, "#DDE2EB", 260);
+                Rounded(px, 38, pw, 60 + shown * 25, "#292B30", 6);
+                Text(title, px + 13, 45, 10, "#C0C4CD", pw - 26);
+                Field(window.S("input"), window, px + 13, 64, pw - 26, 14, "#FFFFFF", 0, true);
+                for (int i = start; i < Math.Min(start + shown, options.Length); i++)
+                {
+                    double row = 94 + (i - start) * 25;
+                    if (i == index) Rounded(px + 5, row - 3, pw - 10, 24, "#234D72", 3);
+                    Text(options[i], px + 15, row, 13, "#EEEEF3", pw - 30);
+                }
             }
         }
 
@@ -305,32 +337,62 @@ namespace TouchTypingStudio
             string input = scene.S("terminalInput");
             string cwd = scene.D("terminal").S("cwd", "~/piling-main");
             double y = Math.Min(h - 45, 72 + Math.Min(11, output.Split('\n').Length) * 20);
-            Text("learner@ubuntu", 16, y, 13, "#8EE087", 180, 1, true);
-            Text(":" + cwd + "$ " + input + "▌", 146, y, 13, "#F2E8F1", w - 162, 1, true);
+            TerminalField(window, 16, y, w - 32);
             if (window.S("status").Length > 0) Text(window.S("status"), 16, h - 25, 11, "#C9B3C5", w - 35);
+        }
+
+        internal string CapturePng()
+        {
+            if (ActualWidth < 1 || ActualHeight < 1) return "";
+            double scale = Math.Min(1, 500 / ActualWidth);
+            var bitmap = new RenderTargetBitmap((int)Math.Ceiling(ActualWidth * scale), (int)Math.Ceiling(ActualHeight * scale),
+                96 * scale, 96 * scale, PixelFormats.Pbgra32);
+            bitmap.Render(this);
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            using (var stream = new MemoryStream())
+            {
+                encoder.Save(stream);
+                return Convert.ToBase64String(stream.ToArray());
+            }
         }
 
         private void DrawFiles(Data window, double w, double h)
         {
+            if (window.S("focus") == "image-preview" && window.S("imagePreview").StartsWith("data:image/png;base64,"))
+            {
+                var bytes = Convert.FromBase64String(window.S("imagePreview").Substring("data:image/png;base64,".Length));
+                using (var stream = new MemoryStream(bytes))
+                {
+                    var bitmap = BitmapFrame.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+                    double scale = Math.Min((w - 20) / bitmap.PixelWidth, (h - 48) / bitmap.PixelHeight);
+                    double iw = bitmap.PixelWidth * scale, ih = bitmap.PixelHeight * scale;
+                    context.DrawImage(bitmap, new Rect((w - iw) / 2, (h + 29 - ih) / 2, iw, ih));
+                }
+                return;
+            }
             Rectangle(0, 29, w, h - 29, "#F7F7F8");
             Rectangle(0, 29, 145, h - 29, "#E7E7EA");
             Text("Недавние\nИзбранное\nДомашняя папка\nДокументы\nЗагрузки\nКорзина", 14, 57, 12, "#494B54", 126, 10);
-            Text("⌂  Домашняя папка  ›  piling-main", 164, 48, 13, "#424550", w - 179);
-            string[] files = { "src", "tests", "README.md", "main.py", "report.txt", "requirements.txt" };
-            for (int i = 0; i < files.Length; i++)
+            Text(window.S("folder").Replace("/home/student", "Домашняя папка").Replace("/", "  ›  "), 164, 48, 13, "#424550", w - 179);
+            var entries = window.Items("entries").ToArray();
+            int visible = Math.Max(1, (int)((h - 90) / 35));
+            int first = Math.Max(0, window.I("item", -1) - visible + 1);
+            for (int i = first; i < Math.Min(first + visible, entries.Length); i++)
             {
-                double x = 180 + (i % 3) * 190, y = 100 + i / 3 * 110;
-                Rounded(x, y, 52, 42, i < 2 ? "#D89357" : "#E0E7F0", 5);
-                Text(i < 2 ? "▰" : "≡", x + 15, y + 5, 24, i < 2 ? "#F5C591" : "#6B8FB6");
-                Text(files[i], x - 14, y + 55, 11, "#454C59", 160);
+                double y = 87 + (i - first) * 35;
+                if (i == window.I("item", -1)) Rounded(154, y - 4, w - 166, 31, "#F1D9C9", 5);
+                Rounded(166, y + 3, 22, 16, entries[i].S("kind") == "folder" ? "#D99A56" : "#9DADBD", 3);
+                Text(entries[i].S("title"), 200, y, 14, "#37302C", w - 212);
             }
+            if (entries.Length == 0) Text("Папка пуста", 166, 90, 14, "#817872");
         }
 
         private void DrawOverview()
         {
             Rectangle(0, 28, 1200, 492, "#EF17202B");
             Rounded(360, 51, 480, 38, "#3C4455", 18);
-            Text("⌕  Введите запрос для поиска", 389, 61, 14, "#BEC9DA");
+            Text(scene.S("search").Length == 0 ? "Поиск приложений" : scene.S("search"), 389, 61, 14, "#BEC9DA");
             int i = 0;
             foreach (var window in scene.Items("windows").Where(w => w.S("state") != "closed"))
             {
@@ -361,11 +423,11 @@ namespace TouchTypingStudio
         private void DrawSwitcher()
         {
             Rounded(338, 185, 524, 143, "#F4181B23", 15);
-            var windows = scene.Items("windows").Where(w => w.S("state") != "closed").Take(4).ToArray();
+            var windows = scene.Items("windows").Where(w => w.I("workspace") == scene.I("workspace")).Take(4).ToArray();
             for (int i = 0; i < windows.Length; i++)
             {
                 double x = 354 + i * 124;
-                if (windows[i].B("active")) Rounded(x, 200, 111, 111, "#4F485E", 9);
+                if (windows[i].S("id") == scene.S("switchTarget")) Rounded(x, 200, 111, 111, "#4F485E", 9);
                 Icon(windows[i].S("app"), x + 35, 216, 41);
                 Text(AppTitle(windows[i].S("app")), x + 9, 280, 11, "#EAE5F0", 101);
             }
@@ -399,6 +461,52 @@ namespace TouchTypingStudio
         { context.DrawRectangle(Ui.Brush(fill), null, new Rect(x, y, Math.Max(0, w), Math.Max(0, h))); }
         private void Rounded(double x, double y, double w, double h, string fill, double radius)
         { context.DrawRoundedRectangle(Ui.Brush(fill), null, new Rect(x, y, Math.Max(0, w), Math.Max(0, h)), radius, radius); }
+        private void TerminalField(Data window, double x, double y, double width)
+        {
+            string prompt = "student@ubuntu:" + scene.D("terminal").S("cwd", "~").Replace("/home/student", "~") + "$ ";
+            Field(prompt + scene.S("terminalInput"), window, x, y, width, 13, "#E9EFF6", -prompt.Length,
+                window.S("app") == "terminal" || window.S("focus") == "terminal");
+        }
+
+        private void Field(string value, Data window, double x, double y, double width, double size, string ink, int offset, bool focused, bool document = false)
+        {
+            if (width <= 0) return;
+            var line = new FormattedText(value, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, mono,
+                size, Ui.Brush(ink), VisualTreeHelper.GetDpi(this).PixelsPerDip);
+            int caret = window.I(document ? "bodyCursor" : "cursor") - offset;
+            int anchor = window.I(document ? "bodyAnchor" : "anchor") - offset;
+            int start = Math.Max(0, Math.Min(value.Length, Math.Min(caret, anchor)));
+            int end = Math.Max(0, Math.Min(value.Length, Math.Max(caret, anchor)));
+            bool drawCaret = focused && caret >= 0 && caret <= value.Length;
+            double cx = 0;
+            if (drawCaret && caret > 0)
+            {
+                var prefix = new FormattedText(value.Substring(0, caret), CultureInfo.CurrentUICulture,
+                    FlowDirection.LeftToRight, mono, size, Ui.Brush(ink), VisualTreeHelper.GetDpi(this).PixelsPerDip);
+                cx = prefix.WidthIncludingTrailingWhitespace;
+            }
+            context.PushClip(new RectangleGeometry(new Rect(x, y, width, size * 1.7)));
+            x -= Math.Max(0, cx - width + 3);
+            var origin = new Point(x, y);
+            if (focused && document)
+            {
+                foreach (Data match in window.Items("matches"))
+                {
+                    int mark = match.Integer() - offset, length = Math.Abs(anchor - caret);
+                    int lo = Math.Max(0, mark), hi = Math.Min(value.Length, mark + length);
+                    if (hi > lo) context.DrawGeometry(Ui.Brush("#385677"), null, line.BuildHighlightGeometry(origin, lo, hi - lo));
+                }
+            }
+            if (focused && end > start)
+            {
+                context.DrawGeometry(Ui.Brush("#35629B"), null, line.BuildHighlightGeometry(origin, start, end - start));
+                line.SetForegroundBrush(Brushes.White, start, end - start);
+            }
+            context.DrawText(line, origin);
+            if (drawCaret) Rectangle(x + cx, y + 1, 1.5, size * 1.3, ink);
+            context.Pop();
+        }
+
         private void Text(string value, double x, double y, double size, string ink, double width = 1200, int lines = 1, bool code = false)
         {
             if (width <= 0 || string.IsNullOrEmpty(value)) return;

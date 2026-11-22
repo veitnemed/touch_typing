@@ -59,7 +59,7 @@ def run_checks(args):
     environment.update(PYTHONPATH=os.pathsep.join((str(ROOT), str(tests))), WAYLAND_DISPLAY="training-qa",
                        TOUCH_TYPING_QA_OUTPUT=str(args.output), TOUCH_TYPING_QA_SEED=str(args.seed))
     report = {"status": "running", "started": datetime.now(timezone.utc).isoformat(), "seed": args.seed,
-              "isolated": True, "platform": "linux", "windowsNative": "requires Test-Live-UI.ps1 on Windows", "checks": [], "coverage": ["physical EN/RU keys", "four classes",
+              "isolated": True, "platform": "linux", "windowsNative": "requires Test-Live-UI.ps1 on Windows", "checks": [], "coverage": ["physical EN/RU keys", "four application classes and integrated workday", "51 complete missions", "selection pixels and caret", "untimed and count-limited sessions",
               "forms and confirmations", "held modifiers", "capture lifecycle", "single left Windows key",
               "connected scenarios", "shortcut-only Chrome and VS Code", "F11 versus Print",
               "Space resumes and Enter stays in the scene", "independent wrong-key highlight"]}
@@ -76,6 +76,8 @@ def run_checks(args):
                 completed = subprocess.run(command, env=environment, stdout=output,
                                            stderr=subprocess.STDOUT, timeout=timeout)
             code = completed.returncode
+            if code == 0 and "Traceback (most recent call last)" in destination.read_text(errors="replace"):
+                code = 1
         except subprocess.TimeoutExpired:
             code = 124
         entry = {"name": name, "status": "passed" if code == 0 else "failed", "exitCode": code,
@@ -102,6 +104,7 @@ def run_checks(args):
                 raise RuntimeError("Полная проверка требует исходники и SDK .NET 10.")
             for name in projects:
                 check(name, [dotnet, "run", "--project", str(tests / (name + ".csproj"))], timeout=300)
+        check("missions", [sys.executable, str(tests / "test_live_missions.py")], timeout=300)
         check("protocol", [sys.executable, str(tests / "test_practice.py")])
         subprocess.run(["gsettings", "set", "org.gnome.desktop.input-sources", "sources",
                         "[('xkb', 'us'), ('xkb', 'ru')]"], env=environment, check=True)

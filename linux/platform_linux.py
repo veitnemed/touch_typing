@@ -96,7 +96,7 @@ class InputSources:
         schema_source = Gio.SettingsSchemaSource.get_default()
         self.wm = "org.gnome.desktop.wm.keybindings"
         self.languages = "org.gnome.desktop.input-sources"
-        self.settings = {name: Gio.Settings.new(name) for name in (self.wm, self.languages)
+        self.settings = {name: Gio.Settings.new(name) for name in (self.wm, self.languages, "org.gnome.shell")
                          if schema_source and schema_source.lookup(name, True)}
 
     @staticmethod
@@ -118,6 +118,15 @@ class InputSources:
         def first(key):
             return next((chord for raw in wm.get_strv(key) if (chord := self.as_chord(raw))), "")
         return first("switch-input-source"), first("switch-input-source-backward")
+
+    def dock(self):
+        shell = self.settings.get("org.gnome.shell")
+        if shell is None:
+            return ["chrome", "code", "terminal", "files"]
+        known = {"org.gnome.Nautilus": "files", "google-chrome": "chrome", "chromium": "chrome",
+                 "org.gnome.Ptyxis": "terminal", "org.gnome.Terminal": "terminal",
+                 "org.gnome.Console": "terminal", "code": "code", "com.microsoft.VSCode": "code"}
+        return [known.get(name.removesuffix(".desktop"), name.removesuffix(".desktop")) for name in shell.get_strv("favorite-apps")[:9]]
 
     def guess(self):
         settings = self.settings.get(self.languages)

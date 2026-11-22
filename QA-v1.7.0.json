@@ -1,0 +1,86 @@
+{
+  "version": "1.7.0",
+  "linux": {
+    "platform": "Ubuntu · GTK 4 / GNOME Wayland",
+    "native": [
+      {
+        "name": "missions",
+        "status": "passed",
+        "exitCode": 0,
+        "seconds": 62.72,
+        "log": "missions.log"
+      },
+      {
+        "name": "protocol",
+        "status": "passed",
+        "exitCode": 0,
+        "seconds": 9.11,
+        "log": "protocol.log"
+      },
+      {
+        "name": "native-small",
+        "status": "passed",
+        "exitCode": 0,
+        "seconds": 29.73,
+        "log": "native-small.log"
+      },
+      {
+        "name": "ui-controls",
+        "status": "passed",
+        "exitCode": 0,
+        "seconds": 16.47,
+        "log": "ui-controls.log"
+      },
+      {
+        "name": "capture-denied",
+        "status": "passed",
+        "exitCode": 0,
+        "seconds": 5.39,
+        "log": "capture-denied.log"
+      },
+      {
+        "name": "legacy-window",
+        "status": "passed",
+        "exitCode": 0,
+        "seconds": 9.0,
+        "log": "legacy-window.log"
+      },
+      {
+        "name": "native-180-seconds",
+        "status": "passed",
+        "exitCode": 0,
+        "seconds": 182.55,
+        "log": "native-180-seconds.log"
+      }
+    ],
+    "desktopLauncher": "installed, validated and launched via gio on the desktop session",
+    "keyboard": "US/RU, right and left Ctrl, system shortcuts with permission, Fn event mapping"
+  },
+  "routes": {
+    "missions": 51,
+    "classMissions": 48,
+    "crossApplication": 3,
+    "minimumSteps": 20,
+    "validation": "Every route replayed using physical events. Each course also compiled for 3 fixture variants in EN and RU. Cross-application checks compare downloaded, moved and saved file contents with shell output."
+  },
+  "engine": {
+    "shared": 344,
+    "terminal": 7041,
+    "live": 978,
+    "stress": {
+      "status": "pass",
+      "suite": "lab-adversarial",
+      "checks": 735503,
+      "sessions": 90,
+      "events": 160602,
+      "recoveries": 720
+    },
+    "protocolTests": 24,
+    "previousWindowsEditor": "passed"
+  },
+  "windows": {
+    "localCrossBuild": "WPF net48 and self-contained win-x64 engine succeeded",
+    "nativeRender": "Measured by release-live on windows-latest. The release attachment includes the runner result and URL.",
+    "interactiveSession": "Manual keyboard input on a physical Windows laptop was not part of this run."
+  }
+}

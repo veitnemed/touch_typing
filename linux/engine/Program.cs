@@ -43,6 +43,7 @@ internal sealed class PracticeService
     private ShortcutRun run;
     private TypingRun typing;
     private LabRun lab;
+    private string[] dock;
     internal string StorageError => store.Error;
 
     internal PracticeService(bool verify)
@@ -80,12 +81,16 @@ internal sealed class PracticeService
                     forward = ValidBinding(Text(message, "forward"));
                     backward = ValidBinding(Text(message, "backward"));
                 }
+                if (message.TryGetProperty("dock", out var pinned) && pinned.ValueKind == JsonValueKind.Array)
+                    dock = pinned.EnumerateArray().Take(9).Select(item => item.GetString() ?? "").ToArray();
                 return Library();
-            case "lab-catalog": return LabCatalog.Catalog();
+            case "lab-catalog": return LabCatalog.Catalog(profile.LiveDrafts);
             case "lab-start":
                 FinishLab();
+                var draft = Flag(message, "continue") ? profile.LiveDrafts.LastOrDefault(item =>
+                    item.App == Text(message, "app") && item.Level == Number(message, "level") && item.Guidance == Text(message, "guidance")) : null;
                 lab = new LabRun(Text(message, "app"), Text(message, "mode"), Number(message, "level"), Number(message, "seconds", 180), layout, profile.ShortcutHistory,
-                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared);
+                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit"), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: Text(message, "mission"), draft: draft);
                 return LabState();
             case "lab-key":
                 if (lab == null) throw new InvalidOperationException("Сначала выберите учебный класс.");
@@ -94,6 +99,7 @@ internal sealed class PracticeService
                 if (lab.Finished) FinishLab();
                 return LabState();
             case "lab-state": if (lab?.Finished == true) FinishLab(); return LabState();
+            case "lab-hint": lab?.Hint(); return LabState();
             case "lab-pause": lab?.Pause(); return LabState();
             case "lab-resume": lab?.Resume(); return LabState();
             case "lab-stop": lab?.Stop(); FinishLab(); return LabState();
@@ -149,9 +155,9 @@ internal sealed class PracticeService
         if (lab == null) return null;
         return new { lab.App, lab.Mode, lab.Level, task = lab.Task.Snapshot(), scene = lab.Scene.Snapshot(), held = lab.Held,
             lab.LastKey, lab.Status, lab.Feedback, lab.Errors, lab.Solved, lab.Block, index = lab.Solved % 20 + 1,
-            lab.Seconds, lab.Remaining, lab.TimeLimit, lab.Finished, lab.Paused, needsCapture = true,
-            scenario = lab.ScenarioTitle, scenarioStep = lab.ScenarioStep, scenarioLength = lab.ScenarioLength,
-            guide = lab.Task.Keys.Length == 0 ? null : Describe(Gesture.Parse(lab.Task.Keys), "") };
+            lab.Seconds, lab.Remaining, lab.TimeLimit, lab.ActionLimit, lab.Guidance, lab.ShowGuide, lab.Finished, lab.Paused, needsCapture = true,
+            mission = lab.MissionId, phase = lab.PhaseTitle, objectives = lab.Objectives, scenario = lab.ScenarioTitle, scenarioStep = lab.ScenarioStep, scenarioLength = lab.ScenarioLength,
+            guide = !lab.ShowGuide || lab.Task.Keys.Length == 0 ? null : Describe(Gesture.Parse(lab.Task.Keys), "") };
     }
 
     internal void FinishLab()
@@ -159,8 +165,13 @@ internal sealed class PracticeService
         if (lab == null || lab.Saved) return;
         lab.Pause();
         var record = lab.SessionRecord();
-        if (record.Solved + record.Errors == 0) { lab.MarkSaved(); return; }
-        Save(current => LabSessionRecords.Update(current, record));
+        if (!lab.HasDraft && record.Solved + record.Errors == 0) { lab.MarkSaved(); return; }
+        Save(current =>
+        {
+            current.LiveDrafts.RemoveAll(item => item.App == record.App && item.Level == record.Level && item.Guidance == record.Guidance);
+            if (lab.HasDraft) current.LiveDrafts.Add(lab.Draft());
+            if (record.Solved + record.Errors > 0) LabSessionRecords.Update(current, record);
+        });
         if (store.Error == null) lab.MarkSaved();
     }
 
@@ -178,6 +189,17 @@ internal sealed class PracticeService
                 key = ShortcutCatalog.KeyName(cap), cap.Units, cap.Finger, cap.Anchor,
                 en = cap.English, ru = cap.Russian, enShift = cap.EnglishShift, ruShift = cap.RussianShift
             })),
+            liveSkills = profile.ShortcutHistory.Where(a => a.Mission != null).GroupBy(a => a.Skill).Select(group =>
+            {
+                var samples = group.Where(a => a.Independent && !a.Assisted).TakeLast(10).ToArray();
+                string id = group.Key[(group.Key.IndexOf('/', 4) + 1)..];
+                var successes = samples.Where(a => a.FirstTry).ToArray();
+                return new { group.Key, title = LabCatalog.Shortcuts.FirstOrDefault(t => t.Id == id)?.Title ?? id.Replace("command/", ""),
+                    count = group.Count(), accuracy = ShortcutScore.AccuracyOf(group), milliseconds = ShortcutScore.From(group).Median,
+                    independent = group.Count(a => a.Independent && !a.Assisted && a.Correct), hints = group.Count(a => a.Independent && a.Assisted),
+                    confirmed = samples.Length == 10 && successes.Length >= 9 && successes.Select(a => a.Mission).Distinct().Count() >= 3
+                        && successes.Select(a => a.Session).Distinct().Count() >= 2 };
+            }),
             typing = TypingRun.Catalog(profile),
             typingHistory = profile.Results.Where(item => item.Activity is "LinuxTyping" or "TypingPractice")
                 .TakeLast(60).Reverse().Select(item => new

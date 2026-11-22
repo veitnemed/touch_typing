@@ -327,7 +327,7 @@ class Studio(Gtk.Application):
         self.sources = InputSources(Gio)
         self.layout = self.sources.guess()
         self.library = self.engine.call("configure", layout=self.layout, forward=self.sources.bindings()[0],
-                                        backward=self.sources.bindings()[1])
+                                        backward=self.sources.bindings()[1], dock=self.sources.dock())
         provider = Gtk.CssProvider()
         provider.load_from_path(str(ROOT / "style.css"))
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
@@ -428,7 +428,7 @@ class Studio(Gtk.Application):
 
     def refresh(self):
         forward, backward = self.sources.bindings()
-        result = self.call("configure", layout=self.layout, forward=forward, backward=backward)
+        result = self.call("configure", layout=self.layout, forward=forward, backward=backward, dock=self.sources.dock())
         if result:
             self.library = result
 
@@ -1648,7 +1648,12 @@ class Studio(Gtk.Application):
         metric(counts, "Попыток", str(sum(item["score"]["count"] for item in attempted)))
         metric(counts, "Устойчивые навыки", str(sum(item["score"]["level"] == 2 for item in attempted)))
         self.page.append(counts)
-        hotkeys = add(card(gap=7), text("Live", "h3"))
+        for skill in self.library.get("liveSkills", []):
+            tile = card(gap=3)
+            tile.append(text(skill["title"] + ("  ✓" if skill["confirmed"] else ""), "h3"))
+            tile.append(text(f'{skill["accuracy"]:g}% · {skill["milliseconds"]} мс · самостоятельно {skill["independent"]} · с подсказкой {skill["hints"]}', "muted"))
+            self.page.append(tile)
+        hotkeys = add(card(gap=7), text("Отдельные сочетания", "h3"))
         if not attempted:
             hotkeys.append(text("После первой попытки здесь появятся точность и время реакции.", "muted", wrap=True))
         for item in sorted(attempted, key=lambda item: (item["score"]["accuracy"], item["skill"]["title"])):
@@ -1810,14 +1815,17 @@ class LabPage(Gtk.Box):
         self.canvas.add_overlay(self.modal_layer)
         catalog = host.call("lab-catalog") or {"classes": []}
         self.classes = catalog["classes"]
+        self.missions = catalog.get("missions", [])
+        self.mission_picker = dropdown(["Подобрать поручение"])
+        self.mission_picker.set_hexpand(True)
         self.picker = dropdown([item["title"] for item in self.classes])
         self.picker.set_visible(False)
-        self.mode = dropdown(["Песочница", "Тренировка"])
+        self.mode = dropdown(["По шагам", "Самостоятельно"])
+        self.limit = dropdown(["Без таймера", "20 действий", "40 действий", "60 действий", "3 минуты", "10 минут"])
         self.level = dropdown(["Основы", "Рабочие приёмы", "Сложный"])
         self.begin = button("Начать · Пробел", self.start, "primary")
         self.prep = box(Gtk.Orientation.VERTICAL, 12, "lab-prep")
         self.prep.append(text("Практика без мыши", "h2"))
-        self.prep.append(text("Выберите приложение. Работайте три минуты в одной связанной цепочке.", "muted"))
         class_cards = row(10)
         self.class_buttons = []
         for index, item in enumerate(self.classes):
@@ -1826,7 +1834,8 @@ class LabPage(Gtk.Box):
             class_cards.append(expand(select))
             self.class_buttons.append(select)
         self.prep.append(class_cards)
-        self.prep.append(add(row(8), self.picker, self.mode, self.level, expand(box()), self.begin))
+        self.prep.append(self.mission_picker)
+        self.prep.append(add(row(8), self.picker, self.mode, self.level, self.limit, expand(box()), self.begin))
         self.summary = text("", "muted", wrap=True)
         self.prep.append(self.summary)
         self.keyboard_profile = dropdown(["Huawei MateBook D16", "Обычная клавиатура"])
@@ -1842,7 +1851,8 @@ class LabPage(Gtk.Box):
         self.check_status = text("", "muted", wrap=True)
         check_control = button("Автопроверка", lambda: host.run_checks(check_control, self.check_status))
         self.prep.append(add(row(9), check_control, expand(self.check_status)))
-        self.picker.connect("notify::selected", lambda *_: self.describe())
+        for selector in (self.mode, self.picker, self.level):
+            selector.connect("notify::selected", lambda *_: self.describe())
         self.content.append(self.prep)
         self.toolbar = row(7, "lab-taskbar")
         self.timer = text("03:00", "lesson-timer")
@@ -1867,10 +1877,11 @@ class LabPage(Gtk.Box):
             control.set_tooltip_text({"keys": "Клавиатура", "hands": "Руки", "mistakes": "Красная подсветка ошибки"}[name])
             control.connect("toggled", lambda widget, key=name: self.aid(key, widget.get_active()))
             self.aids[name] = control
+        self.hint_button = button("Подсказка · F1", lambda: self.render(self.host.call("lab-hint")), "lab-control")
         self.diagnostic_button = button("i", self.toggle_diagnostic, "lab-control")
         self.diagnostic_button.set_tooltip_text("Какая физическая клавиша получена")
         add(self.toolbar, self.timer, expand(add(box(gap=1), self.task, self.gesture)),
-            *self.aids.values(), self.diagnostic_button, self.pause, self.finish)
+            self.hint_button, *self.aids.values(), self.diagnostic_button, self.pause, self.finish)
         self.content.append(self.toolbar)
         self.desktop = DesktopView()
         self.stage = Gtk.Overlay()
@@ -1900,7 +1911,17 @@ class LabPage(Gtk.Box):
                 item.remove_css_class("selected")
                 if index == self.picker.get_selected():
                     item.add_css_class("selected")
-            self.summary.set_label(selected["description"] + "  ·  3 минуты · новые связанные задания в каждом подходе")
+            self.summary.set_label(selected["description"])
+            app = selected["id"]
+            level = self.level.get_selected()
+            guidance = "guided" if self.mode.get_selected() == 0 else "independent"
+            catalog = self.host.call("lab-catalog") or {}
+            self.choices = [("", "Подобрать поручение")]
+            if any(d["app"] == app and d["level"] == level and d["guidance"] == guidance for d in catalog.get("drafts", [])):
+                self.choices.append(("@resume", "Продолжить с сохранённого места"))
+            self.choices.extend((m["id"], m["title"]) for m in self.missions if m["app"] == app and m["level"] == level)
+            self.mission_picker.set_model(Gtk.StringList.new([title for _, title in self.choices]))
+            self.mission_picker.set_selected(0)
 
     def hardware_setting(self):
         profile = "matebook-d16" if self.keyboard_profile.get_selected() == 0 else "standard"
@@ -1936,19 +1957,21 @@ class LabPage(Gtk.Box):
     @staticmethod
     def append_summary_chart(panel, result):
         duration = max(1, result.get("seconds", 0))
-        per_second = {}
-        errors_by_second = set()
+        stride = max(1, (duration + 599) // 600)
+        per_bin = {}
+        errors = set()
         for point in result.get("series", []):
-            second = point["second"]
+            index = point["second"] // stride
             if point["correct"]:
-                per_second[second] = per_second.get(second, 0) + 1
+                per_bin[index] = per_bin.get(index, 0) + 1
             else:
-                errors_by_second.add(second)
+                errors.add(index)
         points = []
-        for second in range(duration + 1):
-            start = max(0, second - 4)
-            count = sum(per_second.get(i, 0) for i in range(start, second + 1))
-            points.append((second, count * 60 / (second - start + 1), second in errors_by_second))
+        for index in range(duration // stride + 1):
+            start = max(0, index - 4 // stride)
+            end = min(duration + 1, (index + 1) * stride)
+            count = sum(per_bin.get(i, 0) for i in range(start, index + 1))
+            points.append((end - 1, count * 60 / (end - start * stride), index in errors))
         panel.append(series_chart(points, "Действий/мин", lambda count: f"{count:g} с",
                                   "Темп и ошибки занятия"))
         legend = row(17, "stamina-legend")
@@ -1983,8 +2006,11 @@ class LabPage(Gtk.Box):
         self.result = False
         self.host.refresh()
         app = self.classes[self.picker.get_selected()]["id"]
-        mode = "sandbox" if self.mode.get_selected() == 0 else "drill"
-        self.state = self.host.call("lab-start", app=app, mode=mode, level=self.level.get_selected(), seconds=180)
+        choice = self.limit.get_selected()
+        mission = self.choices[self.mission_picker.get_selected()][0]
+        self.state = self.host.call("lab-start", app=app, mode="sandbox", level=self.level.get_selected(), mission="" if mission == "@resume" else mission,
+                                    **{"continue": mission == "@resume"}, guidance="guided" if self.mode.get_selected() == 0 else "independent",
+                                    seconds={4: 180, 5: 600}.get(choice, 0), actionLimit={1: 20, 2: 40, 3: 60}.get(choice, 0))
         if not self.state:
             return
         self.active = True
@@ -2066,7 +2092,7 @@ class LabPage(Gtk.Box):
         self.surface = self.handler = None
         self.pressed.clear()
 
-    def pause_run(self, message="Пауза. Нажмите F8, чтобы продолжить."):
+    def pause_run(self, message="Пауза. Нажмите пробел, чтобы продолжить."):
         if not self.active:
             return
         state = self.host.call("lab-pause")
@@ -2085,7 +2111,7 @@ class LabPage(Gtk.Box):
                 GLib.idle_add(self.resolve_capture)
                 GLib.timeout_add(300, self.check_denied)
         elif not self.waiting_capture:
-            self.pause_run("Пауза. Вернитесь в тренажёр и нажмите F8.")
+            self.pause_run("Пауза. Вернитесь в тренажёр и нажмите пробел.")
 
     def toggle_pause(self):
         if self.state and self.state["paused"]:
@@ -2117,6 +2143,9 @@ class LabPage(Gtk.Box):
                 return True
             return False
         pause_key, finish_key = self.bindings()
+        if key == "F1" and not has_modifiers and not self.state.get("showGuide", True) and not self.state["paused"]:
+            self.render(self.host.call("lab-hint"))
+            return True
         if key == pause_key and not has_modifiers:
             self.toggle_pause()
             return True
@@ -2139,6 +2168,8 @@ class LabPage(Gtk.Box):
         if key in self.pressed:
             return True
         self.pressed.add(key)
+        if key == "Print":
+            character = self.desktop.capture_png()
         state = self.host.call("lab-key", key=key, pressed=True, text=character)
         if state:
             self.render(state)
@@ -2165,15 +2196,26 @@ class LabPage(Gtk.Box):
             self.stop()
             return
         task = state.get("task") or {}
-        self.task.set_label(task.get("title", "Подготовка рабочего места"))
-        self.task.set_tooltip_text((state.get("scenario", "") + " · " + task.get("title", "")).strip(" ·"))
+        guided = state.get("showGuide", True)
+        self.task.set_label(task.get("title", "") if guided else state.get("phase", ""))
+        self.task.set_tooltip_text(state.get("scenario", "") + "\n" + "\n".join(state.get("objectives", [])))
         gesture = display_chord(task.get("keys", ""), self.host.library) or task.get("text", "")
+        if guided and not task.get("keys") and task.get("id", "").startswith("open-"):
+            gesture = "⊞  →  " + task["text"] + "  →  Enter"
+        elif guided and task.get("id", "").startswith("command/") and len(task.get("text", "")) > 12:
+            gesture = "Ctrl+R  ·  найдите команду по фрагменту  →  Enter"
+        if not guided:
+            gesture = ""
+        self.hint_button.set_visible(not state.get("showGuide", True))
         if state.get("scenarioLength", 0):
             gesture += f'  ·  шаг {state["scenarioStep"]}/{state["scenarioLength"]}'
-        self.gesture.set_label(gesture)
+        self.gesture.set_label((state.get("phase" if guided else "scenario", "") + "    ·    " + gesture).strip(" ·"))
         self.gesture.set_visible(bool(self.gesture.get_label()))
         remaining = max(0, state.get("remaining", 180))
+        self.timer.set_visible(bool(state.get("timeLimit") or state.get("actionLimit")))
         self.timer.set_label(f"{int(remaining) // 60:02}:{int(remaining) % 60:02}")
+        if state.get("actionLimit"):
+            self.timer.set_label(f'{state["solved"]}/{state["actionLimit"]}')
         status = state.get("status", "") or task.get("hint", "")
         if state["held"]:
             status += "  ·  Нажато " + " + ".join(key_label(k) for k in state["held"])
@@ -2230,8 +2272,7 @@ class LabPage(Gtk.Box):
             return
         self.result = True
         clear(self.modal_layer)
-        panel = stamina_modal("Результат", "Три минуты практики" if result.get("completed") else
-                              "Занятие завершено досрочно", self.summary_metrics(result))
+        panel = stamina_modal("Результат", self.state.get("scenario", "Практикум"), self.summary_metrics(result))
         note = f'Ошибки: {result["errors"]}    ·    Рекорд: {result.get("record", 0)}'
         if result.get("newRecord"):
             note += "    ·    Новый рекорд"
@@ -2261,10 +2302,17 @@ class LabPage(Gtk.Box):
         selected_class = self.picker.get_selected()
         selected_mode = self.mode.get_selected()
         selected_level = self.level.get_selected()
+        limit = self.limit.get_selected()
         self.host.navigate("lab")
         self.host.lab.picker.set_selected(selected_class)
         self.host.lab.mode.set_selected(selected_mode)
         self.host.lab.level.set_selected(selected_level)
+        self.host.lab.limit.set_selected(limit)
+        mission = self.state.get("mission")
+        for index, (identifier, _) in enumerate(self.host.lab.choices):
+            if identifier == mission:
+                self.host.lab.mission_picker.set_selected(index)
+                break
         self.host.lab.start()
 
 

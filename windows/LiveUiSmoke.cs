@@ -31,12 +31,13 @@ internal static class LiveUiSmoke
             Focus();
                 Chord("Ctrl+F5");
             Check(Exists("LabStart") && !Exists("LabClock"), "Modified F5 keeps the class chooser open");
-            string[] apps = { "ubuntu", "chrome", "code", "terminal" };
+            string[] apps = { "ubuntu", "chrome", "code", "terminal", "workday" };
             foreach (string name in apps)
                 foreach (int mode in new[] { 0, 1 })
                 {
                     Invoke("LabClass-" + name);
                     Select("LabMode", mode);
+                    Select("LabDuration", 4);
                     Key("F5");
                     Until(delegate { return Exists("LabClock") && Name("LabPause").StartsWith("Пауза"); }, "active " + name + " lesson");
                     Check(Name("LabClock") == "03:00" || Name("LabClock") == "02:59", "A class starts with 180 seconds");
@@ -74,7 +75,7 @@ internal static class LiveUiSmoke
                         Find("LabPauseRestart").SetFocus();
                         Key("Enter");
                         Until(delegate { return !Exists("LabPauseResult") && Exists("LabClock") &&
-                            Name("LabClock") == "03:00"; }, "Enter restarts through the focused pause button");
+                            (Name("LabClock") == "03:00" || Name("LabClock") == "02:59"); }, "Enter restarts through the focused pause button");
                     }
                     if (name == "terminal") CheckPasteLayouts();
                     VirtualEnglish();
@@ -98,18 +99,20 @@ internal static class LiveUiSmoke
             {
                 Invoke("LabClass-terminal");
                 Select("LabMode", 1);
+                Select("LabDuration", 4);
                 Key("F5");
                 Until(delegate { return Exists("LabClock"); }, "full timed session");
                 VirtualEnglish();
                 Solve(int.MaxValue, true);
                 Until(delegate { return Exists("LabResult"); }, "three-minute completion", 10000);
                 string result = Find("LabResult").Current.HelpText;
-                Check(result.Contains("Полный трёхминутный подход"), "A complete 180-second session is recorded");
+                Check(result.Contains("Цель занятия выполнена"), "A complete 180-second session is recorded");
                 var match = Regex.Match(result, "Рекорд ([0-9]+)");
                 Check(match.Success && int.Parse(match.Groups[1].Value) > 0, "A completed class has a positive record");
             }
             if (Exists("LabResult")) Invoke("LabChooseClass");
             Invoke("LabClass-ubuntu");
+            Select("LabDuration", 4);
             Key("F5");
             Until(delegate { return Exists("LabClock"); }, "lesson before save-and-close");
             PostMessage(trainer, 0x10, IntPtr.Zero, IntPtr.Zero);
@@ -161,12 +164,12 @@ internal static class LiveUiSmoke
             }
             else
             {
-                string before = Name("LabCounter");
+                int before = ReadSolved();
                 var strokes = Parse(chord);
                 Send(strokes.Select(stroke => stroke.Down()).ToArray());
                 if (chord == "Ctrl+Shift+V")
                 {
-                    Until(delegate { return !Exists("LabClock") || Name("LabCounter") != before; }, "Ctrl+Shift+V counts on keydown");
+                    Until(delegate { return !Exists("LabClock") || ReadSolved() != before; }, "Ctrl+Shift+V counts on keydown");
                     Check(true, "Ctrl+Shift+V counts while modifiers remain held");
                 }
                 Send(strokes.Reverse().Select(stroke => stroke.Up()).ToArray());
@@ -182,7 +185,7 @@ internal static class LiveUiSmoke
 
     private static int ReadSolved()
     {
-        var value = Regex.Match(Name("LabCounter"), "Выполнено ([0-9]+)");
+        var value = Regex.Match(Find("LabCounter").Current.HelpText, "Выполнено ([0-9]+)");
         return value.Success ? int.Parse(value.Groups[1].Value) : 0;
     }
 
@@ -208,13 +211,12 @@ internal static class LiveUiSmoke
                 if (keyboard == IntPtr.Zero) throw new InvalidOperationException("The native layout is unavailable: " + layout);
                 SendMessage(trainer, 0x50, IntPtr.Zero, keyboard);
                 Wait(90);
-                Chord("Ctrl+Shift+C");
-                Check(Name("LabDesktop").Contains("Скопировано"), "Copy resets the observed terminal result");
-                Chord("RCtrl+RShift+V");
-                Check(Name("LabDesktop").Contains("Вставлено из учебного буфера"), "Right Ctrl+Shift+V changes the simulated terminal using " + layout);
-                Chord("Ctrl+Shift+C");
-                Chord("LCtrl+LShift+V");
-                Check(Name("LabDesktop").Contains("Вставлено из учебного буфера"), "Left Ctrl+Shift+V changes the simulated terminal using " + layout);
+                foreach (string paste in new[] { "RCtrl+RShift+V", "LCtrl+LShift+V" })
+                {
+                    Chord(paste);
+                    Check(Find("LabDesktop").Current.HelpText.Contains("pwd"), "Physical terminal paste on " + layout);
+                    Chord("Ctrl+U");
+                }
             }
         }
         finally { if (!app.HasExited) SendMessage(trainer, 0x50, IntPtr.Zero, previous); }

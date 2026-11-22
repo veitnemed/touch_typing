@@ -11,8 +11,8 @@ internal sealed record LabTask(string Id, string Title, string Keys, string Hint
 
 internal static class LabCatalog
 {
-    internal static readonly string[] Apps = ["ubuntu", "chrome", "code", "terminal"];
-    internal static string Title(string app) => app switch { "ubuntu" => "Ubuntu", "chrome" => "Chrome", "code" => "VS Code", _ => "Терминал" };
+    internal static readonly string[] Apps = ["ubuntu", "chrome", "code", "terminal", "workday"];
+    internal static string Title(string app) => app switch { "workday" => "Рабочий день", "ubuntu" => "Ubuntu", "chrome" => "Chrome", "code" => "VS Code", _ => "Терминал" };
     private static LabTask T(string id, string title, string keys, string action, int level = 0, string hint = "") =>
         new(id, title, keys, hint.Length == 0 ? "Удерживайте модификаторы и нажмите основную клавишу." : hint, Action: action, Level: level);
     internal static readonly LabTask[] Shortcuts =
@@ -40,6 +40,24 @@ internal static class LabCatalog
         T("screenshot-confirm", "Подтвердите снимок экрана", "Enter", "screenshot-confirm"),
         T("copy-shot", "Скопируйте учебный снимок", "Ctrl+C", "copy-shot"),
         T("escape", "Закройте панель и вернитесь к работе", "Esc", "escape"),
+        T("history", "Найдите страницу в истории", "Ctrl+H", "history"),
+        T("downloads", "Откройте загрузки", "Ctrl+J", "downloads"),
+        T("bookmark-manager", "Откройте сохранённые страницы", "Ctrl+Shift+O", "bookmark-manager"),
+        T("link-next", "Перейдите к следующей ссылке", "Tab", "item-next"),
+        T("link-prev", "Вернитесь к предыдущей ссылке", "Shift+Tab", "item-prev"),
+        T("link-open", "Откройте выбранную ссылку", "Enter", "item-open"),
+        T("file-next", "Выберите следующий объект", "Down", "item-next"),
+        T("file-prev", "Выберите предыдущий объект", "Up", "item-prev"),
+        T("file-open", "Откройте выбранный объект", "Enter", "item-open"),
+        T("file-copy", "Скопируйте выбранный файл", "Ctrl+C", "file-copy"),
+        T("file-cut", "Подготовьте файл к переносу", "Ctrl+X", "file-cut"),
+        T("file-paste", "Поместите файл в эту папку", "Ctrl+V", "file-paste"),
+        T("file-parent", "Перейдите на уровень выше", "Alt+Up", "file-parent"),
+        T("file-home", "Откройте домашнюю папку", "Alt+Home", "file-home"),
+        T("file-back", "Вернитесь в предыдущую папку", "Alt+Left", "file-back"),
+        T("file-forward", "Перейдите вперёд по истории папок", "Alt+Right", "file-forward"),
+        T("trash", "Переместите выбранный файл в корзину", "Delete", "trash"),
+        T("restore-trash", "Отмените перемещение в корзину", "Ctrl+Z", "restore-trash"),
         T("new-tab", "Создайте вкладку", "Ctrl+T", "new-tab"),
         T("new-file", "Создайте файл", "Ctrl+N", "new-tab"),
         T("close-tab", "Закройте текущую вкладку", "Ctrl+W", "close-tab"),
@@ -70,6 +88,25 @@ internal static class LabCatalog
         T("goto-line", "Откройте переход к строке", "Ctrl+G", "goto-line", 1),
         T("explorer", "Откройте проводник проекта", "Ctrl+Shift+E", "explorer", 1),
         T("project-search", "Откройте поиск по проекту", "Ctrl+Shift+F", "project-search", 1),
+        T("move-line-up", "Поднимите строку", "Alt+Up", "move-line-up"),
+        T("move-line-down", "Перенесите строку ниже", "Alt+Down", "move-line-down"),
+        T("document-start", "Перейдите в начало файла", "Ctrl+Home", "document-start"),
+        T("occurrence", "Выделите вхождение", "Ctrl+D", "occurrence"),
+        T("replace", "Откройте замену", "Ctrl+H", "replace"),
+        T("replace-field", "Перейдите к тексту замены", "Tab", "replace-field"),
+        T("replace-one", "Замените найденный фрагмент", "Enter", "replace-one"),
+        T("symbols", "Найдите символ в файле", "Ctrl+Shift+O", "symbols"),
+        T("symbol-next", "Выберите символ ниже", "Down", "symbol-next"),
+        T("symbol-open", "Перейдите к определению", "Enter", "symbol-open"),
+        T("changes", "Просмотрите изменения проекта", "Ctrl+Shift+G", "changes"),
+        T("focus-second", "Перейдите ко второй группе", "Ctrl+2", "focus-second"),
+        T("focus-editor", "Вернитесь к первой группе редактора", "Ctrl+1", "focus-editor"),
+        T("terminal-search", "Найдите команду в истории", "Ctrl+R", "terminal-search"),
+        T("terminal-word-left", "К предыдущему слову", "Alt+B", "word-left"),
+        T("terminal-word-right", "К следующему слову", "Alt+F", "word-right"),
+        T("panel", "Переключите нижнюю панель", "Ctrl+J", "panel"),
+        T("extensions", "Откройте расширения", "Ctrl+Shift+X", "extensions"),
+        T("select-line", "Выделите текущую строку", "Ctrl+L", "select-line"),
         T("sidebar", "Переключите боковую панель", "Ctrl+B", "sidebar"),
         T("split", "Разделите редактор", "Ctrl+\\", "split", 1),
         T("terminal-toggle", "Переключите встроенный терминал", "Ctrl+`", "terminal-toggle", 1),
@@ -78,8 +115,8 @@ internal static class LabCatalog
         T("copy", "Скопируйте текст", "Ctrl+C", "copy"),
         T("cut", "Вырежьте выделенный текст", "Ctrl+X", "cut"),
         T("paste", "Вставьте текст", "Ctrl+V", "paste"),
-        T("terminal-copy", "Скопируйте вывод терминала", "Ctrl+Shift+C", "copy"),
-        T("terminal-cut", "Вырежьте ввод терминала", "Ctrl+Shift+X", "cut", 1),
+        T("terminal-copy", "Скопируйте выделенный фрагмент", "Ctrl+Shift+C", "terminal-copy"),
+        T("terminal-yank", "Верните удалённую часть команды", "Ctrl+Y", "terminal-yank", 1),
         T("terminal-paste", "Вставьте команду в терминал", "Ctrl+Shift+V", "paste"),
         T("undo", "Отмените изменение", "Ctrl+Z", "undo"),
         T("redo", "Повторите изменение", "Ctrl+Shift+Z", "redo", 1),
@@ -96,51 +133,14 @@ internal static class LabCatalog
         T("terminal-submit", "Выполните введённую команду", "Enter", "terminal-submit"),
     ];
     private static readonly HashSet<string> UbuntuIds = new(Shortcuts.Take(23).Select(task => task.Id));
-    private static readonly HashSet<string> ChromeIds = new(["new-tab", "close-tab", "restore-tab", "next-tab", "prev-tab", "first-tab", "last-tab", "url", "navigate-pasted", "find", "find-next", "refresh", "back", "forward", "fullscreen", "zoom-in", "zoom-out", "zoom-reset", "bookmark", "bookmarks", "select-all", "copy", "cut", "paste", "escape", "layout"]);
-    private static readonly HashSet<string> CodeIds = new(["new-file", "close-tab", "next-tab", "prev-tab", "quick-open", "quick-next", "quick-choose", "palette", "palette-next", "palette-choose", "goto-line", "explorer", "project-search", "sidebar", "split", "terminal-toggle", "save", "select-all", "copy", "cut", "paste", "undo", "redo", "comment", "delete-line", "find", "escape", "layout"]);
+    private static readonly HashSet<string> FilesIds = new(Shortcuts.Where(task => task.Id.StartsWith("file-") || task.Id is "trash" or "restore-trash").Select(task => task.Id));
+    private static readonly HashSet<string> ChromeIds = new(["history", "downloads", "bookmark-manager", "link-next", "link-prev", "link-open", "new-tab", "close-tab", "restore-tab", "next-tab", "prev-tab", "first-tab", "last-tab", "url", "navigate-pasted", "find", "find-next", "refresh", "back", "forward", "fullscreen", "zoom-in", "zoom-out", "zoom-reset", "bookmark", "bookmarks", "select-all", "copy", "cut", "paste", "escape", "layout"]);
+    private static readonly HashSet<string> CodeIds = new(["document-start", "move-line-up", "move-line-down", "occurrence", "replace", "replace-field", "replace-one", "symbols", "symbol-next", "symbol-open", "changes", "focus-editor", "focus-second", "panel", "extensions", "select-line", "new-file", "close-tab", "next-tab", "prev-tab", "quick-open", "quick-next", "quick-choose", "palette", "palette-next", "palette-choose", "goto-line", "explorer", "project-search", "sidebar", "split", "terminal-toggle", "save", "select-all", "copy", "cut", "paste", "undo", "redo", "comment", "delete-line", "find", "escape", "layout"]);
     private static readonly HashSet<string> TerminalIds = new(Shortcuts.Where(task => task.Id.StartsWith("terminal-")).Select(task => task.Id).Concat(["layout", "escape"]));
-    internal static object Catalog() => new { classes = Apps.Select(app => new { id = app, title = Title(app), description = app switch
-        { "ubuntu" => "Окна, рабочие столы и системные сочетания", "chrome" => "Вкладки, навигация, поиск и адресная строка", "code" => "Файлы, код, панели и встроенный терминал", _ => "Сочетания, команды и учебная файловая система" },
-        shortcuts = Shortcuts.Where(task => InApp(task, app)).Select(task => task.Snapshot()) }), duration = 180, blockSize = 20 };
-    private static bool InApp(LabTask task, string app) => (app switch { "ubuntu" => UbuntuIds, "chrome" => ChromeIds, "code" => CodeIds, _ => TerminalIds }).Contains(task.Id);
-
-    internal static LabTask[] Candidates(string app, LabScene scene, int level)
-    {
-        bool integratedTerminal = app == "code" && scene.Active?.Focus == "terminal";
-        var tasks = Shortcuts.Where(task => (integratedTerminal ? TerminalIds.Contains(task.Id) || task.Id is "terminal-toggle" or "escape" : InApp(task, app)) && task.Level <= level && Available(task, scene)).ToList();
-        var window = scene.Active;
-        if (app == "ubuntu" && scene.Overview && scene.Layout == "EN")
-            foreach (string appName in new[] { "chrome", "code", "terminal", "files" })
-                tasks.Add(new LabTask("launch/" + appName, "Найдите и запустите " + (appName == "files" ? "Файлы" : Title(appName)), "", "Введите название в поиске обзора и нажмите Enter.", appName, "launch"));
-        if (window != null && scene.Layout == "EN" && !scene.Overview)
-        {
-            if (app == "terminal" && (window.App == "terminal" || window.Focus == "terminal"))
-            {
-                if (scene.TerminalInput.Length == 0)
-                {
-                    foreach (string command in scene.Terminal.SuggestedCommands(level))
-                        tasks.Add(new LabTask("command/" + command, "Выполните команду «" + command + "»", "",
-                            "Наберите команду и нажмите Enter. Команда выполняется в учебном терминале.", command, "command"));
-                }
-            }
-            else if (app == "chrome" && window.Focus == "url" && (window.Input.Length == 0 || window.Selected))
-                tasks.Add(new LabTask("navigate", "Откройте документацию Python", "", "Введите адрес и нажмите Enter.", "https://docs.python.org/3/", "navigate"));
-            else if ((app == "chrome" || app == "code") && (window.Focus == "find" || window.Focus == "project-search") && (window.Input.Length == 0 || window.Selected))
-                {
-                string word = System.Text.RegularExpressions.Regex.Matches(window.Body, @"[A-Za-z]{3,}").Select(match => match.Value).FirstOrDefault() ?? "";
-                if (word.Length > 0) tasks.Add(new LabTask("find-text", "Найдите слово «" + word + "»", "", "Введите текст поиска и нажмите Enter.", word, "find-text"));
-            }
-            else if (app == "code" && window.Focus == "quick-open" && (window.Input.Length == 0 || window.Selected))
-                tasks.Add(new LabTask("open-file", "Откройте файл app.py", "", "Введите имя файла и нажмите Enter.", "app.py", "open-file"));
-            else if (app == "code" && window.Focus == "palette" && (window.Input.Length == 0 || window.Selected))
-                tasks.Add(new LabTask("palette-command", "Выполните команду Format Document", "", "Введите название и нажмите Enter.", "Format Document", "palette-command"));
-            else if (app == "code" && window.Focus == "goto-line" && (window.Input.Length == 0 || window.Selected))
-                tasks.Add(new LabTask("goto-number", "Перейдите к первой строке", "", "Введите номер и нажмите Enter.", "1", "goto-number"));
-            else if (app == "code" && window.App == "code" && window.Focus == "body" && window.Body.Length == 0)
-                tasks.Add(new LabTask("type-code", "Введите Python-код", "", "Введите строку кода. Символы проверяются в учебном документе.", "fft_values = np.fft.fft(signal)", "type-code"));
-        }
-        return tasks.ToArray();
-    }
+    internal static object Catalog(IEnumerable<LiveDraft> drafts = null) => new { drafts = (drafts ?? []).Select(d => new { d.App, d.Level, d.Mission, d.Guidance }), classes = Apps.Select(app => new { id = app, title = Title(app), description = app switch
+        { "workday" => "Общее рабочее место, файлы и окна четырёх приложений", "ubuntu" => "Окна, рабочие столы и системные сочетания", "chrome" => "Вкладки, навигация, поиск и адресная строка", "code" => "Файлы, код, панели и встроенный терминал", _ => "Сочетания, команды и учебная файловая система" },
+        shortcuts = Shortcuts.Where(task => InApp(task, app)).Select(task => task.Snapshot()) }), missions = LiveCourse.Missions.Select(m => new { m.App, m.Level, m.Id, m.Title }), duration = 0, blockSize = 20 };
+    private static bool InApp(LabTask task, string app) => app == "workday" || (app switch { "ubuntu" => UbuntuIds, "chrome" => ChromeIds, "code" => CodeIds, _ => TerminalIds }).Contains(task.Id);
 
     internal static bool Available(LabTask task, LabScene scene)
     {
@@ -148,6 +148,13 @@ internal static class LabCatalog
         bool terminal = window != null && (window.App == "terminal" || window.Focus == "terminal");
         return task.Id switch
         {
+            "document-start" or "move-line-up" or "move-line-down" or "occurrence" => window?.App == "code" && window.Focus == "body",
+            "replace-field" => window?.Focus == "replace-find",
+            "replace-one" => window?.Focus == "replace-with",
+            "symbol-next" or "symbol-open" => window?.Focus == "symbols",
+            "file-open" or "file-copy" or "file-cut" or "trash" => window?.App == "files" && window.Item >= 0,
+            "link-open" => window?.App == "chrome" && window.Focus == "body" && window.Item >= 0,
+            "link-next" or "link-prev" => window?.App == "chrome" && window.Focus == "body",
             "switch-next" or "switch-prev" => scene.Windows.Count(item => item.Workspace == scene.Workspace) >= 2,
             "close-window" => window != null,
             "open-chrome" => window?.App != "chrome",
@@ -164,7 +171,7 @@ internal static class LabCatalog
             "screenshot-confirm" => scene.Screenshot,
             "escape" => scene.Overview || scene.Screenshot || scene.ScreenshotReady || window?.Focus is not (null or "body"),
             "new-tab" => window?.App == "chrome" && window.Tabs.Count < 6,
-            "url" => window?.App == "chrome" && window.Focus != "url" && window.Url != "about:blank",
+            "url" => window?.App == "chrome",
             "navigate-pasted" => window?.App == "chrome" && window.Focus == "url" && !string.IsNullOrWhiteSpace(window.Input),
             "refresh" or "fullscreen" or "bookmarks" => window?.App == "chrome",
             "zoom-in" => window?.App == "chrome" && window.Zoom < 200,
@@ -180,21 +187,22 @@ internal static class LabCatalog
             "zoom-reset" => window?.Zoom != 100,
             "find" => window != null && !terminal && window.Focus != "find",
             "find-next" => window?.Find.Length > 0,
-            "quick-open" or "palette" or "goto-line" or "explorer" or "project-search" or "sidebar" or "split" or "terminal-toggle" => window?.App == "code",
-            "quick-next" or "quick-choose" => window?.App == "code" && window.Focus == "quick-open" && window.Tabs.Count > 1,
+            "panel" or "extensions" or "quick-open" or "palette" or "goto-line" or "explorer" or "project-search" or "sidebar" or "split" or "terminal-toggle" => window?.App == "code",
+            "quick-next" or "quick-choose" => window?.App == "code" && window.Focus == "quick-open" && scene.Entries(window).Length > 0,
             "palette-next" or "palette-choose" => window?.App == "code" && window.Focus == "palette",
             "save" => window?.App == "code" && window.Tab?.Body != window.Tab?.SavedBody,
-            "undo" => window?.Undo.Count > 0,
-            "redo" => window?.Redo.Count > 0,
-            "comment" or "delete-line" => window?.App == "code" && window.Body.Length > 0 && window.Focus == "body",
+            "undo" => window?.Tab?.Undo.Count > 0,
+            "redo" => window?.Tab?.Redo.Count > 0,
+            "select-line" or "comment" or "delete-line" => window?.App == "code" && window.Body.Length > 0 && window.Focus == "body",
             "select-all" => window != null && !window.Selected && (window.Focus == "body" ? window.Body.Length > 0 : window.Input.Length > 0),
-            "copy" => window != null && window.Selected && (window.Focus == "body" ? window.Body.Length > 0 : window.Input.Length > 0),
-            "cut" => window != null && window.Selected && (window.Focus == "body" ? window.App == "code" && window.Body.Length > 0 : window.Input.Length > 0),
-            "paste" => window != null && scene.Clipboard.Length > 0 && (window.App == "code" && window.Focus == "body" || window.App == "chrome" && window.Focus == "url"),
-            "terminal-copy" or "terminal-clear" => terminal,
-            "terminal-paste" => terminal && scene.TerminalInput.Length == 0 && scene.Clipboard.Length > 0,
-            "terminal-cut" or "terminal-cancel" or "terminal-erase" or "terminal-kill" or "terminal-home" or "terminal-end" => terminal && scene.TerminalInput.Length > 0,
-            "terminal-submit" => terminal && scene.TerminalInput.Length > 0,
+            "copy" => window != null && (window.Selected || window.App == "code" && window.Focus == "body" && window.Body.Length > 0),
+            "cut" => window != null && (window.Focus == "body" ? window.App == "code" && window.Body.Length > 0 : window.Selected),
+            "paste" => window != null && scene.Clipboard.Length > 0 && (window.App == "code" || window.App == "chrome" && window.Focus != "body"),
+            "terminal-copy" => terminal && window.Selected,
+            "terminal-clear" or "terminal-yank" => terminal,
+            "terminal-paste" => terminal && scene.Clipboard.Length > 0,
+            "terminal-cancel" or "terminal-erase" or "terminal-kill" or "terminal-home" or "terminal-end" => terminal && scene.TerminalInput.Length > 0,
+            "terminal-submit" => terminal && window.Focus != "reverse-search" && scene.TerminalInput.Length > 0,
             "terminal-history-up" => terminal && scene.CanHistoryUp,
             "terminal-history-down" => terminal && scene.CanHistoryDown,
             _ => true
@@ -204,16 +212,23 @@ internal static class LabCatalog
     internal static LabTask Resolve(string key, IEnumerable<string> held, LabScene scene)
     {
         string app = scene.Active?.App ?? "ubuntu";
-        bool terminal = app == "terminal" || scene.Active?.Focus == "terminal";
+        bool terminal = app == "terminal" || scene.Active?.Focus is "terminal" or "reverse-search";
         HashSet<string> context = terminal ? TerminalIds : app switch
-        { "chrome" => ChromeIds, "code" => CodeIds, _ => UbuntuIds };
+        { "chrome" => ChromeIds, "code" => CodeIds, "files" => FilesIds, _ => UbuntuIds };
         int Priority(LabTask task)
         {
             if (task.Id == "copy-shot" && scene.ScreenshotReady && !scene.ScreenshotCopied) return 2;
             if (task.Id == "screenshot-confirm" && scene.Screenshot) return 2;
             return context.Contains(task.Id) ? 1 : 0;
         }
-        var ordered = Shortcuts.Where(task => task.Id != "copy-shot" || scene.ScreenshotReady && !scene.ScreenshotCopied)
+        if (app == "chrome")
+        {
+            string alias = key == "D" && Gesture.Parse("Alt+D").Chords[0].FitsModifiers(held) ? "url" :
+                (key is "PageUp" or "PageDown") && Gesture.Parse("Ctrl+Tab").Chords[0].FitsModifiers(held)
+                    ? (key == "PageUp" ? "prev-tab" : "next-tab") : null;
+            if (alias != null) return Shortcuts.FirstOrDefault(task => task.Id == alias && Available(task, scene));
+        }
+        var ordered = Shortcuts.Select(scene.WithBinding).Where(task => task.Keys.Length > 0).Where(task => task.Id != "copy-shot" || scene.ScreenshotReady && !scene.ScreenshotCopied)
             .Where(task => task.Id != "screenshot-confirm" || scene.Screenshot)
             .OrderByDescending(Priority);
         return ordered.FirstOrDefault(task =>
@@ -222,7 +237,7 @@ internal static class LabCatalog
             bool trigger = chord.Trigger == null ? KeyChord.IsModifier(key) : chord.Trigger == key;
             if (!trigger || !chord.FitsModifiers(held) || !Available(task, scene)) return false;
             if (UbuntuIds.Contains(task.Id)) return true;
-            return context.Contains(task.Id) || terminal && app == "code" && task.Id is "terminal-toggle" or "escape";
+            return context.Contains(task.Id) || terminal && app == "code" && task.Id is "terminal-toggle" or "panel" or "escape";
         });
     }
 }

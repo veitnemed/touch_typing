@@ -17,6 +17,11 @@ namespace TouchTypingStudio
     internal sealed partial class LiveStudio
     {
         private bool legacyLive, labActive;
+        private ComboBox labLimitSelect, labMissionSelect;
+        private int lastLabLimit;
+        private string lastLabMission = "";
+        private string[] labMissionIds = new string[0];
+        private Button labHint;
         private string labApp = "ubuntu", labMode = "sandbox";
         private int labLevel;
         private ComboBox labModeSelect, labLevelSelect;
@@ -30,7 +35,7 @@ namespace TouchTypingStudio
 
         private FrameworkElement BuildLabHome()
         {
-            var root = PagePanel("Live", "Три минуты практики горячих клавиш в учебных приложениях");
+            var root = PagePanel("Live", "Практикум работы с клавиатурой");
             var catalog = Request("lab-catalog");
             var classes = catalog.Items("classes").ToArray();
             var layout = new UniformGrid { Columns = 2, Margin = new Thickness(0, 0, 0, 15) };
@@ -38,11 +43,20 @@ namespace TouchTypingStudio
             var shortcuts = Label("", 13, Dim);
             shortcuts.MaxWidth = 1000;
             var selected = Label("", 18, Ink, true);
+            labMissionSelect = new ComboBox { MinWidth = 270, MaxWidth = 600, HorizontalAlignment = HorizontalAlignment.Left };
             Action describe = delegate
             {
                 var item = classes.FirstOrDefault(c => c.S("id") == labApp);
                 selected.Text = item == null ? "Выберите класс" : item.S("title");
-                shortcuts.Text = item == null ? "" : string.Join("   ·   ", item.Items("shortcuts").Select(s => DisplayGesture(s.S("keys"))).Where(s => s.Length > 0));
+                shortcuts.Text = item == null ? "" : item.S("description");
+                int level = labLevelSelect == null ? 0 : Math.Max(0, labLevelSelect.SelectedIndex);
+                var ids = new List<string> { "" }; var titles = new List<string> { "Подобрать поручение" };
+                string guidance = labModeSelect != null && labModeSelect.SelectedIndex == 0 ? "independent" : "guided";
+                if (catalog.Items("drafts").Any(d => d.S("app") == labApp && d.I("level") == level && d.S("guidance") == guidance))
+                { ids.Add("@resume"); titles.Add("Продолжить с сохранённого места"); }
+                foreach (var m in catalog.Items("missions").Where(m => m.S("app") == labApp && m.I("level") == level))
+                { ids.Add(m.S("id")); titles.Add(m.S("title")); }
+                labMissionIds = ids.ToArray(); labMissionSelect.ItemsSource = titles; labMissionSelect.SelectedIndex = 0;
                 foreach (var entry in labClassButtons)
                 {
                     entry.Value.Background = entry.Key == labApp ? Ui.Brush("#404A5E") : Card;
@@ -73,17 +87,23 @@ namespace TouchTypingStudio
             shortcuts.Margin = new Thickness(0, 6, 0, 16);
             root.Children.Add(shortcuts);
             var choices = Stack(true);
-            labModeSelect = Select("Режим", new[] { "Сочетания · 3 минуты", "Задачи на рабочем столе · 3 минуты" }, labMode == "sandbox" ? 1 : 0, 315);
+            labModeSelect = Select("Режим", new[] { "Самостоятельно", "По шагам" }, labMode == "sandbox" ? 1 : 0, 315);
             AutomationProperties.SetAutomationId(labModeSelect, "LabMode");
             labLevelSelect = Select("Сложность", new[] { "Базовый", "Средний", "Сложный" }, labLevel, 150);
             choices.Children.Add(labModeSelect);
             choices.Children.Add(labLevelSelect);
+            labLimitSelect = Select("Длительность", new[] { "Без таймера", "20 действий", "40 действий", "60 действий", "3 минуты", "10 минут" }, lastLabLimit, 155);
+            AutomationProperties.SetAutomationId(labLimitSelect, "LabDuration");
+            choices.Children.Add(labLimitSelect);
             AutomationProperties.SetAutomationId(labLevelSelect, "LabLevel");
             beginControl = ActionButton("Начать · F5", StartLab, true);
             AutomationProperties.SetAutomationId(beginControl, "LabStart");
             beginControl.IsEnabled = classes.Length > 0;
             choices.Children.Add(beginControl);
             root.Children.Add(choices);
+            root.Children.Add(labMissionSelect);
+            labModeSelect.SelectionChanged += delegate { describe(); };
+            labLevelSelect.SelectionChanged += delegate { describe(); };
             var hardware = new Expander { Header = "Клавиатура и Fn", Foreground = Dim,
                 Margin = new Thickness(0, 12, 0, 3), IsExpanded = false };
             var hardwareControls = Stack(true);
@@ -105,7 +125,7 @@ namespace TouchTypingStudio
             hardwareControls.Children.Add(fnModeSelect);
             hardware.Content = hardwareControls;
             root.Children.Add(hardware);
-            var notes = Label("20 связанных действий в блоке · EN и RU · 3 минуты", 13, Dim);
+            var notes = Label("Сочетания работают в EN и RU", 13, Dim);
             notes.Margin = new Thickness(0, 12, 0, 17);
             root.Children.Add(notes);
             root.Children.Add(ActionButton("Отдельное сочетание", delegate { legacyLive = true; ShowPage(LivePage); }));
@@ -123,11 +143,19 @@ namespace TouchTypingStudio
             }
             labMode = labModeSelect.SelectedIndex == 1 ? "sandbox" : "drill";
             labLevel = Math.Max(0, labLevelSelect.SelectedIndex);
+            int limit = lastLabLimit = labLimitSelect.SelectedIndex;
+            int actions = limit >= 1 && limit <= 3 ? 20 * limit : 0;
+            int seconds = limit == 4 ? 180 : limit == 5 ? 600 : 0;
+            string guidance = labMode == "drill" ? "independent" : "guided";
+            string mission = labMissionIds[Math.Max(0, labMissionSelect.SelectedIndex)];
+            bool resume = mission == "@resume";
+            if (resume) mission = "";
             int seed;
             var initial = verifyMode && int.TryParse(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"), out seed)
-                ? Request("lab-start", "app", labApp, "mode", labMode, "level", labLevel, "seconds", 180, "seed", seed)
-                : Request("lab-start", "app", labApp, "mode", labMode, "level", labLevel, "seconds", 180);
+                ? Request("lab-start", "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "seed", seed)
+                : Request("lab-start", "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume);
             if (!initial.Exists) return;
+            lastLabMission = initial.S("mission");
             labActive = active = true;
             paused = true;
             pressed.Clear();
@@ -185,6 +213,8 @@ namespace TouchTypingStudio
             labHandAid.ToolTip = "Показать или скрыть руки · F7";
             labMistakeAid.ToolTip = "Подсвечивать ошибочную клавишу красным";
             AutomationProperties.SetAutomationId(labMistakeAid, "LabMistakeHighlight");
+            labHint = ActionButton("Подсказка · F1", delegate { RenderLab(Request("lab-hint")); });
+            aids.Children.Add(labHint);
             aids.Children.Add(labKeyAid);
             aids.Children.Add(labHandAid);
             aids.Children.Add(labMistakeAid);
@@ -301,12 +331,13 @@ namespace TouchTypingStudio
             if (down ? !pressed.Add(key) : !pressed.Remove(key)) return;
             if (down && !pressed.Any(IsModifier))
             {
+                if (key == "F1" && !state.B("showGuide", true)) { RenderLab(Request("lab-hint")); return; }
                 if (key == LabPauseKey()) { PauseLab(); return; }
                 if (key == LabEndKey()) { FinishLab(); return; }
                 if (key == "F4" && !state.D("task").S("keys").Split('+').Contains("F4")) { ToggleLabAid(true); return; }
                 if (key == "F7" && !state.D("task").S("keys").Split('+').Contains("F7")) { ToggleLabAid(false); return; }
             }
-            var next = Request("lab-key", "key", key, "pressed", down, "text", value ?? "");
+            var next = Request("lab-key", "key", key, "pressed", down, "text", key == "Print" && down ? labDesktop.CapturePng() : value ?? "");
             if (next.Exists) RenderLab(next);
         }
 
@@ -316,14 +347,17 @@ namespace TouchTypingStudio
             if (state.B("finished")) { FinishLab(); return; }
             paused = state.B("paused");
             int remaining = state.I("remaining", 180);
-            timerLabel.Text = (remaining / 60).ToString("00") + ":" + (remaining % 60).ToString("00");
-            labCounter.Text = "Выполнено " + state.I("solved") + "    ·    Блок " + state.I("block", 1) + "    ·    Задание " + state.I("index", 1) + "/20";
+            timerLabel.Visibility = state.I("timeLimit") > 0 || state.I("actionLimit") > 0 ? Visibility.Visible : Visibility.Collapsed;
+            timerLabel.Text = state.I("actionLimit") > 0 ? state.I("solved") + "/" + state.I("actionLimit") : (remaining / 60).ToString("00") + ":" + (remaining % 60).ToString("00");
+            labCounter.Text = state.S("scenario") + "    ·    " + state.S("phase");
+            AutomationProperties.SetHelpText(labCounter, "Выполнено " + state.I("solved"));
             var task = state.D("task");
-            labTask.Text = task.S("title", "Учебный рабочий стол");
-            labTask.ToolTip = state.S("scenario");
-            labKeys.Text = (task.S("keys").Length > 0 ? DisplayLabGesture(task.S("keys")) : task.S("text")) +
+            labTask.Text = state.B("showGuide", true) ? task.S("title") : state.S("phase");
+            labTask.ToolTip = state.S("scenario") + "\n" + string.Join("\n", state.Items("objectives").Select(item => item.Value()));
+            labKeys.Text = (!state.B("showGuide", true) ? "" : task.S("keys").Length > 0 ? DisplayLabGesture(task.S("keys")) : task.S("id").StartsWith("open-") ? "⊞  →  " + task.S("text") + "  →  Enter" : task.S("text").Length > 12 ? "Ctrl+R  ·  найдите фрагмент  →  Enter" : task.S("text")) +
                 (state.I("scenarioLength") > 0 ? "   ·   шаг " + state.I("scenarioStep") + "/" + state.I("scenarioLength") : "");
-            labKeys.ToolTip = task.S("hint");
+            labHint.Visibility = state.B("showGuide", true) ? Visibility.Collapsed : Visibility.Visible;
+            labKeys.ToolTip = state.B("showGuide", true) ? task.S("hint") : "";
             AutomationProperties.SetHelpText(labKeys, task.S("keys"));
             AutomationProperties.SetHelpText(labTask, task.S("text"));
             labDesktop.Update(state.D("scene"), labApp);
@@ -378,26 +412,35 @@ namespace TouchTypingStudio
             center.Content = result.Exists ? BuildLabResult(result, backdrop) : BuildLabHome();
         }
 
+        private void RestartLab()
+        {
+            if (labActive) FinishLab();
+            center.Content = BuildLabHome();
+            int choice = Array.IndexOf(labMissionIds, lastLabMission);
+            if (choice >= 0) labMissionSelect.SelectedIndex = choice;
+            StartLab();
+        }
+
         private FrameworkElement BuildLabResult(Data result, FrameworkElement backdrop, bool preview = false)
         {
             int seconds = result.I("seconds");
             var series = result.Items("series").ToArray();
-            var counts = series.Where(point => point.B("correct")).GroupBy(point => point.I("second"))
+            int duration = Math.Max(1, seconds), stride = Math.Max(1, (duration + 599) / 600);
+            var counts = series.Where(point => point.B("correct")).GroupBy(point => point.I("second") / stride)
                 .ToDictionary(group => group.Key, group => group.Count());
-            var errorCounts = series.Where(point => !point.B("correct")).GroupBy(point => point.I("second"))
+            var errorCounts = series.Where(point => !point.B("correct")).GroupBy(point => point.I("second") / stride)
                 .ToDictionary(group => group.Key, group => group.Count());
-            int duration = Math.Max(1, seconds);
-            var tempo = Enumerable.Range(0, duration + 1).Select(second =>
+            var tempo = Enumerable.Range(0, duration / stride + 1).Select(second =>
             {
-                int start = Math.Max(0, second - 4);
+                int start = Math.Max(0, second - 4 / stride);
                 int count = Enumerable.Range(start, second - start + 1)
                     .Sum(index => counts.ContainsKey(index) ? counts[index] : 0);
-                return (double?)(count * 60.0 / (second - start + 1));
+                return (double?)(count * 60.0 / (Math.Min(duration + 1, (second + 1) * stride) - start * stride));
             }).ToArray();
-            var errors = Enumerable.Range(0, duration + 1)
+            var errors = Enumerable.Range(0, duration / stride + 1)
                 .Select(second => (double)(errorCounts.ContainsKey(second) ? errorCounts[second] : 0)).ToArray();
             string summary = labApp == "ubuntu" ? "Ubuntu" : labApp == "chrome" ? "Chrome" :
-                labApp == "code" ? "VS Code" : "Терминал";
+                labApp == "code" ? "VS Code" : labApp == "workday" ? "Рабочий день" : "Терминал";
             string detail = "Ошибки " + result.I("errors") + "   ·   Рекорд " + result.D("record").Value("—") +
                 (result.B("newRecord") ? "   ·   Новый рекорд" : "");
             return BuildStaminaResult(backdrop, preview ? "Пауза" : "Результат", summary, seconds, "ДЕЙСТВИЙ",
@@ -406,9 +449,8 @@ namespace TouchTypingStudio
                 Format(result.N("accuracy")) + "%", tempo, errors, detail, preview ? "LabPauseResult" : "LabResult",
                 "Выполнено " + result.I("solved") + ". Ошибки " + result.I("errors") + ". Рекорд " +
                     result.I("record") + ". " + (result.B("completed") ?
-                        "Полный трёхминутный подход." : "Занятие завершено раньше."),
-                preview ? (Action)delegate { FinishLab(); center.Content = BuildLabHome(); StartLab(); } :
-                    delegate { center.Content = BuildLabHome(); StartLab(); },
+                        "Цель занятия выполнена." : "Занятие сохранено."),
+                RestartLab,
                 preview ? (Action)FinishLab : delegate { legacyLive = false; ShowPage(LivePage); },
                 preview ? (Action)ResumeLab : delegate { ShowPage(ProgressPage); },
                 preview ? "Продолжить" : "Прогресс");

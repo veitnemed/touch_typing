@@ -35,6 +35,7 @@ internal sealed class VirtualTerminal
     internal string Cwd { get; private set; } = Home;
     internal string[] History => history.TakeLast(160).ToArray();
     internal string LastCommand { get; private set; } = "";
+    internal string[] LastOutput { get; private set; } = [];
     internal bool LastSuccess { get; private set; }
     internal int Version { get; private set; }
 
@@ -49,6 +50,10 @@ internal sealed class VirtualTerminal
         history.Add("Учебный Ubuntu Terminal. Проект находится в ~/project.");
     }
 
+    internal string[] Entries(string path) => Children(Resolve(path)).OrderByDescending(directories.Contains).ThenBy(Name, StringComparer.OrdinalIgnoreCase).ToArray();
+    internal void StoreFile(string path, string body) => Write(Resolve(path), body);
+    internal void Transfer(string source, string destination, bool move) => CopyMove(move ? [source, destination] : ["-r", source, destination], move);
+    internal void CreateFolder(string path) => MakeDirectories(["-p", path]);
     internal string ReadFile(string path) => files.GetValueOrDefault(Resolve(path));
     internal bool Exists(string path) => files.ContainsKey(Resolve(path)) || directories.Contains(Resolve(path));
     internal bool DirectoryExists(string path) => directories.Contains(Resolve(path));
@@ -176,7 +181,7 @@ internal sealed class VirtualTerminal
         var copy = new VirtualTerminal
         {
             Cwd = Cwd, repository = repository, branch = branch, packagesUpdated = packagesUpdated,
-            reboots = reboots, shutdowns = shutdowns, Version = Version, LastSuccess = LastSuccess, LastCommand = LastCommand
+            reboots = reboots, shutdowns = shutdowns, Version = Version, LastSuccess = LastSuccess, LastCommand = LastCommand, LastOutput = LastOutput
         };
         Replace(copy.files, files); Replace(copy.modes, modes); Replace(copy.owners, owners);
         copy.directories.Clear(); copy.directories.UnionWith(directories);
@@ -201,6 +206,7 @@ internal sealed class VirtualTerminal
     internal TerminalCommandResult Execute(string command)
     {
         LastCommand = command;
+        LastOutput = [];
         history.Add($"student@ubuntu:{Abbreviate(Cwd)}$ {command}");
         if (string.IsNullOrWhiteSpace(command))
         {
@@ -217,7 +223,7 @@ internal sealed class VirtualTerminal
                 input = ExecuteStage(stage, input);
             var output = Lines(input);
             LastSuccess = true;
-            history.AddRange(output);
+            history.AddRange(output); LastOutput = output;
             return new(true, output);
         }
         catch (ArgumentException error)

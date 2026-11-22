@@ -92,17 +92,17 @@ class PracticeTest(unittest.TestCase):
 
     def test_lab_sessions_persist_separately_and_do_not_award_early_records(self):
         catalog = self.engine.call("lab-catalog")
-        self.assertEqual([item["id"] for item in catalog["classes"]], ["ubuntu", "chrome", "code", "terminal"])
+        self.assertEqual([item["id"] for item in catalog["classes"]], ["ubuntu", "chrome", "code", "terminal", "workday"])
         state = self.engine.call("lab-start", app="chrome", mode="sandbox", level=1, seconds=180)
         self.assertTrue(state["paused"])
         self.assertEqual(state["remaining"], 180)
         state = self.engine.call("lab-resume")
         keys = [{"Ctrl": "RCtrl", "Shift": "LShift", "Alt": "LAlt", "Super": "LSuper"}.get(key, key)
                 for key in state["task"]["keys"].split("+")]
-        for key in keys:
-            state = self.engine.call("lab-key", key=key, pressed=True, text="М")
-        for key in reversed(keys):
-            state = self.engine.call("lab-key", key=key, pressed=False, text="")
+        for _ in range(24):
+            state = self.lab_chord(*keys, text="М")
+            if state["solved"]:
+                break
         self.assertEqual(state["solved"], 1)
         self.engine.call("lab-stop")
         result = self.engine.call("lab-result")
@@ -116,6 +116,104 @@ class PracticeTest(unittest.TestCase):
         self.assertEqual(self.engine.call("lab-result")["history"][0]["solved"], 1)
         self.engine.call("lab-start", app="ubuntu", mode="sandbox", level=1)
         self.assertEqual(self.engine.call("lab-result")["history"], [])
+
+    def lab_chord(self, *keys, text=""):
+        for key in keys:
+            self.engine.call("lab-key", key=key, pressed=True, text=text if key == keys[-1] else "")
+        for key in reversed(keys):
+            state = self.engine.call("lab-key", key=key, pressed=False, text="")
+        return state
+
+    def open_live(self, app):
+        self.engine.call("lab-start", app=app, mode="sandbox", level=0, seconds=0, seed=1)
+        return self.engine.call("lab-resume")
+
+    def test_independent_alternative_route_and_resume_exactly_at_limit(self):
+        config = dict(app="chrome", mode="sandbox", level=0, guidance="independent",
+                      mission="chrome-reader", seconds=0, actionLimit=3, seed=3)
+        self.engine.call("lab-start", **config)
+        initial = self.engine.call("lab-resume")
+        self.assertFalse(initial["showGuide"])
+        self.assertEqual(initial["task"]["id"], "url")
+        # Open the comparison tab before copying the source. Both goals belong to this phase.
+        created = self.lab_chord("RCtrl", "T")
+        self.assertEqual(created["solved"], 1)
+        self.lab_chord("RCtrl", "LShift", "Tab")
+        self.lab_chord("RCtrl", str(initial["scene"]["windows"][0]["activeTab"] + 1))
+        self.lab_chord("RCtrl", "F12")
+        self.assertTrue(self.engine.call("lab-hint")["showGuide"])
+        final = self.lab_chord("LAlt", "D")
+        self.assertTrue(final["finished"])
+        self.assertEqual((final["solved"], final["errors"]), (3, 1))
+        self.assertEqual(final["task"]["id"], "copy")
+        result = self.engine.call("lab-result")
+        self.assertTrue(result["completed"])
+        self.engine.close()
+        self.engine = Engine(verify=True)
+        resumed = self.engine.call("lab-start", **dict(config, actionLimit=0, **{"continue": True}))
+        self.assertEqual((resumed["solved"], resumed["errors"], resumed["timeLimit"]), (0, 0, 0))
+        self.assertEqual(resumed["scenarioStep"], final["scenarioStep"])
+        for field in ("input", "cursor", "anchor", "activeTab", "focus", "url"):
+            self.assertEqual(final["scene"]["windows"][0][field], resumed["scene"]["windows"][0][field])
+        self.engine.call("lab-resume")
+        copied = self.lab_chord("RCtrl", "C")
+        self.assertEqual(copied["solved"], 1)
+        self.assertFalse(copied["finished"])
+
+    def test_live_omnibox_cut_respects_visible_range(self):
+        state = self.open_live("chrome")
+        clip = state["scene"]["clipboard"]
+        url = state["scene"]["windows"][0]["url"]
+        state = self.lab_chord("LCtrl", "L")
+        w = state["scene"]["windows"][0]
+        self.assertEqual((w["anchor"], w["cursor"]), (0, len(url)))
+        self.lab_chord("Left")
+        state = self.lab_chord("LCtrl", "X")
+        self.assertEqual((state["scene"]["windows"][0]["input"], state["scene"]["clipboard"]), (url, clip))
+        self.lab_chord("LShift", "Right")
+        state = self.lab_chord("LCtrl", "X")
+        self.assertEqual((state["scene"]["windows"][0]["input"], state["scene"]["clipboard"]), (url[1:], url[:1]))
+        self.assertEqual(state["errors"], 0)
+
+    def test_live_code_line_panel_and_undo(self):
+        state = self.open_live("code")
+        original = state["scene"]["windows"][0]["body"]
+        line, rest = original.split("\n", 1)
+        w = self.lab_chord("LCtrl", "L")["scene"]["windows"][0]
+        self.assertEqual((w["anchor"], w["cursor"]), (0, len(line) + 1))
+        self.assertEqual(self.lab_chord("LCtrl", "X")["scene"]["windows"][0]["body"], rest)
+        self.assertEqual(self.lab_chord("LCtrl", "Z")["scene"]["windows"][0]["body"], original)
+        self.lab_chord("Left")
+        self.assertEqual(self.lab_chord("LCtrl", "X")["scene"]["clipboard"], line + "\n")
+        self.assertTrue(self.lab_chord("LCtrl", "J")["scene"]["windows"][0]["panel"])
+        self.assertFalse(self.lab_chord("LCtrl", "J")["scene"]["windows"][0]["panel"])
+        self.assertEqual(self.lab_chord("LCtrl", "LShift", "X")["scene"]["windows"][0]["focus"], "extensions")
+
+    def test_history_search_runs_long_command_without_retyping(self):
+        self.engine.call("lab-start", app="terminal", mode="sandbox", level=0, seconds=0, mission="terminal-explore")
+        self.engine.call("lab-resume")
+        self.lab_chord("RCtrl", "R")
+        for glyph in "cd /home":
+            self.lab_chord("Space" if glyph == " " else glyph.upper(), text=glyph)
+        state = self.lab_chord("Enter")
+        self.assertEqual(state["scene"]["terminal"]["cwd"], "/home/student/project")
+        self.assertEqual(state["solved"], 1)
+
+    def test_live_terminal_caret_and_draft(self):
+        for key, expected in (("Delete", "abd"), ("Backspace", "acd")):
+            self.open_live("terminal")
+            for c in "pwd":
+                self.lab_chord(c.upper(), text=c)
+            self.lab_chord("Enter")
+            for c in "abcd":
+                self.lab_chord(c.upper(), text=c)
+            self.lab_chord("Up")
+            self.assertEqual(self.lab_chord("Down")["scene"]["terminalInput"], "abcd")
+            self.lab_chord("Left")
+            self.lab_chord("Left")
+            state = self.lab_chord(key)
+            self.assertEqual(state["scene"]["terminalInput"], expected)
+            self.assertEqual(state["scene"]["windows"][0]["cursor"], 2 if key == "Delete" else 1)
 
     def test_layout_verifies_changed_result(self):
         initial = self.start("layout-back")

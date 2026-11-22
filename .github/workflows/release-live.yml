@@ -2,7 +2,7 @@ name: Build and release Live
 
 on:
   push:
-    branches: [release/v1.6.0]
+    branches: [release/v1.7.0]
   workflow_dispatch:
 
 permissions:
@@ -30,16 +30,17 @@ jobs:
           done
           dotnet build linux/engine/TouchTyping.Engine.csproj
           /usr/bin/python3 linux/tests/test_practice.py
+          /usr/bin/python3 linux/tests/test_live_missions.py
           node tests/workday-editor-state.js
       - name: Build both packages
         run: |
           bash linux/build-release.sh "$RUNNER_TEMP/touch-typing-linux-x64"
           bash windows/build-release.sh "$RUNNER_TEMP/touch-typing-windows-x64"
           mkdir -p artifacts
-          tar -czf artifacts/touch-typing-v1.6.0-linux-x64.tar.gz -C "$RUNNER_TEMP" touch-typing-linux-x64
-          (cd "$RUNNER_TEMP/touch-typing-windows-x64" && zip -qr "$GITHUB_WORKSPACE/artifacts/touch-typing-v1.6.0-windows-x64.zip" .)
-          tar -tzf artifacts/touch-typing-v1.6.0-linux-x64.tar.gz > /dev/null
-          unzip -t artifacts/touch-typing-v1.6.0-windows-x64.zip
+          tar -czf artifacts/touch-typing-v1.7.0-linux-x64.tar.gz -C "$RUNNER_TEMP" touch-typing-linux-x64
+          (cd "$RUNNER_TEMP/touch-typing-windows-x64" && zip -qr "$GITHUB_WORKSPACE/artifacts/touch-typing-v1.7.0-windows-x64.zip" .)
+          tar -tzf artifacts/touch-typing-v1.7.0-linux-x64.tar.gz > /dev/null
+          unzip -t artifacts/touch-typing-v1.7.0-windows-x64.zip
           (cd artifacts && sha256sum *.tar.gz *.zip > SHA256SUMS.txt)
       - uses: actions/upload-artifact@v4
         with:
@@ -55,12 +56,25 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Build Windows app and native UI runner
         run: |
-          dotnet build windows/TouchTyping.Windows.csproj -c Release
+          dotnet build windows/TouchTyping.Windows.csproj -c Release -o "$env:RUNNER_TEMP/studio"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet build windows/UiSmoke.csproj -c Release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet run --project linux/tests/LabRegression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Render native WPF scenes through the released engine
+        run: |
+          dotnet publish linux/engine/TouchTyping.Engine.csproj -c Release -r win-x64 --self-contained -o "$env:RUNNER_TEMP/studio/engine"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $report = "$env:RUNNER_TEMP/wpf-render"
+          $app = Start-Process "$env:RUNNER_TEMP/studio/TouchTyping.exe" -ArgumentList "--qa --check-live-render `"$report`"" -Wait -PassThru
+          Get-Content "$report/result.txt"
+          if ($app.ExitCode -ne 0) { exit $app.ExitCode }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wpf-render
+          path: ${{ runner.temp }}/wpf-render/
   publish:
     needs: [packages, windows-build]
     runs-on: ubuntu-24.04
@@ -73,8 +87,24 @@ jobs:
         with:
           name: release-packages
           path: artifacts
-      - name: Publish v1.6.0
+      - uses: actions/download-artifact@v4
+        with:
+          name: wpf-render
+          path: wpf-render
+      - name: Archive native Windows render checks
+        run: |
+          cp wpf-render/result.txt artifacts/windows-render-result.txt
+          python3 - <<'PYREPORT'
+          import json, os
+          from pathlib import Path
+          report = json.loads(Path("QA-v1.7.0.json").read_text())
+          report["windows"]["nativeRender"] = Path("wpf-render/result.txt").read_text(encoding="utf-8-sig").strip()
+          report["windows"]["run"] = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+          Path("artifacts/QA-v1.7.0.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+          PYREPORT
+          (cd wpf-render && zip -q "$GITHUB_WORKSPACE/artifacts/windows-render-checks.zip" *.png result.txt)
+      - name: Publish v1.7.0
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v1.6.0 artifacts/* QA-v1.6.0.json --target "$GITHUB_SHA" --title "v1.6.0 — Связанные тренировки Live" --notes-file RELEASE-v1.6.0.md
+          gh release create v1.7.0 artifacts/* --target "$GITHUB_SHA" --title "v1.7.0 — Практикум работы с клавиатурой" --notes-file RELEASE-v1.7.0.md

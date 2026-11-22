@@ -43,6 +43,12 @@ namespace TouchTypingStudio
             bool workday = Array.IndexOf(args, "--windows") >= 0;
             bool explicitLive = Array.IndexOf(args, "--live") >= 0;
             string engine = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "engine", "TouchTyping.Engine.exe");
+            int liveRender = Array.IndexOf(args, "--check-live-render");
+            if (verify && liveRender >= 0 && liveRender + 1 < args.Length)
+            {
+                Environment.ExitCode = LiveRenderChecks.Run(engine, args[liveRender + 1]);
+                return;
+            }
             bool legacy = workday || Array.IndexOf(args, "--legacy-typing") >= 0 ||
                 (verify && Array.IndexOf(args, "--qa-desktop-input") >= 0);
             if (!legacy && (explicitLive || System.IO.File.Exists(engine)))

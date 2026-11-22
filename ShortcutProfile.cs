@@ -9,10 +9,20 @@ namespace TouchTypingStudio
         public string Fingers;
     }
 
+    public class LiveDraft
+    {
+        public string App, Mission, Layout, Guidance, Trace, LayoutKey;
+        public string[] Dock;
+        public int Level, Variant;
+        public bool VirtualLayout;
+    }
+
     public class LabSessionRecord
     {
         public string Session, App, Mode;
         public int Level, Seconds, Solved, Errors;
+        public int TimeLimit = 180, ActionLimit;
+        public string Guidance = "guided";
         public DateTime Date;
         public bool Completed;
     }
@@ -20,7 +30,8 @@ namespace TouchTypingStudio
     public class ShortcutAttempt
     {
         public string Skill, Session, Verification, MistakeKey;
-        public string InputMode;
+        public string InputMode, Mission;
+        public bool Assisted, Independent, FirstTry;
         public DateTime Date;
         public bool Correct;
         public int Milliseconds;

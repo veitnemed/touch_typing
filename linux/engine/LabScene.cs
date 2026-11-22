@@ -5,16 +5,30 @@ using System.Linq;
 
 namespace TouchTypingStudio;
 
+internal sealed class FieldPosition
+{
+    internal int Caret, Anchor;
+    internal FieldPosition Clone() => new() { Caret = Caret, Anchor = Anchor };
+}
+
+internal sealed record EditRevision(string Text, int Cursor, int Anchor);
+
 internal sealed class LabTab(string title, string url, string body)
 {
-    internal readonly string Id = Guid.NewGuid().ToString("N")[..8];
-    internal string Title = title, Url = url, Body = body, SavedBody = body;
+    internal string Id = Guid.NewGuid().ToString("N")[..8];
+    internal string Title = title, Url = url, Body = body, SavedBody = body, Origin;
     internal readonly List<string> History = [url];
     internal int HistoryIndex;
+    internal FieldPosition Position = new();
+    internal readonly List<int> ExtraMatches = [];
+    internal readonly Stack<EditRevision> Undo = [], Redo = [];
     internal object Snapshot() => new { Id, Title, Url, Body, SavedBody, modified = Body != SavedBody };
     internal LabTab Clone()
     {
-        var copy = new LabTab(Title, Url, Body) { SavedBody = SavedBody, HistoryIndex = HistoryIndex };
+        var copy = new LabTab(Title, Url, Body) { Id = Id, Origin = Origin, SavedBody = SavedBody, HistoryIndex = HistoryIndex, Position = Position.Clone() };
+        foreach (var item in Undo.Reverse()) copy.Undo.Push(item);
+        foreach (var item in Redo.Reverse()) copy.Redo.Push(item);
+        copy.ExtraMatches.AddRange(ExtraMatches);
         copy.History.Clear(); copy.History.AddRange(History);
         return copy;
     }
@@ -26,47 +40,82 @@ internal sealed class LabWindow(string app, int number, int workspace)
     internal readonly string App = app;
     internal string Title = app switch { "chrome" => "Chrome", "code" => "Visual Studio Code", "terminal" => "Терминал", _ => "Файлы" };
     internal int Workspace = workspace;
-    internal string State = "normal", Focus = "body", Input = "", Find = "", Status = "Готово";
-    internal bool Sidebar = true, Split, Selected, Bookmarks;
+    internal int SearchIndex, UntitledCount, Group, Activation;
+    internal string ShellInput = "";
+    internal string OtherTab, ImagePreview;
+    internal string View = "explorer", Query = "";
+    internal string Folder = "/home/student";
+    internal int Item = -1;
+    internal readonly Stack<string> FolderBack = [], FolderForward = [];
+    internal string State = "normal", Focus = "body", Find = "", Status = "Готово";
+    internal bool Sidebar = true, Split, Panel, Bookmarks;
+    private readonly Dictionary<string, FieldPosition> positions = [];
+    private readonly Dictionary<string, string> fields = [];
+    internal string Input { get => fields.GetValueOrDefault(Focus, ""); set => fields[Focus] = value; }
+    private FieldPosition Position
+    {
+        get
+        {
+            if (Focus == "body" && Tab != null) return Tab.Position;
+            if (!positions.TryGetValue(Focus, out var position)) positions[Focus] = position = new();
+            return position;
+        }
+    }
+    internal int Cursor { get => Position.Caret; set { Position.Caret = Position.Anchor = value; } }
+    internal int Anchor => Position.Anchor;
+    internal int Start => Math.Min(Cursor, Anchor);
+    internal int End => Math.Max(Cursor, Anchor);
+    internal void Select(int anchor, int caret) { Position.Anchor = anchor; Position.Caret = caret; }
+    internal bool Selected
+    {
+        get => Anchor != Cursor;
+        set { if (value) Select(0, Focus == "body" ? Body.Length : Input.Length); else Cursor = Cursor; }
+    }
     internal readonly HashSet<string> SavedBookmarks = [];
-    internal int ActiveTab, Cursor, Zoom = 100, OptionIndex;
+    internal int ActiveTab, Zoom = 100, OptionIndex;
     internal readonly List<LabTab> Tabs = [];
     internal readonly Stack<LabTab> ClosedTabs = [];
-    internal readonly Stack<string> Undo = [], Redo = [];
+    internal Stack<EditRevision> Undo => Tab.Undo;
+    internal Stack<EditRevision> Redo => Tab.Redo;
     internal LabTab Tab => Tabs.Count == 0 ? null : Tabs[Math.Clamp(ActiveTab, 0, Tabs.Count - 1)];
     internal string Body { get => Tab?.Body ?? ""; set { if (Tab != null) Tab.Body = value; } }
     internal string Url => Tab?.Url ?? "";
-    internal object Snapshot(bool active) => new { Id, App, Title, Workspace, State, active,
-        tabs = Tabs.Select(tab => tab.Snapshot()), ActiveTab, Url, Body, Focus, Input, Find, Sidebar, Split, Status, Zoom, Selected, Cursor, OptionIndex, Bookmarks, savedBookmarks = SavedBookmarks.ToArray() };
+    internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults) => new { projectFiles, changedFiles, searchResults, Id, App, Title, Workspace, State, active, Folder, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
+        tabs = Tabs.Select(tab => tab.Snapshot()), ActiveTab, Url, Body, Focus, Input, Find, Sidebar, Split, Status, Zoom, Selected, Cursor, Anchor, Panel, bodyCursor = Tab?.Position.Caret ?? 0, bodyAnchor = Tab?.Position.Anchor ?? 0, OptionIndex, Bookmarks, savedBookmarks = SavedBookmarks.ToArray() };
     internal LabWindow Clone()
     {
         var copy = new LabWindow(App, int.Parse(Id[7..]), Workspace)
         {
-            Title = Title, State = State, Focus = Focus, Input = Input, Find = Find, Status = Status,
-            Sidebar = Sidebar, Split = Split, Selected = Selected, Bookmarks = Bookmarks,
-            ActiveTab = ActiveTab, Cursor = Cursor, Zoom = Zoom, OptionIndex = OptionIndex
+            Activation = Activation, ShellInput = ShellInput, UntitledCount = UntitledCount, ImagePreview = ImagePreview, OtherTab = OtherTab, Group = Group, Folder = Folder, Item = Item, View = View, Query = Query, SearchIndex = SearchIndex, Title = Title, State = State, Focus = Focus, Input = Input, Find = Find, Status = Status,
+            Sidebar = Sidebar, Split = Split, Panel = Panel, Bookmarks = Bookmarks,
+            ActiveTab = ActiveTab, Zoom = Zoom, OptionIndex = OptionIndex
         };
+        foreach (string path in FolderBack.Reverse()) copy.FolderBack.Push(path);
+        foreach (string path in FolderForward.Reverse()) copy.FolderForward.Push(path);
         copy.Tabs.AddRange(Tabs.Select(tab => tab.Clone()));
         foreach (var tab in ClosedTabs.Reverse()) copy.ClosedTabs.Push(tab.Clone());
-        foreach (var value in Undo.Reverse()) copy.Undo.Push(value);
-        foreach (var value in Redo.Reverse()) copy.Redo.Push(value);
+        foreach (var item in fields) copy.fields[item.Key] = item.Value;
+        foreach (var item in positions) copy.positions[item.Key] = item.Value.Clone();
         copy.SavedBookmarks.UnionWith(SavedBookmarks);
         return copy;
     }
 }
 
-internal sealed class LabScene
+internal sealed partial class LabScene
 {
     internal readonly List<LabWindow> Windows = [];
     internal readonly VirtualTerminal Terminal;
     internal int Workspace, WorkspaceCount = 3, Version, Screenshots;
+    internal string[] Dock = ["chrome", "code", "terminal", "files"];
+    internal string LayoutKey = "Super+Space", SwitchTarget;
     internal string Layout, Clipboard = "build: 17 tests passed", ActiveWindow;
     internal bool Overview, Switcher, Screenshot, ScreenshotReady, ScreenshotCopied, ShowDesktop, LayoutIsVirtual;
     internal string Search = "";
-    internal string TerminalInput = "";
+    internal string TerminalInput { get => Active?.ShellInput ?? ""; set { if (Active != null) Active.ShellInput = value; } }
     private int windowNumber;
     private readonly List<string> commands = [];
     private int commandIndex;
+    private string historyDraft = "", killedText = "";
     internal bool CanHistoryUp => commandIndex > 0;
     internal bool CanHistoryDown => commandIndex < commands.Count;
     internal LabWindow Active => Windows.FirstOrDefault(window => window.Id == ActiveWindow);
@@ -74,6 +123,12 @@ internal sealed class LabScene
     internal LabScene(string app, string layout)
     {
         Terminal = new VirtualTerminal();
+        Terminal.CreateFolder("~/Pictures/Screenshots");
+        Terminal.CreateFolder("~/.Trash");
+        Terminal.CreateFolder("~/project/src");
+        foreach (var group in TypingRun.Project.GroupBy(item => item.Path))
+            Terminal.StoreFile("~/project/" + group.Key, string.Join("\n\n", group.Select(item => item.Code)) + "\n");
+        foreach (var path in ProjectDocuments()) originalFiles[path] = Terminal.ReadFile(path);
         Layout = layout == "RU" ? "RU" : "EN";
         Clipboard = app == "terminal" ? "pwd" : "build: 17 tests passed";
         if (app != "ubuntu") Open(app);
@@ -81,14 +136,20 @@ internal sealed class LabScene
 
     private LabScene(LabScene source)
     {
-        Terminal = source.Terminal.Clone();
+        Terminal = source.Terminal.Clone(); captureImage = source.captureImage;
+        foreach (var file in source.originalFiles) originalFiles[file.Key] = file.Value;
+        Dock = [.. source.Dock]; LayoutKey = source.LayoutKey; SwitchTarget = source.SwitchTarget;
         Workspace = source.Workspace; WorkspaceCount = source.WorkspaceCount; Version = source.Version;
         Screenshots = source.Screenshots; Layout = source.Layout; Clipboard = source.Clipboard;
         ActiveWindow = source.ActiveWindow; Overview = source.Overview; Switcher = source.Switcher;
         Screenshot = source.Screenshot; ScreenshotReady = source.ScreenshotReady;
         ScreenshotCopied = source.ScreenshotCopied; ShowDesktop = source.ShowDesktop;
         LayoutIsVirtual = source.LayoutIsVirtual; Search = source.Search;
-        TerminalInput = source.TerminalInput; windowNumber = source.windowNumber;
+        windowNumber = source.windowNumber;
+        historyDraft = source.historyDraft; killedText = source.killedText;
+        fileTransfer = source.fileTransfer; fileCut = source.fileCut;
+        foreach (var item in source.trash) trash[item.Key] = item.Value;
+        recentUrls.AddRange(source.recentUrls); downloads.AddRange(source.downloads);
         commands.AddRange(source.commands); commandIndex = source.commandIndex;
         Windows.AddRange(source.Windows.Select(window => window.Clone()));
     }
@@ -109,12 +170,15 @@ internal sealed class LabScene
             window.Tabs.Add(new LabTab("README.md", "README.md", Terminal.ReadFile("~/project/README.md") ?? ""));
         }
         else if (app == "files") window.Tabs.Add(new LabTab("Домашняя папка", "/home/student", "project/\nДокументы/\nЗагрузки/"));
+        if (app == "chrome" && recentUrls.Count == 0)
+            recentUrls.AddRange(window.Tabs.Select(tab => tab.Url));
         Windows.Add(window); Activate(window); Version++; return window;
     }
 
     internal void Activate(LabWindow window)
     {
         if (window == null) return;
+        window.Activation = Windows.Max(w => w.Activation) + 1;
         ActiveWindow = window.Id; Workspace = window.Workspace; ShowDesktop = Overview = false;
         if (window.State == "minimized") window.State = "normal";
     }
@@ -127,6 +191,12 @@ internal sealed class LabScene
     }
 
     internal bool Apply(string action)
+    {
+        try { return ApplyCore(action); }
+        catch (ArgumentException error) { if (Active != null) Active.Status = error.Message; return false; }
+    }
+
+    private bool ApplyCore(string action)
     {
         var window = Active;
         bool changed = true;
@@ -150,7 +220,7 @@ internal sealed class LabScene
             case "minimize":
                 if (window == null) return false;
                 window.State = "minimized"; ActiveWindow = null;
-                Activate(Windows.LastOrDefault(item => item.Workspace == Workspace && item.State != "minimized")); break;
+                Activate(Windows.Where(item => item.Workspace == Workspace && item.State != "minimized").MaxBy(item => item.Activation)); break;
             case "desktop": ShowDesktop = !ShowDesktop; break;
             case "workspace-next": Workspace = (Workspace + 1) % WorkspaceCount; ActiveWindow = null; Activate(Windows.LastOrDefault(item => item.Workspace == Workspace)); break;
             case "workspace-prev": Workspace = (Workspace + WorkspaceCount - 1) % WorkspaceCount; ActiveWindow = null; Activate(Windows.LastOrDefault(item => item.Workspace == Workspace)); break;
@@ -158,16 +228,17 @@ internal sealed class LabScene
             case "move-prev": if (window == null) return false; window.Workspace = (Workspace + WorkspaceCount - 1) % WorkspaceCount; Workspace = window.Workspace; break;
             case "layout": Layout = Layout == "EN" ? "RU" : "EN"; LayoutIsVirtual = true; break;
             case "screenshot": Screenshot = true; ScreenshotReady = false; ScreenshotCopied = false; break;
-            case "screenshot-confirm": if (!Screenshot) return false; Screenshot = false; ScreenshotReady = true; Screenshots++; break;
-            case "copy-shot": if (!ScreenshotReady) return false; ScreenshotCopied = true; Clipboard = "Учебный снимок #" + Screenshots; break;
-            case "escape": Overview = Switcher = Screenshot = ScreenshotReady = false; if (window != null) { window.Focus = "body"; window.Input = ""; } break;
+            case "screenshot-confirm": if (!Screenshot) return false; Screenshot = false; ScreenshotReady = true; Screenshots++; ScreenshotCopied = true;
+                Capture(); break;
+            case "copy-shot": if (!ScreenshotReady) return false; ScreenshotCopied = true; Clipboard = "Снимок-" + Screenshots + ".png"; break;
+            case "escape": if (window?.Focus == "reverse-search") return Text("Esc", ""); Overview = Switcher = Screenshot = ScreenshotReady = false; if (window != null) { window.ImagePreview = null; window.Focus = "body"; window.Input = ""; } break;
             case "navigate-pasted":
                 if (window?.App != "chrome" || window.Focus != "url" || string.IsNullOrWhiteSpace(window.Input)) return false;
                 return Text("Enter", "");
             case "terminal-submit":
                 if (window == null || window.App != "terminal" && window.Focus != "terminal" || string.IsNullOrWhiteSpace(TerminalInput)) return false;
                 return Text("Enter", "") && Terminal.LastSuccess;
-            default: changed = ApplyWindow(action, window); break;
+            default: changed = ApplyWorkspace(action, window) ?? ApplyWindow(action, window); break;
         }
         if (changed) Version++;
         return changed;
@@ -175,10 +246,28 @@ internal sealed class LabScene
 
     private void Switch(int direction)
     {
-        var visible = Windows.Where(item => item.Workspace == Workspace).ToArray();
+        var visible = Windows.Where(item => item.Workspace == Workspace).OrderByDescending(item => item.Activation).ToArray();
         if (visible.Length == 0) return;
-        int index = Array.FindIndex(visible, item => item.Id == ActiveWindow);
-        Activate(visible[(index + direction + visible.Length) % visible.Length]); Switcher = true;
+        int index = Array.FindIndex(visible, item => item.Id == (Switcher ? SwitchTarget : ActiveWindow));
+        SwitchTarget = visible[(index + direction + visible.Length) % visible.Length].Id; Switcher = true;
+    }
+
+    internal void CommitSwitch()
+    {
+        if (Switcher) Activate(Windows.Find(item => item.Id == SwitchTarget));
+        SwitchTarget = null; Switcher = false;
+    }
+
+    internal LabTask WithBinding(LabTask task)
+    {
+        if (task.Id == "layout") return task with { Keys = LayoutKey };
+        if (task.Id is "open-chrome" or "open-code" or "open-files")
+        {
+            string app = task.Id[5..]; int slot = Array.IndexOf(Dock, app);
+            if (slot >= 0 && slot < 9) return task with { Keys = "Super+" + (slot + 1) };
+            return task with { Keys = "", Text = Layout == "RU" ? app switch { "chrome" => "хром", "code" => "код", _ => "файлы" } : app, Hint = "Откройте обзор клавишей ⊞, введите название и нажмите Enter.", Action = "launch" };
+        }
+        return task;
     }
 
     private bool ApplyWindow(string action, LabWindow window)
@@ -189,25 +278,34 @@ internal sealed class LabScene
         {
             case "new-tab":
                 if (!browser && !code) return false;
-                window.Tabs.Add(browser ? new LabTab("Новая вкладка", "about:blank", "") : new LabTab("untitled.py", "untitled.py", ""));
-                window.ActiveTab = window.Tabs.Count - 1; window.Cursor = 0; window.Focus = browser ? "url" : "body"; window.Input = ""; window.Selected = false; break;
+                string origin = window.Tab?.Id;
+                string name = code ? "notes-" + (++window.UntitledCount) + ".py" : "";
+                window.Tabs.Add(browser ? new LabTab("Новая вкладка", "about:blank", "") : new LabTab(name, name, "") { Origin = origin });
+                window.ActiveTab = window.Tabs.Count - 1; window.Focus = browser ? "url" : "body"; window.Input = ""; window.Cursor = 0; break;
             case "close-tab":
                 if (window.Tabs.Count <= 1) return false;
-                window.ClosedTabs.Push(window.Tab); window.Tabs.RemoveAt(window.ActiveTab); window.ActiveTab = Math.Min(window.ActiveTab, window.Tabs.Count - 1);
-                window.Focus = "body"; window.Input = ""; window.Selected = false; break;
+                var closing = window.Tab;
+                window.ClosedTabs.Push(closing); window.Tabs.RemoveAt(window.ActiveTab);
+                int parent = window.Tabs.FindIndex(t => t.Id == closing.Origin);
+                window.ActiveTab = parent >= 0 ? parent : Math.Min(window.ActiveTab, window.Tabs.Count - 1);
+                if (closing.Id == window.OtherTab) { window.Split = false; window.Group = 0; window.OtherTab = null; }
+                window.Focus = "body"; break;
             case "restore-tab":
                 if (!window.ClosedTabs.TryPop(out var restored)) return false;
                 window.Tabs.Add(restored); window.ActiveTab = window.Tabs.Count - 1;
-                window.Focus = "body"; window.Input = ""; window.Selected = false; break;
+                window.Focus = "body"; break;
             case "next-tab": case "prev-tab":
                 if (window.Tabs.Count < 2) return false;
                 window.ActiveTab = (window.ActiveTab + (action == "next-tab" ? 1 : window.Tabs.Count - 1)) % window.Tabs.Count;
-                window.Cursor = 0; window.Focus = "body"; window.Selected = false; break;
-            case "first-tab": window.ActiveTab = 0; window.Focus = "body"; window.Selected = false; break;
-            case "last-tab": window.ActiveTab = Math.Max(0, window.Tabs.Count - 1); window.Focus = "body"; window.Selected = false; break;
+                window.Focus = "body"; break;
+            case "first-tab": window.ActiveTab = 0; window.Focus = "body"; break;
+            case "last-tab": window.ActiveTab = Math.Max(0, window.Tabs.Count - 1); window.Focus = "body"; break;
             case "url": if (!browser) return false; window.Focus = "url"; window.Input = window.Url; window.Selected = true; break;
-            case "find": window.Focus = "find"; window.Input = ""; window.Find = ""; break;
-            case "find-next": window.Status = "Следующее совпадение «" + window.Find + "»"; break;
+            case "find":
+                string needle = window.Focus == "body" && window.Selected ? Slice(window, window.Body).TrimEnd('\n') : window.Find;
+                window.Focus = "find"; window.Input = window.Find = needle; window.Select(0, needle.Length);
+                if (needle.Length > 0) FindMatch(window, false); break;
+            case "find-next": return FindMatch(window, true);
             case "refresh": if (!browser) return false; window.Status = "Страница обновлена"; break;
             case "back": case "forward":
                 if (!browser || window.Tab == null) return false;
@@ -221,13 +319,20 @@ internal sealed class LabScene
             case "bookmark": window.SavedBookmarks.Add(window.Url); window.Status = "Закладка сохранена"; break;
             case "bookmarks": window.Bookmarks = !window.Bookmarks; break;
             case "sidebar": if (!code) return false; window.Sidebar = !window.Sidebar; if (!window.Sidebar) window.Focus = "body"; break;
-            case "split": if (!code) return false; window.Split = !window.Split; break;
-            case "quick-open": if (!code) return false; window.Focus = "quick-open"; window.Input = ""; window.OptionIndex = window.ActiveTab; break;
-            case "quick-next": if (!code || window.Focus != "quick-open" || window.Tabs.Count < 2) return false; window.OptionIndex = (window.OptionIndex + 1) % window.Tabs.Count; break;
+            case "split":
+                if (!code) return false;
+                window.OtherTab = window.Tab.Id; window.Split = true; window.Group = 1; window.Focus = "body"; break;
+            case "quick-open":
+                if (!code) return false; window.Focus = "quick-open"; window.Cursor = 0; window.Input = ""; window.OptionIndex = 0; break;
+            case "quick-next":
+                var options = Entries(window);
+                if (options.Length == 0) return false;
+                window.OptionIndex = (window.OptionIndex + 1) % options.Length; break;
             case "quick-choose":
-                if (!code || window.Focus != "quick-open" || window.Tabs.Count < 2) return false;
-                window.ActiveTab = window.OptionIndex; window.Focus = "body"; window.Input = ""; window.Selected = false; break;
-            case "palette": if (!code) return false; window.Focus = "palette"; window.Input = ""; window.OptionIndex = 0; break;
+                var chosen = Entries(window).ElementAtOrDefault(window.OptionIndex);
+                if (chosen == null) return false;
+                OpenDocument(chosen.Path); break;
+            case "palette": if (!code) return false; window.Focus = "palette"; window.Cursor = 0; window.Input = ""; window.OptionIndex = 0; break;
             case "palette-next": if (!code || window.Focus != "palette") return false; window.OptionIndex = (window.OptionIndex + 1) % 3; break;
             case "palette-choose":
                 if (!code || window.Focus != "palette") return false;
@@ -235,61 +340,102 @@ internal sealed class LabScene
                 else if (window.OptionIndex == 2) window.Split = !window.Split;
                 else { Remember(window); window.Body = string.Join("\n", window.Body.Split('\n').Select(line => line.TrimEnd())); }
                 window.Focus = "body"; window.Input = ""; break;
-            case "goto-line": if (!code) return false; window.Focus = "goto-line"; window.Input = ""; break;
-            case "explorer": if (!code) return false; window.Sidebar = true; window.Focus = "explorer"; break;
-            case "project-search": if (!code) return false; window.Sidebar = true; window.Focus = "project-search"; window.Input = ""; break;
-            case "terminal-toggle": if (!code) return false; window.Focus = window.Focus == "terminal" ? "body" : "terminal"; window.Selected = false; window.Cursor = window.Focus == "terminal" ? TerminalInput.Length : 0; break;
-            case "save": if (!code || window.Tab == null) return false; window.Tab.SavedBody = window.Body; window.Status = "Файл «" + window.Tab.Title + "» сохранён"; break;
+            case "goto-line": if (!code) return false; window.Focus = "goto-line"; window.Input = ""; window.Cursor = 0; break;
+            case "explorer": if (!code) return false; window.View = "explorer"; window.Sidebar = true; window.Focus = "explorer"; break;
+            case "project-search": if (!code) return false; window.View = "project-search"; window.Sidebar = true; window.Focus = "project-search"; window.Input = ""; break;
+            case "panel":
+                window.Panel = !window.Panel;
+                if (!window.Panel && window.Focus == "terminal") window.Focus = "body";
+                break;
+            case "extensions": window.View = "extensions"; window.Sidebar = true; window.Focus = "extensions"; break;
+            case "terminal-toggle":
+                window.Panel = window.Focus != "terminal";
+                window.Focus = window.Panel ? "terminal" : "body"; break;
+            case "select-line":
+                int first = LineStart(window.Body, window.Start);
+                int last = LineEnd(window.Body, window.End);
+                window.Select(first, Math.Min(window.Body.Length, last + 1)); break;
+            case "save": if (!code || window.Tab == null) return false; Terminal.StoreFile(EditorPath(window.Tab), window.Body); window.Tab.SavedBody = window.Body; window.Status = "Файл «" + window.Tab.Title + "» сохранён"; break;
             case "select-all": window.Selected = true; break;
-            case "copy": Clipboard = terminal ? string.Join("\n", Terminal.History.TakeLast(6)) : window.Focus == "body" ? window.Body : window.Input; window.Status = "Скопировано в учебный буфер"; break;
-            case "cut":
-                Clipboard = terminal ? TerminalInput : window.Focus == "body" ? window.Body : window.Input;
-                if (terminal) TerminalInput = ""; else if (window.Focus == "body") { Remember(window); window.Body = ""; window.Cursor = 0; } else window.Input = "";
-                window.Selected = false; window.Status = "Выделение вырезано"; break;
-            case "paste": Insert(window, Clipboard); window.Status = "Вставлено из учебного буфера"; break;
-            case "undo": if (!code || !window.Undo.TryPop(out var undo)) return false; window.Redo.Push(window.Body); window.Body = undo; window.Cursor = Math.Min(window.Cursor, window.Body.Length); break;
-            case "redo": if (!code || !window.Redo.TryPop(out var redo)) return false; window.Undo.Push(window.Body); window.Body = redo; window.Cursor = Math.Min(window.Cursor, window.Body.Length); break;
+            case "terminal-copy":
+                if (!window.Selected) return false;
+                Clipboard = Slice(window, TerminalInput); break;
+            case "copy": case "cut":
+                var content = FieldText(window);
+                int start = Math.Clamp(window.Start, 0, content.Length), end = Math.Clamp(window.End, start, content.Length);
+                if (start == end && code && window.Focus == "body")
+                {
+                    start = LineStart(content, start); end = Math.Min(content.Length, LineEnd(content, end) + 1);
+                }
+                if (start == end) return false;
+                Clipboard = content[start..end];
+                if (action == "cut") { window.Select(start, end); Insert(window, ""); }
+                break;
+            case "paste": Insert(window, Clipboard); break;
+            case "undo": case "redo":
+                var from = action == "undo" ? window.Undo : window.Redo;
+                var to = action == "undo" ? window.Redo : window.Undo;
+                if (!from.TryPop(out var revision)) return false;
+                to.Push(Revision(window)); window.Body = revision.Text;
+                window.Tab.ExtraMatches.Clear(); window.Select(revision.Anchor, revision.Cursor); break;
             case "comment":
-                if (!code) return false; Remember(window);
-                window.Body = window.Body.StartsWith("# ") ? window.Body[2..] : "# " + window.Body; break;
+                if (!code) return false;
+                int lineStart = LineStart(window.Body, window.Cursor);
+                bool commented = window.Body.AsSpan(lineStart).StartsWith("# ");
+                window.Select(lineStart, lineStart + (commented ? 2 : 0));
+                Insert(window, commented ? "" : "# "); break;
             case "delete-line":
                 if (!code) return false; Remember(window);
-                int begin = window.Body.LastIndexOf('\n', Math.Max(0, window.Cursor - 1)); begin = begin < 0 ? 0 : begin + 1;
-                int end = window.Body.IndexOf('\n', Math.Min(window.Cursor, window.Body.Length)); end = end < 0 ? window.Body.Length : end + 1;
-                window.Body = window.Body.Remove(begin, end - begin); window.Cursor = begin; break;
+                int begin = LineStart(window.Body, window.Cursor);
+                int lineEnd = window.Body.IndexOf('\n', Math.Min(window.Cursor, window.Body.Length)); lineEnd = lineEnd < 0 ? window.Body.Length : lineEnd + 1;
+                window.Body = window.Body.Remove(begin, lineEnd - begin); window.Cursor = begin; break;
             case "terminal-clear": if (!terminal) return false; Terminal.Execute("clear"); break;
-            case "terminal-cancel": if (!terminal) return false; TerminalInput = ""; window.Status = "Ввод команды отменён"; break;
+            case "terminal-cancel": if (!terminal) return false; TerminalInput = ""; window.Cursor = 0; window.Status = "Ввод команды отменён"; break;
             case "terminal-home": if (!terminal) return false; window.Cursor = 0; break;
             case "terminal-end": if (!terminal) return false; window.Cursor = TerminalInput.Length; break;
-            case "terminal-kill": if (!terminal) return false; TerminalInput = TerminalInput[..Math.Clamp(window.Cursor, 0, TerminalInput.Length)]; break;
-            case "terminal-erase": if (!terminal) return false; TerminalInput = ""; window.Cursor = 0; break;
+            case "terminal-kill": if (!terminal) return false; killedText = TerminalInput[window.Cursor..]; TerminalInput = TerminalInput[..window.Cursor]; break;
+            case "terminal-yank": Insert(window, killedText); break;
+            case "terminal-erase": if (!terminal) return false; killedText = TerminalInput[..window.Cursor]; TerminalInput = TerminalInput[window.Cursor..]; window.Cursor = 0; break;
             case "terminal-history-up": case "terminal-history-down":
                 if (!terminal || commands.Count == 0) return false;
+                if (commandIndex == commands.Count) historyDraft = TerminalInput;
                 commandIndex = Math.Clamp(commandIndex + (action == "terminal-history-up" ? -1 : 1), 0, commands.Count);
-                TerminalInput = commandIndex == commands.Count ? "" : commands[commandIndex]; window.Cursor = TerminalInput.Length; break;
+                TerminalInput = commandIndex == commands.Count ? historyDraft : commands[commandIndex]; window.Cursor = TerminalInput.Length; break;
             default: return false;
         }
         return true;
     }
 
-    private static void Remember(LabWindow window) { window.Undo.Push(window.Body); window.Redo.Clear(); }
-    internal void Insert(LabWindow window, string value)
+    private static EditRevision Revision(LabWindow window) => new(window.Body, window.Cursor, window.Anchor);
+    private static void Remember(LabWindow window) { window.Undo.Push(Revision(window)); window.Redo.Clear(); }
+    private static int LineStart(string value, int at) => at <= 0 || value.Length == 0 ? 0 : value.LastIndexOf('\n', Math.Min(value.Length, at) - 1) + 1;
+    private static int LineEnd(string value, int at) => value.IndexOf('\n', Math.Clamp(at, 0, value.Length)) is int n && n >= 0 ? n : value.Length;
+    private static bool IsTerminal(LabWindow w) => w.App == "terminal" || w.Focus == "terminal";
+    private string FieldText(LabWindow w) => IsTerminal(w) ? TerminalInput : w.Focus == "body" ? w.Body : w.Input;
+    private static string Slice(LabWindow w, string value) => value[Math.Clamp(w.Start, 0, value.Length)..Math.Clamp(w.End, 0, value.Length)];
+    internal void Insert(LabWindow w, string value)
     {
-        if (window.App == "terminal" || window.Focus == "terminal")
+        var source = FieldText(w);
+        int start = Math.Clamp(w.Start, 0, source.Length), end = Math.Clamp(w.End, start, source.Length);
+        string updated = source[..start] + value + source[end..];
+        if (IsTerminal(w)) TerminalInput = updated;
+        else if (w.Focus != "body") w.Input = updated;
+        else if (w.App == "code")
         {
-            int cursor = window.Selected ? 0 : Math.Clamp(window.Cursor, 0, TerminalInput.Length);
-            TerminalInput = window.Selected ? value : TerminalInput.Insert(cursor, value); window.Cursor = cursor + value.Length;
+            Remember(w);
+            foreach (int match in w.Tab.ExtraMatches.OrderDescending())
+                if (match >= end && match + end - start <= updated.Length + end - start - value.Length)
+                {
+                    int shifted = match + value.Length - (end - start);
+                    updated = updated[..shifted] + value + updated[(shifted + end - start)..];
+                }
+            w.Tab.ExtraMatches.Clear(); w.Body = updated;
         }
-        else if (window.Focus != "body") { window.Input = window.Selected ? value : window.Input + value; }
-        else if (window.App == "code")
-        {
-            Remember(window); int cursor = window.Selected ? 0 : Math.Clamp(window.Cursor, 0, window.Body.Length);
-            window.Body = window.Selected ? value : window.Body.Insert(cursor, value); window.Cursor = cursor + value.Length;
-        }
-        window.Selected = false; Version++;
+        else return;
+        w.Cursor = start + value.Length; Version++;
     }
 
-    internal bool Text(string key, string text)
+    internal bool Text(string key, string text, bool extend = false, bool word = false)
     {
         if (Overview)
         {
@@ -298,7 +444,7 @@ internal sealed class LabScene
                 string name = Search.ToLowerInvariant().Trim();
                 string app = name.Contains("chrome") || name.Contains("хром") ? "chrome" : name.Contains("code") || name.Contains("код") ? "code" : name.Contains("terminal") || name.Contains("терминал") ? "terminal" : name.Contains("files") || name.Contains("файл") ? "files" : "";
                 if (app.Length == 0) return false;
-                Open(app); Search = ""; Overview = false; Version++; return true;
+                Ensure(app); Search = ""; Overview = false; Version++; return true;
             }
             if (key == "Backspace") Search = Erase(Search, Search.Length, key, out _);
             else if (text.Length > 0 && text.All(c => !char.IsControl(c))) Search += text;
@@ -308,6 +454,19 @@ internal sealed class LabScene
         var window = Active;
         if (window == null) return false;
         bool terminal = window.App == "terminal" || window.Focus == "terminal";
+        if (window.Focus == "reverse-search")
+        {
+            if (key is "Enter" or "Esc" or "Left" or "Right")
+            {
+                window.Focus = window.App == "terminal" ? "body" : "terminal"; window.Cursor = TerminalInput.Length;
+                return key == "Esc" || Text(key, "");
+            }
+            if (key == "Backspace" && window.Query.Length > 0) window.Query = window.Query[..PreviousBoundary(window.Query, window.Query.Length)];
+            else if (!string.IsNullOrEmpty(text) && !text.Any(char.IsControl)) window.Query += text;
+            else return false;
+            window.SearchIndex = commands.Count;
+            return ReverseSearch(window);
+        }
         if (key == "Enter")
         {
             if (terminal)
@@ -322,8 +481,8 @@ internal sealed class LabScene
             {
                 string url = window.Input.Trim(); if (url.Length == 0) return false;
                 if (!url.Contains("://") && url != "about:blank") url = url.Contains('.') ? "https://" + url : "https://search.local/?q=" + Uri.EscapeDataString(url);
-                var tab = window.Tab; tab.History.RemoveRange(tab.HistoryIndex + 1, tab.History.Count - tab.HistoryIndex - 1);
-                tab.History.Add(url); tab.HistoryIndex++; SetPage(tab, url); window.Focus = "body"; window.Input = "";
+                var tab = window.Tab; tab.Position = new(); tab.History.RemoveRange(tab.HistoryIndex + 1, tab.History.Count - tab.HistoryIndex - 1);
+                tab.History.Add(url); tab.HistoryIndex++; SetPage(tab, url); recentUrls.Remove(url); recentUrls.Insert(0, url); window.Item = -1; window.Focus = "body"; window.Input = "";
             }
             else if (window.Focus == "quick-open")
             {
@@ -343,40 +502,59 @@ internal sealed class LabScene
                 else { window.Status = "Команда не найдена"; return false; }
                 window.Input = ""; window.Focus = "body";
             }
-            else if (window.Focus == "goto-line") { if (!int.TryParse(window.Input, out int line)) return false; window.Cursor = window.Body.Split('\n').Take(Math.Max(0, line - 1)).Sum(value => value.Length + 1); window.Cursor = Math.Min(window.Cursor, window.Body.Length); window.Focus = "body"; window.Status = "Строка " + line; }
-            else if (window.Focus is "find" or "project-search") { window.Find = window.Input; window.Status = window.Body.Contains(window.Find, StringComparison.OrdinalIgnoreCase) ? "Совпадение найдено" : "Совпадений нет"; }
-            else if (window.App == "code") Insert(window, "\n");
+            else if (window.Focus == "goto-line") { if (!int.TryParse(window.Input, out int line)) return false; window.Focus = "body"; window.Cursor = window.Body.Split('\n').Take(Math.Max(0, line - 1)).Sum(value => value.Length + 1); window.Cursor = Math.Min(window.Cursor, window.Body.Length); window.Focus = "body"; window.Status = "Строка " + line; }
+            else if (window.Focus is "find" or "project-search") { window.Find = window.Input; FindMatch(window, false); }
+            else if (window.App == "code" && window.Focus == "body") Insert(window, "\n");
             else return false;
             Version++; return true;
         }
         if (key is "Backspace" or "Delete")
         {
-            if (terminal)
+            if (!terminal && window.Focus == "body" && window.App != "code") return false;
+            string value = FieldText(window);
+            if (!window.Selected)
             {
-                TerminalInput = Erase(TerminalInput, window.Cursor, key, out window.Cursor);
+                int caret = Math.Clamp(window.Cursor, 0, value.Length);
+                int edge = key == "Backspace" ? PreviousBoundary(value, caret) : NextBoundary(value, caret);
+                if (edge == caret) return true;
+                window.Select(caret, edge);
             }
-            else if (window.Focus != "body") { window.Input = window.Selected ? "" : Erase(window.Input, window.Input.Length, key, out _); }
-            else if (window.App == "code")
-            {
-                Remember(window);
-                if (window.Selected) { window.Body = ""; window.Cursor = 0; }
-                else window.Body = Erase(window.Body, window.Cursor, key, out window.Cursor);
-            }
-            window.Selected = false; Version++; return true;
+            Insert(window, ""); return true;
         }
-        if (key is "Left" or "Right" or "Home" or "End")
+        if (key is "Left" or "Right" or "Home" or "End" || window.App == "code" && window.Focus == "body" && key is "Up" or "Down")
         {
-            string value = terminal ? TerminalInput : window.Body;
-            window.Cursor = key switch { "Left" => PreviousBoundary(value, window.Cursor), "Right" => NextBoundary(value, window.Cursor), "Home" => 0, _ => value.Length };
-            window.Selected = false;
-            return true;
+            string value = FieldText(window);
+            int pos = Math.Clamp(window.Cursor, 0, value.Length);
+            int target = pos;
+            switch (key)
+            {
+                case "Left": case "Right":
+                    bool left = key == "Left";
+                    if (window.Selected && !extend && !word) target = left ? window.Start : window.End;
+                    else if (word)
+                    {
+                        if (left) { while (target > 0 && !char.IsLetterOrDigit(value[target - 1])) target--; while (target > 0 && char.IsLetterOrDigit(value[target - 1])) target--; }
+                        else { while (target < value.Length && char.IsLetterOrDigit(value[target])) target++; while (target < value.Length && !char.IsLetterOrDigit(value[target])) target++; }
+                    }
+                    else target = left ? PreviousBoundary(value, pos) : NextBoundary(value, pos);
+                    break;
+                case "Home": target = word ? 0 : LineStart(value, pos); break;
+                case "End": target = word ? value.Length : LineEnd(value, pos); break;
+                default:
+                    int start = LineStart(value, pos), end = LineEnd(value, pos);
+                    int adjacent = key == "Up" ? LineStart(value, Math.Max(0, start - 1)) : Math.Min(value.Length, end + 1);
+                    target = Math.Min(LineEnd(value, adjacent), adjacent + pos - start); break;
+            }
+            window.Tab?.ExtraMatches.Clear();
+            window.Select(extend ? window.Anchor : target, target); Version++; return true;
         }
         if (terminal && key is "Up" or "Down") return Apply(key == "Up" ? "terminal-history-up" : "terminal-history-down");
         if (terminal && key == "Tab")
         {
-            string last = TerminalInput.Split(' ').Last();
+            int caret = Math.Clamp(window.Cursor, 0, TerminalInput.Length);
+            string last = TerminalInput[..caret].Split(' ').Last();
             string[] options = Terminal.Complete(last);
-            if (options.Length == 1) { TerminalInput = TerminalInput[..^last.Length] + options[0]; window.Cursor = TerminalInput.Length; }
+            if (options.Length == 1) { window.Select(caret - last.Length, caret); Insert(window, options[0]); }
             else window.Status = string.Join("  ", options);
             return true;
         }
@@ -402,11 +580,22 @@ internal sealed class LabScene
 
     private static void SetPage(LabTab tab, string url)
     {
-        tab.Url = url; tab.Title = url.Contains("python.org") ? "Документация Python" : url.Contains("github.com") ? "Проект piling-main" : url == "about:blank" ? "Новая вкладка" : "Учебная страница";
-        tab.Body = url == "about:blank" ? "" : tab.Title + "\n" + url + "\nPython и Ubuntu. Работа с клавиатурой.";
+        tab.Url = url;
+        (tab.Title, tab.Body) = url switch
+        {
+            "about:blank" => ("Новая вкладка", ""),
+            "chrome://downloads" => ("Загрузки", ""),
+            "chrome://history" => ("История", ""),
+            "chrome://bookmarks" => ("Закладки", ""),
+            "https://docs.python.org/3/" => ("Документация Python", "Python\nДокументация языка Python.\nФункции, модули и примеры."),
+            "https://github.com/veitnemed/piling-main" => ("Проект piling-main", "piling-main\nСигналы, спектр и направляющие векторы."),
+            "https://practice.local/spectrum" => ("Методика расчёта спектра", "Спектр сигнала\nПрямое преобразование возвращает комплексный спектр.\nЦентрированный спектр позволяет сопоставить частоты.\nМатериалы и отчёт доступны ниже."),
+            _ => ("Учебная страница", url)
+        };
+        tab.Position = new();
     }
 
-    internal object Snapshot() => new { Workspace, WorkspaceCount, Overview, Switcher, Layout, ActiveWindow,
-        windows = Windows.Select(window => window.Snapshot(window.Id == ActiveWindow)), terminal = Terminal.Snapshot(), terminalInput = TerminalInput,
-        Clipboard, Screenshot, ScreenshotReady, ScreenshotCopied, Screenshots, ShowDesktop, Search, LayoutIsVirtual, Version };
+    internal object Snapshot() => new { Workspace, WorkspaceCount, Overview, Switcher, SwitchTarget, Dock, Layout, ActiveWindow,
+        windows = Windows.Select(WindowSnapshot), terminal = Terminal.Snapshot(), terminalInput = TerminalInput,
+        Clipboard, clipboardMime = ClipboardImage == null ? "text/plain" : "image/png", Screenshot, ScreenshotReady, ScreenshotCopied, Screenshots, ShowDesktop, Search, LayoutIsVirtual, Version };
 }

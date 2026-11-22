@@ -29,6 +29,7 @@ namespace TouchTypingStudio
         public List<PracticeRecord> PracticeRecords = new List<PracticeRecord>();
         public List<SavedShortcut> Shortcuts = new List<SavedShortcut>();
         public List<ShortcutAttempt> ShortcutHistory = new List<ShortcutAttempt>();
+        public List<LiveDraft> LiveDrafts = new List<LiveDraft>();
         public List<LabSessionRecord> LabSessions = new List<LabSessionRecord>();
         public List<LabSessionRecord> LabRecords = new List<LabSessionRecord>();
         public int TypingCourse;

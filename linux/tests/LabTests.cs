@@ -34,7 +34,11 @@ internal static class LabTests
     private static void Complete(LabRun run)
     {
         var task = run.Task;
-        if (task.Keys.Length > 0) Chord(run, task.Keys);
+        if (task.Keys.Length > 0)
+        {
+            int before = run.Solved;
+            for (int i = 0; i < 30 && run.Solved == before; i++) Chord(run, task.Keys);
+        }
         else
         {
             Type(run, task.Text);
@@ -45,40 +49,27 @@ internal static class LabTests
         => new(app, "sandbox", level, 180, "EN", [], new Random(seed), clock);
     private static void Main()
     {
-        var initialUbuntu = LabScenarios.Eligible("ubuntu", new LabScene("ubuntu", "EN"), 2).Select(item => item.Id).ToHashSet();
-        var initialChrome = LabScenarios.Eligible("chrome", new LabScene("chrome", "EN"), 2).Select(item => item.Id).ToHashSet();
-        var initialCode = LabScenarios.Eligible("code", new LabScene("code", "EN"), 2).Select(item => item.Id).ToHashSet();
-        var initialTerminal = LabScenarios.Eligible("terminal", new LabScene("terminal", "EN"), 2).Select(item => item.Id).ToHashSet();
-        Check(initialUbuntu.Contains("ubuntu-start") && initialUbuntu.Contains("ubuntu-capture"), "Ubuntu opens from desktop and offers capture chain");
-        Check(initialChrome.Contains("chrome-address-cut") && initialChrome.Contains("chrome-fullscreen"), "Chrome offers meaningful address cut and physical F11 chains");
-        Check(initialCode.Contains("code-cut") && initialCode.Contains("code-quick-open"), "VS Code offers real text selection and keyboard file picker");
-        Check(initialTerminal.Contains("terminal-keys-basic") && initialTerminal.Contains("terminal-files"), "Terminal offers connected paste and file chains");
         foreach (string app in LabCatalog.Apps)
         foreach (int level in new[] { 0, 1, 2 })
-        foreach (int seed in Enumerable.Range(1, 4))
         {
-            var run = Create(app, seed, level);
-            Check(run.Paused, "Starts paused before native capture"); run.Resume();
-            Check(run.Scene.Windows.Count == (app == "ubuntu" ? 0 : 1), "Only the relevant application is opened at start");
-            var seen = new HashSet<string>();
-            for (int index = 0; index < 60; index++)
+            var courses = LiveCourse.Missions.Where(m => m.App == app && m.Level == level).ToList();
+            Check(courses.Count == (app == "workday" ? 1 : 4), "Course count: " + app);
+            foreach (var course in courses)
+            foreach (int variant in Enumerable.Range(0, 3))
+            foreach (string layout in new[] { "RU", "EN" })
             {
-                int before = run.Solved;
-                var task = run.Task; seen.Add(task.Id);
-                Check(run.ScenarioTitle.Length > 0 && run.ScenarioStep is >= 1 && run.ScenarioStep <= run.ScenarioLength,
-                    "Connected scenario and step are visible");
-                Check(task.Level <= level, "Scenario does not leak a higher-level task");
-                if (app is "chrome" or "code") Check(task.Keys.Length > 0 && task.Text.Length == 0, "Live app class uses shortcuts only");
-                Check(task.Keys.Length == 0 || LabCatalog.Available(task, run.Scene), "State valid " + app + ": " + task.Id);
-                Complete(run);
-                Check(run.Solved == before + 1, app + "/" + level + " seed" + seed + " task " + task.Id + " failed: " + run.Status);
-                Check(run.Scene.Windows.Count <= (app == "ubuntu" ? 4 : 1), "Window count remains bounded");
+                var initial = new LabScene(app == "workday" ? "ubuntu" : app, layout);
+                initial.PrepareCase(variant, app);
+                var route = LiveCourse.Compile(course, initial);
+                Check(route.Count >= 20, course.Id + ": minimum route length");
+                Check(route.Select(step => step.Task.Id).Distinct().Count() >= 8, course.Id + ": distinct actions");
+                Check(route.Select(step => step.Phase).Distinct().Count() >= 3, course.Id + ": meaningful phases");
             }
-            Check(run.Block == 4, "Continuing blocks of20 " + app);
-            Check(seen.Count >= (level == 0 ? 5 : 10), "Diverse tasks " + app + "/" + level + "/" + seen.Count);
-            Check(run.Errors == 0, "Valid chain has no errors " + app);
         }
         double now = 0;
+        var unlimited = new LabRun("chrome", "sandbox", 0, 0, "EN", [], new Random(4), () => now);
+        unlimited.Resume(); now += 8 * 3600 * 1000;
+        Check(!unlimited.Finished && unlimited.Seconds == 8 * 3600, "An untimed lesson survives eight hours");
         var timed = Create("chrome", clock: () => now);
         now += 100000; Check(timed.Seconds == 0, "Capture waiting excludes clock");
         timed.Resume(); now += 10000; timed.Pause(); now += 90000; Check(timed.Seconds == 10, "Pause excludes clock");
@@ -97,8 +88,6 @@ internal static class LabTests
         foreach (string layout in new[] { "EN", "RU" })
         {
             var run = new LabRun("terminal", "sandbox", 2, 180, layout, [], new Random(1)); run.Resume();
-            for (int index = 0; run.Task.Id != "terminal-paste" && index < 300; index++) Complete(run);
-            Check(run.Task.Id == "terminal-paste", "Linked terminal paste becomes reachable in " + layout);
             // The physical V key works in either layout while both modifiers remain down.
             run.Input("RCtrl", true, ""); run.Input("LShift", true, "");
             int old = run.Scene.Version;
@@ -106,10 +95,9 @@ internal static class LabTests
             Check(run.Scene.Version > old && run.Scene.TerminalInput.Length > 0, "Physical paste in " + layout);
             int same = run.Scene.Version; run.Input("V", true, "М"); Check(run.Scene.Version == same, "Autorepeat ignored");
             run.Input("V", false, "");
-            var cut = LabCatalog.Resolve("X", ["RCtrl", "LShift"], run.Scene);
-            Check(cut?.Id == "terminal-cut", "Physical CtrlShiftX resolves in " + layout);
-            Check(run.Scene.Apply(cut.Action) && run.Scene.TerminalInput.Length == 0, "Physical CtrlShiftX scene effect in " + layout);
-            Check(run.Task.Id != "terminal-cut", "Guided task still controls scoring in " + layout);
+            run.Input("LShift", false, ""); run.Input("RCtrl", false, "");
+            Chord(run, "Ctrl+U");
+            Check(run.Scene.TerminalInput == "", "Readline kills to beginning in " + layout);
         }
         var tie = new LabSessionRecord { Session = "previous", App = timed.App, Mode = timed.Mode, Level = timed.Level, Completed = true, Solved = timed.Solved, Errors = timed.Errors + 1 };
         var tiedResult = JsonSerializer.SerializeToElement(timed.Result([tie, record]), Program.Json);
@@ -143,12 +131,14 @@ internal static class LabTests
         var wrongAction = Create("code"); wrongAction.Resume();
         var pending = wrongAction.Task; int unchanged = wrongAction.Scene.Version;
         Chord(wrongAction, "Alt+F4");
-        Check(wrongAction.Task == pending && wrongAction.Scene.Version == unchanged && wrongAction.Scene.Windows.Count == 1 &&
-              wrongAction.LastKey == "F4", "Wrong valid shortcut leaves guided scene unchanged and marks actual key");
+        Check(wrongAction.Task == pending && wrongAction.Scene.Version > unchanged && wrongAction.Scene.Windows.Count == 0,
+            "Alt+F4 closes only the virtual window while the lesson stays active");
+        Chord(wrongAction, "Super+2");
+        Check(wrongAction.Scene.Active?.App == "code", "User can reopen the simulated editor");
         LabRun function = null;
         for (int seed = 1; seed <= 8 && function == null; seed++)
         {
-            var candidate = Create("chrome", seed, 0); candidate.Resume();
+            var candidate = Create("chrome", seed, 2); candidate.Resume();
             for (int index = 0; index < 200 && candidate.Task.Id != "fullscreen"; index++) Complete(candidate);
             if (candidate.Task.Id == "fullscreen") function = candidate;
         }
@@ -165,8 +155,8 @@ internal static class LabTests
         Check(repair.Task.Action == "command", "Terminal command story is reachable");
         string commandTask = repair.Task.Id, oldCommand = repair.Scene.Terminal.LastCommand;
         Type(repair, "not-a-command"); Chord(repair, "Enter");
-        Check(repair.Errors == 1 && repair.Task.Id == commandTask && repair.Scene.TerminalInput == "not-a-command" &&
-              repair.Scene.Terminal.LastCommand == oldCommand, "Wrong terminal command preserves input and virtual system");
+        Check(repair.Errors == 1 && repair.Task.Id == commandTask && repair.Scene.TerminalInput == "" &&
+              repair.Scene.Terminal.LastCommand == "not-a-command" && !repair.Scene.Terminal.LastSuccess, "Shell executes an unknown command, shows failure and leaves the task pending");
         Chord(repair, "Ctrl+U");
         Check(repair.Scene.TerminalInput.Length == 0 && repair.Task.Id == commandTask, "Ctrl+U repairs command without skipping task");
         int repaired = repair.Solved; Type(repair, repair.Task.Text); Chord(repair, "Enter");
@@ -175,7 +165,7 @@ internal static class LabTests
         unicode.Scene.Active.Focus = "body"; unicode.Scene.Active.Body = "";
         Check(unicode.Scene.Text("A", "ф") && unicode.Scene.Active.Body == "ф", "Scene preserves actual Unicode before virtual layout switch");
         unicode.Input("A", true, "ф"); unicode.Input("A", false, "");
-        Check(unicode.Scene.Active.Body == "ф" && unicode.Errors == 1, "Wrong text does not mutate guided shortcut scene");
+        Check(unicode.Scene.Active.Body == "фф" && unicode.Errors == 0, "Ordinary Unicode editing works during a shortcut mission");
         var oldWinner = new LabSessionRecord { Session = "old-winner", App = "chrome", Mode = "sandbox", Level = 2,
             Completed = true, Seconds = 180, Solved = 250, Errors = 2, Date = DateTime.Now.AddYears(-2) };
         var migrated = new StudioProfile(); migrated.LabSessions.Add(oldWinner);
