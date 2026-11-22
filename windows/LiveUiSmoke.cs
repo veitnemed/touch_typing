@@ -169,12 +169,13 @@ internal static class LiveUiSmoke
         for (int i = 0; i < attempts && Exists("LabClock"); i++)
         {
             if (timeout.Elapsed.TotalSeconds > (full ? 195 : 25)) break;
-            string chord = Find("LabKeys").Current.HelpText;
-            Console.WriteLine("TASK " + Name("LabTask") + " | " + chord + " | " + Name("LabCounter"));
-            if (chord.Length == 0)
+            var task = Find("LabTask");
+            string instruction = task.Current.ItemStatus;
+            string title = task.Current.Name;
+            Console.WriteLine("TASK " + title + " | " + instruction + " | " + Name("LabCounter"));
+            if (instruction.StartsWith("text:", StringComparison.Ordinal) && instruction.Length > 5)
             {
-                string title = Name("LabTask");
-                string text = Find("LabTask").Current.HelpText;
+                string text = instruction.Substring(5);
                 foreach (char character in text)
                 {
                     Stroke[] strokes = Character(character);
@@ -183,8 +184,9 @@ internal static class LiveUiSmoke
                 }
                 if (Exists("LabClock") && Name("LabTask") == title) Key("Enter");
             }
-            else
+            else if (instruction.StartsWith("keys:", StringComparison.Ordinal) && instruction.Length > 5)
             {
+                string chord = instruction.Substring(5);
                 int before = ReadSolved();
                 var strokes = Parse(chord);
                 Send(strokes.Select(stroke => stroke.Down()).ToArray());
@@ -195,6 +197,8 @@ internal static class LiveUiSmoke
                 }
                 Send(strokes.Reverse().Select(stroke => stroke.Up()).ToArray());
             }
+            else
+                throw new InvalidOperationException("Missing typed QA input for the active task: " + title + " [" + instruction + "]");
             Wait(70);
         }
         if (!full)

@@ -374,6 +374,14 @@ namespace TouchTypingStudio
             labKeys.ToolTip = state.B("showGuide", true) ? task.S("hint") : "";
             AutomationProperties.SetHelpText(labKeys, task.S("keys"));
             AutomationProperties.SetHelpText(labTask, task.S("text"));
+            // A WPF TextBlock with empty HelpText falls back to its tooltip.
+            // Keep QA input metadata separate from visible/accessibility hints.
+            if (verifyMode)
+            {
+                string keys = task.S("keys"), text = task.S("text");
+                AutomationProperties.SetItemStatus(labTask,
+                    keys.Length > 0 ? "keys:" + keys : text.Length > 0 ? "text:" + text : "none:");
+            }
             labDesktop.Update(state.D("scene"), labApp);
             string status = state.S("status").Replace("LSuper", "⊞").Replace("RSuper", "⊞ прав.").Replace("Super", "⊞");
             string held = string.Join(" + ", state.Items("held").Select(key => LiveKeyboard.Title(key.Value())));
