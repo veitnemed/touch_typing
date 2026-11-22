@@ -231,7 +231,16 @@ internal sealed partial class LabScene
             case "screenshot-confirm": if (!Screenshot) return false; Screenshot = false; ScreenshotReady = true; Screenshots++; ScreenshotCopied = true;
                 Capture(); break;
             case "copy-shot": if (!ScreenshotReady) return false; ScreenshotCopied = true; Clipboard = "Снимок-" + Screenshots + ".png"; break;
-            case "escape": if (window?.Focus == "reverse-search") return Text("Esc", ""); Overview = Switcher = Screenshot = ScreenshotReady = false; if (window != null) { window.ImagePreview = null; window.Focus = "body"; window.Input = ""; } break;
+            case "escape":
+                if (window?.Focus == "reverse-search") return Text("Esc", "");
+                Overview = Switcher = Screenshot = ScreenshotReady = false;
+                if (window != null)
+                {
+                    window.ImagePreview = null;
+                    if (window.Focus != "body") window.Input = "";
+                    window.Focus = "body"; // restores the active tab's independent caret/selection
+                }
+                break;
             case "navigate-pasted":
                 if (window?.App != "chrome" || window.Focus != "url" || string.IsNullOrWhiteSpace(window.Input)) return false;
                 return Text("Enter", "");
@@ -433,6 +442,16 @@ internal sealed partial class LabScene
         }
         else return;
         w.Cursor = start + value.Length; Version++;
+    }
+
+    internal bool CanRepeatEditing(string key)
+    {
+        var window = Active;
+        if (window == null || Overview || Switcher || Screenshot || window.Focus == "reverse-search") return false;
+        bool editor = window.App == "code" && window.Focus == "body";
+        if (!editor && !IsTerminal(window)) return false;
+        return key is "Left" or "Right" or "Home" or "End" or "Delete" or "Backspace"
+            || editor && key is "Up" or "Down";
     }
 
     internal bool Text(string key, string text, bool extend = false, bool word = false)

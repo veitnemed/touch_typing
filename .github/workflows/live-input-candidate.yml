@@ -1,0 +1,125 @@
+name: Live input candidate (no publish)
+
+on:
+  push:
+    branches: [feature/live-input-reliability]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-input-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Regressions and distributable
+        env:
+          PYTHONPATH: linux
+        run: |
+          set -euo pipefail
+          for project in SharedRegression LabRegression LabStressTests TerminalRegression; do
+            dotnet run --project "linux/tests/$project.csproj" -c Release
+          done
+          bash linux/build-release.sh "$RUNNER_TEMP/touch-typing-linux-x64"
+          export TOUCH_TYPING_ENGINE="$RUNNER_TEMP/touch-typing-linux-x64/engine/TouchTyping.Engine"
+          /usr/bin/python3 linux/tests/test_practice.py
+          /usr/bin/python3 linux/tests/test_live_missions.py
+          /usr/bin/python3 linux/tests/test_live_visual_fields.py
+          node tests/workday-editor-state.js
+          tar -czf "$RUNNER_TEMP/touch-typing-linux-x64.tar.gz" -C "$RUNNER_TEMP" touch-typing-linux-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64-candidate
+          path: ${{ runner.temp }}/touch-typing-linux-x64.tar.gz
+
+  windows-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build exact ZIP under test
+        run: |
+          set -euo pipefail
+          bash windows/build-release.sh "$RUNNER_TEMP/touch-typing-windows-x64"
+          (cd "$RUNNER_TEMP/touch-typing-windows-x64" && zip -qr "$RUNNER_TEMP/touch-typing-windows-x64.zip" .)
+          (cd "$RUNNER_TEMP" && sha256sum touch-typing-windows-x64.zip > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-candidate
+          path: |
+            ${{ runner.temp }}/touch-typing-windows-x64.zip
+            ${{ runner.temp }}/SHA256SUMS.txt
+
+  windows-window:
+    needs: windows-package
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64-candidate
+          path: ${{ runner.temp }}/candidate
+      - name: Verify and extract ZIP
+        shell: pwsh
+        run: |
+          $inputDir = Join-Path $env:RUNNER_TEMP candidate
+          $zip = Join-Path $inputDir touch-typing-windows-x64.zip
+          $expected = (Get-Content (Join-Path $inputDir SHA256SUMS.txt) -Raw).Split(' ')[0]
+          if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne $expected) { throw 'ZIP SHA mismatch' }
+          Get-ComputerInfo -Property WindowsProductName, WindowsVersion, OsBuildNumber, OsArchitecture
+          Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $env:RUNNER_TEMP 'TouchTyping QA')
+      - name: Render WPF and send keys to the extracted application
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $appDir = Join-Path $env:RUNNER_TEMP 'TouchTyping QA'
+          $app = Join-Path $appDir TouchTyping.exe
+          $out = Join-Path $env:RUNNER_TEMP windows-evidence
+          $render = Join-Path $out render
+          New-Item -Path $render -ItemType Directory -Force | Out-Null
+          $proc = Start-Process $app -ArgumentList "--qa --check-live-render `"$render`"" -Wait -PassThru
+          Get-Content (Join-Path $render result.txt)
+          if ($proc.ExitCode -ne 0) { throw 'WPF render failed' }
+          & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -OutputDirectory (Join-Path $out 'keyboard')
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-evidence
+          path: ${{ runner.temp }}/windows-evidence/
+
+  linux-window:
+    needs: engine
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-x64-candidate
+          path: ${{ runner.temp }}/candidate
+      - name: Install GNOME test session dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnome-shell gsettings-desktop-schemas gir1.2-gtk-4.0 python3-gi dbus-x11 fonts-dejavu-core libgl1-mesa-dri
+      - name: Send keys through isolated GNOME Wayland to the packaged GTK window
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          tar -xzf "$RUNNER_TEMP/candidate/touch-typing-linux-x64.tar.gz" -C "$RUNNER_TEMP/candidate"
+          bash "$RUNNER_TEMP/candidate/touch-typing-linux-x64/check.sh" --terminal-only --output "$RUNNER_TEMP/linux-evidence"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-evidence
+          path: ${{ runner.temp }}/linux-evidence/

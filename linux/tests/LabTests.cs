@@ -99,6 +99,85 @@ internal static class LabTests
             Chord(run, "Ctrl+U");
             Check(run.Scene.TerminalInput == "", "Readline kills to beginning in " + layout);
         }
+        foreach (string layout in new[] { "EN", "RU" })
+        {
+            var edit = new LabRun("terminal", "sandbox", 0, 0, layout, [], new Random(3));
+            edit.Resume();
+            string line = layout == "RU" ? "абвгде" : "abcdef";
+            Type(edit, line);
+            int startingScore = edit.Solved;
+            edit.Input("Left", true, "");
+            edit.Input("Left", true, "");
+            edit.Input("Left", false, "");
+            Check(edit.Scene.Active.Cursor == 4, "Held Left moves caret twice in " + layout);
+            edit.Input("Delete", true, "");
+            edit.Input("Delete", true, "");
+            edit.Input("Delete", false, "");
+            Check(edit.Scene.TerminalInput == line[..4], "Held Delete removes forward in " + layout);
+            edit.Input("Backspace", true, "");
+            edit.Input("Backspace", true, "");
+            edit.Input("Backspace", false, "");
+            Check(edit.Scene.TerminalInput == line[..2] && edit.Scene.Active.Cursor == 2, "Held Backspace removes backward in " + layout);
+            Check(edit.Solved == startingScore, "Repeat edits do not count as training steps");
+            var reopened = new LabRun("terminal", "sandbox", 0, 0, layout, [], new Random(3), draft: edit.Draft());
+            Check(reopened.Scene.TerminalInput == line[..2] && reopened.Scene.Active.Cursor == 2,
+                "Current draft replays bounded editing repeats in " + layout);
+            Chord(edit, "Ctrl+U");
+            Type(edit, "pwd");
+            edit.Input("Enter", true, "");
+            string[] output = edit.Scene.Terminal.History;
+            edit.Input("Enter", true, "");
+            edit.Input("Enter", false, "");
+            Check(edit.Scene.Terminal.History.SequenceEqual(output), "Held Enter does not submit twice");
+            Type(edit, line);
+            edit.Input("LShift", true, "");
+            edit.Pause();
+            edit.Resume();
+            edit.Input("LShift", false, "");
+            Chord(edit, "Left");
+            Check(!edit.Scene.Active.Selected, "Focus loss clears held Shift before navigation");
+        }
+        var editor = Create("code");
+        editor.Resume();
+        string body = editor.Scene.Active.Body;
+        editor.Scene.Active.Cursor = body.IndexOf("np.fft.fft", StringComparison.Ordinal);
+        if (editor.Scene.Active.Cursor < 0) editor.Scene.Active.Cursor = 0;
+        int beforeFind = editor.Scene.Active.Cursor;
+        Chord(editor, "Ctrl+F");
+        Check(editor.Scene.Active.Focus == "find", "Find opens as a separate editor field");
+        Type(editor, "notfoundxyz");
+        Chord(editor, "Esc");
+        Check(editor.Scene.Active.Focus == "body" && editor.Scene.Active.Body == body && editor.Scene.Active.Cursor == beforeFind,
+            "Escape returns to the document without replacing its content");
+        int originalCaret = editor.Scene.Active.Cursor;
+        editor.Input("Right", true, "");
+        editor.Input("Right", true, "");
+        editor.Input("Right", false, "");
+        Check(editor.Scene.Active.Cursor == originalCaret + 2, "Held Right edits the focused document");
+
+        var strict = new LabRun("chrome", "sandbox", 0, 0, "EN", [], new Random(3));
+        strict.Resume();
+        for (int step = 0; step < 100 && strict.Task.Id != "url"; step++) Complete(strict);
+        Check(strict.Task.Id == "url", "Browser route reaches the physical Ctrl+L step");
+        int previousScore = strict.Solved;
+        Chord(strict, "Alt+D");
+        Check(strict.Scene.Active.Focus == "url" && strict.Scene.Active.Selected && strict.Solved == previousScore,
+            "Alt+D selects the address without satisfying Ctrl+L");
+        var currentDraft = strict.Draft();
+        LabRun Reopen(LiveDraft draft) => new("chrome", "sandbox", 0, 0, "EN", [], new Random(3), draft: draft);
+        var reopenedCurrent = Reopen(currentDraft);
+        Check(reopenedCurrent.Task.Id == "url" && reopenedCurrent.Scene.Active.Selected,
+            "Current trace keeps address effects without crediting the alternate");
+        var oldEvents = JsonSerializer.Deserialize<LiveEvent[]>(currentDraft.Trace)
+            .Where(item => item.Key != "@exact-url");
+        currentDraft.Trace = JsonSerializer.Serialize(oldEvents);
+        var reopenedOld = Reopen(currentDraft);
+        Check(reopenedOld.Task.Id != "url", "Legacy draft does not revoke earlier alternate credit");
+        Check(Reopen(reopenedOld.Draft()).Task.Id == reopenedOld.Task.Id,
+            "Legacy state remains stable after upgrade and re-save");
+        Chord(strict, "Ctrl+L");
+        Check(strict.Solved == previousScore + 1, "Physical Ctrl+L passes even after Alt+D selected the address");
+
         var tie = new LabSessionRecord { Session = "previous", App = timed.App, Mode = timed.Mode, Level = timed.Level, Completed = true, Solved = timed.Solved, Errors = timed.Errors + 1 };
         var tiedResult = JsonSerializer.SerializeToElement(timed.Result([tie, record]), Program.Json);
         Check(tiedResult.GetProperty("newRecord").GetBoolean(), "Equal score with fewer errors improves record");

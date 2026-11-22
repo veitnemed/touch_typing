@@ -191,11 +191,11 @@ namespace TouchTypingStudio
             prompt.Margin = new Thickness(0, 7, 0, 7);
             labTask = Label("", 20, Ink, true);
             AutomationProperties.SetAutomationId(labTask, "LabTask");
-            labTask.TextWrapping = TextWrapping.NoWrap;
-            labTask.TextTrimming = TextTrimming.CharacterEllipsis;
+            labTask.TextWrapping = TextWrapping.Wrap;
             labKeys = Label("", 17, Accent);
             AutomationProperties.SetAutomationId(labKeys, "LabKeys");
             labKeys.Margin = new Thickness(0, 4, 0, 0);
+            labKeys.TextWrapping = TextWrapping.Wrap;
             prompt.Children.Add(labTask);
             prompt.Children.Add(labKeys);
             Grid.SetRow(prompt, 1);
@@ -222,8 +222,7 @@ namespace TouchTypingStudio
             input.Children.Add(aids);
             feedback = labStatus = Label("", 12, Dim);
             AutomationProperties.SetAutomationId(feedback, "LabStatus");
-            feedback.TextWrapping = TextWrapping.NoWrap;
-            feedback.TextTrimming = TextTrimming.CharacterEllipsis;
+            feedback.TextWrapping = TextWrapping.Wrap;
             feedback.VerticalAlignment = VerticalAlignment.Center;
             AutomationProperties.SetLiveSetting(feedback, AutomationLiveSetting.Polite);
             input.Children.Add(labStatus);
@@ -321,15 +320,29 @@ namespace TouchTypingStudio
         private void ToggleLabPause()
         { if (paused) ResumeLab(); else PauseLab(); }
 
-        private void CaptureLabKey(int vk, int scan, bool extended, bool down, string value)
+        private static bool LabEditingRepeat(string key)
+        {
+            switch (key)
+            {
+                case "Left": case "Right": case "Up": case "Down":
+                case "Home": case "End": case "PageUp": case "PageDown":
+                case "Backspace": case "Delete": return true;
+                default: return false;
+            }
+        }
+
+        private void CaptureLabKey(int vk, int scan, bool extended, bool down, bool nativeRepeat, string value)
         {
             if (!labActive || paused || !IsActive) return;
             string key = ScanKey(scan, extended, vk);
             if (key.Length == 0) return;
-            bool repeat = value == null;
-            if (down && repeat) return;
-            if (down ? !pressed.Add(key) : !pressed.Remove(key)) return;
-            if (down && !pressed.Any(IsModifier))
+            bool repeat = down && (nativeRepeat || pressed.Contains(key));
+            if (repeat)
+            {
+                if (!pressed.Contains(key) || !LabEditingRepeat(key)) return;
+            }
+            else if (down ? !pressed.Add(key) : !pressed.Remove(key)) return;
+            if (down && !repeat && !pressed.Any(IsModifier))
             {
                 if (key == "F1" && !state.B("showGuide", true)) { RenderLab(Request("lab-hint")); return; }
                 if (key == LabPauseKey()) { PauseLab(); return; }

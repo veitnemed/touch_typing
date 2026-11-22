@@ -19,6 +19,7 @@ def main():
     parser.add_argument("--output", type=Path, default=Path.cwd() / "typing-check-results")
     parser.add_argument("--timed", action="store_true", help="Дополнительно пройти настоящий подход на 180 секунд")
     parser.add_argument("--full", action="store_true", help="Запустить C# стресс-тесты из исходников, требуется SDK .NET 10")
+    parser.add_argument("--terminal-only", action="store_true", help="Проверить ввод в окно терминала на 1366×768")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -48,6 +49,7 @@ def main():
             command = ["dbus-run-session", "--", sys.executable, str(Path(__file__).resolve()),
                        "--inside", "--output", str(args.output), "--seed", str(args.seed)]
             if args.timed: command.append("--timed")
+            if args.terminal_only: command.append("--terminal-only")
             if args.full: command.append("--full")
             return subprocess.run(command, env=environment).returncode
     return run_checks(args)
@@ -63,6 +65,8 @@ def run_checks(args):
               "forms and confirmations", "held modifiers", "capture lifecycle", "single left Windows key",
               "connected scenarios", "shortcut-only Chrome and VS Code", "F11 versus Print",
               "Space resumes and Enter stays in the scene", "independent wrong-key highlight"]}
+    if args.terminal_only:
+        report["coverage"] = ["native terminal RU/EN", "caret, deletion, history, focus and frame bounds"]
     def save():
         temporary = args.output / "report.json.tmp"
         temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -104,8 +108,9 @@ def run_checks(args):
                 raise RuntimeError("Полная проверка требует исходники и SDK .NET 10.")
             for name in projects:
                 check(name, [dotnet, "run", "--project", str(tests / (name + ".csproj"))], timeout=300)
-        check("missions", [sys.executable, str(tests / "test_live_missions.py")], timeout=300)
-        check("protocol", [sys.executable, str(tests / "test_practice.py")])
+        if not args.terminal_only:
+            check("missions", [sys.executable, str(tests / "test_live_missions.py")], timeout=300)
+            check("protocol", [sys.executable, str(tests / "test_practice.py")])
         subprocess.run(["gsettings", "set", "org.gnome.desktop.input-sources", "sources",
                         "[('xkb', 'us'), ('xkb', 'ru')]"], env=environment, check=True)
         shell_output = (args.output / "compositor.log").open("w", encoding="utf-8")
@@ -119,12 +124,15 @@ def run_checks(args):
                 raise RuntimeError("Тестовый GNOME не запустился. См. compositor.log.")
             time.sleep(.1)
         time.sleep(1)
-        check("native-small", [sys.executable, str(tests / "test_lab_window.py"), "--small"])
-        check("ui-controls", [sys.executable, str(tests / "test_ui_controls.py"), "--small"])
-        check("capture-denied", [sys.executable, str(tests / "test_ui_controls.py"), "--small", "--deny-capture"])
-        check("legacy-window", [sys.executable, str(tests / "test_wayland_window.py")])
-        if args.timed:
-            check("native-180-seconds", [sys.executable, str(tests / "test_lab_window.py"), "--timed"], timeout=300)
+        if args.terminal_only:
+            check("native-terminal", [sys.executable, str(tests / "test_lab_window.py"), "--terminal-only"])
+        else:
+            check("native-small", [sys.executable, str(tests / "test_lab_window.py"), "--small"])
+            check("ui-controls", [sys.executable, str(tests / "test_ui_controls.py"), "--small"])
+            check("capture-denied", [sys.executable, str(tests / "test_ui_controls.py"), "--small", "--deny-capture"])
+            check("legacy-window", [sys.executable, str(tests / "test_wayland_window.py")])
+            if args.timed:
+                check("native-180-seconds", [sys.executable, str(tests / "test_lab_window.py"), "--timed"], timeout=300)
         report["status"] = "passed" if all(c["status"] == "passed" for c in report["checks"]) else "failed"
     except Exception as error:
         report["status"] = "failed"

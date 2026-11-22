@@ -1792,6 +1792,9 @@ class LabPage(Gtk.Box):
         self.active = False
         self.state = None
         self.pressed = set()
+        # Actual GUI key state is separate from keys already sent to the
+        # engine. Capture resets on pause, but a held F-key is not a new press.
+        self.physical_down = set()
         self.surface = None
         self.handler = None
         self.capture_timeout = 0
@@ -1858,7 +1861,7 @@ class LabPage(Gtk.Box):
         self.timer = text("03:00", "lesson-timer")
         self.task = text("Выберите класс и нажмите пробел", "lab-task")
         self.task.set_ellipsize(Pango.EllipsizeMode.END)
-        self.gesture = text("", "mono", "lab-gesture")
+        self.gesture = text("", "mono", "lab-gesture", wrap=True)
         self.status = text("", "muted", wrap=True)
         self.status.add_css_class("lab-status")
         self.status.set_halign(Gtk.Align.START)
@@ -2104,6 +2107,8 @@ class LabPage(Gtk.Box):
         self.pause.grab_focus()
 
     def focus(self, active):
+        if not active:
+            self.physical_down.clear()
         if not self.active:
             return
         if active:
@@ -2127,6 +2132,12 @@ class LabPage(Gtk.Box):
     def key_down(self, key, character, modifiers=Gdk.ModifierType(0), keycode=None):
         has_modifiers = bool(modifiers & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK |
                                          Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SUPER_MASK))
+        repeat = bool(key) and key in self.physical_down
+        if key:
+            self.physical_down.add(key)
+        if repeat and (not self.active or self.state["paused"] or key not in self.pressed or key not in (
+                "Left", "Right", "Up", "Down", "Home", "End", "PageUp", "PageDown", "Backspace", "Delete")):
+            return True
         if self.active and key:
             self.last_physical = (key, keycode)
             self.update_diagnostic()
@@ -2165,8 +2176,6 @@ class LabPage(Gtk.Box):
         if not self.surface or not self.surface.get_property("shortcuts-inhibited"):
             self.pause_run("Захват клавиш прерван. Разрешите его, чтобы продолжить.")
             return True
-        if key in self.pressed:
-            return True
         self.pressed.add(key)
         if key == "Print":
             character = self.desktop.capture_png()
@@ -2176,6 +2185,7 @@ class LabPage(Gtk.Box):
         return True
 
     def key_up(self, key):
+        self.physical_down.discard(key)
         if self.active and key in self.pressed:
             self.pressed.remove(key)
             if not self.state["paused"]:

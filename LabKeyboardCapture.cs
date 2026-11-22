@@ -13,19 +13,24 @@ namespace TouchTypingStudio
     {
         private readonly IntPtr window;
         private readonly Dispatcher dispatcher;
-        private readonly Action<int, int, bool, bool, string> receive;
+        private readonly Action<int, int, bool, bool, bool, string> receive;
         private readonly Hook callback;
         private readonly byte[] keys = new byte[256];
         private readonly HashSet<int> held = new HashSet<int>();
+        private readonly HashSet<int> carried = new HashSet<int>();
         private IntPtr handle;
         private bool disposed;
 
-        internal LabKeyboardCapture(IntPtr window, Dispatcher dispatcher, Action<int, int, bool, bool, string> receive)
+        internal LabKeyboardCapture(IntPtr window, Dispatcher dispatcher, Action<int, int, bool, bool, bool, string> receive)
         {
             this.window = window;
             this.dispatcher = dispatcher;
             this.receive = receive;
             callback = Capture;
+            // A hook installed on resume did not see the original presses.
+            // Ignore any release/repeat sequence already held when it started.
+            for (int vk = 8; vk < keys.Length; vk++)
+                if ((GetAsyncKeyState(vk) & 0x8000) != 0) carried.Add(vk);
             handle = SetWindowsHookEx(13, callback, GetModuleHandle(null), 0);
             if (handle == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
         }
@@ -40,6 +45,11 @@ namespace TouchTypingStudio
             var stroke = (Stroke)Marshal.PtrToStructure(pointer, typeof(Stroke));
             int vk = (int)stroke.VirtualKey;
             bool down = kind == 0x100 || kind == 0x104;
+            if (carried.Contains(vk))
+            {
+                if (!down) carried.Remove(vk);
+                return new IntPtr(1);
+            }
             bool repeat = down && !held.Add(vk);
             if (!down) held.Remove(vk);
             if (vk < keys.Length) keys[vk] = down ? (byte)0x80 : (byte)0;
@@ -57,7 +67,7 @@ namespace TouchTypingStudio
             bool extended = (stroke.Flags & 1) != 0;
             dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(delegate
             {
-                if (!disposed && GetForegroundWindow() == window) receive(vk, scan, extended, down, repeat ? null : text);
+                if (!disposed && GetForegroundWindow() == window) receive(vk, scan, extended, down, repeat, text);
             }));
             return new IntPtr(1);
         }
@@ -69,6 +79,7 @@ namespace TouchTypingStudio
             if (handle != IntPtr.Zero) UnhookWindowsHookEx(handle);
             handle = IntPtr.Zero;
             held.Clear();
+            carried.Clear();
         }
 
         private delegate IntPtr Hook(int code, IntPtr message, IntPtr pointer);
@@ -90,6 +101,8 @@ namespace TouchTypingStudio
         private static extern IntPtr GetModuleHandle(string name);
         [DllImport("user32.dll")]
         private static extern IntPtr GetKeyboardLayout(uint thread);
+        [DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(int virtualKey);
         [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
         private static extern int ToUnicodeEx(uint key, uint scan, byte[] state, StringBuilder output, int capacity, uint flags, IntPtr layout);
     }

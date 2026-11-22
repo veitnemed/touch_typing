@@ -67,6 +67,15 @@ namespace TouchTypingStudio
                         var selected = Draw(directory, app, app + "-selection", Chord(engine, "RCtrl", "L"));
                         var plain = Draw(directory, app, app + "-caret", Chord(engine, "Left"));
                         if (Highlight(selected) < Highlight(plain) + 30) throw new InvalidOperationException("Visible selection in " + app);
+                        if (app == "chrome")
+                        {
+                            Chord(engine, "RCtrl", "F");
+                            foreach (string key in new[] { "A", "B", "C", "D" }) Chord(engine, key);
+                            var findSelected = Draw(directory, app, "chrome-find-selection", Chord(engine, "RCtrl", "A"));
+                            var findCaret = Draw(directory, app, "chrome-find-caret", Chord(engine, "Left"));
+                            if (Highlight(findSelected) < Highlight(findCaret) + 30)
+                                throw new InvalidOperationException("Visible Chrome find selection");
+                        }
                         if (app == "code")
                         {
                             var opened = Chord(engine, "RCtrl", "J");
@@ -77,7 +86,7 @@ namespace TouchTypingStudio
                     }
                     engine.Call("lab-stop");
                 }
-                File.WriteAllText(Path.Combine(directory, "result.txt"), "PASS WPF selection, caret, Delete and Ctrl+J");
+                File.WriteAllText(Path.Combine(directory, "result.txt"), "PASS WPF selection, caret, Chrome Ctrl+F, Delete and Ctrl+J");
                 return 0;
             }
             catch (Exception error)

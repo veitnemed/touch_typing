@@ -171,7 +171,7 @@ internal static class LabCatalog
             "screenshot-confirm" => scene.Screenshot,
             "escape" => scene.Overview || scene.Screenshot || scene.ScreenshotReady || window?.Focus is not (null or "body"),
             "new-tab" => window?.App == "chrome" && window.Tabs.Count < 6,
-            "url" => window?.App == "chrome",
+            "url" => window?.App == "chrome" && !scene.Overview && !scene.Switcher && !scene.Screenshot,
             "navigate-pasted" => window?.App == "chrome" && window.Focus == "url" && !string.IsNullOrWhiteSpace(window.Input),
             "refresh" or "fullscreen" or "bookmarks" => window?.App == "chrome",
             "zoom-in" => window?.App == "chrome" && window.Zoom < 200,
@@ -226,7 +226,11 @@ internal static class LabCatalog
             string alias = key == "D" && Gesture.Parse("Alt+D").Chords[0].FitsModifiers(held) ? "url" :
                 (key is "PageUp" or "PageDown") && Gesture.Parse("Ctrl+Tab").Chords[0].FitsModifiers(held)
                     ? (key == "PageUp" ? "prev-tab" : "next-tab") : null;
-            if (alias != null) return Shortcuts.FirstOrDefault(task => task.Id == alias && Available(task, scene));
+            if (alias != null)
+            {
+                var task = Shortcuts.FirstOrDefault(task => task.Id == alias && Available(task, scene));
+                return task != null && alias == "url" ? task with { Keys = "Alt+D" } : task;
+            }
         }
         var ordered = Shortcuts.Select(scene.WithBinding).Where(task => task.Keys.Length > 0).Where(task => task.Id != "copy-shot" || scene.ScreenshotReady && !scene.ScreenshotCopied)
             .Where(task => task.Id != "screenshot-confirm" || scene.Screenshot)

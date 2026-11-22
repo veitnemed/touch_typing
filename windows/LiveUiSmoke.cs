@@ -77,7 +77,11 @@ internal static class LiveUiSmoke
                         Until(delegate { return !Exists("LabPauseResult") && Exists("LabClock") &&
                             (Name("LabClock") == "03:00" || Name("LabClock") == "02:59"); }, "Enter restarts through the focused pause button");
                     }
-                    if (name == "terminal") CheckPasteLayouts();
+                    if (name == "terminal")
+                    {
+                        CheckPasteLayouts();
+                        CheckTerminalCursorRepeat();
+                    }
                     VirtualEnglish();
                     Solve(24, false);
                     Key("F10");
@@ -222,6 +226,49 @@ internal static class LiveUiSmoke
         finally { if (!app.HasExited) SendMessage(trainer, 0x50, IntPtr.Zero, previous); }
     }
 
+    private static void CheckTerminalCursorRepeat()
+    {
+        VirtualEnglish();
+        string initial = Find("LabDesktop").Current.HelpText;
+        foreach (var character in "abcd") Send(Character(character));
+        Until(delegate { return Find("LabDesktop").Current.HelpText == initial + "abcd"; }, "terminal input fixture");
+
+        // Each pair contains two down events before one physical key-up.
+        var left = Parse("Left").Single();
+        Send(new[] { left.Down(), left.Down(), left.Up() });
+        var delete = Parse("Delete").Single();
+        Send(new[] { delete.Down(), delete.Down(), delete.Up() });
+        Until(delegate { return Find("LabDesktop").Current.HelpText == initial + "ab"; }, "Left repeat then right-hand Delete repeat");
+
+        Send(new[] { left.Down() });
+        Wait(110);
+        try
+        {
+            CheckFocusLoss();
+            Send(new[] { left.Down() });
+            Key("Delete");
+            Check(Find("LabDesktop").Current.HelpText == initial + "a", "Held pre-pause arrow is ignored after focus regain");
+        }
+        finally { Send(new[] { left.Up() }); }
+        Key("Right");
+        Key("Backspace");
+        Until(delegate { return Find("LabDesktop").Current.HelpText == initial; }, "fresh editing keys work after focus recovery");
+        Check(true, "Native terminal caret, repeated deletion and focus recovery");
+
+        foreach (var character in "echo qa") Send(Character(character));
+        Until(delegate { return Find("LabDesktop").Current.HelpText == "echo qa"; }, "terminal history fixture");
+        Key("Enter");
+        foreach (var character in "draft") Send(Character(character));
+        Until(delegate { return Find("LabDesktop").Current.HelpText == "draft"; }, "terminal history draft");
+        Key("Up");
+        Until(delegate { return Find("LabDesktop").Current.HelpText == "echo qa"; }, "Up recalls previous terminal command");
+        Key("Down");
+        Until(delegate { return Find("LabDesktop").Current.HelpText == "draft"; }, "Down restores the exact terminal draft");
+        Chord("Ctrl+U");
+        Until(delegate { return Find("LabDesktop").Current.HelpText == ""; }, "terminal history fixture cleanup");
+        Check(true, "Native terminal history restores a draft");
+    }
+
     private static void CheckFocusLoss()
     {
         if (focusProbe == IntPtr.Zero)
@@ -311,6 +358,7 @@ internal static class LiveUiSmoke
                 case "Space": return new Stroke(0x39, false);
                 case "Tab": return new Stroke(0xf, false);
                 case "Backspace": return new Stroke(0xe, false);
+                case "Delete": return new Stroke(0x53, true);
                 case "Up": return new Stroke(0x48, true);
                 case "Down": return new Stroke(0x50, true);
                 case "Left": return new Stroke(0x4b, true);

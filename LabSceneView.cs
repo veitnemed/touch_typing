@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Windows.Media.Imaging;
@@ -14,6 +15,7 @@ namespace TouchTypingStudio
         private Data scene = Data.Empty;
         private string classApp = "ubuntu";
         private DrawingContext context;
+        private readonly Dictionary<string, double> fieldScroll = new Dictionary<string, double>();
         private readonly Typeface regular = new Typeface("Segoe UI");
         private readonly Typeface mono = new Typeface("Consolas");
         private const double WidthUnits = 1200, HeightUnits = 520;
@@ -224,7 +226,10 @@ namespace TouchTypingStudio
             if (window.S("find").Length > 0 || window.S("focus") == "find")
             {
                 Rounded(w - 337, 104, 323, 41, "#343A45", 5);
-                Text("⌕  " + (window.S("focus") == "find" ? window.S("input") : window.S("find")), w - 321, 116, 12, "#FFFFFF", 240);
+                bool editingFind = window.S("focus") == "find";
+                Text("⌕", w - 321, 115, 14, "#CFD7E8", 23);
+                Field(editingFind ? window.S("input") : window.S("find"), window, w - 297, 116, 211,
+                    12, "#FFFFFF", 0, editingFind && window.B("active"), scrollKey: "find:" + window.S("id"));
                 Text("↑  ↓  ×", w - 79, 115, 13, "#CFD7E8");
             }
             if (window.S("status").Length > 0)
@@ -465,10 +470,12 @@ namespace TouchTypingStudio
         {
             string prompt = "student@ubuntu:" + scene.D("terminal").S("cwd", "~").Replace("/home/student", "~") + "$ ";
             Field(prompt + scene.S("terminalInput"), window, x, y, width, 13, "#E9EFF6", -prompt.Length,
-                window.S("app") == "terminal" || window.S("focus") == "terminal");
+                window.B("active") && (window.S("app") == "terminal" || window.S("focus") == "terminal"),
+                scrollKey: "terminal:" + window.S("id"));
         }
 
-        private void Field(string value, Data window, double x, double y, double width, double size, string ink, int offset, bool focused, bool document = false)
+        private void Field(string value, Data window, double x, double y, double width, double size, string ink,
+            int offset, bool focused, bool document = false, string scrollKey = null)
         {
             if (width <= 0) return;
             var line = new FormattedText(value, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, mono,
@@ -486,7 +493,17 @@ namespace TouchTypingStudio
                 cx = prefix.WidthIncludingTrailingWhitespace;
             }
             context.PushClip(new RectangleGeometry(new Rect(x, y, width, size * 1.7)));
-            x -= Math.Max(0, cx - width + 3);
+            double shift = Math.Max(0, cx - width + 3);
+            if (drawCaret && scrollKey != null)
+            {
+                double prior;
+                if (fieldScroll.TryGetValue(scrollKey, out prior))
+                    shift = Math.Max(shift, Math.Min(prior, Math.Max(0, cx - 3)));
+                else if (fieldScroll.Count >= 32)
+                    fieldScroll.Remove(fieldScroll.Keys.First());
+                fieldScroll[scrollKey] = shift;
+            }
+            x -= shift;
             var origin = new Point(x, y);
             if (focused && document)
             {

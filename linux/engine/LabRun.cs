@@ -16,11 +16,12 @@ internal sealed class LabRun
     private readonly HashSet<string> held = [];
     private readonly List<LabPoint> points = [];
     private readonly List<LiveEvent> trace = [];
-    private bool restoring;
+    private bool restoring, replayLegacyUrl;
+    private const string ExactUrlEvent = "@exact-url";
     private int variant;
     private string initialLayout;
     private bool initialVirtual;
-    internal bool HasDraft => trace.Count > 0;
+    internal bool HasDraft => trace.Any(item => item.Key != ExactUrlEvent);
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask;
@@ -87,13 +88,17 @@ internal sealed class LabRun
         if (draft != null)
         {
             Resume();
+            replayLegacyUrl = true;
             foreach (var e in JsonSerializer.Deserialize<LiveEvent[]>(draft.Trace) ?? [])
             {
                 if (e.Key.StartsWith("@held/")) { held.Add(e.Key[6..]); superUsed = e.Down; }
                 else if (e.Key == "@release") { Pause(); Resume(); }
                 else if (e.Key == "@hint") Hint();
+                else if (e.Key == ExactUrlEvent) { replayLegacyUrl = false; trace.Add(e); }
                 else Input(e.Key, e.Down, e.Text);
             }
+            if (replayLegacyUrl) trace.Add(new(ExactUrlEvent));
+            replayLegacyUrl = false;
             Pause(); restoring = false; Solved = Errors = taskInBlock = 0; Block = 1; activeMilliseconds = 0;
             points.Clear(); Attempts.Clear(); LastKey = ""; Feedback = "ready";
         }
@@ -122,7 +127,18 @@ internal sealed class LabRun
     internal ShortcutAttempt Input(string key, bool pressed, string text)
     {
         if (Finished || Paused || string.IsNullOrEmpty(key)) return null;
-        if (pressed == held.Contains(key)) return null;
+        if (pressed && held.Contains(key))
+        {
+            if (!replayLegacyUrl && Scene.CanRepeatEditing(key) && !held.Any(item => KeyChord.Family(item) is "Alt" or "Super")
+                && (!held.Any(item => KeyChord.Family(item) == "Ctrl") || key is "Left" or "Right" or "Home" or "End"))
+            {
+                trace.Add(new(key, true, ""));
+                Scene.Text(key, "", held.Any(item => KeyChord.Family(item) == "Shift"),
+                    held.Any(item => KeyChord.Family(item) == "Ctrl"));
+            }
+            return null; // repeat edits can move the caret, never complete a lesson step
+        }
+        if (!pressed && !held.Contains(key)) return null;
         trace.Add(new(key, pressed, text));
         if (!pressed)
         {
@@ -191,7 +207,14 @@ internal sealed class LabRun
         bool changed = eligible && Scene.Apply(actual.Action);
         if (changed && mission != null)
         {
-            var passed = Observe(key);
+            // Alt+D mirrors the browser behavior but does not demonstrate
+            // the requested physical Ctrl+L shortcut.
+            if (!replayLegacyUrl && actual.Id == "url" && actual.Keys == "Alt+D")
+            {
+                if (Task.Id == "url") return Miss(key, "Адрес выделен. Это задание проверяет Ctrl+L.");
+                return null;
+            }
+            var passed = Observe(key, acceptExistingUrlSelection: !replayLegacyUrl && actual.Id == "url" && actual.Keys != "Alt+D");
             if (passed != null) return passed;
         }
         if (changed) { Status = ""; LastKey = ""; Feedback = "ready"; return null; }
@@ -205,12 +228,13 @@ internal sealed class LabRun
         watching = eligible.Select(goal => (goal, LiveCourse.Evidence(goal.Task, Scene))).ToList();
     }
 
-    private ShortcutAttempt Observe(string key, string equivalentCommand = null)
+    private ShortcutAttempt Observe(string key, string equivalentCommand = null, bool acceptExistingUrlSelection = false)
     {
         if (mission == null || watching == null || Scene.Switcher) return null;
         foreach (var (goal, before) in watching)
         {
-            if (before == goal.Target || LiveCourse.Evidence(goal.Task, Scene, goal.Task == Task ? equivalentCommand : null) != goal.Target) continue;
+            if (before == goal.Target && !(acceptExistingUrlSelection && goal.Task.Id == "url")) continue;
+            if (LiveCourse.Evidence(goal.Task, Scene, goal.Task == Task ? equivalentCommand : null) != goal.Target) continue;
             Task = goal.Task;
             pending.Remove(goal);
             return Pass(key);
@@ -261,6 +285,7 @@ internal sealed class LabRun
                 : courses.FirstOrDefault(m => m.Id == requestedMission) ?? throw new ArgumentException("Поручение недоступно для выбранного уровня.");
             if (!restoring) variant = random.Next(3);
             requestedMission = null; used.Add(mission.Id); trace.Clear();
+            if (!restoring) trace.Add(new(ExactUrlEvent));
             initialLayout = Scene.Layout;
             initialVirtual = Scene.LayoutIsVirtual;
             foreach (string key in held) trace.Add(new("@held/" + key, superUsed));

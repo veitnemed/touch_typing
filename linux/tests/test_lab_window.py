@@ -2,6 +2,7 @@
 
 TOUCH_TYPING_QA_OUTPUT selects an existing directory for the preview images.
 --small verifies 960x600, --timed verifies an actual 180-second run and record.
+--terminal-only checks real terminal editing at 1366x768 (or 960x600 with --small).
 """
 import os
 from pathlib import Path
@@ -14,7 +15,8 @@ from platform_linux import PHYSICAL
 class LabWindowTest(Studio):
     def __init__(self):
         self.received = {}
-        super().__init__(smoke='-', smoke_size=(960,600) if '--small' in sys.argv else (1380,900))
+        super().__init__(smoke='-', smoke_size=(960,600) if '--small' in sys.argv else
+                         (1366,768) if '--terminal-only' in sys.argv else (1380,900))
     def key_pressed(self, controller, keyval, keycode, modifiers):
         from gi.repository import Gdk
         self.last_character = chr(Gdk.keyval_to_unicode(keyval)) if Gdk.keyval_to_unicode(keyval) else ""
@@ -45,7 +47,8 @@ class LabWindowTest(Studio):
             next(self.steps)
             return GLib.SOURCE_CONTINUE
         except StopIteration:
-            print('PASS native GTK Live classes, capture, task state, RU/EN, pause, results and screenshots',flush=True)
+            print('PASS native GTK terminal editing' if '--terminal-only' in sys.argv else
+                  'PASS native GTK Live classes, capture, task state, RU/EN, pause, results and screenshots',flush=True)
         except Exception:
             traceback.print_exc()
             self.smoke_failure=True
@@ -78,6 +81,20 @@ class LabWindowTest(Studio):
                             break
                         yield
                     assert self.received.get(observed, 0) != count or not self.lab.active or self.lab.state["paused"], ("undelivered key", key, down)
+        def hold(key, presses=3):
+            observed = (keycodes[key] + 8, True)
+            count = self.received.get(observed, 0)
+            event(key, True)
+            try:
+                for _ in range(270):
+                    if self.received.get(observed, 0) >= count + presses:
+                        break
+                    yield
+                assert self.received.get(observed, 0) >= count + presses, ("no OS repeat", key)
+            finally:
+                event(key, False)
+            for _ in range(5):
+                yield
         def capture_png(path, widget=None):
             paintable=__import__('gi').repository.Gtk.WidgetPaintable.new(widget or self.window)
             snapshot=__import__('gi').repository.Gtk.Snapshot()
@@ -89,6 +106,10 @@ class LabWindowTest(Studio):
                 self.window.present()
                 yield
             self.navigate('lab')
+            if '--terminal-only' in sys.argv:
+                output = Path(os.environ['TOUCH_TYPING_QA_OUTPUT'])
+                yield from self.exercise_terminal(chord, hold, capture_png, output)
+                return
             for index in ([1] if '--timed' in sys.argv else range(5)):
                 desired = "RU" if index in (1, 2) else "EN"
                 for _ in range(20):yield
@@ -246,6 +267,113 @@ class LabWindowTest(Studio):
                 self.stop()
                 assert self.result_kind=='shortcuts'
         finally:call(session,api+'.Session','Stop')
+
+    def exercise_terminal(self, chord, hold, capture_png, output):
+        from gi.repository import Gtk
+
+        def switch_layout(target):
+            for attempt in range(3):
+                yield from chord('A')
+                if self.layout == target:
+                    return
+                if attempt < 2:
+                    yield from chord('Super+Space')
+                    for _ in range(35):
+                        yield
+            raise AssertionError(('OS layout not switched', self.layout, target))
+
+        def start_terminal(layout):
+            yield from switch_layout(layout)
+            lab = self.lab
+            lab.picker.set_selected(next(i for i, row in enumerate(lab.classes) if row['id'] == 'terminal'))
+            lab.level.set_selected(1)
+            lab.limit.set_selected(0)
+            lab.start()
+            for _ in range(140):
+                if lab.active and not lab.state['paused']:
+                    break
+                yield
+            assert lab.active and not lab.state['paused'], lab.status.get_label()
+            assert self.window.is_active() and self.window.get_focus() == lab.desktop
+            assert lab.state["scene"]["layout"] == layout
+
+        yield from start_terminal('EN')
+        lab = self.lab
+
+        def field():
+            scene = lab.state['scene']
+            terminal = next(w for w in scene['windows'] if w['app'] == 'terminal' and w['active'])
+            return scene['terminalInput'], terminal['cursor']
+
+        def editing(expected, *keys):
+            for key in keys:
+                yield from chord(key)
+            assert field() == expected, (keys, field(), expected)
+
+        # Character index, not end of line, governs each editing key.
+        yield from editing(('', 0), 'Ctrl+C')
+        yield from editing(('abcd', 4), 'A', 'B', 'C', 'D', 'Right')
+        yield from editing(('abcd', 2), 'Left', 'Left')
+        yield from editing(('abd', 2), 'Delete')
+        capture_png(output / 'terminal-en-delete.png', lab.desktop)
+        yield from editing(('ad', 1), 'Backspace')
+        yield from editing(('ad', 0), 'Left', 'Left', 'Backspace')
+        yield from editing(('ad', 2), 'Right', 'Right', 'Right', 'Delete')
+
+        yield from editing(('', 0), 'Ctrl+C')
+        for key in 'ABCDE' * 8:
+            yield from chord(key)
+        original, cursor = field()
+        yield from hold('Left')
+        after_left, position = field()
+        assert after_left == original and 0 <= position <= cursor - 3, field()
+        capture_png(output / 'terminal-en-held-left.png')
+        yield from hold('Delete')
+        after_delete, position_after = field()
+        removed = len(original) - len(after_delete)
+        assert removed >= 2 and position_after == position, field()
+        assert after_delete == original[:position] + original[position + removed:], field()
+        capture_png(output / 'terminal-en-held-delete.png')
+
+        # History Up then Down restores the unsubmitted line, not the command.
+        yield from editing(('', 0), 'Ctrl+C')
+        yield from editing(('pwd', 3), 'P', 'W', 'D')
+        yield from editing(('', 0), 'Enter')
+        yield from editing(('ab', 2), 'A', 'B')
+        yield from editing(('pwd', 3), 'Up')
+        yield from editing(('ab', 2), 'Down')
+
+        lab.stop()
+        self.navigate('lab')
+        yield from start_terminal('RU')
+        lab = self.lab
+        yield from editing(('', 0), 'Ctrl+C')
+        yield from editing(('фисв', 4), 'A', 'B', 'C', 'D')
+        yield from editing(('фисв', 2), 'Left', 'Left')
+        yield from editing(('фив', 2), 'Delete')
+        capture_png(output / 'terminal-ru-delete.png', lab.desktop)
+        yield from editing(('фв', 1), 'Backspace')
+
+        # The actual GTK window must pause on genuine focus loss. The focused
+        # other window receives the next physical key, never the lab buffer.
+        decoy = Gtk.ApplicationWindow(application=self, title='QA focus probe')
+        try:
+            decoy.present()
+            for _ in range(100):
+                if decoy.is_active() and not self.window.is_active() and lab.state['paused']:
+                    break
+                yield
+            assert decoy.is_active() and lab.state['paused']
+            yield from editing(('фв', 1), 'A')
+        finally:
+            decoy.close()
+
+        found, bounds = lab.desktop.compute_bounds(self.window)
+        assert found and bounds.get_x() >= 0 and bounds.get_y() >= 0
+        assert bounds.get_x() + bounds.get_width() <= self.window.get_width() + 1
+        assert bounds.get_y() + bounds.get_height() <= self.window.get_height() + 1
+        print('GTK terminal geometry', self.window.get_width(), self.window.get_height(),
+              bounds.get_x(), bounds.get_y(), bounds.get_width(), bounds.get_height(), flush=True)
 
 if __name__=='__main__':
     if os.environ.get('WAYLAND_DISPLAY')!='training-qa':raise SystemExit('Private test compositor required')

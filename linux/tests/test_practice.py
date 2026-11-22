@@ -142,9 +142,16 @@ class PracticeTest(unittest.TestCase):
         self.lab_chord("RCtrl", str(initial["scene"]["windows"][0]["activeTab"] + 1))
         self.lab_chord("RCtrl", "F12")
         self.assertTrue(self.engine.call("lab-hint")["showGuide"])
-        final = self.lab_chord("LAlt", "D")
+        alias = self.lab_chord("LAlt", "D")
+        address = alias["scene"]["windows"][0]
+        self.assertFalse(alias["finished"])
+        self.assertEqual(alias["solved"], 2)
+        self.assertEqual((address["focus"], address["anchor"], address["cursor"]),
+                         ("url", 0, len(address["url"])))
+        self.lab_chord("Esc")
+        final = self.lab_chord("RCtrl", "L")
         self.assertTrue(final["finished"])
-        self.assertEqual((final["solved"], final["errors"]), (3, 1))
+        self.assertEqual((final["solved"], final["errors"]), (3, 2))
         self.assertEqual(final["task"]["id"], "copy")
         result = self.engine.call("lab-result")
         self.assertTrue(result["completed"])

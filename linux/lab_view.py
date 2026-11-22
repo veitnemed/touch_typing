@@ -20,6 +20,7 @@ class DesktopView(Gtk.Widget):
         super().__init__()
         self.scene = {}
         self.icons = {}
+        self.field_scroll = {}
         self.wallpaper = None
         for candidate in ("ubuntu-default-greyscale-wallpaper.png", "warty-final-ubuntu.png"):
             path = Path("/usr/share/backgrounds") / candidate
@@ -83,7 +84,8 @@ class DesktopView(Gtk.Widget):
     def units(value):
         return len(value.encode("utf-16-le")) // 2
 
-    def field(self, value, window, x, y, width, size, color, offset=0, focused=True, mono=True):
+    def field(self, value, window, x, y, width, size, color, offset=0, focused=True,
+              mono=True, scroll_key=None):
         """Draw one line using the same shaped layout for its text, selection and caret."""
         if width <= 0:
             return
@@ -100,7 +102,16 @@ class DesktopView(Gtk.Widget):
         anchor = window.get("anchor", caret)
         left, right = sorted((edge(caret), edge(anchor)))
         draw_caret = focused and offset <= caret <= offset + len(encoded) // 2
-        x_shift = max(0, edge(caret) - width + 3) if draw_caret else 0
+        caret_x = edge(caret) if draw_caret else 0
+        x_shift = max(0, caret_x - width + 3)
+        if draw_caret and scroll_key is not None:
+            # Keep enough of the command on screen to see a one-character edit;
+            # scrolling back should not snap the caret to the right edge.
+            prior = self.field_scroll.get(scroll_key, 0)
+            x_shift = max(x_shift, min(prior, max(0, caret_x - 3)))
+            if scroll_key not in self.field_scroll and len(self.field_scroll) >= 32:
+                self.field_scroll.pop(next(iter(self.field_scroll)))
+            self.field_scroll[scroll_key] = x_shift
         self.snapshot.push_clip(self.rect(x, y, width, size * 1.7))
         x -= x_shift
         if focused and offset >= 0:
@@ -117,7 +128,7 @@ class DesktopView(Gtk.Widget):
         self.snapshot.append_layout(layout, ink(color))
         self.snapshot.restore()
         if draw_caret:
-            self.fill(color, x + edge(caret), y + 1, 1.5, size * 1.35)
+            self.fill(color, x + caret_x, y + 1, 1.5, size * 1.35)
         self.snapshot.pop()
 
     def app_icon(self, app, x, y, size=30):
@@ -384,7 +395,14 @@ class DesktopView(Gtk.Widget):
         if window.get("zoom", 100) != 100:
             self.fill("#303134", x + w - 160, y + body_top + 2, 150, 25, 5)
             self.label("Масштаб  " + str(window["zoom"]) + "%", x + w - 147, y + body_top + 8, 10)
-        if window.get("focus") in ("find", "downloads", "history", "bookmarks"):
+        if window.get("focus") == "find":
+            left = x + max(10, w - 300)
+            box_width = min(290, w - 20)
+            self.fill("#303134", left, y + 64, box_width, 38, 5)
+            self.label("⌕", left + 9, y + 73, 14)
+            self.field(window.get("input", ""), window, left + 29, y + 74, box_width - 42,
+                       13, "#ffffff", mono=False, scroll_key=("find", window.get("id")))
+        elif window.get("focus") in ("downloads", "history", "bookmarks"):
             self.fill("#303134", x + max(10, w - 300), y + 64, min(290, w - 20), 38, 5)
             self.label({"find": "Поиск", "downloads": "Загрузки", "history": "История", "bookmarks": "Закладки"}.get(window["focus"], "")
                        + "  " + window.get("input", ""), x + max(20, w - 290), y + 74, 11, width=min(270, w - 40))
@@ -417,10 +435,25 @@ class DesktopView(Gtk.Widget):
         editor_w = w - 35 - sidebar
         self.fill("#181818", editor_x, y, editor_w, 28)
         tabs = window.get("tabs", [])
-        for i, tab in enumerate(tabs[:4]):
-            self.fill("#252526" if i == window.get("activeTab", 0) else "#181818", editor_x + i * 115, y, 113, 28)
-            self.label("Py  " + tab.get("title", "fft.py"), editor_x + 10 + i * 115, y + 8, 10, "#d5bd7c", width=100)
-        name = tabs[window["activeTab"]]["title"] if tabs else ""
+        active_index = min(max(0, window.get("activeTab", 0)), max(0, len(tabs) - 1))
+        capacity = max(1, int((editor_w - 42) / 98))
+        first_tab = max(0, active_index - capacity + 1)
+        visible_tabs = tabs[first_tab:first_tab + capacity]
+        tab_start = editor_x + (20 if first_tab else 0)
+        if first_tab:
+            self.label("‹", editor_x + 6, y + 5, 15, "#c6ccd4")
+        if first_tab + capacity < len(tabs):
+            self.label("›", editor_x + editor_w - 16, y + 5, 15, "#c6ccd4")
+        tab_width = min(115, max(1, (editor_w - 42) / max(1, len(visible_tabs))))
+        for i, tab in enumerate(visible_tabs):
+            active = first_tab + i == active_index
+            left = tab_start + i * tab_width
+            self.fill("#252526" if active else "#181818", left, y, tab_width - 2, 28)
+            if active:
+                self.fill("#007acc", left, y, tab_width - 2, 2)
+            self.label(tab.get("title", "fft.py"), left + 8, y + 8, 10,
+                       "#ffffff" if active else "#d5bd7c", width=tab_width - 16)
+        name = tabs[active_index]["title"] if tabs else ""
         split = window.get("split", False)
         pane = editor_w / 2 if split else editor_w
         current = editor_x + (pane if split and window.get("group") == 1 else 0)
@@ -491,4 +524,5 @@ class DesktopView(Gtk.Widget):
         shift = self.units(prefix)
         field = dict(window, cursor=shift + window.get("cursor", 0), anchor=shift + window.get("anchor", 0))
         self.field(prefix + value, field, x + 16, y + 10 + len(recent) * 21, w - 32, 13, "#e5efe4",
-                   focused=not embedded or window.get("focus") == "terminal")
+                   focused=(not embedded or window.get("focus") == "terminal") and window.get("active", True),
+                   scroll_key=("terminal", window.get("id")))
