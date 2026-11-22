@@ -1,0 +1,80 @@
+name: Build and release Live
+
+on:
+  push:
+    branches: [release/v1.6.0]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-live-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  packages:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Shared engine regressions
+        env:
+          PYTHONPATH: linux
+        run: |
+          for project in SharedRegression LabRegression LabStressTests TerminalRegression; do
+            dotnet run --project "linux/tests/$project.csproj" -c Release
+          done
+          dotnet build linux/engine/TouchTyping.Engine.csproj
+          /usr/bin/python3 linux/tests/test_practice.py
+          node tests/workday-editor-state.js
+      - name: Build both packages
+        run: |
+          bash linux/build-release.sh "$RUNNER_TEMP/touch-typing-linux-x64"
+          bash windows/build-release.sh "$RUNNER_TEMP/touch-typing-windows-x64"
+          mkdir -p artifacts
+          tar -czf artifacts/touch-typing-v1.6.0-linux-x64.tar.gz -C "$RUNNER_TEMP" touch-typing-linux-x64
+          (cd "$RUNNER_TEMP/touch-typing-windows-x64" && zip -qr "$GITHUB_WORKSPACE/artifacts/touch-typing-v1.6.0-windows-x64.zip" .)
+          tar -tzf artifacts/touch-typing-v1.6.0-linux-x64.tar.gz > /dev/null
+          unzip -t artifacts/touch-typing-v1.6.0-windows-x64.zip
+          (cd artifacts && sha256sum *.tar.gz *.zip > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: artifacts/*
+  windows-build:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build Windows app and native UI runner
+        run: |
+          dotnet build windows/TouchTyping.Windows.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet build windows/UiSmoke.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet run --project linux/tests/LabRegression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  publish:
+    needs: [packages, windows-build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: artifacts
+      - name: Publish v1.6.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v1.6.0 artifacts/* QA-v1.6.0.json --target "$GITHUB_SHA" --title "v1.6.0 — Связанные тренировки Live" --notes-file RELEASE-v1.6.0.md

@@ -1,4 +1,4 @@
-﻿param([switch]$DesktopShortcut, [switch]$Stage, [string]$StageDirectory)
+﻿param([switch]$DesktopShortcut, [switch]$Stage, [string]$StageDirectory, [switch]$LegacyOnly)
 $ErrorActionPreference = 'Stop'
 if ($StageDirectory -and (-not $Stage -or $DesktopShortcut)) {
     throw 'StageDirectory requires -Stage and cannot be combined with -DesktopShortcut.'
@@ -23,14 +23,36 @@ if ($StageDirectory) {
     # The running image is locked. Update the shortcuts to a sibling build for the next launch.
     $appPath = Join-Path $PSScriptRoot ('TouchTyping-' + (Get-Date -Format 'yyyyMMddHHmmssfff') + '.exe')
 }
-$compilerOutput = & $compiler /nologo /target:winexe /optimize+ /platform:anycpu /codepage:65001 `
-    "/win32manifest:$PSScriptRoot\app.manifest" "/out:$appPath" @references @sources
+$compilerOutput = & $compiler /nologo /target:winexe /optimize+ /platform:x64 /codepage:65001 `
+    "/win32manifest:$PSScriptRoot\app.manifest" "/out:$appPath" "/resource:$PSScriptRoot\linux\hands.png,TouchTyping.Hands.png" `
+    "/resource:$PSScriptRoot\linux\result-time.png,TouchTyping.Result.time.png" `
+    "/resource:$PSScriptRoot\linux\result-count.png,TouchTyping.Result.count.png" `
+    "/resource:$PSScriptRoot\linux\result-speed.png,TouchTyping.Result.speed.png" `
+    "/resource:$PSScriptRoot\linux\result-accuracy.png,TouchTyping.Result.accuracy.png" @references @sources
 if ($LASTEXITCODE -ne 0) {
     throw ('TouchTyping compilation failed.' + [Environment]::NewLine + ($compilerOutput -join [Environment]::NewLine))
 }
 foreach ($diagnostic in $compilerOutput) { Write-Warning $diagnostic }
 $config = Join-Path $PSScriptRoot 'TouchTyping.exe.config'
 if ($appPath + '.config' -ne $config) { Copy-Item -LiteralPath $config -Destination ($appPath + '.config') }
+if (-not $LegacyOnly) {
+    $project = Join-Path $PSScriptRoot 'linux\engine\TouchTyping.Engine.csproj'
+    $engineDirectory = Join-Path (Split-Path -Parent $appPath) 'engine'
+    $sdk = (Get-Command dotnet -ErrorAction Stop).Source
+    $engineOutput = & $sdk publish $project -c Release -r win-x64 --self-contained true -p:DebugType=none -p:DebugSymbols=false -o $engineDirectory
+    if ($LASTEXITCODE -ne 0) {
+        throw ('TouchTyping engine publish failed.' + [Environment]::NewLine + ($engineOutput -join [Environment]::NewLine))
+    }
+    $deps = Get-Content -Raw -LiteralPath (Join-Path $engineDirectory 'TouchTyping.Engine.deps.json') | ConvertFrom-Json
+    $runtimeKey = $deps.libraries.PSObject.Properties.Name | Where-Object { $_ -like 'runtimepack.Microsoft.NETCore.App.Runtime.win-x64/*' } | Select-Object -First 1
+    if (-not $runtimeKey) { throw 'Cannot determine bundled .NET runtime version.' }
+    $runtimeVersion = ($runtimeKey -split '/')[1]
+    $packages = if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES } else { Join-Path $env:USERPROFILE '.nuget\packages' }
+    $runtimePackage = Join-Path $packages "microsoft.netcore.app.runtime.win-x64\$runtimeVersion"
+    foreach ($license in @('LICENSE.TXT', 'THIRD-PARTY-NOTICES.TXT')) {
+        Copy-Item -LiteralPath (Join-Path $runtimePackage $license) -Destination $engineDirectory
+    }
+}
 if ($Stage) {
     Write-Output $appPath
     return
@@ -41,6 +63,9 @@ $entries = @(
     @{ Name = 'Код вслепую'; Mode = '--typing' },
     @{ Name = 'Windows без мыши'; Mode = '--windows' }
 )
+if (-not $LegacyOnly) {
+    $entries = @(@{ Name = 'Код вслепую - Live'; Mode = '--live' }) + $entries
+}
 foreach ($entry in $entries) {
     $shortcut = $shell.CreateShortcut((Join-Path $PSScriptRoot ($entry.Name + '.lnk')))
     $shortcut.TargetPath = $appPath

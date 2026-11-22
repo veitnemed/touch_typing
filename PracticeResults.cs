@@ -7,39 +7,6 @@ using System.Windows.Media;
 
 namespace TouchTypingStudio
 {
-    public class PracticeRecord
-    {
-        public string Id;
-        public double Speed, Accuracy;
-    }
-
-    internal static class PracticeRecords
-    {
-        public const int MinimumCharacters = 180;
-
-        public static bool CanRecordTyping(ContinuousTypingSnapshot result)
-        {
-            return result.Count >= MinimumCharacters;
-        }
-
-        public static void Record(StudioProfile profile, string id, double speed, double accuracy)
-        {
-            var item = profile.PracticeRecords.Find(record => record.Id == id);
-            if (item == null)
-            {
-                item = new PracticeRecord { Id = id };
-                profile.PracticeRecords.Add(item);
-            }
-            item.Speed = Math.Max(item.Speed, speed);
-            item.Accuracy = Math.Max(item.Accuracy, accuracy);
-        }
-
-        public static Brush ScoreColor(double value, double middle, double good)
-        {
-            return Ui.Brush(value >= good ? "#8BE3B4" : value >= middle ? "#FFD381" : "#FFA2A7");
-        }
-    }
-
     internal sealed class PracticeResultsPage : ScrollViewer
     {
         public readonly UIElement InitialFocus;
@@ -60,13 +27,13 @@ namespace TouchTypingStudio
             AddMetric(measures, "Скорость", result.Cpm.ToString("0") + " сим/мин",
                 result.Wpm.ToString("0") + " слов/мин · 5 символов на слово",
                 best == null ? "Лучший результат появится после зачёта" : "Лучшая скорость · " + best.Speed.ToString("0") + " сим/мин",
-                qualified ? PracticeRecords.ScoreColor(result.Cpm, 90, 165) : Ui.Muted,
-                best == null ? Ui.Muted : PracticeRecords.ScoreColor(best.Speed, 90, 165));
+                qualified ? ScoreColor(result.Cpm, 90, 165) : Ui.Muted,
+                best == null ? Ui.Muted : ScoreColor(best.Speed, 90, 165));
             AddMetric(measures, "Точность", result.Accuracy.ToString("0.0") + "%",
                 result.Count + " символов · " + Duration(result.Seconds),
                 best == null ? "Лучший результат появится после зачёта" : "Лучшая точность · " + best.Accuracy.ToString("0.0") + "%",
-                qualified ? PracticeRecords.ScoreColor(result.Accuracy, 92, 97) : Ui.Muted,
-                best == null ? Ui.Muted : PracticeRecords.ScoreColor(best.Accuracy, 92, 97));
+                qualified ? ScoreColor(result.Accuracy, 92, 97) : Ui.Muted,
+                best == null ? Ui.Muted : ScoreColor(best.Accuracy, 92, 97));
             Ui.Add(stack, measures, 10);
 
             var mistakes = new StackPanel();
@@ -94,6 +61,11 @@ namespace TouchTypingStudio
             var card = Ui.Panel(content, new Thickness(13), Ui.Brush("#182536"));
             card.Margin = new Thickness(0, 0, 8, 8);
             panel.Children.Add(card);
+        }
+
+        private static Brush ScoreColor(double value, double middle, double good)
+        {
+            return Ui.Brush(value >= good ? "#8BE3B4" : value >= middle ? "#FFD381" : "#FFA2A7");
         }
 
         private static string Duration(double seconds)

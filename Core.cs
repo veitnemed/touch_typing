@@ -15,6 +15,11 @@ namespace TouchTypingStudio
         public bool F2Seen;
         public bool ShowKeys = true;
         public bool ShowHands = true;
+        public bool ShowMistakeKey = true;
+        public string KeyboardProfile = "matebook-d16";
+        public string FnMode = "hotkeys";
+        public bool RightHandChord = true;
+        public string WindowsLayoutForward, WindowsLayoutBackward;
         public string CustomText;
         public string CustomName;
         public string SelectedLesson = "home-motion";
@@ -22,6 +27,10 @@ namespace TouchTypingStudio
         public int AdaptivePythonLevel;
         public List<PracticeSet> PracticeSets = new List<PracticeSet>();
         public List<PracticeRecord> PracticeRecords = new List<PracticeRecord>();
+        public List<SavedShortcut> Shortcuts = new List<SavedShortcut>();
+        public List<ShortcutAttempt> ShortcutHistory = new List<ShortcutAttempt>();
+        public List<LabSessionRecord> LabSessions = new List<LabSessionRecord>();
+        public List<LabSessionRecord> LabRecords = new List<LabSessionRecord>();
         public int TypingCourse;
         public double CardX = double.NaN;
         public double CardY = double.NaN;
@@ -141,9 +150,18 @@ namespace TouchTypingStudio
         public readonly string Root;
         public string Error { get; private set; }
 
-        public ProfileStore(bool verification)
+        public ProfileStore(bool verification, string dataRoot = null)
         {
-            Root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            string qaRoot = verification ? Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT") : null;
+            if (!string.IsNullOrEmpty(qaRoot))
+            {
+                bool windowsAbsolute = qaRoot.StartsWith(@"\\", StringComparison.Ordinal) || qaRoot.StartsWith("//", StringComparison.Ordinal) ||
+                    (qaRoot.Length >= 3 && qaRoot[1] == ':' && (qaRoot[2] == '\\' || qaRoot[2] == '/'));
+                if (!Path.IsPathRooted(qaRoot) || (Path.DirectorySeparatorChar == '\\' && !windowsAbsolute))
+                    throw new ArgumentException("Папка профиля проверки должна иметь абсолютный путь.");
+                dataRoot = Path.GetFullPath(qaRoot);
+            }
+            Root = Path.Combine(dataRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 verification ? "TouchTypingStudio-QA" : "TouchTypingStudio");
             path = Path.Combine(Root, "progress.xml");
             gate = new Mutex(false, verification ? @"Local\TouchTypingStudio.QA.Profile" : @"Local\TouchTypingStudio.Profile");

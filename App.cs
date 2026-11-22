@@ -40,7 +40,25 @@ namespace TouchTypingStudio
                 RenderChecks.Run(app, store, args[render + 1]);
                 return;
             }
-            var window = new StudioWindow(store, Array.IndexOf(args, "--windows") >= 0, Array.IndexOf(args, "--resume") < 0,
+            bool workday = Array.IndexOf(args, "--windows") >= 0;
+            bool explicitLive = Array.IndexOf(args, "--live") >= 0;
+            string engine = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "engine", "TouchTyping.Engine.exe");
+            bool legacy = workday || Array.IndexOf(args, "--legacy-typing") >= 0 ||
+                (verify && Array.IndexOf(args, "--qa-desktop-input") >= 0);
+            if (!legacy && (explicitLive || System.IO.File.Exists(engine)))
+            {
+                try
+                {
+                    app.Run(new LiveStudio(Array.IndexOf(args, "--typing") >= 0 ? "Печать" : "Live", verify));
+                }
+                catch (Exception error)
+                {
+                    MessageBox.Show(error.Message, "Код вслепую", MessageBoxButton.OK, MessageBoxImage.Error);
+                    Environment.ExitCode = 1;
+                }
+                return;
+            }
+            var window = new StudioWindow(store, workday, Array.IndexOf(args, "--resume") < 0,
                 verify && Array.IndexOf(args, "--qa-desktop-input") >= 0);
             app.Run(window);
         }

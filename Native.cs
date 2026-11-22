@@ -388,15 +388,6 @@ namespace TouchTypingStudio
         internal static string Quote(string value) { return "\"" + value + "\""; }
     }
 
-    internal enum Chord
-    {
-        None, SwitchWindow, SwitchLayout, OpenExplorer, Address, NewFolder, Rename, Copy, Paste, Arrow,
-        Find, Undo, Save, QuickOpen, Palette, Confirm, ExerciseCharacter, StartApp, CloseWindow, SelectAll, MoveWord,
-        ParentFolder, ForwardFolder, BackFolder, Cut, SnapLeft, SnapRight, GoLine, Replace, Comment, MoveLine,
-        CloseEditor, ReopenEditor, SwitchEditor, ReplaceAll,
-        RunDialog, WindowsSettings, TaskManager, Dismiss
-    }
-
     internal struct InputChord
     {
         public Chord Chord;

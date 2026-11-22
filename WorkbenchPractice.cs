@@ -1,7 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+#if LINUX
+using Key = TouchTypingStudio.LinuxKey;
+using ModifierKeys = TouchTypingStudio.LinuxModifiers;
+#else
 using System.Windows.Input;
+#endif
 
 namespace TouchTypingStudio
 {

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <LangVersion>5</LangVersion>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>TouchTyping</AssemblyName>
+    <RootNamespace>TouchTypingStudio</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <ApplicationManifest>../app.manifest</ApplicationManifest>
+    <AppConfig>../TouchTyping.exe.config</AppConfig>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="../linux/hands.png" LogicalName="TouchTyping.Hands.png" />
+    <EmbeddedResource Include="../linux/result-time.png" LogicalName="TouchTyping.Result.time.png" />
+    <EmbeddedResource Include="../linux/result-count.png" LogicalName="TouchTyping.Result.count.png" />
+    <EmbeddedResource Include="../linux/result-speed.png" LogicalName="TouchTyping.Result.speed.png" />
+    <EmbeddedResource Include="../linux/result-accuracy.png" LogicalName="TouchTyping.Result.accuracy.png" />
+    <Compile Include="../*.cs" Link="%(Filename)%(Extension)" />
+    <Reference Include="PresentationCore;PresentationFramework;WindowsBase;UIAutomationClient;UIAutomationTypes;System.Xaml;System.IO.Compression;System.Web.Extensions;Microsoft.CSharp" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,80 @@
+[
+  {
+    "path": "src/signals.py",
+    "name": "calculate_energy",
+    "tier": 0,
+    "code": "def calculate_energy(signal: np.ndarray, time_vector: np.ndarray):\n    return np.trapezoid(y=np.abs(signal) ** 2, x=time_vector)"
+  },
+  {
+    "path": "src/signals.py",
+    "name": "noise_level",
+    "tier": 0,
+    "code": "def noise_level(energy_signal: np.ndarray, snr: float, duration_all: np.ndarray):\n\n    return np.sqrt(energy_signal / (duration_all * snr))"
+  },
+  {
+    "path": "src/spectrum.py",
+    "name": "ifft",
+    "tier": 0,
+    "code": "def ifft(spectrum: np.ndarray) -> np.ndarray:\n\n    fft_back = np.fft.ifftshift(spectrum)\n    complex_signal_back = np.fft.ifft(fft_back)\n    return np.real(complex_signal_back)"
+  },
+  {
+    "path": "src/spectrum.py",
+    "name": "fft",
+    "tier": 0,
+    "code": "def fft(signal: np.ndarray):\n\n    fft_values = np.fft.fft(signal)\n    fft_centred = np.fft.fftshift(fft_values)\n    return fft_centred"
+  },
+  {
+    "path": "src/model.py",
+    "name": "gamma_array",
+    "tier": 0,
+    "code": "def gamma_array(sensor_amount: int) -> np.ndarray:\n    return (2 * np.pi / sensor_amount) * np.arange(sensor_amount)"
+  },
+  {
+    "path": "src/steerings.py",
+    "name": "approx_steering_vector",
+    "tier": 1,
+    "code": "def approx_steering_vector(phi: float, M: int) -> np.ndarray:\n    return np.array([1, np.cos(phi), np.sin(phi)] * M).T"
+  },
+  {
+    "path": "src/spectrum.py",
+    "name": "spectrum_energy",
+    "tier": 1,
+    "code": "def spectrum_energy(spectrum: np.ndarray):\n    return np.sum(np.abs(spectrum) ** 2)"
+  },
+  {
+    "path": "src/spectrum.py",
+    "name": "cut_spectrum",
+    "tier": 1,
+    "code": "def cut_spectrum(spectrum: np.ndarray, bandwidth: float, fs: float) -> np.ndarray:\n\n    local_freq_vector = np.fft.fftshift(np.fft.fftfreq(len(spectrum), d=1 / fs))\n    mask = (local_freq_vector < -bandwidth / 2) | (local_freq_vector > bandwidth / 2)\n    spectrum_copy = spectrum.copy()\n    spectrum_copy[mask] = 0\n    return spectrum_copy"
+  },
+  {
+    "path": "src/model.py",
+    "name": "tau_array",
+    "tier": 1,
+    "code": "def tau_array(configs: SimpleNamespace) -> np.ndarray:\n    return (configs.R / configs.c) * np.cos(\n        configs.target_phi - gamma_array(configs.M)\n    )"
+  },
+  {
+    "path": "src/steerings.py",
+    "name": "complex_steering_vector",
+    "tier": 2,
+    "code": "def complex_steering_vector(\n    phi: float, tau_array: np.ndarray, f0: float, M: int\n) -> np.ndarray:\n\n    return np.array(\n        [\n            x\n            for i in range(M)\n            for x in np.array([1, np.cos(phi), np.sin(phi)])\n            * np.exp(-2j * np.pi * f0 * tau_array[i])\n        ]\n    ).T"
+  },
+  {
+    "path": "src/steerings.py",
+    "name": "complex_steering_matrix",
+    "tier": 2,
+    "code": "def complex_steering_matrix(configs: SimpleNamespace) -> np.ndarray:\n    res = []\n\n    for phi in configs.phi_vector:\n        config_copy = copy(configs)\n        config_copy.target_phi = phi\n        taus = model.tau_array(config_copy)\n        res.append(complex_steering_vector(phi, taus, configs.f0, configs.M))\n    return np.array(res)"
+  },
+  {
+    "path": "src/spectrum.py",
+    "name": "f_99",
+    "tier": 2,
+    "code": "def f_99(freq_vector: np.ndarray, freq_signal: np.ndarray):\n\n    power = np.abs(freq_signal) ** 2\n    order = np.argsort(np.abs(freq_vector))\n    energy_1 = np.cumsum(power[order])\n    energy_1 /= energy_1[-1]\n    idx = np.searchsorted(energy_1, 0.99)\n    res = np.abs(freq_vector[order[idx]])\n    return res"
+  },
+  {
+    "path": "src/spectrum.py",
+    "name": "f_rms",
+    "tier": 2,
+    "code": "def f_rms(spectrum: np.ndarray, configs: SimpleNamespace):\n    return np.abs(\n        np.sqrt(\n            np.trapezoid(\n                y=(configs.freq_vector * np.abs(spectrum)) ** 2,\n                x=configs.freq_vector,\n            )\n            / (np.trapezoid(y=np.abs(spectrum) ** 2, x=configs.freq_vector))\n        )\n    )"
+  }
+]

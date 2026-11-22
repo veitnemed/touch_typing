@@ -26,6 +26,11 @@ $tempChecksum = "$tempArchive.sha256"
 try {
     [void](& (Join-Path $PSScriptRoot 'build.ps1') -Stage -StageDirectory $payload)
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'START-RU.txt') -Destination $payload
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'windows\Start-Live.cmd') -Destination $payload
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'windows\Start-Workday.cmd') -Destination $payload
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'windows\Test-Live-UI.ps1') -Destination $payload
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'windows\LiveUiSmoke.cs') -Destination $payload
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'windows\README.md') -Destination (Join-Path $payload 'README.md')
     $codeLesson = Join-Path $payload 'code-lesson'
     [void][IO.Directory]::CreateDirectory($codeLesson)
     foreach ($file in @('lesson.js', 'package.json')) {

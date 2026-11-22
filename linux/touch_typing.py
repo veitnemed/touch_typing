@@ -1,0 +1,2279 @@
+#!/usr/bin/python3
+import argparse
+from datetime import datetime
+import os
+from pathlib import Path
+import sys
+
+import gi
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gdk, Gio, GLib, Gtk, Pango
+
+from platform_linux import APP_ID, Engine, EngineError, FINGERS, InputSources, MODIFIERS, PHYSICAL, ROOT, chord_label, key_label
+from lab_view import DesktopView
+from visuals import PracticeLine, fingers as paint_fingers, hand_picture, series_chart
+
+
+def box(direction=Gtk.Orientation.VERTICAL, gap=8, *styles):
+    widget = Gtk.Box(orientation=direction, spacing=gap)
+    for style in styles:
+        widget.add_css_class(style)
+    return widget
+
+
+def row(gap=8, *styles):
+    return box(Gtk.Orientation.HORIZONTAL, gap, *styles)
+
+
+def text(value="", *styles, wrap=False):
+    widget = Gtk.Label(label=value, xalign=0)
+    widget.set_wrap(wrap)
+    widget.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+    for style in styles:
+        widget.add_css_class(style)
+    return widget
+
+
+def button(name, callback, *styles):
+    widget = Gtk.Button(label=name)
+    for style in styles:
+        widget.add_css_class(style)
+    widget.connect("clicked", lambda *_: callback())
+    return widget
+
+
+def add(parent, *children):
+    for child in children:
+        parent.append(child)
+    return parent
+
+
+def expand(widget, vertical=False):
+    widget.set_vexpand(True) if vertical else widget.set_hexpand(True)
+    return widget
+
+
+def clear(parent):
+    while child := parent.get_first_child():
+        parent.remove(child)
+
+
+def dropdown(names, change=None):
+    widget = Gtk.DropDown.new_from_strings(names)
+    widget.set_enable_search(len(names) > 8)
+    if change:
+        widget.connect("notify::selected", lambda *_: change())
+    return widget
+
+
+def scroll(widget, height=0):
+    scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+    scroller.set_min_content_height(height)
+    scroller.set_child(widget)
+    return scroller
+
+
+def card(*styles, gap=9):
+    return box(Gtk.Orientation.VERTICAL, gap, "card", *styles)
+
+
+def metric(parent, title, value="—"):
+    widget = expand(card(gap=4))
+    number = text(value, "metric-value")
+    add(widget, text(title, "muted"), number)
+    parent.append(widget)
+    return number
+
+
+def stamina_modal(title, subtitle, metrics):
+    """A compact, keyboard-first result and pause surface shared by lessons."""
+    panel = box(Gtk.Orientation.VERTICAL, 11, "stamina-modal")
+    panel.set_size_request(664, -1)
+    panel.set_halign(Gtk.Align.CENTER)
+    panel.set_valign(Gtk.Align.CENTER)
+    heading = text(title, "stamina-modal-title")
+    description = text(subtitle, "stamina-modal-subtitle", wrap=True)
+    add(panel, heading, Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), description)
+    if metrics:
+        strip = Gtk.Grid(column_homogeneous=True, column_spacing=7)
+        strip.add_css_class("stamina-metrics")
+        for index, (icon, name, value, tone) in enumerate(metrics):
+            item = row(7, "stamina-metric", tone)
+            asset = ROOT / f'result-{tone.removeprefix("tone-")}.png'
+            if asset.is_file():
+                glyph = Gtk.Picture.new_for_filename(str(asset))
+                glyph.set_content_fit(Gtk.ContentFit.CONTAIN)
+                glyph.set_can_shrink(True)
+                glyph.set_size_request(40, 40)
+                glyph.add_css_class("stamina-metric-icon")
+            else:
+                glyph = text(icon, "stamina-metric-icon")
+                glyph.set_xalign(.5)
+            words = box(gap=1)
+            label = text(name, "stamina-metric-label")
+            number = text(str(value), "stamina-metric-value")
+            add(words, label, number)
+            add(item, glyph, words)
+            strip.attach(item, index, 0, 1, 1)
+        panel.append(strip)
+    return panel
+
+
+def needs_fn(key, profile):
+    return (profile.get("keyboardProfile") == "matebook-d16" and
+            profile.get("fnMode") == "hotkeys" and key.startswith("F") and key[1:].isdigit() and
+            1 <= int(key[1:]) <= 12)
+
+
+def physical_key_hint(key, profile):
+    return ("Fn + " if needs_fn(key, profile) else "") + key_label(key)
+
+
+def display_chord(chord, profile):
+    parts = []
+    for part in chord.split(" → "):
+        keys = part.split("+") if part else []
+        labels = [key_label(key) for key in keys]
+        if any(needs_fn(key, profile) for key in keys):
+            labels.insert(0, "Fn")
+        parts.append(" + ".join(labels))
+    return " → ".join(parts)
+
+
+def bind_name(widget, name):
+    widget.update_property([Gtk.AccessibleProperty.LABEL], [name])
+    return widget
+
+
+def inside_widget(widget, ancestor):
+    while widget:
+        if widget is ancestor:
+            return True
+        widget = widget.get_parent()
+    return False
+
+
+class KeyboardView(Gtk.Box):
+    def __init__(self, rows, function_row=True):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        self.add_css_class("keyboard")
+        self.cells = {}
+        functions = [{"key": k, "units": 1, "en": k, "ru": k} for k in
+                     ("Esc", *[f"F{i}" for i in range(1, 13)], "Print")]
+        def extra(key, label):
+            return {"key": key, "units": 1.25, "en": label, "ru": label}
+        for items in ([functions] if function_row else []) + list(rows):
+            caps = []
+            for cap in items:
+                if not function_row and cap["key"] in ("Up", "Down", "Left", "Right"):
+                    continue
+                caps.append(cap)
+                if cap["key"] == "RAlt":
+                    if not function_row:
+                        caps.append(extra("Menu", "Menu"))
+            line = Gtk.Grid(column_homogeneous=True)
+            units = sum(item["units"] for item in caps)
+            start, used = 0, 0
+            for item in caps:
+                key = item["key"]
+                special = len(key) > 1
+                cell = text("", "cap")
+                if special and key != "Space":
+                    cell.add_css_class("special")
+                if key == "LSuper":
+                    cell.add_css_class("windows-key")
+                if item.get("anchor"):
+                    cell.add_css_class("anchor")
+                cell.set_xalign(.5)
+                cell.set_ellipsize(Pango.EllipsizeMode.END)
+                used += item["units"]
+                end = round(60 * used / units)
+                line.attach(cell, start, 0, end - start, 1)
+                start = end
+                self.cells[key] = (cell, item)
+            self.append(line)
+
+    def paint(self, layout, keys=(), held=(), miss=None, finger_map=None, profile=None):
+        finger_map = finger_map or {}
+        profile = profile or {}
+        matebook = profile.get("keyboardProfile") == "matebook-d16"
+        for key, (cell, cap) in self.cells.items():
+            if key == "Print":
+                cell.set_visible(not matebook)
+            color_class = f'finger-{finger_map.get(key, cap.get("finger", ""))}'
+            for style in cell.get_css_classes():
+                if style.startswith("finger-") and style != color_class:
+                    cell.remove_css_class(style)
+            if color_class != "finger-":
+                cell.add_css_class(color_class)
+            caption = cap["ru" if layout == "RU" else "en"]
+            label = {"LSuper": "⊞", "RSuper": "⊞", "Space": "", "Print": "PrtSc",
+                     "CapsLock": "Caps Lock"}.get(key, caption)
+            if key == "F11" and matebook:
+                label = "F11\nPrtSc"
+                cell.add_css_class("dual-function")
+            else:
+                cell.remove_css_class("dual-function")
+            cell.set_label(label)
+            if needs_fn(key, profile):
+                cell.set_tooltip_text(physical_key_hint(key, profile) +
+                                      (" · полноэкранный режим" if key == "F11" else ""))
+            elif key == "Print" and profile.get("keyboardProfile") == "matebook-d16" and profile.get("fnMode") == "hotkeys":
+                cell.set_tooltip_text("PrtSc · снимок экрана без Fn")
+            else:
+                cell.set_tooltip_text(key_label(key))
+            same_key = ("F11", "Print") if key == "F11" and matebook else (key,)
+            for name, enabled in (("target", any(item in keys for item in same_key)),
+                                  ("held", any(item in held for item in same_key)),
+                                  ("miss", miss in same_key)):
+                if enabled:
+                    cell.add_css_class(name)
+                else:
+                    cell.remove_css_class(name)
+
+
+class LessonGuide(Gtk.Box):
+    def __init__(self, rows, function_row=True):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.add_css_class("lesson-guide")
+        self.board = KeyboardView(rows, function_row)
+        self.board.add_css_class("key-deck")
+        self.board.set_hexpand(False)
+        self.board.set_valign(Gtk.Align.CENTER)
+        self.hands = {side: hand_picture(side) for side in ("left", "right")}
+        self.panel = row(24)
+        self.panel.set_halign(Gtk.Align.CENTER)
+        add(self.panel, self.hands["left"], self.board, self.hands["right"])
+        self.label = text("", "dim", "finger-caption")
+        self.label.set_ellipsize(Pango.EllipsizeMode.END)
+        self.label.set_xalign(.5)
+        self.append(self.panel)
+        self.append(self.label)
+        self.compact = None
+        self.show_keys = self.show_hands = True
+        self.chosen = ()
+        self.reflow(1140)
+
+    def reflow(self, width):
+        compact = width < 1040
+        if compact == self.compact:
+            return
+        self.compact = compact
+        self.board.set_size_request(590 if compact else 636, -1)
+        self.panel.set_spacing(18 if compact else 28)
+        self.update_hands()
+
+    def update_hands(self):
+        for side, picture in self.hands.items():
+            picture.set_size_request(108 if self.compact else 134, 118 if self.compact else 146)
+            paint_fingers(picture, self.chosen, side, self.compact)
+
+    def paint(self, profile, layout, targets=(), held=(), miss=None, notes="", chosen=()):
+        self.show_keys, self.show_hands = profile["showKeys"], profile["showHands"]
+        self.board.paint(layout, targets, held, miss, targets if isinstance(targets, dict) else None, profile)
+        self.board.set_visible(self.show_keys)
+        for picture in self.hands.values():
+            picture.set_visible(profile["showHands"])
+        if self.chosen != tuple(chosen):
+            self.chosen = tuple(chosen)
+            self.update_hands()
+        self.label.set_label(notes)
+        self.label.set_tooltip_text(notes or None)
+        self.label.set_visible(bool(notes) and profile["showHands"])
+
+        self.set_visible(profile["showKeys"] or profile["showHands"])
+
+
+class Studio(Gtk.Application):
+    def __init__(self, smoke=None, smoke_size=None, smoke_live=False):
+        flags = Gio.ApplicationFlags.NON_UNIQUE if smoke else Gio.ApplicationFlags.DEFAULT_FLAGS
+        super().__init__(application_id=APP_ID, flags=flags)
+        self.smoke = smoke
+        self.window_size = smoke_size or ((1508, 850) if smoke else (1140, 710))
+        self.smoke_live = smoke_live
+        self.smoke_failure = False
+        self.engine = None
+        self.lab = None
+        self.check_process = None
+        self.window = None
+        self.workout = None
+        self.result_kind = None
+        self.state = None
+        self.mode = "shortcuts"
+        self.group = "Терминал"
+        self.skill_id = "terminal-paste"
+        self.recording = False
+        self.pressed = set()
+        self.capture_keys = []
+        self.capture_surface = None
+        self.capture_handler = None
+        self.capture_requested = False
+        self.capture_timeout = 0
+        self.capture_dialog_seen = False
+        self.request_exact = False
+        self.capture_note = ""
+        self.allow_close = False
+        self.close_dialog = None
+        self.guide = None
+        self.paused = False
+        self.typing_choice = "Russian"
+
+    def do_activate(self):
+        if self.window:
+            self.window.present()
+            return
+        self.engine = Engine(bool(self.smoke))
+        self.sources = InputSources(Gio)
+        self.layout = self.sources.guess()
+        self.library = self.engine.call("configure", layout=self.layout, forward=self.sources.bindings()[0],
+                                        backward=self.sources.bindings()[1])
+        provider = Gtk.CssProvider()
+        provider.load_from_path(str(ROOT / "style.css"))
+        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.window = Gtk.ApplicationWindow(application=self, title="Код вслепую — Linux")
+        self.window.set_default_size(*self.window_size)
+        self.window.set_size_request(960, 600)
+        bar = Gtk.HeaderBar()
+        menu = Gtk.MenuButton(icon_name="open-menu-symbolic")
+        pop = Gtk.Popover()
+        items = box(gap=4)
+        for page, title in (("lab", "Live"), ("shortcuts", "Клавиши"), ("typing", "Печать"), ("editor", "Редактор"), ("progress", "Прогресс")):
+            items.append(button(title, lambda dest=page: (pop.popdown(), self.navigate(dest))))
+        pop.set_child(items)
+        menu.set_popover(pop)
+        bar.pack_start(menu)
+        bar.pack_start(text("КОД ВСЛЕПУЮ", "brand"))
+        self.window.set_titlebar(bar)
+        self.window.connect("close-request", self.close_request)
+        self.window.connect("notify::is-active", self.focus_changed)
+        controller = Gtk.EventControllerKey()
+        controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        controller.connect("key-pressed", self.key_pressed)
+        controller.connect("key-released", self.key_released)
+        self.window.add_controller(controller)
+
+        self.navigation = {}
+        self.tabs = row(3)
+        for page, title, key in (
+            ("lab", "Live", "1"), ("typing", "Печать", "2"),
+            ("editor", "Редактор", "3"), ("progress", "Прогресс", "4"),
+        ):
+            nav = button(title, lambda value=page: self.navigate(value), "nav")
+            nav.set_tooltip_text("Alt+" + key)
+            bind_name(nav, title + " Alt+" + key)
+            self.tabs.append(nav)
+            self.navigation[page] = nav
+        bar.set_title_widget(expand(box()))
+        bar.pack_end(self.tabs)
+        self.layout_tag = text(self.layout, "tag")
+        bar.pack_end(self.layout_tag)
+
+        main = box(gap=0)
+        self.banner = text("", "bad", wrap=True)
+        self.banner.set_margin_top(6)
+        self.banner.set_margin_start(24)
+        self.banner.set_visible(False)
+        self.body = expand(box(gap=0), True)
+        add(main, self.banner, self.body)
+        main.add_css_class("shell")
+        self.window.set_child(main)
+        self.navigate("shortcuts" if self.smoke else "lab")
+        if not self.smoke:
+            self.window.maximize()
+        self.window.present()
+        (self.start_button if self.smoke else self.lab.begin).grab_focus()
+        GLib.timeout_add(200, self.tick)
+        if self.smoke:
+            GLib.timeout_add(450, self.smoke_test)
+
+    def run_checks(self, control, status):
+        if self.check_process:
+            status.set_label("Автопроверка уже выполняется.")
+            return
+        data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
+        output = data / "TouchTypingStudio/checks" / datetime.now().strftime("%Y%m%d-%H%M%S")
+        runner = ROOT / "check.sh"
+        try:
+            self.check_process = Gio.Subprocess.new([str(runner), "--timed", "--output", str(output)],
+                                                   Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE)
+        except GLib.Error as error:
+            status.set_label(str(error))
+            return
+        control.set_sensitive(False)
+        status.set_label("Автопроверка выполняется в отдельном сеансе. Полный прогон занимает около четырёх минут.")
+        def completed(process, response):
+            try:
+                success = process.wait_check_finish(response)
+            except GLib.Error:
+                success = False
+            self.check_process = None
+            control.set_sensitive(True)
+            status.set_label(("Проверки пройдены. " if success else "Обнаружен сбой. ") + "Отчёт " + str(output / "report.json"))
+        self.check_process.wait_check_async(None, completed)
+
+    def message(self, value=""):
+        self.banner.set_label(value or "")
+        self.banner.set_visible(bool(value))
+
+    def call(self, operation, **payload):
+        try:
+            result = self.engine.call(operation, **payload)
+            if self.engine.storage_error:
+                self.message(self.engine.storage_error)
+            return result
+        except EngineError as exc:
+            self.message(str(exc))
+            return None
+
+    def refresh(self):
+        forward, backward = self.sources.bindings()
+        result = self.call("configure", layout=self.layout, forward=forward, backward=backward)
+        if result:
+            self.library = result
+
+    def navigate(self, page, manual=True):
+        if self.lab:
+            self.lab.stop(show=False)
+            self.lab = None
+        if self.workout:
+            self.stop(show_result=False)
+        self.recording = False
+        self.result_kind = None
+        self.mode = page
+        self.tabs.set_visible(True)
+        self.guide = None
+        if manual:
+            self.message()
+        self.refresh()
+        for name, nav in self.navigation.items():
+            if name == page:
+                nav.add_css_class("active")
+            else:
+                nav.remove_css_class("active")
+        clear(self.body)
+        if page == "lab":
+            self.lab = LabPage(self)
+            self.body.append(expand(self.lab, True))
+            return
+        practice = page in ("shortcuts", "typing")
+        self.page = box(Gtk.Orientation.VERTICAL, 9 if practice else 14, "lesson-page" if practice else "page")
+        layout = scroll(self.page)
+        self.body.append(expand(layout, True))
+        getattr(self, f"build_{page}")()
+        if page == "shortcuts":
+            self.start_button.grab_focus()
+        elif page == "typing":
+            self.typing_start.grab_focus()
+
+    def title(self, line, subtitle=None):
+        heading = add(box(gap=4), text(line, "h1"))
+        if subtitle:
+            heading.append(text(subtitle, "muted", wrap=True))
+        self.page.append(heading)
+        return heading
+
+    def visible_skills(self):
+        return [item for item in self.library["skills"] if not item["skill"]["hidden"]]
+
+    def build_shortcuts(self):
+        groups = list(dict.fromkeys(item["skill"]["group"] for item in self.visible_skills()))
+        preferred = ["Проблемы с ⊞", "Окна и система", "Терминал", "Вкладки", "Модификаторы", "Цифровой ряд", "Спецсимволы"]
+        self.groups = [group for group in preferred if group in groups] + [group for group in groups if group not in preferred]
+        if self.group not in self.groups:
+            self.group = self.groups[0] if self.groups else ""
+        self.group_picker = bind_name(dropdown(self.groups), "Группа сочетаний")
+        if self.group:
+            self.group_picker.set_selected(self.groups.index(self.group))
+        self.skill_picker = bind_name(dropdown([]), "Упражнение Live")
+        self.run_picker = bind_name(dropdown(["Одно сочетание", "Случайная серия группы", "Серия из изученных"],
+                                             self.update_preview), "Формат тренировки")
+        self.tier_picker = bind_name(dropdown(["Авто", "Базовый", "Средний", "Сложный"]), "Сложность")
+        self.limit_picker = bind_name(dropdown(["10 заданий", "20 заданий", "30 заданий"]), "Размер серии")
+        self.technique = bind_name(dropdown(["Ctrl и Shift справа", "Ctrl справа, Shift слева"]), "Постановка для Ctrl и Shift")
+        self.technique.set_selected(0 if self.library["rightHandChord"] else 1)
+        self.technique.set_tooltip_text("Выберите вариант, при котором кисть остаётся расслабленной.")
+        self.technique.connect("notify::selected", lambda *_: self.change_technique())
+        self.start_button = button("Начать · F5", self.toggle_shortcut, "primary")
+        self.preparation = add(box(gap=7), add(row(7), text("Live", "lesson-title"), expand(box()),
+                         self.technique), add(row(7), self.group_picker, expand(self.skill_picker), self.run_picker),
+                         add(row(7), self.tier_picker, self.limit_picker, expand(box()), self.start_button))
+        self.page.append(self.preparation)
+        self.hero = box(gap=3)
+        self.hero.set_focusable(True)
+        self.hero_line = text("", "eyebrow")
+        self.prompt = text("", "lesson-title")
+        self.prompt.set_ellipsize(Pango.EllipsizeMode.END)
+        self.tiles = row(9)
+        self.tiles.set_halign(Gtk.Align.CENTER)
+        self.tiles.set_valign(Gtk.Align.CENTER)
+        self.command_strip = Gtk.CenterBox()
+        self.command_strip.add_css_class("command-strip")
+        self.command_strip.set_center_widget(self.tiles)
+        self.start_on_click(self.command_strip, self.toggle_shortcut)
+        self.detail = text("", "muted", wrap=True)
+        self.detail.set_xalign(.5)
+        self.substitute = text("", "warning", wrap=True)
+        self.substitute.set_xalign(.5)
+        self.scene_box = box(gap=3)
+        self.scene_box.add_css_class("scene")
+        self.feedback = text("", "muted", wrap=True)
+        self.exit_hint = text("", "key-hint")
+        self.live_timer = text("00:00", "lesson-timer")
+        self.live_status = self.live_timer
+        self.hero_line.set_visible(False)
+        self.live_controls = self.lesson_controls(self.pause_live, self.stop, self.prompt)
+        self.live_controls.append(self.exit_hint)
+        self.live_progress = self.lesson_progress()
+        self.prompt.remove_css_class("lesson-title")
+        self.prompt.add_css_class("crumb")
+        self.live_timer.set_halign(Gtk.Align.CENTER)
+        self.substitute_button = button("Учебная замена  ·  F6", self.switch_capture, "capture-button")
+        self.live_controls.append(self.substitute_button)
+        add(self.hero, self.live_timer, self.live_controls, self.command_strip, self.live_progress,
+            self.detail, self.substitute, self.scene_box, self.feedback)
+        self.guide = LessonGuide(self.library["keyboard"])
+        self.guide.reflow(self.window.get_width() or self.window_size[0])
+        add(self.page, self.hero, self.guide)
+        self.group_picker.connect("notify::selected", lambda *_: self.change_group())
+        self.skill_picker.connect("notify::selected", lambda *_: self.select_skill())
+        self.change_group()
+
+    def change_group(self):
+        if self.workout:
+            return
+        selected = self.group_picker.get_selected()
+        self.group = self.groups[selected] if selected < len(self.groups) else ""
+        self.entries = [item for item in self.visible_skills() if item["skill"]["group"] == self.group]
+        if self.skill_id not in {item["skill"]["id"] for item in self.entries}:
+            self.skill_id = self.entries[0]["skill"]["id"] if self.entries else ""
+        self.updating_skill = True
+        try:
+            self.skill_picker.set_model(Gtk.StringList.new([
+                item["skill"]["title"] + (f'  ·  {chord_label(item["skill"]["keys"])}' if item["skill"]["keys"] else "")
+                for item in self.entries]))
+            for index, item in enumerate(self.entries):
+                if item["skill"]["id"] == self.skill_id:
+                    self.skill_picker.set_selected(index)
+                    break
+        finally:
+            self.updating_skill = False
+        self.update_preview()
+
+    def select_skill(self, key=None):
+        if self.updating_skill or self.workout:
+            return
+        if key is not None:
+            for index, item in enumerate(self.entries):
+                if item["skill"]["id"] == key:
+                    self.skill_picker.set_selected(index)
+                    break
+        selected = self.skill_picker.get_selected()
+        if selected < len(self.entries):
+            self.skill_id = self.entries[selected]["skill"]["id"]
+            self.run_picker.set_selected(0)
+        self.update_preview()
+
+    def set_group(self, key):
+        found = next((item["skill"]["group"] for item in self.visible_skills() if item["skill"]["id"] == key), None)
+        if found and found in self.groups:
+            self.skill_id = key
+            self.group_picker.set_selected(self.groups.index(found))
+            self.select_skill(key)
+
+    def update_preview(self):
+        if self.workout or not hasattr(self, "entries"):
+            return
+        chosen = next((item for item in self.entries if item["skill"]["id"] == self.skill_id), None)
+        self.start_button.set_sensitive(chosen is not None)
+        if chosen is None:
+            self.prompt.set_label("Выберите упражнение")
+            return
+        skill = chosen["skill"]
+        series = self.run_picker.get_selected()
+        prompt = skill["title"] if not series else ("Случайная серия" if series == 1 else "Изученные сочетания")
+        self.render_skill(skill, None, 0, prompt=prompt, preview=True)
+        self.guide.paint(self.library, self.layout)
+        self.live_progress.set_visible(False)
+        self.exit_hint.set_visible(False)
+        self.preparation.set_visible(True)
+        self.live_status.set_visible(False)
+        self.live_controls.set_visible(True)
+        self.pause_button.set_visible(False)
+        self.finish_button.set_visible(False)
+        self.hint_titles("F4", "F7")
+        for widget in (self.feedback, self.scene_box, self.substitute, self.substitute_button):
+            widget.set_visible(False)
+
+    def render_skill(self, skill, guide, step, prompt=None, held=(), miss=None, blind=False, waiting=False, preview=False):
+        self.hero_line.set_label(skill["group"].upper())
+        self.prompt.set_label("Live  ›  " + skill["group"] + "  ›  " + (prompt or skill["title"]))
+        self.detail.set_label(skill["note"] or "")
+        self.detail.set_visible(bool(skill["note"]))
+        clear(self.tiles)
+        actions = guide["steps"][min(step, len(guide["steps"]) - 1)] if guide and guide["steps"] else []
+        if preview:
+            self.tiles.append(text("Пробел — СТАРТ", "ready-line"))
+            self.detail.set_visible(False)
+        elif waiting:
+            self.tiles.append(text("Ожидание разрешения…", "ready-line"))
+        elif skill["action"] in ("layout", "layout-back") and self.state["activity"] != "layout-after":
+            self.tiles.append(text("A", "keytile"))
+            actions = [{"token": "A", "key": "A", "finger": 0}]
+        elif skill["action"] in ("layout", "layout-back") and not actions:
+            self.tiles.append(text("Системная раскладка", "keytile"))
+        elif skill["action"] == "reboot":
+            self.tiles.append(text("reboot", "keytile"))
+            self.tiles.append(text("Enter", "keytile"))
+        elif blind:
+            self.tiles.append(text("Нажмите по памяти", "keytile"))
+        elif skill["character"]:
+            self.tiles.append(text(skill["character"], "keytile"))
+        else:
+            if any(needs_fn(item["token"], self.library) for item in actions):
+                self.tiles.append(text("Fn", "keytile"))
+                self.tiles.append(text("+", "plus"))
+            for index, item in enumerate(actions):
+                if index:
+                    self.tiles.append(text("+", "plus"))
+                self.tiles.append(text(key_label(item["token"]), "keytile"))
+        targets = {} if blind or waiting else {item["key"]: item["finger"] for item in actions}
+        hints = "   ·   ".join(f'{key_label(item["key"])} — {FINGERS[item["finger"]]}' for item in actions
+                             if item["key"] in targets)
+        self.guide.paint(self.library, self.layout, targets, held, miss, hints, targets.values())
+        self.technique.set_visible(preview and skill["id"] in ("terminal-copy", "terminal-paste", "terminal-cut", "terminal-right-paste"))
+
+    def change_technique(self):
+        updated = self.call("settings", paired=self.technique.get_selected() == 0)
+        if updated:
+            self.library = updated
+            self.update_preview()
+
+    def toggle_shortcut(self):
+        if self.workout:
+            self.stop()
+            return
+        self.refresh()
+        choice = self.run_picker.get_selected()
+        ids = ([item["skill"]["id"] for item in self.visible_skills()] if choice == 2 else
+               [item["skill"]["id"] for item in self.entries] if choice == 1 else [self.skill_id])
+        tier = self.tier_picker.get_selected()
+        state = self.call("shortcut-start", ids=ids, level=max(tier - 1, 0), auto=tier == 0,
+                          studied=choice == 2, limit=[10, 20, 30][self.limit_picker.get_selected()])
+        if state is None:
+            return
+        self.message()
+        self.workout = "shortcuts"
+        self.capture_note = ""
+        self.request_exact = False
+        self.pressed.clear()
+        self.paused = False
+        self.preparation.set_visible(False)
+        self.page.add_css_class("engaged")
+        self.tabs.set_visible(True)
+        self.hero.grab_focus()
+        self.render_shortcut_state(state)
+
+    def render_scene(self, scene, subtitle=""):
+        clear(self.scene_box)
+        action = scene["action"]
+        show = action not in ("keys", "digit", "digits", "symbol", "layout", "layout-back")
+        self.scene_box.set_visible(show)
+        if not show:
+            return
+        description = row(8)
+        self.scene_box.append(description)
+        if scene["tabs"]:
+            tabs = row(5)
+            for index, item in enumerate(scene["tabs"]):
+                styles = ("tag", "tab-active") if index == scene["active"] else ("tag",)
+                tabs.append(text(item, *styles))
+            description.append(expand(tabs))
+        elif action == "reboot":
+            prompt = "$ " + scene["entry"] + " ▌" if not scene["rebooted"] else "$ reboot   ✓"
+            description.append(expand(text(prompt, "mono", "good")))
+        elif action.startswith("window"):
+            view = ("Учебное окно закрыто" if not scene["window"] else
+                    "Учебное окно · полный экран" if scene["fullscreen"] else
+                    "Учебное окно · развёрнуто" if scene["maximized"] else "Учебное окно · отчёт")
+            description.append(expand(text(view, "tag")))
+        elif action.startswith("screenshot"):
+            description.append(expand(text("▣  Отчёт · 17 проверок  ✓" if scene["captured"] else
+                                       "□  Учебная область для снимка", "mono", "lavender")))
+        elif action == "terminal-open":
+            description.append(expand(text("$ учебный терминал" if scene["terminal"] else "Учебный рабочий стол", "mono")))
+        else:
+            description.append(expand(text(f'$ {scene["body"] or "▌"}', "mono", "good")))
+        if scene["clipboard"]:
+            clip = text("Учебный буфер  ·  " + scene["clipboard"], "muted")
+            clip.set_ellipsize(Pango.EllipsizeMode.END)
+            description.append(clip)
+        if subtitle:
+            self.scene_box.append(text(subtitle, "muted", wrap=True))
+
+    def render_shortcut_state(self, state):
+        self.state = state
+        if state["finished"]:
+            self.stop(completed=True)
+            return
+        if state["inputMode"] == "waiting" and not self.request_exact:
+            self.set_input_mode("substitute")
+            return
+        mode = state["inputMode"]
+        waiting = mode == "waiting"
+        self.update_capture(state["needsSystem"] and mode != "substitute" and not self.paused)
+        blind = self.tier_picker.get_selected() in (0, 3) and state["tier"] == 2 and mode == "exact"
+        self.render_skill(state["skill"], state["guide"], state["step"],
+                          held=state["held"], miss=(state["mistakeKey"] if state["feedback"] == "error" and
+                                                    self.library.get("showMistakeKey", True) else None),
+                          blind=blind and not self.paused, waiting=waiting)
+        if state["activity"] == "layout-after":
+            self.detail.set_visible(True)
+            self.detail.set_label("Переключите системную раскладку, затем снова нажмите физическую A.")
+        elif state["activity"] in ("layout", "layout-back"):
+            self.detail.set_visible(True)
+            self.detail.set_label("Нажмите физическую A (Ф), затем переключите раскладку.")
+        label = ""
+        if waiting:
+            label = "В диалоге GNOME выберите «Разрешить». Затем вернитесь к упражнению."
+        elif mode == "substitute":
+            label = self.capture_note or f'Учебная замена для {chord_label(state["targetKeys"])}'
+        self.substitute.set_label(label)
+        self.substitute.set_visible(bool(label))
+        if mode in ("substitute", "waiting"):
+            self.detail.set_visible(False)
+        self.substitute_button.set_visible(state["needsSystem"] and bool(state["substituteKeys"]))
+        self.substitute_button.set_label(("Исходные клавиши" if mode == "substitute" else "Учебная замена") + " · " + state["previewKey"])
+        self.render_scene(state.get("verifiedScene") or state["scene"])
+        self.live_status.set_visible(True)
+        self.live_controls.set_visible(True)
+        self.pause_button.set_visible(True)
+        self.finish_button.set_visible(True)
+        feedback = "Пауза. Нажмите пробел, чтобы продолжить." if self.paused else state["status"]
+        self.feedback.set_label(feedback.replace("LSuper", "⊞").replace("RSuper", "⊞ прав.").replace("Super", "⊞"))
+        self.feedback.set_visible(bool(feedback))
+        self.feedback.remove_css_class("bad")
+        self.feedback.remove_css_class("good")
+        if not self.paused and state["feedback"] in ("error", "good"):
+            self.feedback.add_css_class("bad" if state["feedback"] == "error" else "good")
+        self.exit_hint.set_label(f'{state["solved"]}/{state["limit"]}')
+        self.live_timer.set_label(self.clock_text(state["seconds"]))
+        key_hint, hands_hint, pause_hint = self.shortcut_control_keys()
+        self.hint_titles(key_hint, hands_hint)
+        self.pause_button.set_label("▶" if self.paused else "Ⅱ")
+        self.pause_button.set_tooltip_text("Продолжить · Пробел" if self.paused else
+                                           "Пауза · " + physical_key_hint(pause_hint, self.library))
+        self.finish_button.set_tooltip_text("Остановить · " + state["exitKey"])
+        self.exit_hint.set_visible(True)
+        self.live_progress.set_visible(True)
+        self.live_progress.set_fraction(state["solved"] / state["limit"])
+        if state["held"] and not self.paused:
+            self.feedback.set_visible(True)
+            self.feedback.set_label("Нажато: " + " + ".join(key_label(k) for k in state["held"]))
+
+    def switch_capture(self):
+        if self.state["inputMode"] == "substitute":
+            self.capture_note = ""
+            self.request_exact = True
+            self.set_input_mode("waiting")
+        else:
+            self.choose_substitute()
+
+    def update_capture(self, enabled):
+        if not enabled:
+            if self.capture_timeout:
+                GLib.source_remove(self.capture_timeout)
+                self.capture_timeout = 0
+            surface, handler = self.capture_surface, self.capture_handler
+            self.capture_surface = self.capture_handler = None
+            self.capture_requested = False
+            self.capture_dialog_seen = False
+            if surface is not None:
+                surface.disconnect(handler)
+                surface.restore_system_shortcuts()
+            return
+
+        if self.capture_requested:
+            if self.state["inputMode"] == "waiting":
+                if not self.capture_timeout:
+                    self.capture_timeout = GLib.timeout_add_seconds(30, self.capture_expired)
+                GLib.idle_add(self.resolve_capture)
+            return
+        surface = self.window.get_surface()
+        if not isinstance(surface, Gdk.Toplevel):
+            GLib.idle_add(self.choose_substitute)
+            return
+        self.capture_surface = surface
+        self.capture_requested = True
+        self.capture_handler = surface.connect("notify::shortcuts-inhibited", self.capture_changed)
+        surface.inhibit_system_shortcuts(None)
+        self.capture_timeout = GLib.timeout_add_seconds(4, self.capture_expired)
+        GLib.idle_add(self.resolve_capture)
+
+    def capture_changed(self, *_):
+        GLib.idle_add(self.resolve_capture)
+
+    def resolve_capture(self):
+        if not self.capture_surface or self.workout != "shortcuts" or self.paused:
+            return GLib.SOURCE_REMOVE
+        if self.capture_surface.get_property("shortcuts-inhibited") and self.window.is_active():
+            if self.capture_timeout:
+                GLib.source_remove(self.capture_timeout)
+                self.capture_timeout = 0
+            if self.state["inputMode"] == "waiting":
+                self.set_input_mode("exact")
+        elif self.state["inputMode"] == "exact":
+            self.choose_substitute()
+        return GLib.SOURCE_REMOVE
+
+    def capture_after_dialog(self, token):
+        if (self.workout == "shortcuts" and self.state["stepToken"] == token and
+                self.state["inputMode"] == "waiting" and self.window.is_active()):
+            self.resolve_capture()
+            if self.state["inputMode"] == "waiting":
+                self.capture_unavailable()
+        return GLib.SOURCE_REMOVE
+
+    def capture_expired(self):
+        self.capture_timeout = 0
+        if self.workout == "shortcuts" and self.state["inputMode"] == "waiting" and not self.paused:
+            if self.capture_dialog_seen and not self.window.is_active():
+                return GLib.SOURCE_REMOVE
+            self.capture_unavailable()
+        return GLib.SOURCE_REMOVE
+
+    def capture_unavailable(self):
+        self.capture_note = "Система оставила сочетание за собой. Выполните учебную замену в строке."
+        self.choose_substitute()
+
+    def set_input_mode(self, mode):
+        if self.state["inputMode"] != mode:
+            self.pressed.clear()
+        state = self.call("shortcut-input-mode", mode=mode, stepToken=self.state["stepToken"])
+        if state:
+            self.render_shortcut_state(state)
+
+    def choose_substitute(self):
+        self.request_exact = False
+        if self.workout == "shortcuts" and self.state["needsSystem"] and self.state["substituteKeys"]:
+            self.set_input_mode("substitute")
+            if self.window.is_active():
+                self.hero.grab_focus()
+        return GLib.SOURCE_REMOVE
+
+    def close_request(self, *_):
+        if self.allow_close:
+            return False
+        active = bool(self.lab and self.lab.active) or bool(self.workout) or self.recording
+        if not active:
+            return False
+        if self.lab and self.lab.active:
+            self.lab.pause_run("Пауза. Нажмите пробел, чтобы продолжить.")
+        elif self.workout == "shortcuts":
+            if not self.paused:
+                self.pause_live()
+            self.update_capture(False)
+        elif self.workout == "typing" and not self.paused:
+            self.typing_pause()
+        if self.close_dialog is not None:
+            self.close_dialog.present()
+            return True
+        dialog = Gtk.MessageDialog(transient_for=self.window, modal=True,
+                                   message_type=Gtk.MessageType.QUESTION, text="Закрыть тренажёр?")
+        dialog.add_button("Остаться", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Закрыть", Gtk.ResponseType.ACCEPT)
+        dialog.set_default_response(Gtk.ResponseType.ACCEPT)
+        def answer(widget, response):
+            widget.destroy()
+            self.close_dialog = None
+            if response == Gtk.ResponseType.ACCEPT:
+                self.allow_close = True
+                self.window.close()
+        dialog.connect("response", answer)
+        self.close_dialog = dialog
+        dialog.present()
+        return True
+
+    def focus_changed(self, *_):
+        if self.lab:
+            self.lab.focus(self.window.is_active())
+            return
+        if self.window.is_active():
+            if self.workout == "shortcuts" and self.state["inputMode"] == "waiting":
+                GLib.idle_add(self.resolve_capture)
+                if self.capture_dialog_seen:
+                    GLib.timeout_add(250, self.capture_after_dialog, self.state["stepToken"])
+            return
+        self.pressed.clear()
+        if self.recording:
+            self.capture_keys = []
+        if self.workout == "shortcuts":
+            if self.state["inputMode"] == "waiting":
+                self.capture_dialog_seen = True
+                return
+            if self.state["activity"] not in ("layout", "layout-back", "layout-after") and not self.paused:
+                self.pause_live()
+        elif self.workout == "typing":
+            self.typing_pause()
+
+    def pause_live(self):
+        if self.paused:
+            self.paused = False
+            state = self.call("shortcut-resume")
+            if state:
+                self.render_shortcut_state(state)
+            self.hero.grab_focus()
+        else:
+            self.paused = True
+            self.pressed.clear()
+            if self.state["needsSystem"] and self.state["inputMode"] == "exact":
+                self.call("shortcut-pause")
+                self.choose_substitute()
+            else:
+                state = self.call("shortcut-pause")
+                self.render_shortcut_state(state or self.state)
+
+    @staticmethod
+    def clock_text(seconds):
+        minutes, seconds = divmod(int(seconds), 60)
+        return f"{minutes:02}:{seconds:02}"
+
+    def stop(self, completed=False, show_result=True):
+        previous = self.workout
+        self.workout = None
+        self.paused = False
+        self.tabs.set_visible(True)
+        self.update_capture(False)
+        self.pressed.clear()
+        if previous == "shortcuts":
+            result = self.call("shortcut-result")
+            settings = (self.run_picker.get_selected(), self.tier_picker.get_selected(), self.limit_picker.get_selected())
+            if show_result and result:
+                self.build_result(previous, result, settings, completed)
+            else:
+                self.change_group()
+        elif previous == "typing":
+            self.call("typing-stop", layout=self.layout)
+            result = self.call("typing-result", layout=self.layout)
+            settings = (self.typing_level.get_selected(), self.typing_time.get_selected())
+            if show_result and result:
+                self.build_result(previous, result, settings, completed)
+            else:
+                self.typing_prep.set_visible(True)
+                self.typing_controls.set_visible(False)
+
+    def start_on_click(self, surface, start):
+        gesture = Gtk.GestureClick()
+        gesture.connect("released", lambda *_: start() if not self.workout else None)
+        surface.add_controller(gesture)
+
+    def lesson_progress(self):
+        bar = Gtk.ProgressBar()
+        bar.add_css_class("lesson-progress")
+        return bar
+
+    def lesson_controls(self, pause, finish, crumb):
+        self.pause_button = button("Ⅱ", pause, "mini")
+        self.pause_button.set_tooltip_text("Пауза · " + physical_key_hint("F8", self.library))
+        self.finish_button = button("ОСТАНОВИТЬ", finish, "stop")
+        self.finish_button.set_tooltip_text("Остановить · Esc")
+        controls = add(row(5), crumb, self.finish_button, expand(box()))
+        self.hint_buttons = {}
+        for key, icon in (("keys", "⌨"), ("hands", "👐"), ("mistakes", "●")):
+            toggle = Gtk.ToggleButton(label=icon)
+            toggle.add_css_class("hint-toggle")
+            if key == "mistakes":
+                toggle.add_css_class("mistake-toggle")
+            setting = {"keys": "showKeys", "hands": "showHands", "mistakes": "showMistakeKey"}[key]
+            toggle.set_active(self.library.get(setting, True))
+            toggle.connect("toggled", lambda widget, key=key: self.apply_hint(key, widget.get_active()))
+            self.hint_buttons[key] = toggle
+            controls.append(toggle)
+        self.hint_titles("F4", "F7")
+        bind_name(self.hint_buttons["mistakes"], "Подсветка ошибочной клавиши")
+        self.hint_buttons["mistakes"].set_tooltip_text("Подсветка ошибочной клавиши")
+        controls.append(self.pause_button)
+        return controls
+
+    def hint_titles(self, keys, hands):
+        for key, label, binding in (("keys", "Клавиатура", keys), ("hands", "Руки", hands)):
+            hint = label + " · " + physical_key_hint(binding, self.library)
+            self.hint_buttons[key].set_tooltip_text(hint)
+            bind_name(self.hint_buttons[key], hint)
+
+    def apply_hint(self, key, enabled):
+        updated = self.call("settings", **{("mistakeKeys" if key == "mistakes" else key): enabled})
+        if not updated:
+            return
+        self.library = updated
+        if self.mode == "shortcuts":
+            if self.workout:
+                self.render_shortcut_state(self.state)
+            else:
+                self.update_preview()
+        elif self.workout == "typing":
+            self.render_typing_state(self.state)
+        elif self.mode == "typing":
+            self.guide.paint(self.library, self.layout)
+
+    def hint_key(self, key):
+        toggle = self.hint_buttons[key]
+        toggle.set_active(not toggle.get_active())
+
+    def shortcut_control_keys(self):
+        state = self.state
+        step = state["step"]
+        guide = state["guide"]
+        tokens = {item["token"] for item in guide["steps"][step]} if guide and step < len(guide["steps"]) else set()
+        return ("F9" if "F4" in tokens else "F4", "F10" if "F7" in tokens else "F7", "F11" if "F8" in tokens else "F8")
+
+    def update_layout(self, controller, character):
+        candidate = None
+        if character and character.isascii() and character.isalpha():
+            candidate = "EN"
+        elif character and ("а" <= character.lower() <= "я" or character.lower() == "ё"):
+            candidate = "RU"
+        elif controller is not None:
+            # GNOME can replace the Wayland keymap when switching sources. Ask GDK
+            # how it translates physical A in this event, independent of source-list order.
+            translated, probe, *_ = self.window.get_display().translate_key(
+                38, Gdk.ModifierType(0), controller.get_group())
+            if translated and (codepoint := Gdk.keyval_to_unicode(probe)):
+                candidate = {"a": "EN", "ф": "RU"}.get(chr(codepoint).lower())
+        if candidate and candidate != self.layout:
+            self.layout = candidate
+            self.layout_tag.set_label(self.layout)
+            if not self.workout and not self.recording and not self.result_kind and self.mode == "shortcuts":
+                self.refresh()
+                self.change_group()
+
+    def key_pressed(self, controller, keyval, keycode, modifiers):
+        key = PHYSICAL.get(keycode, "")
+        character = chr(value) if (value := Gdk.keyval_to_unicode(keyval)) else ""
+        self.update_layout(controller, character)
+        if self.lab:
+            handled = self.lab.key_down(key, character, modifiers, keycode)
+            if not self.lab.active and not handled and modifiers & Gdk.ModifierType.ALT_MASK and key in ("1", "2", "3", "4"):
+                self.navigate(list(self.navigation)[int(key) - 1])
+                return True
+            return handled
+        if self.recording:
+            return self.capture_press(key)
+        if self.workout == "shortcuts":
+            if key == self.state["exitKey"] and not (self.pressed & MODIFIERS):
+                self.stop()
+                return True
+            key_hint, hands_hint, pause_hint = self.shortcut_control_keys()
+            if key in (key_hint, hands_hint) and not (self.pressed & MODIFIERS):
+                self.hint_key("keys" if key == key_hint else "hands")
+                return True
+            if (key == pause_hint and not (self.pressed & MODIFIERS)) or (self.paused and key == "Space"):
+                self.pause_live()
+                return True
+            if self.paused and key == "Enter":
+                return self.window.get_focus() is not self.finish_button
+            if (key == self.state["previewKey"] and not (self.pressed & MODIFIERS)
+                    and self.state["needsSystem"]):
+                self.switch_capture()
+                return True
+            if self.paused or key in self.pressed or self.state["inputMode"] == "waiting":
+                return True
+            if self.capture_was_revoked():
+                return True
+            if self.state["skill"]["action"] == "symbol" and self.state["skill"]["id"].split("-")[1] != self.layout:
+                self.feedback.set_label("Вернитесь в раскладку этого упражнения. Можно завершить и выбрать текущую.")
+                return True
+            self.pressed.add(key)
+            if (self.state["activity"] in ("reboot", "layout", "layout-back", "layout-after")
+                    and modifiers & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SUPER_MASK)):
+                character = ""
+            self.send_shortcut_key(key or "Неизвестная клавиша", True, character)
+            return True
+        if self.workout == "typing":
+            if key == "Esc":
+                self.stop()
+            elif key in ("F4", "F7"):
+                self.hint_key("keys" if key == "F4" else "hands")
+            elif key == "F8" or self.paused and key == "Space":
+                self.typing_pause() if not self.paused else self.typing_resume()
+            elif self.paused and key == "Enter":
+                return self.window.get_focus() is not self.finish_button
+            elif not self.paused and not (modifiers & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK |
+                                                         Gdk.ModifierType.SUPER_MASK)):
+                typed = {"Enter": "\n", "NumEnter": "\n", "Backspace": "\b", "Tab": "\t"}.get(key, character)
+                if typed and (typed in ("\n", "\t", "\b") or typed.isprintable()):
+                    state = self.call("typing-key", text=typed, layout=self.layout)
+                    if state:
+                        self.render_typing_state(state)
+                        if state["finished"]:
+                            self.stop(completed=True)
+            return True
+        if key == "F5" and not self.result_kind and self.mode in ("shortcuts", "typing"):
+            self.toggle_shortcut() if self.mode == "shortcuts" else self.start_typing()
+            return True
+        if self.result_kind and key == "Esc":
+            self.navigate(self.result_kind)
+            return True
+        if self.result_kind and key == "Space" and not (modifiers & (Gdk.ModifierType.ALT_MASK |
+                                                                       Gdk.ModifierType.CONTROL_MASK |
+                                                                       Gdk.ModifierType.SHIFT_MASK |
+                                                                       Gdk.ModifierType.SUPER_MASK)):
+            if inside_widget(self.window.get_focus(), self.page):
+                return False
+            self.replay_result(self.result_kind, self.result_settings)
+            return True
+        if (not self.result_kind and self.mode in ("shortcuts", "typing") and key in ("F4", "F7")
+                and not (modifiers & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SUPER_MASK))):
+            self.hint_key("keys" if key == "F4" else "hands")
+            return True
+        if modifiers & Gdk.ModifierType.ALT_MASK and key in ("1", "2", "3", "4"):
+            self.navigate(list(self.navigation)[int(key) - 1])
+            return True
+        if (not self.result_kind and self.mode in ("shortcuts", "typing") and key == "Space"
+                and not (modifiers & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SUPER_MASK))):
+            focus = self.window.get_focus()
+            if focus is None or not any(focus.get_ancestor(t) or isinstance(focus, t)
+                                        for t in (Gtk.DropDown, Gtk.Button, Gtk.Popover)):
+                self.toggle_shortcut() if self.mode == "shortcuts" else self.start_typing()
+                return True
+        return False
+
+    def key_released(self, _controller, _keyval, keycode, _modifiers):
+        key = PHYSICAL.get(keycode, "")
+        if self.lab:
+            self.lab.key_up(key)
+            return
+        if self.recording:
+            self.capture_release(key)
+        elif self.workout == "shortcuts" and key in self.pressed:
+            self.pressed.remove(key)
+            if not self.paused and not self.capture_was_revoked():
+                self.send_shortcut_key(key or "Неизвестная клавиша", False, "")
+
+    def capture_was_revoked(self):
+        if self.state["needsSystem"] and self.state["inputMode"] == "exact" and not (
+                self.capture_surface and self.capture_surface.get_property("shortcuts-inhibited")):
+            self.choose_substitute()
+            return True
+        return False
+
+    def send_shortcut_key(self, key, pressed, character):
+        state = self.call("shortcut-key", key=key, pressed=pressed, text=character)
+        if state:
+            self.render_shortcut_state(state)
+
+    def tick(self):
+        if self.lab:
+            self.lab.tick()
+            return GLib.SOURCE_CONTINUE
+        if self.guide:
+            if self.window.get_height() <= 665:
+                self.page.add_css_class("compact-height")
+            else:
+                self.page.remove_css_class("compact-height")
+            width = self.window.get_width()
+            self.guide.reflow(width)
+            inset = max(12, round(width * .019))
+            self.page.set_margin_start(inset)
+            self.page.set_margin_end(inset)
+            progress = self.live_progress if self.mode == "shortcuts" else self.typing_progress
+            progress.set_margin_start(round(width * .093))
+            progress.set_margin_end(round(width * .093))
+        if self.workout == "shortcuts" and not self.paused and self.state["inputMode"] != "waiting":
+            state = self.call("shortcut-state")
+            if state:
+                self.live_timer.set_label(self.clock_text(state["seconds"]))
+        if self.workout == "typing" and not self.paused:
+            state = self.call("typing-state", layout=self.layout)
+            if state:
+                self.render_typing_state(state)
+                if state["finished"]:
+                    self.stop(completed=True)
+        return GLib.SOURCE_CONTINUE
+
+    def build_typing(self):
+        catalog = self.library["typing"]
+        self.typing_options = [
+            ("Russian", "Русские фразы"), ("English", "Английские фразы"),
+            ("WordsRU", "Русский словарь"), ("WordsEN", "Английский словарь"),
+            ("Project", "Python · piling-main"), ("Symbols", "Спецсимволы"),
+            ("WeakRU", "Работа над промахами · RU"), ("WeakEN", "Работа над промахами · EN"),
+        ]
+        self.typing_options += [(item["id"], "Python · " + item["title"]) for item in catalog["projects"]]
+        self.typing_options += [(item["id"], "Свой набор · " + item["title"]) for item in catalog["sets"]]
+        self.typing_options += [(item["id"], "Урок · " + item["title"]) for item in catalog["lessons"]
+                                if item["language"] == "RU" or item["id"] in ("lesson:qwop", "lesson:xc") or
+                                "motion" in item["id"] or item["id"] == "lesson:home-rest"]
+        self.typing_pick = bind_name(dropdown([item[1] for item in self.typing_options]), "Урок печати")
+        current = next((index for index, item in enumerate(self.typing_options) if item[0] == self.typing_choice), 0)
+        self.typing_pick.set_selected(current)
+        self.typing_level = bind_name(dropdown(["Базовый", "Средний", "Сложный"]), "Сложность")
+        self.typing_time = bind_name(dropdown(["Без таймера", "1 минута", "3 минуты", "5 минут", "10 минут"]), "Длительность")
+        self.typing_start = button("Начать · F5", self.start_typing, "primary")
+        self.typing_prep = add(box(gap=7), text("Печать", "lesson-title"),
+                              add(row(8), expand(self.typing_pick), self.typing_level, self.typing_time, self.typing_start))
+        self.page.append(self.typing_prep)
+        self.typing_hero = box(gap=3)
+        self.typing_hero.set_focusable(True)
+        self.typing_tag = text("Уроки  ›  Печать", "crumb")
+        self.typing_tag.set_ellipsize(Pango.EllipsizeMode.END)
+        self.typing_timer = text("00:00", "lesson-timer")
+        self.typing_text = PracticeLine()
+        self.start_on_click(self.typing_text, self.start_typing)
+        self.typing_detail = text("", "muted", wrap=True)
+        self.typing_detail.set_xalign(.5)
+        self.typing_detail.set_visible(False)
+        self.typing_timer.set_halign(Gtk.Align.CENTER)
+        self.typing_text.placeholder = "Пробел — СТАРТ"
+        self.typing_controls = self.lesson_controls(self.toggle_typing_pause, self.stop, self.typing_tag)
+        self.typing_progress = self.lesson_progress()
+        tape_frame = add(box(Gtk.Orientation.VERTICAL, 0, "tape-frame"), self.typing_text)
+        add(self.typing_hero, self.typing_timer, self.typing_controls, tape_frame, self.typing_progress, self.typing_detail)
+        self.guide = LessonGuide(self.library["keyboard"], function_row=False)
+        self.guide.reflow(self.window.get_width() or self.window_size[0])
+        self.pause_button.set_visible(False)
+        self.finish_button.set_visible(False)
+        add(self.page, self.typing_hero, self.guide)
+        self.guide.paint(self.library, self.layout)
+
+    def start_typing(self):
+        if self.workout:
+            self.stop()
+            return
+        self.typing_choice = self.typing_options[self.typing_pick.get_selected()][0]
+        state = self.call("typing-start", mode=self.typing_choice, level=self.typing_level.get_selected(),
+                          seconds=[0, 60, 180, 300, 600][self.typing_time.get_selected()], layout=self.layout)
+        if state is None:
+            return
+        self.message()
+        self.workout = "typing"
+        self.paused = False
+        self.typing_prep.set_visible(False)
+        self.page.add_css_class("engaged")
+        self.typing_controls.set_visible(True)
+        self.pause_button.set_visible(True)
+        self.finish_button.set_visible(True)
+        self.tabs.set_visible(True)
+        self.typing_hero.grab_focus()
+        self.render_typing_state(state)
+
+    def render_typing_state(self, state):
+        self.state = state
+        heading = state["title"]
+        if state.get("source"):
+            heading += "  ·  " + state["source"]
+        if state["rounds"]:
+            heading += f'  ·  подход {state["round"]}/{state["rounds"]}'
+        language = "Русская раскладка" if state["wantedLayout"] == "RU" else "Английская раскладка"
+        self.typing_tag.set_label("Уроки  ›  " + language + "  ›  " + heading)
+        self.typing_tag.set_tooltip_text(heading)
+        self.typing_tag.set_max_width_chars(76)
+        self.typing_progress.set_fraction(state["fragmentProgress"])
+        self.typing_text.update(state["before"], state["after"], state["correct"])
+        timer = self.clock_text(state["seconds"])
+        if state["timeLimit"]:
+            timer += " / " + self.clock_text(state["timeLimit"])
+        self.typing_timer.set_label(timer)
+        detail = "Пауза. Нажмите пробел, чтобы продолжить." if self.paused else ""
+        if not detail and state["wantedLayout"] != self.layout and state["key"]:
+            detail = "Смените раскладку на " + state["wantedLayout"]
+        if not detail and state["weak"]:
+            detail = "Повтор промаха: " + state["weak"]
+        self.typing_detail.set_label(detail)
+        self.typing_detail.set_visible(bool(detail))
+        self.pause_button.set_label("▶" if self.paused else "Ⅱ")
+        self.pause_button.set_tooltip_text("Продолжить · Пробел" if self.paused else
+                                           "Пауза · " + physical_key_hint("F8", self.library))
+        hints = []
+        targets = {}
+        if state["finger"] is not None:
+            targets[state["key"]] = state["finger"]
+        if state["modifier"]:
+            targets[state["modifier"]] = 0 if state["modifier"] == "LShift" else 7
+        for key, finger in targets.items():
+            hints.append(f"{key_label(key)} — {FINGERS[finger]}")
+        self.guide.paint(self.library, state["wantedLayout"], targets, notes="  ·  ".join(hints), chosen=targets.values())
+
+    def toggle_typing_pause(self):
+        self.typing_resume() if self.paused else self.typing_pause()
+
+    def typing_pause(self):
+        self.paused = True
+        state = self.call("typing-pause", layout=self.layout)
+        if state:
+            self.render_typing_state(state)
+
+    def typing_resume(self):
+        self.paused = False
+        state = self.call("typing-resume", layout=self.layout)
+        if state:
+            self.render_typing_state(state)
+        self.typing_hero.grab_focus()
+
+    def build_editor(self):
+        self.title("Редактор", "Соберите личные сочетания и тексты для тренировки.")
+        self.editor_host = box(gap=10)
+        self.page.append(add(row(8), button("Горячие клавиши", self.edit_shortcuts), button("Тексты и символы", self.edit_texts)))
+        self.page.append(self.editor_host)
+        self.edit_shortcuts()
+
+    def edit_shortcuts(self, selected_id=""):
+        self.recording = False
+        clear(self.editor_host)
+        self.editor_kind = "shortcut"
+        self.edit_data = [None, *self.library["skills"]]
+        names = ["Новое сочетание",
+                 *[f'{item["skill"]["group"]} · {item["skill"]["title"]}' + (" · скрыто" if item["skill"]["hidden"] else "")
+                   for item in self.edit_data[1:]]]
+        self.editor_choice = bind_name(dropdown(names), "Сочетание для редактирования")
+        self.editor_host.append(self.editor_choice)
+        form = card()
+        self.edit_title = bind_name(Gtk.Entry(), "Название сочетания")
+        self.edit_title.set_placeholder_text("Например, вставить в терминал")
+        self.edit_group = bind_name(Gtk.Entry(), "Группа сочетания")
+        self.edit_group.set_placeholder_text("Название группы")
+        labels = row(10)
+        add(labels, expand(add(box(gap=4), text("Название", "muted"), self.edit_title)),
+            expand(add(box(gap=4), text("Группа", "muted"), self.edit_group)))
+        self.edit_keys = bind_name(Gtk.Entry(), "Клавиши сочетания")
+        self.edit_keys.set_placeholder_text("RCtrl+Shift+V или Ctrl+T → Ctrl+W")
+        self.capture_button = button("Записать нажатием", self.capture_start)
+        self.finger_options = box(gap=5)
+        self.finger_widgets = {}
+        self.editor_notice = text("", "muted", wrap=True)
+        self.editor_actions = row(8)
+        add(form, labels, text("Сочетание или последовательность", "muted"),
+            add(row(8), expand(self.edit_keys), self.capture_button, button("Подсказки для пальцев", self.load_fingers)),
+            self.finger_options, self.editor_notice, self.editor_actions)
+        self.editor_host.append(form)
+        if self.library["typing"]["oldShortcuts"]:
+            for item in self.library["typing"]["oldShortcuts"]:
+                self.editor_host.append(button("Импортировать набор «" + item["title"] + "»",
+                                               lambda id=item["id"]: self.apply_editor("shortcut-import", id=id)))
+        self.editor_choice.connect("notify::selected", lambda *_: self.load_shortcut_form())
+        if selected_id:
+            found = next((index for index, item in enumerate(self.edit_data) if item and item["skill"]["id"] == selected_id), 0)
+            self.editor_choice.set_selected(found)
+        self.load_shortcut_form()
+
+    def load_shortcut_form(self, copy=False):
+        self.recording = False
+        item = self.edit_data[self.editor_choice.get_selected()]
+        skill = item["skill"] if item else {}
+        self.edit_id = "" if copy else skill.get("id", "")
+        self.edit_title.set_text(skill.get("title", ""))
+        self.edit_group.set_text("Мои сочетания" if copy or not skill else skill["group"])
+        self.edit_keys.set_text(skill.get("keys", ""))
+        self.editor_notice.set_label("")
+        self.load_fingers(skill.get("fingers") or "")
+        editable = not skill or copy or item["editable"]
+        for widget in (self.edit_title, self.edit_group, self.edit_keys, self.capture_button):
+            widget.set_sensitive(editable)
+        self.finger_options.set_sensitive(editable)
+        clear(self.editor_actions)
+        if editable:
+            self.editor_actions.append(button("Сохранить сочетание", self.save_shortcut, "primary"))
+        if self.edit_id:
+            self.editor_actions.append(button("Показать" if skill["hidden"] else "Скрыть",
+                lambda: self.apply_editor("shortcut-hide", id=self.edit_id, hide=not skill["hidden"])))
+        if editable and self.edit_id:
+            self.editor_actions.append(button("Удалить", lambda: self.confirm_delete("shortcut-delete", self.edit_id)))
+        elif not editable:
+            if skill["keys"]:
+                self.editor_actions.append(button("Сделать личную копию", lambda: self.load_shortcut_form(copy=True)))
+            self.editor_notice.set_label("Встроенные сочетания можно скрыть. Для своей техники создайте личную копию.")
+
+    def load_fingers(self, source=None):
+        keys = self.edit_keys.get_text().strip()
+        if source is None:
+            source = self.finger_values()
+        clear(self.finger_options)
+        self.finger_widgets = {}
+        if not keys:
+            return
+        inspected = self.call("inspect", keys=keys, fingers=source)
+        if not inspected:
+            return
+        self.message()
+        self.finger_options.append(text("Пальцы", "h3"))
+        options = row(8)
+        for index, candidate in enumerate(inspected["choices"]):
+            key = candidate["key"]
+            widget = bind_name(dropdown(["Авто", *FINGERS]), f"Палец для {key_label(key)}")
+            widget.set_selected(candidate["finger"] + 1 if candidate["custom"] else 0)
+            self.finger_widgets[key] = widget
+            if index % 4 == 0:
+                options = row(8)
+                self.finger_options.append(options)
+            options.append(expand(add(box(gap=4), text(key_label(key), "key-hint"), widget)))
+
+    def finger_values(self):
+        return "\n".join(f"{key}={widget.get_selected() - 1}" for key, widget in self.finger_widgets.items()
+                         if 0 < widget.get_selected() <= len(FINGERS))
+
+    def save_shortcut(self):
+        self.apply_editor("shortcut-save", id=self.edit_id, title=self.edit_title.get_text(),
+                          group=self.edit_group.get_text(), keys=self.edit_keys.get_text(), fingers=self.finger_values())
+
+    def capture_start(self):
+        self.recording = True
+        self.pressed.clear()
+        self.capture_keys = []
+        self.editor_notice.set_label("Нажмите сочетание и отпустите все клавиши. Esc — отменить. Для серии можно дописать « → » и следующий шаг.")
+
+    def capture_press(self, key):
+        if key == "Esc" and not self.capture_keys:
+            self.recording = False
+            self.editor_notice.set_label("Запись отменена. Для Esc можно ввести название клавиши вручную.")
+            return True
+        if key and key not in self.pressed:
+            self.pressed.add(key)
+            self.capture_keys.append(key)
+        return True
+
+    def capture_release(self, key):
+        if key not in self.pressed:
+            return
+        self.pressed.remove(key)
+        if self.pressed or not self.capture_keys:
+            return
+        self.recording = False
+        keys = "+".join(self.capture_keys)
+        result = self.call("inspect", keys=keys, fingers="")
+        if result:
+            self.edit_keys.set_text(result["keys"])
+            self.editor_notice.set_label("Сочетание записано.")
+            self.load_fingers("")
+        else:
+            self.editor_notice.set_label("Запишите сочетание заново или введите клавиши текстом.")
+
+    def edit_texts(self, selected_id=""):
+        self.recording = False
+        self.editor_kind = "text"
+        clear(self.editor_host)
+        self.text_sets = [None, *self.library["typing"]["sets"]]
+        self.text_choice = bind_name(dropdown(["Новый набор", *[item["title"] for item in self.text_sets[1:]]]), "Свой набор")
+        self.editor_host.append(self.text_choice)
+        form = card()
+        self.set_title = bind_name(Gtk.Entry(), "Название набора печати")
+        self.set_kind = bind_name(dropdown(["Текст или код", "Символы"]), "Тип набора")
+        self.set_body = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR)
+        bind_name(self.set_body, "Содержимое набора печати")
+        self.set_body.add_css_class("mono")
+        self.set_actions = row()
+        add(form, add(row(), expand(self.set_title), self.set_kind),
+            text("Вставьте текст или код. Пустая строка разделяет фрагменты. Для символов используйте одну группу на строку.", "muted", wrap=True),
+            scroll(self.set_body, 240), self.set_actions)
+        self.set_title.set_placeholder_text("Название набора")
+        self.editor_host.append(form)
+        self.text_choice.connect("notify::selected", lambda *_: self.load_text_form())
+        if selected_id:
+            found = next((index for index, item in enumerate(self.text_sets) if item and item["id"] == selected_id), 0)
+            self.text_choice.set_selected(found)
+        self.load_text_form()
+
+    def load_text_form(self):
+        item = self.text_sets[self.text_choice.get_selected()] or {}
+        self.set_id = item.get("id", "").removeprefix("set:")
+        self.set_title.set_text(item.get("title", ""))
+        self.set_kind.set_selected(int(item.get("kind") == "Symbols"))
+        self.set_body.get_buffer().set_text(item.get("content", ""))
+        clear(self.set_actions)
+        self.set_actions.append(button("Сохранить набор", self.save_text, "primary"))
+        if self.set_id:
+            self.set_actions.append(button("Начать печать", self.open_text_set))
+            self.set_actions.append(button("Удалить", lambda: self.confirm_delete("typing-delete-set", self.set_id)))
+
+    def open_text_set(self):
+        self.typing_choice = "set:" + self.set_id
+        self.navigate("typing")
+        self.start_typing()
+
+    def save_text(self):
+        buffer = self.set_body.get_buffer()
+        self.apply_editor("typing-save-set", id=self.set_id, title=self.set_title.get_text(),
+                          symbols=self.set_kind.get_selected() == 1, content=buffer.get_text(*buffer.get_bounds(), False))
+
+    def confirm_delete(self, operation, item_id):
+        dialog = Gtk.MessageDialog(transient_for=self.window, modal=True, text="Удалить личный набор или сочетание?")
+        dialog.add_button("Отмена", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Удалить", Gtk.ResponseType.OK)
+        dialog.set_default_response(Gtk.ResponseType.CANCEL)
+        def response(_dialog, result):
+            dialog.destroy()
+            if result == Gtk.ResponseType.OK:
+                self.apply_editor(operation, id=item_id)
+        dialog.connect("response", response)
+        dialog.present()
+
+    def apply_editor(self, operation, **payload):
+        old = self.library
+        result = self.call(operation, **payload)
+        if not result:
+            return
+        self.library = result
+        selection = payload.get("id", "") if not operation.endswith("-delete") and operation != "typing-delete-set" else ""
+        if self.editor_kind == "shortcut":
+            if operation == "shortcut-save" and not selection:
+                prior = {item["skill"]["id"] for item in old["skills"]}
+                selection = next((item["skill"]["id"] for item in result["skills"] if item["skill"]["id"] not in prior), "")
+            self.edit_shortcuts(selection)
+        else:
+            if operation == "typing-save-set":
+                prior = {item["id"] for item in old["typing"]["sets"]}
+                selection = "set:" + selection if selection else next(
+                    (item["id"] for item in result["typing"]["sets"] if item["id"] not in prior), "")
+            self.edit_texts(selection)
+        if not self.engine.storage_error:
+            self.message()
+            if self.editor_kind == "shortcut":
+                self.editor_notice.set_label("Изменения сохранены.")
+        self.editor_choice.grab_focus() if self.editor_kind == "shortcut" else self.text_choice.grab_focus()
+
+    def build_result(self, kind, result, settings, completed):
+        self.result_kind = kind
+        self.result_settings = settings
+        self.guide = None
+        backdrop = self.body.get_first_child()
+        if backdrop:
+            self.body.remove(backdrop)
+        self.result_overlay = Gtk.Overlay()
+        self.result_overlay.set_child(backdrop or box())
+        self.page = box(Gtk.Orientation.VERTICAL, 0, "lab-modal-layer")
+        self.page.set_halign(Gtk.Align.FILL)
+        self.page.set_valign(Gtk.Align.FILL)
+        self.page.set_hexpand(True)
+        self.page.set_vexpand(True)
+        self.result_overlay.add_overlay(self.page)
+        self.body.append(expand(self.result_overlay, True))
+        mistakes = result.get("topMistakes", [])
+        if kind == "shortcuts":
+            score = result["score"]
+            seconds = result["seconds"]
+            errors = score["count"] - score["correct"]
+            summary = f'{result["solved"]} из {result["limit"]} заданий'
+            count = result["solved"]
+            speed = f'{count * 60 / max(1, seconds):.1f}'
+            speed_label = "Действий/мин"
+            accuracy = f'{score["accuracy"]:g}%' if score["count"] else "—"
+            points = [(index + 1, elapsed, elapsed is None) for index, elapsed in enumerate(result["series"])]
+            unit = "Реакция, мс"
+            footer = lambda count: f"{count} попыток"
+            description = "Время реакции по попыткам. Розовые отметки показывают ошибки."
+            if score["verifiedResults"]:
+                summary += f' · проверено по результату: {score["verifiedResults"]}'
+            if score.get("substituteCount"):
+                substitute_summary = f'Учебные замены: {score["substituteCorrect"]}/{score["substituteCount"]} верно'
+                if score["substituteVerifiedResults"]:
+                    substitute_summary += f' · проверено сцен: {score["substituteVerifiedResults"]}'
+                summary += " · " + substitute_summary
+                substitute_mistakes = ", ".join(
+                    f'{key_label(item["key"])} ×{item["count"]}' for item in result.get("substituteTopMistakes", []))
+                if substitute_mistakes:
+                    summary += " · Промахи в заменах: " + substitute_mistakes
+                if not points and result.get("substituteSeries"):
+                    points = [(index + 1, elapsed, elapsed is None)
+                              for index, elapsed in enumerate(result["substituteSeries"])]
+                    unit = "Реакция на замену, мс"
+                    description = "Время реакции на учебные замены."
+        else:
+            state = result["state"]
+            seconds = state["seconds"]
+            mistakes = state["topMistakes"]
+            summary = f'{state["title"]}  ·  {state["count"]} знаков'
+            count = state["count"]
+            speed = f'{state["cpm"]:g}'
+            speed_label = "Знаков/мин"
+            accuracy = f'{state["accuracy"]:g}%' if state["count"] + state["errors"] else "—"
+            errors = state["errors"]
+            points = []
+            prior_errors = 0
+            for point in result["series"]:
+                points.append((point["seconds"], point["speed"], point["errors"] > prior_errors))
+                prior_errors = point["errors"]
+            unit = "Скорость, зн/мин"
+            footer = lambda count: f"{count} с"
+            description = "Скорость набора по времени. Розовые отметки показывают ошибки."
+        panel = stamina_modal("Результат", summary, [
+            ("◷", "Время", f'{seconds // 60:02}:{seconds % 60:02}', "tone-time"),
+            ("⌨", "Действия" if kind == "shortcuts" else "Знаки", count, "tone-count"),
+            ("↗", speed_label, speed, "tone-speed"),
+            ("◎", "Точность", accuracy, "tone-accuracy"),
+        ])
+        summary_line = text(f'Ошибки: {errors}' + ("    ·    Упражнение завершено" if completed else ""),
+                            "stamina-summary")
+        summary_line.set_xalign(.5)
+        panel.append(summary_line)
+        if points:
+            panel.append(series_chart(points, unit, footer, description))
+            legend = row(17, "stamina-legend")
+            legend.set_halign(Gtk.Align.CENTER)
+            add(legend, text("● " + unit, "stamina-legend-speed"),
+                text("● Ошибки", "stamina-legend-error"))
+            panel.append(legend)
+        else:
+            hint = text("График появится после первых попыток.", "muted")
+            hint.set_xalign(.5)
+            panel.append(hint)
+        if mistakes:
+            details = Gtk.Expander(label="Частые промахи")
+            details.set_child(text("  ·  ".join(f'{key_label(item["key"])} ×{item["count"]}' for item in mistakes),
+                                   "muted", wrap=True))
+            panel.append(details)
+        actions = row(8, "stamina-actions")
+        actions.set_halign(Gtk.Align.CENTER)
+        again = button("Начать сначала · Пробел", lambda: self.replay_result(kind, settings), "stamina-blue")
+        add(actions, button("Завершить", lambda: self.navigate(kind), "stamina-blue"),
+            again, button("Прогресс", lambda: self.navigate("progress"), "primary"))
+        panel.append(actions)
+        self.page.append(panel)
+        again.grab_focus()
+
+    def replay_result(self, kind, settings):
+        self.navigate(kind)
+        if kind == "shortcuts":
+            for widget, value in zip((self.run_picker, self.tier_picker, self.limit_picker), settings):
+                widget.set_selected(value)
+            self.toggle_shortcut()
+        else:
+            for widget, value in zip((self.typing_level, self.typing_time), settings):
+                widget.set_selected(value)
+            self.start_typing()
+
+    def build_progress(self):
+        self.title("Прогресс", "Точность, скорость и изменение результата по каждому навыку.")
+        attempted = [item for item in self.library["skills"] if item["score"]["count"] or item["score"].get("substituteCount")]
+        counts = row(9)
+        metric(counts, "Сочетаний в практике", str(len(attempted)))
+        metric(counts, "Попыток", str(sum(item["score"]["count"] for item in attempted)))
+        metric(counts, "Устойчивые навыки", str(sum(item["score"]["level"] == 2 for item in attempted)))
+        self.page.append(counts)
+        hotkeys = add(card(gap=7), text("Live", "h3"))
+        if not attempted:
+            hotkeys.append(text("После первой попытки здесь появятся точность и время реакции.", "muted", wrap=True))
+        for item in sorted(attempted, key=lambda item: (item["score"]["accuracy"], item["skill"]["title"])):
+            skill, score = item["skill"], item["score"]
+            trend = f' · {score["change"]:+g} п.п.' if score["change"] is not None else ""
+            speed = f' · {score["median"]} мс' if score["correct"] else ""
+            spread = f' · ±{score["deviation"]} мс' if score["correct"] > 1 else ""
+            details = f'{score["correct"]}/{score["count"]} верно · {score["accuracy"]:g}%{trend}{speed}{spread}'
+            if not score["count"]:
+                details = "Исходное сочетание ожидает проверки"
+            if score.get("substituteCount"):
+                details += f' · замены {score["substituteCorrect"]}/{score["substituteCount"]}'
+            line = add(row(12), expand(add(box(gap=2), text(skill["title"], "h3", wrap=True), text(details, "muted", wrap=True))))
+            if not skill["hidden"]:
+                line.append(button("Повторить", lambda id=skill["id"]: self.from_progress(id)))
+            hotkeys.append(line)
+            progress = Gtk.ProgressBar()
+            progress.set_fraction(score["accuracy"] / 100)
+            hotkeys.append(progress)
+        self.page.append(hotkeys)
+        typing = add(card(gap=8), text("Печать", "h3"))
+        if not self.library["typingHistory"]:
+            typing.append(text("Здесь сохраняются результаты занятий печатью.", "muted"))
+        for item in self.library["typingHistory"]:
+            when = item["date"][:10].split("-")
+            label = f'{when[2]}.{when[1]}.{when[0]}  ·  {item["speed"]} сим/мин  ·  {item["accuracy"]:.1f}%  ·  ошибок {item["errors"]}'
+            typing.append(add(row(8), expand(text(item["lesson"], wrap=True)), text(label, "muted")))
+        self.page.append(typing)
+
+    def from_progress(self, key):
+        self.navigate("shortcuts")
+        self.set_group(key)
+        self.start_button.grab_focus()
+
+    def smoke_test(self):
+        try:
+            assert self.mode == "shortcuts" and "Вставить в терминал" in self.prompt.get_label()
+            self.toggle_shortcut()
+            for key, pressed in (("RCtrl", True), ("LShift", True), ("V", True),
+                                 ("V", False), ("LShift", False), ("RCtrl", False)):
+                self.send_shortcut_key(key, pressed, "v" if key == "V" else "")
+            assert self.state["solved"] == 1 and self.state["score"]["verifiedResults"] == 1
+            self.hint_key("keys")
+            assert not self.guide.board.get_visible() and all(h.get_visible() for h in self.guide.hands.values())
+            self.hint_key("keys")
+            self.hint_key("hands")
+            assert self.guide.board.get_visible() and all(not h.get_visible() for h in self.guide.hands.values())
+            self.hint_key("hands")
+            self.stop()
+            assert self.result_kind == "shortcuts"
+            self.navigate("shortcuts")
+            self.set_group("screenshot")
+            self.toggle_shortcut()
+            assert self.state["inputMode"] == "substitute"
+            for key, pressed in (("LCtrl", True), ("RShift", True), ("P", True),
+                                 ("P", False), ("RShift", False), ("LCtrl", False)):
+                self.send_shortcut_key(key, pressed, "")
+            assert self.state["solved"] == 1
+            assert self.state["score"]["substituteCorrect"] == 1 and self.state["score"]["count"] == 0
+            self.stop()
+            self.navigate("editor")
+            assert self.edit_title.get_sensitive()
+            self.edit_keys.set_text("RCtrl+Shift+V")
+            self.load_fingers("")
+            assert "RCtrl" in self.finger_widgets
+            self.navigate("typing")
+            self.typing_choice = "Project"
+            options = [item[0] for item in self.typing_options]
+            self.typing_pick.set_selected(options.index("Project"))
+            self.start_typing()
+            assert self.state["title"] == "Python · piling-main" and self.state["key"] == "D"
+            self.stop()
+            assert self.result_kind == "typing"
+            if self.smoke_live:
+                self.navigate("shortcuts")
+                self.set_group("screenshot-copy")
+                self.toggle_shortcut()
+                self.choose_substitute()
+            else:
+                self.navigate("typing")
+                self.typing_pick.set_selected([item[0] for item in self.typing_options].index("WordsEN"))
+                self.start_typing()
+            print("PASS: GTK Live, substitute capture, separate aids, results, editor and project typing", flush=True)
+            if self.smoke != "-":
+                GLib.timeout_add(350, self.save_preview)
+            else:
+                self.quit()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.smoke_failure = True
+            self.quit()
+        return GLib.SOURCE_REMOVE
+
+    def save_preview(self):
+        try:
+            self.capture_preview()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.smoke_failure = True
+        self.quit()
+        return GLib.SOURCE_REMOVE
+
+    def capture_preview(self):
+        self.guide.reflow(self.window.get_width())
+        paintable = Gtk.WidgetPaintable.new(self.window)
+        snapshot = Gtk.Snapshot()
+        width, height = paintable.get_intrinsic_width(), paintable.get_intrinsic_height()
+        paintable.snapshot(snapshot, width, height)
+        node = snapshot.to_node()
+        texture = self.window.get_renderer().render_texture(node, None)
+        texture.save_to_png(self.smoke)
+        child = self.window.get_child()
+        for widget in (self.guide.board, *self.guide.hands.values()):
+            found, bounds = widget.compute_bounds(child)
+            bottom = bounds.get_y() + bounds.get_height()
+            assert found and 0 < bottom <= child.get_height(), f"Keyboard or hands below viewport ({bottom}/{child.get_height()})"
+        print(f"PASS: guide in {self.window.get_width()} × {self.window.get_height()} logical pixels", flush=True)
+
+    def do_shutdown(self):
+        if self.lab:
+            self.lab.stop(show=False)
+        if self.workout == "typing":
+            self.call("typing-stop", layout=self.layout)
+        if self.engine:
+            self.engine.close()
+        Gtk.Application.do_shutdown(self)
+
+
+class LabPage(Gtk.Box):
+    """Three-minute classes and a keyboard-operated simulated desktop."""
+    def __init__(self, host):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.host = host
+        self.active = False
+        self.state = None
+        self.pressed = set()
+        self.surface = None
+        self.handler = None
+        self.capture_timeout = 0
+        self.waiting_capture = False
+        self.result = False
+        self.show_diagnostic = False
+        self.last_physical = ("", None)
+        self.add_css_class("lab-page")
+        self.canvas = Gtk.Overlay()
+        self.canvas.set_hexpand(True)
+        self.canvas.set_vexpand(True)
+        self.append(self.canvas)
+        self.content = box(Gtk.Orientation.VERTICAL, 3, "lab-content")
+        self.canvas.set_child(self.content)
+        self.modal_layer = box(Gtk.Orientation.VERTICAL, 0, "lab-modal-layer")
+        self.modal_layer.set_halign(Gtk.Align.FILL)
+        self.modal_layer.set_valign(Gtk.Align.FILL)
+        self.modal_layer.set_hexpand(True)
+        self.modal_layer.set_vexpand(True)
+        self.modal_layer.set_visible(False)
+        self.canvas.add_overlay(self.modal_layer)
+        catalog = host.call("lab-catalog") or {"classes": []}
+        self.classes = catalog["classes"]
+        self.picker = dropdown([item["title"] for item in self.classes])
+        self.picker.set_visible(False)
+        self.mode = dropdown(["Песочница", "Тренировка"])
+        self.level = dropdown(["Основы", "Рабочие приёмы", "Сложный"])
+        self.begin = button("Начать · Пробел", self.start, "primary")
+        self.prep = box(Gtk.Orientation.VERTICAL, 12, "lab-prep")
+        self.prep.append(text("Практика без мыши", "h2"))
+        self.prep.append(text("Выберите приложение. Работайте три минуты в одной связанной цепочке.", "muted"))
+        class_cards = row(10)
+        self.class_buttons = []
+        for index, item in enumerate(self.classes):
+            select = button(item["title"], lambda i=index: self.picker.set_selected(i), "class-button")
+            select.set_tooltip_text(item["description"])
+            class_cards.append(expand(select))
+            self.class_buttons.append(select)
+        self.prep.append(class_cards)
+        self.prep.append(add(row(8), self.picker, self.mode, self.level, expand(box()), self.begin))
+        self.summary = text("", "muted", wrap=True)
+        self.prep.append(self.summary)
+        self.keyboard_profile = dropdown(["Huawei MateBook D16", "Обычная клавиатура"])
+        self.keyboard_profile.set_selected(0 if host.library.get("keyboardProfile") == "matebook-d16" else 1)
+        self.fn_mode = dropdown(["Fn + F1–F12", "F1–F12 без Fn"])
+        self.fn_mode.set_selected(0 if host.library.get("fnMode") == "hotkeys" else 1)
+        self.keyboard_profile.connect("notify::selected", lambda *_: self.hardware_setting())
+        self.fn_mode.connect("notify::selected", lambda *_: self.hardware_setting())
+        self.hardware = Gtk.Expander(label="Клавиатура и режим Fn")
+        self.hardware.set_child(add(row(8), self.keyboard_profile, self.fn_mode,
+                                    text("Фактически полученную клавишу видно во время занятия по кнопке «i».", "muted", wrap=True)))
+        self.prep.append(self.hardware)
+        self.check_status = text("", "muted", wrap=True)
+        check_control = button("Автопроверка", lambda: host.run_checks(check_control, self.check_status))
+        self.prep.append(add(row(9), check_control, expand(self.check_status)))
+        self.picker.connect("notify::selected", lambda *_: self.describe())
+        self.content.append(self.prep)
+        self.toolbar = row(7, "lab-taskbar")
+        self.timer = text("03:00", "lesson-timer")
+        self.task = text("Выберите класс и нажмите пробел", "lab-task")
+        self.task.set_ellipsize(Pango.EllipsizeMode.END)
+        self.gesture = text("", "mono", "lab-gesture")
+        self.status = text("", "muted", wrap=True)
+        self.status.add_css_class("lab-status")
+        self.status.set_halign(Gtk.Align.START)
+        self.status.set_valign(Gtk.Align.END)
+        self.pause = button("Ⅱ", self.toggle_pause, "lab-control")
+        self.finish = button("■", self.stop, "lab-control", "stop")
+        self.capture = button("Разрешить клавиши", self.acquire)
+        self.aids = {}
+        for name, title in (("keys", "⌨"), ("hands", "👐"), ("mistakes", "●")):
+            control = Gtk.ToggleButton(label=title)
+            control.add_css_class("hint-toggle")
+            if name == "mistakes":
+                control.add_css_class("mistake-toggle")
+            setting = {"keys": "showKeys", "hands": "showHands", "mistakes": "showMistakeKey"}[name]
+            control.set_active(host.library.get(setting, True))
+            control.set_tooltip_text({"keys": "Клавиатура", "hands": "Руки", "mistakes": "Красная подсветка ошибки"}[name])
+            control.connect("toggled", lambda widget, key=name: self.aid(key, widget.get_active()))
+            self.aids[name] = control
+        self.diagnostic_button = button("i", self.toggle_diagnostic, "lab-control")
+        self.diagnostic_button.set_tooltip_text("Какая физическая клавиша получена")
+        add(self.toolbar, self.timer, expand(add(box(gap=1), self.task, self.gesture)),
+            *self.aids.values(), self.diagnostic_button, self.pause, self.finish)
+        self.content.append(self.toolbar)
+        self.desktop = DesktopView()
+        self.stage = Gtk.Overlay()
+        self.stage.set_hexpand(True)
+        self.stage.set_vexpand(True)
+        self.stage.set_child(self.desktop)
+        self.stage.add_overlay(self.status)
+        self.diagnostic = text("", "lab-diagnostic")
+        self.diagnostic.set_halign(Gtk.Align.END)
+        self.diagnostic.set_valign(Gtk.Align.START)
+        self.stage.add_overlay(self.diagnostic)
+        self.diagnostic.set_visible(False)
+        self.content.append(self.stage)
+        self.guide = LessonGuide(host.library["keyboard"])
+        self.guide.add_css_class("lab-guide")
+        self.content.append(self.guide)
+        self.guide.paint(host.library, host.layout)
+        self.describe()
+        for widget in (self.toolbar, self.stage, self.guide):
+            widget.set_visible(False)
+        self.begin.grab_focus()
+
+    def describe(self):
+        if self.classes:
+            selected = self.classes[self.picker.get_selected()]
+            for index, item in enumerate(self.class_buttons):
+                item.remove_css_class("selected")
+                if index == self.picker.get_selected():
+                    item.add_css_class("selected")
+            self.summary.set_label(selected["description"] + "  ·  3 минуты · новые связанные задания в каждом подходе")
+
+    def hardware_setting(self):
+        profile = "matebook-d16" if self.keyboard_profile.get_selected() == 0 else "standard"
+        mode = "hotkeys" if self.fn_mode.get_selected() == 0 else "functions"
+        updated = self.host.call("settings", keyboardProfile=profile, fnMode=mode)
+        if updated:
+            self.host.library = updated
+            if self.state:
+                self.render(self.state)
+
+    def toggle_diagnostic(self):
+        self.show_diagnostic = not self.show_diagnostic
+        self.diagnostic.set_visible(self.show_diagnostic and self.active)
+        self.update_diagnostic()
+
+    def update_diagnostic(self):
+        key, code = self.last_physical
+        self.diagnostic.set_label("Получено: " + key_label(key or "—") +
+                                  (f" · код {code}" if code is not None else ""))
+
+    @staticmethod
+    def summary_metrics(result):
+        seconds = result.get("seconds", 0)
+        solved = result.get("solved", 0)
+        accuracy = result.get("accuracy", 0)
+        return [
+            ("◷", "Время", f'{seconds // 60:02}:{seconds % 60:02}', "tone-time"),
+            ("⌨", "Действия", str(solved), "tone-count"),
+            ("↗", "Действий/мин", f'{solved * 60 / max(1, seconds):.1f}', "tone-speed"),
+            ("◎", "Точность", f'{accuracy:g}%', "tone-accuracy"),
+        ]
+
+    @staticmethod
+    def append_summary_chart(panel, result):
+        duration = max(1, result.get("seconds", 0))
+        per_second = {}
+        errors_by_second = set()
+        for point in result.get("series", []):
+            second = point["second"]
+            if point["correct"]:
+                per_second[second] = per_second.get(second, 0) + 1
+            else:
+                errors_by_second.add(second)
+        points = []
+        for second in range(duration + 1):
+            start = max(0, second - 4)
+            count = sum(per_second.get(i, 0) for i in range(start, second + 1))
+            points.append((second, count * 60 / (second - start + 1), second in errors_by_second))
+        panel.append(series_chart(points, "Действий/мин", lambda count: f"{count:g} с",
+                                  "Темп и ошибки занятия"))
+        legend = row(17, "stamina-legend")
+        legend.set_halign(Gtk.Align.CENTER)
+        add(legend, text("● Темп", "stamina-legend-speed"),
+            text("● Ошибки", "stamina-legend-error"))
+        panel.append(legend)
+
+    def show_pause_modal(self):
+        clear(self.modal_layer)
+        result = self.host.call("lab-result") or {"seconds": 0, "solved": 0, "errors": 0, "accuracy": 0}
+        panel = stamina_modal("Пауза", "Пробел — продолжить занятие", self.summary_metrics(result))
+        summary = text(f'Ошибки: {result.get("errors", 0)}', "stamina-summary")
+        summary.set_xalign(.5)
+        panel.append(summary)
+        self.append_summary_chart(panel, result)
+        controls = row(8, "stamina-actions")
+        controls.set_halign(Gtk.Align.CENTER)
+        resume = button("Продолжить · Пробел", self.acquire, "primary")
+        add(controls, resume,
+            button("Начать сначала", self.replay, "stamina-blue"),
+            button("Завершить", self.stop, "stamina-blue"))
+        panel.append(controls)
+        self.modal_layer.append(panel)
+        self.modal_layer.set_visible(True)
+        if not self.host.window.get_focus() or self.host.window.get_focus() == self.desktop:
+            resume.grab_focus()
+
+    def start(self):
+        if self.active or not self.classes:
+            return
+        self.result = False
+        self.host.refresh()
+        app = self.classes[self.picker.get_selected()]["id"]
+        mode = "sandbox" if self.mode.get_selected() == 0 else "drill"
+        self.state = self.host.call("lab-start", app=app, mode=mode, level=self.level.get_selected(), seconds=180)
+        if not self.state:
+            return
+        self.active = True
+        self.prep.set_visible(False)
+        for widget in (self.toolbar, self.stage, self.guide):
+            widget.set_visible(True)
+        self.desktop.set_size_request(400, 220)
+        self.desktop.grab_focus()
+        self.render(self.state)
+        self.acquire()
+
+    def acquire(self):
+        if not self.active or self.waiting_capture:
+            return
+        keyboard = self.host.window.get_display().get_default_seat().get_keyboard()
+        modifiers = keyboard.get_modifier_state() if keyboard else Gdk.ModifierType(0)
+        if modifiers & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK |
+                        Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SUPER_MASK):
+            self.status.set_label("Отпустите Ctrl, Shift, Alt и ⊞, затем нажмите «Продолжить».")
+            self.status.set_visible(True)
+            return
+        self.release_capture()
+        surface = self.host.window.get_surface()
+        if not isinstance(surface, Gdk.Toplevel):
+            self.status.set_label("Этот оконный сервер не передаёт системные клавиши. Занятие на паузе.")
+            self.status.set_visible(True)
+            return
+        self.waiting_capture = True
+        self.modal_layer.set_visible(False)
+        self.surface = surface
+        self.handler = surface.connect("notify::shortcuts-inhibited", lambda *_: GLib.idle_add(self.resolve_capture))
+        surface.inhibit_system_shortcuts(None)
+        self.capture_timeout = GLib.timeout_add_seconds(15, self.capture_expired)
+        GLib.timeout_add(700, self.check_denied)
+        self.status.set_label("В диалоге GNOME разрешите перехват клавиш для учебного рабочего стола.")
+        self.status.set_visible(True)
+        GLib.idle_add(self.resolve_capture)
+
+    def resolve_capture(self):
+        if self.active and self.surface and self.surface.get_property("shortcuts-inhibited") and self.host.window.is_active():
+            self.waiting_capture = False
+            if self.capture_timeout:
+                GLib.source_remove(self.capture_timeout)
+                self.capture_timeout = 0
+            state = self.host.call("lab-resume")
+            if state:
+                self.render(state)
+            self.desktop.grab_focus()
+        elif self.active and self.state and not self.state["paused"] and not self.waiting_capture:
+            self.pause_run("Система вернула горячие клавиши. Разрешите их захват, чтобы продолжить.")
+        return GLib.SOURCE_REMOVE
+
+    def check_denied(self):
+        if self.active and self.waiting_capture and self.host.window.is_active() and self.surface and not self.surface.get_property("shortcuts-inhibited"):
+            self.waiting_capture = False
+            self.release_capture()
+            self.status.set_label("Захват клавиш отклонён. Нажмите «Разрешить клавиши», чтобы повторить.")
+            self.status.set_visible(True)
+            self.show_pause_modal()
+        return GLib.SOURCE_REMOVE
+
+    def capture_expired(self):
+        self.capture_timeout = 0
+        if self.waiting_capture and self.host.window.is_active():
+            self.waiting_capture = False
+            self.release_capture()
+            self.status.set_label("Захват клавиш не разрешён. Нажмите «Разрешить клавиши» для продолжения.")
+            self.status.set_visible(True)
+            self.show_pause_modal()
+        return GLib.SOURCE_REMOVE
+
+    def release_capture(self):
+        if self.capture_timeout:
+            GLib.source_remove(self.capture_timeout)
+            self.capture_timeout = 0
+        if self.surface:
+            self.surface.disconnect(self.handler)
+            self.surface.restore_system_shortcuts()
+        self.surface = self.handler = None
+        self.pressed.clear()
+
+    def pause_run(self, message="Пауза. Нажмите F8, чтобы продолжить."):
+        if not self.active:
+            return
+        state = self.host.call("lab-pause")
+        self.waiting_capture = False
+        self.release_capture()
+        if state:
+            self.render(state)
+        self.status.set_label(message)
+        self.pause.grab_focus()
+
+    def focus(self, active):
+        if not self.active:
+            return
+        if active:
+            if self.waiting_capture:
+                GLib.idle_add(self.resolve_capture)
+                GLib.timeout_add(300, self.check_denied)
+        elif not self.waiting_capture:
+            self.pause_run("Пауза. Вернитесь в тренажёр и нажмите F8.")
+
+    def toggle_pause(self):
+        if self.state and self.state["paused"]:
+            self.acquire()
+        else:
+            self.pause_run()
+
+    def bindings(self):
+        task = (self.state or {}).get("task") or {}
+        tokens = task.get("keys", "").replace(" → ", "+").split("+")
+        return ("F6" if "F8" in tokens else "F8", "F9" if "F10" in tokens else "F10")
+
+    def key_down(self, key, character, modifiers=Gdk.ModifierType(0), keycode=None):
+        has_modifiers = bool(modifiers & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK |
+                                         Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SUPER_MASK))
+        if self.active and key:
+            self.last_physical = (key, keycode)
+            self.update_diagnostic()
+        if not self.active:
+            if self.result and key in ("Space", "F5") and not has_modifiers:
+                if key == "Space" and inside_widget(self.host.window.get_focus(), self.modal_layer):
+                    return False
+                self.replay()
+                return True
+            if key in ("Space", "F5") and not self.result and not has_modifiers:
+                if key == "Space" and isinstance(self.host.window.get_focus(), (Gtk.Button, Gtk.DropDown)):
+                    return False
+                self.start()
+                return True
+            return False
+        pause_key, finish_key = self.bindings()
+        if key == pause_key and not has_modifiers:
+            self.toggle_pause()
+            return True
+        if key == finish_key and not has_modifiers:
+            self.stop()
+            return True
+        if self.state["paused"]:
+            if key == "Space" and not has_modifiers:
+                if inside_widget(self.host.window.get_focus(), self.modal_layer):
+                    return False
+                self.acquire()
+            if key == "Enter":
+                focused = self.host.window.get_focus()
+                return not (inside_widget(focused, self.modal_layer) and isinstance(focused, Gtk.Button) and
+                            not focused.get_label().startswith("Продолжить"))
+            return key in ("Space", pause_key, finish_key)
+        if not self.surface or not self.surface.get_property("shortcuts-inhibited"):
+            self.pause_run("Захват клавиш прерван. Разрешите его, чтобы продолжить.")
+            return True
+        if key in self.pressed:
+            return True
+        self.pressed.add(key)
+        state = self.host.call("lab-key", key=key, pressed=True, text=character)
+        if state:
+            self.render(state)
+        return True
+
+    def key_up(self, key):
+        if self.active and key in self.pressed:
+            self.pressed.remove(key)
+            if not self.state["paused"]:
+                state = self.host.call("lab-key", key=key, pressed=False, text="")
+                if state:
+                    self.render(state)
+
+    def aid(self, key, enabled):
+        result = self.host.call("settings", **{("mistakeKeys" if key == "mistakes" else key): enabled})
+        if result:
+            self.host.library = result
+            if self.state:
+                self.render(self.state)
+
+    def render(self, state):
+        self.state = state
+        if state["finished"]:
+            self.stop()
+            return
+        task = state.get("task") or {}
+        self.task.set_label(task.get("title", "Подготовка рабочего места"))
+        self.task.set_tooltip_text((state.get("scenario", "") + " · " + task.get("title", "")).strip(" ·"))
+        gesture = display_chord(task.get("keys", ""), self.host.library) or task.get("text", "")
+        if state.get("scenarioLength", 0):
+            gesture += f'  ·  шаг {state["scenarioStep"]}/{state["scenarioLength"]}'
+        self.gesture.set_label(gesture)
+        self.gesture.set_visible(bool(self.gesture.get_label()))
+        remaining = max(0, state.get("remaining", 180))
+        self.timer.set_label(f"{int(remaining) // 60:02}:{int(remaining) % 60:02}")
+        status = state.get("status", "") or task.get("hint", "")
+        if state["held"]:
+            status += "  ·  Нажато " + " + ".join(key_label(k) for k in state["held"])
+        self.status.set_label(status.replace("LSuper", "⊞").replace("RSuper", "⊞ прав.").replace("Super", "⊞"))
+        self.status.set_visible(state["paused"] or state.get("feedback") == "error")
+        self.status.remove_css_class("bad")
+        self.status.remove_css_class("good")
+        if state.get("feedback") in ("error", "good"):
+            self.status.add_css_class("bad" if state["feedback"] == "error" else "good")
+        pause_key, finish_key = self.bindings()
+        self.pause.set_tooltip_text(("Продолжить · Пробел" if state["paused"] else
+                                     "Пауза · " + physical_key_hint(pause_key, self.host.library)))
+        self.finish.set_tooltip_text("Результат · " + physical_key_hint(finish_key, self.host.library))
+        self.pause.set_label("▶" if state["paused"] else "Ⅱ")
+        self.finish.set_label("■")
+        self.desktop.presentation_app = state["app"]
+        self.desktop.update(state["scene"])
+        self.update_diagnostic()
+        self.diagnostic.set_visible(self.show_diagnostic and self.active)
+        guide = state.get("guide") or {}
+        steps = guide.get("steps") or [[]]
+        actions = steps[0]
+        targets = {item["key"]: item["finger"] for item in actions}
+        notes = "  ·  ".join(f'{key_label(k)} — {FINGERS[f]}' for k, f in targets.items())
+        miss = (state.get("lastKey") if state.get("feedback") == "error" and
+                self.host.library.get("showMistakeKey", True) else None)
+        self.guide.paint(self.host.library, state["scene"].get("layout", self.host.layout), targets,
+                         state["held"], miss=miss, notes=notes, chosen=targets.values())
+        if state["paused"] and not self.waiting_capture:
+            self.show_pause_modal()
+        elif self.active:
+            self.modal_layer.set_visible(False)
+
+    def tick(self):
+        self.guide.reflow(self.host.window.get_width())
+        if self.host.window.get_height() <= 680:
+            self.add_css_class("compact-height")
+        else:
+            self.remove_css_class("compact-height")
+        if self.active and self.state and not self.state["paused"]:
+            state = self.host.call("lab-state")
+            if state:
+                self.render(state)
+
+    def stop(self, show=True):
+        if not self.active:
+            return
+        self.host.call("lab-stop")
+        result = self.host.call("lab-result")
+        self.active = False
+        self.waiting_capture = False
+        self.release_capture()
+        if not show or not result:
+            return
+        self.result = True
+        clear(self.modal_layer)
+        panel = stamina_modal("Результат", "Три минуты практики" if result.get("completed") else
+                              "Занятие завершено досрочно", self.summary_metrics(result))
+        note = f'Ошибки: {result["errors"]}    ·    Рекорд: {result.get("record", 0)}'
+        if result.get("newRecord"):
+            note += "    ·    Новый рекорд"
+        summary = text(note, "stamina-summary")
+        summary.set_xalign(.5)
+        panel.append(summary)
+        self.append_summary_chart(panel, result)
+        weak = result.get("weak", [])[:4]
+        if weak:
+            details = Gtk.Expander(label="Работа над ошибками")
+            details.set_child(text("  ·  ".join(f'{item["title"]} ×{item["errors"]}' for item in weak),
+                                   "muted", wrap=True))
+            panel.append(details)
+        actions = row(8, "stamina-actions")
+        actions.set_halign(Gtk.Align.CENTER)
+        restart = button("Начать сначала · Пробел", self.replay, "stamina-blue")
+        add(actions, button("Завершить", lambda: self.host.navigate("lab"), "stamina-blue"),
+            restart,
+            button("Прогресс", lambda: self.host.navigate("progress"), "primary"))
+        panel.append(actions)
+        self.modal_layer.append(panel)
+        self.modal_layer.set_visible(True)
+        restart.grab_focus()
+        self.host.refresh()
+
+    def replay(self):
+        selected_class = self.picker.get_selected()
+        selected_mode = self.mode.get_selected()
+        selected_level = self.level.get_selected()
+        self.host.navigate("lab")
+        self.host.lab.picker.set_selected(selected_class)
+        self.host.lab.mode.set_selected(selected_mode)
+        self.host.lab.level.set_selected(selected_level)
+        self.host.lab.start()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--smoke", metavar="PNG", help=argparse.SUPPRESS)
+    parser.add_argument("--smoke-small", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--smoke-live", action="store_true", help=argparse.SUPPRESS)
+    options = parser.parse_args()
+    studio = Studio(options.smoke, (960, 600) if options.smoke_small else None, options.smoke_live)
+    status = studio.run([sys.argv[0]])
+    sys.exit(1 if studio.smoke_failure else status)

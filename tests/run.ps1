@@ -3,7 +3,7 @@ $root = Split-Path $PSScriptRoot
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $framework = Split-Path $compiler
 $refs = @('System.dll','System.Core.dll','System.Xml.dll','System.IO.Compression.dll','Microsoft.CSharp.dll','WPF\WindowsBase.dll',
-    'WPF\PresentationCore.dll','WPF\PresentationFramework.dll','WPF\UIAutomationClient.dll','WPF\UIAutomationTypes.dll','System.Xaml.dll') |
+    'WPF\PresentationCore.dll','WPF\PresentationFramework.dll','WPF\UIAutomationClient.dll','WPF\UIAutomationTypes.dll','System.Xaml.dll','System.Web.Extensions.dll') |
     ForEach-Object { '/reference:' + (Join-Path $framework $_) }
 $sources = Get-ChildItem -LiteralPath $root -Filter '*.cs' -File | Select-Object -ExpandProperty FullName
 $tests = Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.cs' -File | Select-Object -ExpandProperty FullName

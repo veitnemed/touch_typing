@@ -1,0 +1,100 @@
+{
+  "version": "1.6.0",
+  "status": "passed",
+  "finished": "2026-11-22T15:48:39.793322+00:00",
+  "seed": 7,
+  "coverage": [
+    "physical EN/RU keys",
+    "four classes",
+    "forms and confirmations",
+    "held modifiers",
+    "capture lifecycle",
+    "single left Windows key",
+    "connected scenarios",
+    "shortcut-only Chrome and VS Code",
+    "F11 versus Print",
+    "Space resumes and Enter stays in the scene",
+    "independent wrong-key highlight"
+  ],
+  "windows": {
+    "build": "passed",
+    "uiRunnerBuild": "passed",
+    "nativeUI": "not run; requires Windows desktop"
+  },
+  "checks": [
+    {
+      "name": "SharedRegression",
+      "status": "passed",
+      "exitCode": 0,
+      "seconds": 4.05
+    },
+    {
+      "name": "LabRegression",
+      "status": "passed",
+      "exitCode": 0,
+      "seconds": 6.29
+    },
+    {
+      "name": "LabStressTests",
+      "status": "passed",
+      "exitCode": 0,
+      "seconds": 10.1,
+      "summary": {
+        "status": "pass",
+        "suite": "lab-adversarial",
+        "checks": 537621,
+        "sessions": 72,
+        "events": 117848,
+        "recoveries": 576
+      }
+    },
+    {
+      "name": "TerminalRegression",
+      "status": "passed",
+      "exitCode": 0,
+      "seconds": 4.53
+    },
+    {
+      "name": "protocol",
+      "status": "passed",
+      "exitCode": 0,
+      "seconds": 8.74
+    },
+    {
+      "name": "native-small",
+      "status": "passed",
+      "exitCode": 0,
+      "seconds": 24.39
+    },
+    {
+      "name": "ui-controls",
+      "status": "passed",
+      "exitCode": 0,
+      "seconds": 16.22
+    },
+    {
+      "name": "capture-denied",
+      "status": "passed",
+      "exitCode": 0,
+      "seconds": 5.53
+    },
+    {
+      "name": "legacy-window",
+      "status": "passed",
+      "exitCode": 0,
+      "seconds": 9.25
+    },
+    {
+      "name": "native-180-seconds",
+      "status": "passed",
+      "exitCode": 0,
+      "seconds": 182.84
+    }
+  ],
+  "engineSummaries": {
+    "LabRegression": "PASS 16133 lab checks across state-valid chains, virtual commands, RU/EN physical input, pause and records",
+    "LabStressTests": "{\"status\":\"pass\",\"suite\":\"lab-adversarial\",\"checks\":537621,\"sessions\":72,\"events\":117848,\"recoveries\":576}",
+    "SharedRegression": "PASS: 344 checks across campaign, routes, input, storage, analytics, Python drills and 48 hours.",
+    "TerminalRegression": "PASS: 7041 isolated terminal checks including seeded adversarial sessions"
+  }
+}

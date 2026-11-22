@@ -31,6 +31,7 @@ namespace TouchTypingStudio
             EndlessTypingSummary();
             DailyAndRecords();
             Challenge();
+#if !LINUX
             ConsoleMissionTests.Run();
             DesktopSwitchTests.Run();
             WorkdayAddresses();
@@ -38,9 +39,11 @@ namespace TouchTypingStudio
             WorkdayEditorTests.Run();
             DesktopItineraryTests.Run();
             ChromeMissionTests.Run();
+#endif
             Console.WriteLine("PASS: " + assertions + " checks across campaign, routes, input, storage, analytics, Python drills and 48 hours.");
         }
 
+#if !LINUX
         private static void WorkdayAddresses()
         {
             const string path = @"C:\Users\Имя с пробелом\folder\отчёт #1.txt";
@@ -49,6 +52,8 @@ namespace TouchTypingStudio
             Check(DesktopStrip.ShortAddress("Find text\r\nSave changes") == null, "Keep multiline practice text visible");
             Check(DesktopStrip.ShortAddress("Status: reviewed") == null, "Keep plain instructions as text");
         }
+
+#endif
 
         private static void PracticeRecordThreshold()
         {
@@ -72,7 +77,7 @@ namespace TouchTypingStudio
             var lessons = Atlas.Nodes.Where(n => n.Lesson != null).Select(n => n.Lesson).ToArray();
             Check(lessons.Distinct().Count() == Lessons.All.Length && lessons.Length == Lessons.All.Length, "One node per existing lesson");
             var routes = Atlas.Nodes.Where(n => n.Route != null).Select(n => n.Route).ToArray();
-            Check(routes.Distinct().Count() == RouteSession.Routes.Length && routes.Length == RouteSession.Routes.Length, "One node per existing route");
+            Check(routes.Distinct().Count() == RouteCatalog.Routes.Length && routes.Length == RouteCatalog.Routes.Length, "One node per existing route");
             foreach (var territory in Atlas.Regions)
             {
                 var nodes = Atlas.Nodes.Where(n => n.Region == territory).ToArray();
@@ -269,7 +274,9 @@ namespace TouchTypingStudio
             }
             string repairs = PythonDrills.CodeLevels.First(l => l.HasRepairs).Create(random);
             Check(repairs.Contains("prim⌫ntt⌫("), "Backspace deletes a slipped letter and a duplicated letter in print");
+#if !LINUX
             Check(PracticeRibbon.VisibleText("len (\n  prim⌫nt)") == "len (↵  prim⌫nt)", "Practice ribbon preserves spaces and Backspace");
+#endif
         }
 
         private static bool ReplayEditedPython(string script)

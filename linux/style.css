@@ -1,0 +1,171 @@
+@define-color ink #f2f4f3;
+@define-color muted #a9aaa9;
+@define-color dim #85888b;
+@define-color accent #bfcbe0;
+@define-color lavender #c2b9f4;
+@define-color rose #ffabae;
+@define-color edge #333638;
+
+window, scrolledwindow, viewport { background: #252a35; color: @ink; }
+window { font-family: "Noto Sans", sans-serif; font-size: 13px; }
+headerbar { background: #29292c; color: @ink; border-bottom: 1px solid #20232c; min-height: 35px; box-shadow: none; }
+headerbar .title { color: @dim; font-size: 12px; }
+label { color: inherit; }
+.brand-icon { color: @accent; font: bold 15px "DejaVu Sans Mono"; padding: 2px 6px; border: 1px solid #444854; border-radius: 6px; }
+.brand { font-size: 14px; font-weight: 800; }
+.mono, .eyebrow, .tag, .cap, .keytile, .metric-value, .key-hint, .code { font-family: "DejaVu Sans Mono", monospace; }
+.eyebrow { color: @accent; font-size: 11px; font-weight: 700; }
+.muted { color: @muted; }
+.dim, .key-hint { color: @dim; }
+.lavender { color: @lavender; }
+.h1 { font-size: 36px; font-weight: 850; }
+.h2 { font-size: 26px; font-weight: 800; }
+.h3 { font-size: 17px; font-weight: 750; }
+.metric-value { font-size: 23px; font-weight: 750; color: @ink; }
+.bad { color: @rose; }
+.good { color: @accent; }
+.page { padding: 25px 26px 26px; }
+.card { background: #292d36; border: 1px solid #383e49; border-radius: 15px; padding: 16px; }
+.scene { padding: 6px 11px; background: #272c35; border-radius: 7px; border: 1px solid #3a404a; }
+.tag { background: #323742; color: #dbdee6; border: 1px solid #494f59; border-radius: 7px; padding: 5px 8px; font-size: 11px; }
+.tab-active { color: @accent; border-color: #748194; background: #404958; }
+.keytile { font-size: 21px; font-weight: 800; color: #f7e1d1; border-radius: 5px; padding: 6px 12px; min-width: 32px; background: #463532; border: 1px solid #765543; border-bottom-width: 2px; }
+.plus { color: #ab9a8d; font-size: 18px; }
+button, entry, dropdown > button, spinbutton, textview { background: #333944; color: @ink; border: 1px solid #474d57; border-radius: 8px; box-shadow: none; }
+button { min-height: 27px; padding: 4px 9px; font-weight: 650; }
+button:hover, dropdown > button:hover { background: #414854; }
+button:focus-visible, entry:focus-visible, dropdown:focus-visible > button, textview:focus-visible, checkbutton:focus-visible { outline: 2px solid @accent; outline-offset: -2px; }
+button:disabled, dropdown:disabled { color: #797d7d; }
+button.primary { background: #b80b23; color: #ffffff; border-color: #b80b23; font-weight: 850; min-height: 32px; padding: 5px 14px; }
+button.primary:hover { background: #c91e36; }
+button.nav { background: transparent; color: #b7bab9; border-color: transparent; min-height: 28px; padding: 3px 12px; }
+button.nav:hover { background: #333841; }
+button.nav.active { background: #363c48; color: @accent; border-color: #515966; }
+entry { padding: 5px 8px; }
+textview { padding: 9px; }
+textview text { background: transparent; color: @ink; }
+popover, popover contents { background: #232627; color: @ink; }
+separator { background: #373b3b; }
+progressbar trough { background: #303637; min-height: 5px; border-radius: 4px; }
+progressbar progress { background: @accent; min-height: 5px; border-radius: 4px; }
+
+window { background: #222732; }
+viewport, scrolledwindow { background: transparent; }
+headerbar { background: #29292c; padding: 0 10px; min-height: 38px; box-shadow: 0 2px 5px alpha(black,.25); }
+headerbar button { border: none; background: transparent; }
+.brand { font-family: sans-serif; color: white; font-size: 21px; font-weight: 800; }
+headerbar .tag { background: transparent; border: none; font-weight: bold; }
+button.nav { color: #f5f5f5; font-size: 14px; }
+button.nav.active { color: white; background: #3c4048; border-color: transparent; }
+.lesson-page, .page { background-image: linear-gradient(to right, #1d232e, #2e343e); }
+.lesson-page { padding: 14px 2px 18px; }
+.lesson-page.engaged { padding-top: 39px; }
+.lesson-title { font-size: 20px; font-weight: 700; }
+.lesson-timer { font: bold 17px "Courier New", monospace; color: #c8cad2; border: 2px solid #363c48; border-radius: 7px; padding: 5px 10px; background: #292d36; box-shadow: 0 3px 6px alpha(black,.32); margin-bottom: 24px; }
+.crumb { color: white; font-size: 16px; }
+button.stop, button.mini, button.hint-toggle { padding: 0 2px; min-height: 17px; min-width: 20px; border-radius: 3px; background: transparent; border: 1px solid transparent; color: #e8e8eb; }
+button.hint-toggle { font-size: 15px; color: #a8acb4; }
+button.hint-toggle:checked { border-color: #d9dce3; color: white; background: #373c46; }
+button.stop { color: white; background: #b80924; font-size: 11px; font-weight: bold; padding: 0 5px; }
+button.stop:hover { background: #da1031; }
+.tape-frame, .command-strip { background: #292d36; border: 6px solid #333944; border-radius: 13px; box-shadow: 0 4px 8px alpha(black,.36); }
+.command-strip { background-image: linear-gradient(to right, #1f2125 50%, #292d36 50%); min-height: 66px; padding: 2px 6px; }
+.keytile, .plus, .ready-line { background: transparent; color: #cac9cf; border: none; font-family: "Courier New","Liberation Mono",monospace; font-size: 35px; font-weight: normal; padding: 0; min-width: 0; }
+.ready-line { font-size: 24px; }
+.lesson-guide { padding: 28px 0 0; }
+.lesson-page.engaged .lesson-guide { padding-top: 41px; }
+.key-deck { background: #333944; padding: 7px; border-radius: 6px; box-shadow: 0 4px 7px alpha(black,.35); }
+.cap { background: #ababab; color: #17171b; min-height: 29px; margin: 1px; border-radius: 4px; border: 1px solid #232832; font: 19px "Courier New","Liberation Mono",monospace; }
+.cap.finger-0, .cap.finger-7 { background: #c38e9a; }
+.cap.finger-1, .cap.finger-6 { background: #caa56f; }
+.cap.finger-2, .cap.finger-5 { background: #96b07c; }
+.cap.finger-3 { background: #82afb2; }
+.cap.finger-4 { background: #8a9eb2; }
+.cap.finger-8, .cap.finger-9 { background: #a78fb1; }
+.cap.special { background: #ababab; color: #38383c; font-size: 11px; }
+.cap.anchor { background: #669195; text-decoration-line: underline; }
+.cap.anchor.finger-4 { background: #708699; }
+.cap.target { border-color: #ce0d29; box-shadow: 0 0 4px 2px #be1b32; }
+.cap.held { border-color: white; box-shadow: inset 0 0 0 2px white; }
+.cap.miss { background: #dc566a; }
+.finger-caption { font-size: 11px; color: #afb6c2; margin-top: 6px; }
+.lesson-progress { margin: 12px 0 0; }
+.lesson-progress trough, .lesson-progress progress { min-height: 5px; border-radius: 3px; border: none; }
+.lesson-progress trough { background: #191d25; }
+.lesson-progress progress { background: #8296a8; }
+.warning { color: #ffcf91; }
+
+.shell { background-image: linear-gradient(to right, #1d232e, #2e343e); }
+.lesson-page { background: transparent; }
+.lesson-progress progress, .lesson-progress trough { min-width: 0; padding: 0; margin: 0; }
+button.capture-button { font-size: 11px; min-height: 17px; padding: 1px 5px; }
+.lesson-page.compact-height.engaged { padding-top: 17px; }
+.lesson-page.compact-height .lesson-timer { margin-bottom: 10px; }
+.lesson-page.compact-height .lesson-guide { padding-top: 12px; }
+.lesson-page.compact-height .cap { min-height: 24px; }
+.lab-page { padding: 12px 18px; }
+.lab-page .lesson-timer { margin: 0; font-size: 19px; }
+.lab-page .lab-guide { padding-top: 0; }
+.lab-page .lab-guide .cap { min-height: 21px; font-size: 15px; }
+.lab-page .lab-guide .cap.special { font-size: 10px; }
+.lab-page .lab-guide .key-deck { padding: 4px; }
+.lab-page.compact-height { padding: 6px 10px; }
+.lab-page.compact-height .h3 { font-size: 14px; }
+.lab-page.compact-height .lab-guide .cap { min-height: 18px; font-size: 13px; }
+.lab-page.compact-height .lab-guide .cap.special { font-size: 9px; }
+.lab-page.compact-height button { min-height: 22px; padding: 2px 5px; }
+.lab-page.compact-height .finger-caption { font-size: 10px; margin: 0; }
+button.class-button { min-height: 60px; font-size: 20px; font-weight: 700; padding: 12px; border: 1px solid #50586a; background: #2d3340; }
+button.class-button.selected { border-color: #e95420; background: #4c313a; color: #fff0e5; }
+.cap.windows-key, .lab-page .cap.windows-key, .lab-page.compact-height .cap.windows-key { font-family: "DejaVu Sans"; font-size: 19px; }
+
+/* The lesson stage carries the interface. Controls and hints stay quiet until needed. */
+.lab-page { padding: 0; background: #202631; }
+.lab-content { padding: 7px 9px 7px; background: #202631; }
+.lab-prep { padding: 25px 28px; }
+.lab-prep .h2 { font-size: 29px; }
+.lab-taskbar { min-height: 42px; padding: 2px 7px; background: #292d36; border-radius: 5px; }
+.lab-taskbar .lesson-timer { margin: 0; padding: 3px 7px; font-size: 16px; border-width: 1px; }
+.lab-task { font-size: 15px; font-weight: 700; }
+.lab-gesture { font-size: 13px; color: #c9d6ed; }
+.lab-taskbar button.lab-control { min-height: 25px; min-width: 27px; padding: 1px 5px; background: transparent; border-color: transparent; font-size: 14px; }
+.lab-taskbar button.lab-control:hover { background: #414854; }
+.lab-taskbar button.hint-toggle { min-height: 25px; min-width: 27px; font-size: 15px; }
+.lab-taskbar button.hint-toggle:checked { background: #3d4655; border-color: #606c7e; }
+.lab-taskbar button.hint-toggle.mistake-toggle, button.hint-toggle.mistake-toggle { color: #8d939e; }
+.lab-taskbar button.hint-toggle.mistake-toggle:checked, button.hint-toggle.mistake-toggle:checked { color: #e44c53; }
+.lab-status { margin: 8px; padding: 5px 9px; background: alpha(#20242d, .93); border-radius: 5px; font-size: 12px; }
+.lab-diagnostic { margin: 8px; padding: 4px 8px; background: alpha(#20242d, .95); border: 1px solid #5b677a; border-radius: 5px; color: #d3dded; font: 12px "DejaVu Sans Mono", monospace; }
+.lab-page .lab-guide { padding: 1px 0 0; }
+.lab-page .lab-guide .key-deck { padding: 4px; }
+.lab-page .lab-guide .finger-caption { margin: 2px 0 0; }
+.lab-page .cap.dual-function, .lab-page.compact-height .cap.dual-function { font: 10px "DejaVu Sans Mono", monospace; min-height: 24px; }
+.lab-page.compact-height { padding: 0; }
+.lab-page.compact-height .lab-content { padding: 3px 6px; }
+.lab-page.compact-height .lab-taskbar { min-height: 38px; }
+
+/* Stamina-style summary for all three practice modes. */
+.lab-modal-layer { background: alpha(#161d29, .84); }
+.result-screen { background: #242a36; padding: 18px; }
+.stamina-modal { background: #292d36; color: #f0f1f4; border: 1px solid #414958; border-radius: 6px; padding: 13px 16px 14px; box-shadow: 0 12px 32px alpha(black, .45); font-family: "Roboto", "Noto Sans", sans-serif; font-size: 14px; }
+.stamina-modal-title { font-size: 17px; font-weight: 400; color: #f1f2f5; }
+.stamina-modal separator { background: #3d4350; min-height: 1px; }
+.stamina-modal-subtitle { font-size: 13px; color: #b6bdc8; }
+.stamina-metrics { margin: 5px 0 2px; }
+.stamina-metric { min-height: 67px; padding: 7px 5px; background: transparent; border: none; }
+.stamina-metric-icon { min-width: 28px; font-size: 27px; font-weight: 900; }
+.stamina-metric-label { font-size: 10px; color: #c0c5ce; }
+.stamina-metric-value { font: bold 18px "DejaVu Sans Mono", monospace; color: #f6f7fa; }
+.stamina-metric.tone-time .stamina-metric-icon { color: #6d9800; }
+.stamina-metric.tone-count .stamina-metric-icon { color: #9b00f7; }
+.stamina-metric.tone-speed .stamina-metric-icon { color: #ff9d00; }
+.stamina-metric.tone-accuracy .stamina-metric-icon { color: #ff4d00; }
+.stamina-summary { color: #d5d8df; font-size: 12px; }
+.stamina-legend { margin-top: -5px; font-size: 11px; }
+.stamina-legend-speed { color: #388df8; }
+.stamina-legend-error { color: #e44c53; }
+.stamina-actions { margin-top: 4px; }
+.stamina-actions button { min-height: 31px; padding: 4px 12px; }
+.stamina-actions button.stamina-blue { background: #367ac5; border-color: #367ac5; color: white; }
+.stamina-actions button.stamina-blue:hover { background: #438bd9; }
+.stamina-modal expander { color: #bcc7d3; }

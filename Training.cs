@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.Windows.Input;
 
 namespace TouchTypingStudio
 {
@@ -91,8 +90,8 @@ namespace TouchTypingStudio
         {
             get
             {
-                if (Id == "windows") return RouteSession.Routes.Where(x => !x.InCode);
-                if (Id == "vscode") return RouteSession.Routes.Where(x => x.InCode);
+                if (Id == "windows") return RouteCatalog.Routes.Where(x => !x.InCode);
+                if (Id == "vscode") return RouteCatalog.Routes.Where(x => x.InCode);
                 return Enumerable.Empty<RouteSpec>();
             }
         }
@@ -267,7 +266,7 @@ namespace TouchTypingStudio
             // Previous course passes remain meaningful even if they predate the award system.
             return p.Awards.Sum(x => x.Xp) +
                 Lessons.All.Count(l => Cleared(l, p) && !p.Awards.Any(x => x.Id == "skill/" + l.Id)) * 45 +
-                RouteSession.Routes.Count(r => p.CompletedRoutes.Contains(r.PassId(2)) && !p.Awards.Any(x => x.Id == "route/" + r.Kind)) * 50;
+                RouteCatalog.Routes.Count(r => p.CompletedRoutes.Contains(r.PassId(2)) && !p.Awards.Any(x => x.Id == "route/" + r.Kind)) * 50;
         }
 
         public static int Level(StudioProfile profile) { return 1 + Xp(profile) / 125; }

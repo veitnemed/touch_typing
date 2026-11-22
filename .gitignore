@@ -3,3 +3,8 @@
 /*.lnk
 /previews/
 /release/
+/linux/**/bin/
+/linux/**/obj/
+/linux/**/__pycache__/
+/windows/bin/
+/windows/obj/
