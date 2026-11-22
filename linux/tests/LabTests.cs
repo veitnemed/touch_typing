@@ -66,6 +66,53 @@ internal static class LabTests
                 Check(route.Select(step => step.Phase).Distinct().Count() >= 3, course.Id + ": meaningful phases");
             }
         }
+        var reportRun = new LabRun("workday", "sandbox", 0, 0, "EN", [], new Random(3), missionId: "workday-report");
+        reportRun.Resume();
+        const string verifyId = "command/head -n 2 spectrum-report.txt";
+        for (int i = 0; i < 50 && reportRun.Task.Id != verifyId; i++) Complete(reportRun);
+        Check(reportRun.Task.Id == verifyId && reportRun.ReportArtifact == null, "Earlier steps do not award report evidence");
+        var report = reportRun.Scene.ReadReportArtifact();
+        Check(report.Content.Split('\n').Length > 3 && !report.DownloadStillPresent, "Delivery creates a multiline report only in the project");
+        var lines = report.Content.Split('\n');
+        lines[2] = "quietly corrupted outside the terminal preview";
+        reportRun.Scene.Terminal.StoreFile(report.Path, string.Join("\n", lines));
+        int reportScore = reportRun.Solved;
+        Complete(reportRun);
+        Check(reportRun.Scene.Terminal.LastSuccess && reportRun.Scene.Terminal.LastOutput.SequenceEqual(lines.Take(2)) &&
+            reportRun.Solved == reportScore && reportRun.ReportArtifact == null && reportRun.Status.Contains("отчёт не совпадает"),
+            "Successful preview cannot verify corrupted report content below line two");
+        reportRun.Scene.Terminal.StoreFile(report.Path, report.Content);
+        reportRun.Scene.Terminal.StoreFile("/home/student/Downloads/spectrum-report.txt", report.Content);
+        Complete(reportRun);
+        Check(reportRun.Solved == reportScore && reportRun.ReportArtifact == null, "Copy does not qualify as moved delivery");
+        reportRun.Scene.Terminal.Execute("rm ~/Downloads/spectrum-report.txt");
+        Complete(reportRun);
+        Check(reportRun.Solved == reportScore + 1 && reportRun.ReportArtifact == report, "Exact saved report is verified as an artifact");
+
+        // Hold the actual profile mutex on another thread; the timeout must not
+        // disappear when Update falls back to returning readable profile contents.
+        using (var ready = new System.Threading.ManualResetEventSlim())
+        using (var release = new System.Threading.ManualResetEventSlim())
+        {
+            var writer = new ProfileStore(true, System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+            var lockThread = System.Threading.Tasks.Task.Run(() =>
+            {
+                using var occupied = new System.Threading.Mutex(false, @"Local\TouchTypingStudio.QA.Profile");
+                occupied.WaitOne();
+                try { ready.Set(); release.Wait(); }
+                finally { occupied.ReleaseMutex(); }
+            });
+            try
+            {
+                Check(ready.Wait(5000), "Another thread locked the QA profile");
+                bool changed = false;
+                var snapshot = writer.Update(_ => changed = true);
+                Check(snapshot != null && !changed && writer.Error?.Contains("Профиль занят") == true,
+                    "Failed profile update retains storage error after fallback read");
+            }
+            finally { release.Set(); lockThread.GetAwaiter().GetResult(); }
+        }
+
         double now = 0;
         var unlimited = new LabRun("chrome", "sandbox", 0, 0, "EN", [], new Random(4), () => now);
         unlimited.Resume(); now += 8 * 3600 * 1000;
@@ -83,6 +130,21 @@ internal static class LabTests
         Check(scene.Active.Body.Contains("np.fft.fft"), "Code source comes from piling fixture");
         scene.Apply("comment"); Check(scene.Active.Body != scene.Active.Tab.SavedBody, "Editor dirty content");
         scene.Apply("save"); Check(scene.Active.Body == scene.Active.Tab.SavedBody, "Save writes document snapshot");
+        var files = new LabScene("files", "EN");
+        const string file = "/home/student/notes.txt", occupied = "/home/student/.Trash/1-notes.txt";
+        const string movedFile = "/home/student/.Trash/2-notes.txt";
+        files.Terminal.StoreFile(file, "original");
+        files.Terminal.StoreFile(occupied, "already in the bin");
+        files.Active.Item = Array.FindIndex(files.Entries(files.Active), item => item.Path == file);
+        Check(files.Apply("trash") && files.Terminal.ReadFile(occupied) == "already in the bin" &&
+            files.Terminal.ReadFile(movedFile) == "original", "Deterministic trash skips an occupied slot without overwriting");
+        var clonedFiles = files.Clone();
+        Check(clonedFiles.Apply("restore-trash") && clonedFiles.Terminal.ReadFile(file) == "original" &&
+            files.Terminal.ReadFile(movedFile) == "original", "Restoring the cloned bin does not mutate the source scene");
+        clonedFiles.Active.Item = Array.FindIndex(clonedFiles.Entries(clonedFiles.Active), item => item.Path == file);
+        Check(clonedFiles.Apply("trash") && clonedFiles.Terminal.ReadFile("/home/student/.Trash/3-notes.txt") == "original",
+            "Cloning carries the bin allocation sequence forward");
+
         var shot = new LabScene("ubuntu", "EN"); shot.Apply("screenshot"); Check(shot.Screenshot && !shot.ScreenshotReady, "Print opens capture panel");
         shot.Apply("screenshot-confirm"); Check(!shot.Screenshot && shot.ScreenshotReady, "Enter captures scene"); shot.Apply("copy-shot"); Check(shot.ScreenshotCopied, "Clipboard owns capture");
         foreach (string layout in new[] { "EN", "RU" })

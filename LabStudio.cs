@@ -133,6 +133,8 @@ namespace TouchTypingStudio
             return Scroll(root);
         }
 
+        private bool labSavePending, labSaveClosePending;
+
         private void StartLab()
         {
             if (active) return;
@@ -154,7 +156,8 @@ namespace TouchTypingStudio
             var initial = verifyMode && int.TryParse(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"), out seed)
                 ? Request("lab-start", "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "seed", seed)
                 : Request("lab-start", "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume);
-            if (!initial.Exists) return;
+            if (!initial.Exists || initial.B("startBlocked")) return;
+            labSavePending = labSaveClosePending = false;
             lastLabMission = initial.S("mission");
             labActive = active = true;
             paused = true;
@@ -258,6 +261,7 @@ namespace TouchTypingStudio
 
         private void ResumeLab()
         {
+            if (labSavePending) return;
             if (!labActive || !IsActive || (!paused && labCapture != null)) return;
             if (Keyboard.Modifiers != ModifierKeys.None)
             {
@@ -295,6 +299,7 @@ namespace TouchTypingStudio
         private void PauseLab()
         {
             if (labCapture != null) labCapture.Suspend();
+            if (labSavePending) return;
             if (!labActive || paused) return;
             paused = true;
             pressed.Clear();
@@ -417,11 +422,68 @@ namespace TouchTypingStudio
             return shown;
         }
 
+        private bool TrySaveLab()
+        {
+            StopLabCapture();
+            timer.Stop();
+            paused = true;
+            pressed.Clear();
+            var saved = Request("lab-stop");
+            if (saved.Exists && saved.B("saved") && string.IsNullOrWhiteSpace(engine.Notice))
+            {
+                labSavePending = false;
+                return true;
+            }
+            labSavePending = true;
+            string problem = string.IsNullOrWhiteSpace(notice.Text) ?
+                "Не удалось сохранить занятие. Проверьте, доступна ли папка профиля, и повторите." :
+                notice.Text;
+            ShowLabSaveRetry(problem);
+            return false;
+        }
+
+        private void ShowLabSaveRetry(string problem)
+        {
+            RestorePausedLabView();
+            pausedLabView = center.Content as FrameworkElement;
+            center.Content = null;
+            var overlay = new Grid { Background = Ui.Brush("#1D2430") };
+            if (pausedLabView != null)
+            {
+                pausedLabView.IsHitTestVisible = false;
+                overlay.Children.Add(pausedLabView);
+                overlay.Children.Add(new Border { Background = Ui.Brush("#BF080B12") });
+            }
+            var card = Stack();
+            var heading = Label("Занятие пока не сохранено", 18, Ink, true);
+            AutomationProperties.SetAutomationId(heading, "LabSaveError");
+            card.Children.Add(heading);
+            var detail = Label(problem, 13, Ink);
+            detail.TextWrapping = TextWrapping.Wrap;
+            detail.Margin = new Thickness(0, 8, 0, 12);
+            card.Children.Add(detail);
+            var retry = ActionButton(labSaveClosePending ? "Повторить сохранение и закрыть" :
+                "Повторить сохранение", FinishLab, true);
+            AutomationProperties.SetAutomationId(retry, "LabRetrySave");
+            card.Children.Add(retry);
+            overlay.Children.Add(new Border { Child = card, Padding = new Thickness(24), Width = 470,
+                Background = Night, HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center });
+            center.Content = overlay;
+            Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(delegate
+            { if (ReferenceEquals(center.Content, overlay)) retry.Focus(); }));
+        }
+
         private void FinishLab()
         {
-            if (!labActive) return;
-            StopLabCapture();
-            Request("lab-stop");
+            if (!labActive || !TrySaveLab()) return;
+            if (labSaveClosePending)
+            {
+                labSaveClosePending = false;
+                closeAccepted = true;
+                Close();
+                return;
+            }
             var result = Request("lab-result");
             labActive = active = paused = false;
             pressed.Clear();
@@ -437,6 +499,7 @@ namespace TouchTypingStudio
         private void RestartLab()
         {
             if (labActive) FinishLab();
+            if (labActive) return; // Retain the paused lesson until its save succeeds.
             center.Content = BuildLabHome();
             int choice = Array.IndexOf(labMissionIds, lastLabMission);
             if (choice >= 0) labMissionSelect.SelectedIndex = choice;

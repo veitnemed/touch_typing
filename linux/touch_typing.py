@@ -434,7 +434,9 @@ class Studio(Gtk.Application):
 
     def navigate(self, page, manual=True):
         if self.lab:
-            self.lab.stop(show=False)
+            if self.lab.active:
+                self.lab.stop(show=False, on_saved=lambda: self.navigate(page, manual))
+                return
             self.lab = None
         if self.workout:
             self.stop(show_result=False)
@@ -868,6 +870,8 @@ class Studio(Gtk.Application):
         if not active:
             return False
         if self.lab and self.lab.active:
+            if self.lab.save_pending:
+                return True
             self.lab.pause_run("Пауза. Нажмите пробел, чтобы продолжить.")
         elif self.workout == "shortcuts":
             if not self.paused:
@@ -887,8 +891,13 @@ class Studio(Gtk.Application):
             widget.destroy()
             self.close_dialog = None
             if response == Gtk.ResponseType.ACCEPT:
-                self.allow_close = True
-                self.window.close()
+                def close_saved():
+                    self.allow_close = True
+                    self.window.close()
+                if self.lab and self.lab.active:
+                    self.lab.stop(show=False, on_saved=close_saved)
+                else:
+                    close_saved()
         dialog.connect("response", answer)
         self.close_dialog = dialog
         dialog.present()
@@ -1790,6 +1799,8 @@ class LabPage(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.host = host
         self.active = False
+        self.save_pending = False
+        self.retry_save = None
         self.state = None
         self.pressed = set()
         # Actual GUI key state is separate from keys already sent to the
@@ -2022,11 +2033,14 @@ class LabPage(Gtk.Box):
             widget.set_visible(True)
         self.desktop.set_size_request(400, 220)
         self.desktop.grab_focus()
+        if self.state.get("startBlocked"):
+            self.show_save_retry(show=False, on_saved=self.start)
+            return
         self.render(self.state)
         self.acquire()
 
     def acquire(self):
-        if not self.active or self.waiting_capture:
+        if not self.active or self.waiting_capture or self.save_pending:
             return
         keyboard = self.host.window.get_display().get_default_seat().get_keyboard()
         modifiers = keyboard.get_modifier_state() if keyboard else Gdk.ModifierType(0)
@@ -2096,7 +2110,7 @@ class LabPage(Gtk.Box):
         self.pressed.clear()
 
     def pause_run(self, message="Пауза. Нажмите пробел, чтобы продолжить."):
-        if not self.active:
+        if not self.active or self.save_pending:
             return
         state = self.host.call("lab-pause")
         self.waiting_capture = False
@@ -2154,6 +2168,11 @@ class LabPage(Gtk.Box):
                 return True
             return False
         pause_key, finish_key = self.bindings()
+        if self.save_pending:
+            if key == finish_key and not has_modifiers:
+                self.retry_save()
+                return True
+            return key not in ("Enter", "Space", "Tab")
         if key == "F1" and not has_modifiers and not self.state.get("showGuide", True) and not self.state["paused"]:
             self.render(self.host.call("lab-hint"))
             return True
@@ -2202,6 +2221,8 @@ class LabPage(Gtk.Box):
 
     def render(self, state):
         self.state = state
+        if self.save_pending:
+            return
         if state["finished"]:
             self.stop()
             return
@@ -2265,21 +2286,49 @@ class LabPage(Gtk.Box):
             self.add_css_class("compact-height")
         else:
             self.remove_css_class("compact-height")
-        if self.active and self.state and not self.state["paused"]:
+        if self.active and not self.save_pending and self.state and not self.state["paused"]:
             state = self.host.call("lab-state")
             if state:
                 self.render(state)
 
-    def stop(self, show=True):
-        if not self.active:
-            return
-        self.host.call("lab-stop")
-        result = self.host.call("lab-result")
-        self.active = False
+    def show_save_retry(self, show, on_saved):
+        self.save_pending = True
+        self.retry_save = lambda: self.stop(show=show, on_saved=on_saved, retry=True)
+        self.status.set_label("Не удалось сохранить занятие. Повторите сохранение.")
+        self.status.set_visible(True)
+        clear(self.modal_layer)
+        details = "Занятие осталось на паузе. Закройте другое окно тренажёра или проверьте доступ к папке профиля."
+        panel = stamina_modal("Прогресс не сохранён", details, [])
+        retry = button("Повторить сохранение", self.retry_save, "primary")
+        panel.append(retry)
+        self.modal_layer.append(panel)
+        self.modal_layer.set_visible(True)
+        retry.grab_focus()
+
+    def stop(self, show=True, on_saved=None, retry=False):
+        if not self.active or self.save_pending and not retry:
+            return False
         self.waiting_capture = False
         self.release_capture()
-        if not show or not result:
-            return
+        state = self.host.call("lab-stop")
+        if not state or not state.get("saved", False):
+            if state:
+                self.state = state
+                self.desktop.update(state["scene"])
+            self.show_save_retry(show, on_saved)
+            return False
+        self.state = state
+        self.save_pending = False
+        self.retry_save = None
+        self.active = False
+        self.host.message()
+        if on_saved:
+            on_saved()
+        if not show:
+            return True
+        result = self.host.call("lab-result")
+        if not result:
+            return True
         self.result = True
         clear(self.modal_layer)
         panel = stamina_modal("Результат", self.state.get("scenario", "Практикум"), self.summary_metrics(result))
@@ -2307,8 +2356,12 @@ class LabPage(Gtk.Box):
         self.modal_layer.set_visible(True)
         restart.grab_focus()
         self.host.refresh()
+        return True
 
     def replay(self):
+        if self.active:
+            self.stop(show=False, on_saved=self.replay)
+            return
         selected_class = self.picker.get_selected()
         selected_mode = self.mode.get_selected()
         selected_level = self.level.get_selected()

@@ -28,6 +28,305 @@ class MissionTest(unittest.TestCase):
                 else:
                     os.environ["XDG_DATA_HOME"] = original
 
+    def test_file_transfer_survives_profile_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original = os.environ.get("XDG_DATA_HOME")
+            os.environ["XDG_DATA_HOME"] = directory
+            engine = None
+            try:
+                options = dict(app="ubuntu", level=0, mode="sandbox", seconds=0, guidance="guided")
+                engine = Engine(verify=True)
+                engine.call("lab-start", seed=0, **options)
+                engine.call("lab-resume")
+
+                def chord(*keys):
+                    for key in keys:
+                        engine.call("lab-key", key=key, pressed=True, text="")
+                    for key in reversed(keys):
+                        state = engine.call("lab-key", key=key, pressed=False, text="")
+                    return state
+
+                def workspace():
+                    return engine.call("lab-state")["scene"]
+
+                def active(scene):
+                    return next(w for w in scene["windows"] if w["id"] == scene["activeWindow"])
+
+                def select(name):
+                    for _ in range(30):
+                        window = active(workspace())
+                        self.assertEqual(window["app"], "files")
+                        item = window["item"]
+                        if item >= 0 and window["entries"][item]["title"] == name:
+                            return
+                        desired = next(i for i, entry in enumerate(window["entries"]) if entry["title"] == name)
+                        chord("Down" if item < desired else "Up")
+                    self.fail("selection never reached " + name)
+
+                def contents(scene):
+                    return {f["path"]: f["content"] for f in scene["terminal"]["files"]}
+
+                def observable(scene):
+                    # Tab IDs are per-process handles, not persisted lesson state.
+                    for window in scene["windows"]:
+                        for tab in window["tabs"]:
+                            tab.pop("id")
+                        if window["otherTab"]:
+                            window["otherTab"].pop("id")
+                    return scene
+
+                def restart():
+                    nonlocal engine
+                    before = engine.call("lab-stop")
+                    self.assertEqual(before["held"], [])
+                    engine.close()
+                    engine = Engine(verify=True)
+                    self.assertTrue(any(item["app"] == options["app"] for item in
+                                        engine.call("lab-catalog")["drafts"]))
+                    reopened = engine.call("lab-start", **{"continue": True}, **options)
+                    self.assertEqual(reopened["mission"], before["mission"])
+                    self.assertEqual(reopened["scenarioStep"], before["scenarioStep"])
+                    self.assertEqual(reopened["task"], before["task"])
+                    self.assertEqual(observable(reopened["scene"]), observable(before["scene"]))
+                    self.assertEqual((reopened["solved"], reopened["errors"]), (0, 0))
+                    engine.call("lab-resume")
+
+                chord("LSuper", "4")
+                chord("LAlt", "Home")
+                select("project")
+                chord("Enter")
+                select("notes.txt")
+                src = "/home/student/project/notes.txt"
+                dst = "/home/student/Downloads/notes.txt"
+                expected = contents(workspace())[src]
+                self.assertTrue(expected)
+                chord("RCtrl", "X")
+                before = workspace()
+                self.assertEqual(before["clipboard"], src)
+                same_folder = chord("RCtrl", "V")
+                self.assertEqual(same_folder["scene"], before)
+                self.assertEqual(same_folder["feedback"], "error")
+                restart()
+
+                chord("LAlt", "Home")
+                select("Downloads")
+                chord("Enter")
+                after_cut = chord("RCtrl", "V")
+                self.assertNotIn(src, contents(after_cut["scene"]))
+                self.assertEqual(contents(after_cut["scene"])[dst], expected)
+                self.assertEqual(active(after_cut["scene"])["entries"][active(after_cut["scene"])["item"]]["path"], dst)
+
+                chord("RCtrl", "C")
+                chord("Delete")
+                trashed = workspace()
+                moved = [(path, data) for path, data in contents(trashed).items() if "/.Trash/" in path]
+                self.assertEqual(len(moved), 1)
+                self.assertEqual(moved[0][1], expected)
+                self.assertNotIn(dst, contents(trashed))
+                self.assertEqual(trashed["clipboard"], dst)
+                chord("LAlt", "Home")
+                select("project")
+                chord("Enter")
+                before = workspace()
+                stale = chord("RCtrl", "V")
+                self.assertEqual(stale["scene"], before)
+                self.assertEqual(stale["feedback"], "error")
+                restart()
+
+                restored = chord("RCtrl", "Z")["scene"]
+                self.assertEqual(contents(restored)[dst], expected)
+                self.assertNotIn(moved[0][0], contents(restored))
+                copied = chord("RCtrl", "V")["scene"]
+                self.assertEqual(contents(copied)[src], expected)
+                self.assertEqual(contents(copied)[dst], expected)
+            finally:
+                if engine is not None:
+                    engine.close()
+                if original is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = original
+
+    def test_acknowledged_report_survives_engine_sigkill(self):
+        import signal
+        from pathlib import Path
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+            options = dict(app="workday", level=0, mode="sandbox", seconds=0, guidance="guided")
+            engine = Engine(verify=True)
+            marker = "lab/workday/command/head -n 2 spectrum-report.txt"
+            sides = {"Ctrl": "RCtrl", "Alt": "LAlt", "Shift": "LShift", "Super": "LSuper"}
+
+            def chord(keys, char=""):
+                for key in keys:
+                    state = engine.call("lab-key", key=key, pressed=True, text=char if key == keys[-1] else "")
+                    self.assertFalse(engine.storage_error)
+                for key in reversed(keys):
+                    state = engine.call("lab-key", key=key, pressed=False, text="")
+                    self.assertFalse(engine.storage_error)
+                return state
+
+            def credit():
+                return next((row["count"] for row in engine.call("library")["liveSkills"] if row["key"] == marker), 0)
+
+            def kill_engine():
+                # Closing stdin first would execute Program.FinishLab and mask lost checkpoints.
+                self.assertFalse(engine.process.stdin.closed)
+                engine.process.kill()
+                self.assertEqual(engine.process.wait(timeout=5), -signal.SIGKILL)
+                engine.close()
+
+            try:
+                engine.call("lab-start", mission="workday-report", seed=0, **options)
+                state = engine.call("lab-resume")
+                for _ in range(state["scenarioLength"]):
+                    if state["reportArtifact"]:
+                        break
+                    task = state["task"]
+                    old = state["solved"]
+                    if task["keys"]:
+                        for _ in range(25):
+                            state = chord([sides.get(k, k) for k in task["keys"].split("+")])
+                            if state["solved"] > old:
+                                break
+                    else:
+                        for char in task["text"]:
+                            chord(["Space" if char == " " else char.upper()], char)
+                        state = chord(["Enter"])
+                    self.assertEqual(state["solved"], old + 1, (task, state["status"]))
+                receipt = state["reportArtifact"]
+                self.assertTrue(receipt)
+                self.assertEqual(credit(), 1)
+                kill_engine()
+                # Simulate an interrupted future temporary write beside the committed profile.
+                profile = Path(directory) / "TouchTypingStudio-QA" / "progress.xml"
+                profile.with_suffix(".xml.writing").write_text("<StudioProfile><LiveDrafts>", encoding="utf-8")
+                # Kill two different engine processes. Replay must not enqueue another credit.
+                for _ in range(2):
+                    engine = Engine(verify=True)
+                    self.assertTrue(any(d["mission"] == "workday-report"
+                                        for d in engine.call("lab-catalog")["drafts"]))
+                    reopened = engine.call("lab-start", **{"continue": True}, **options)
+                    self.assertFalse(engine.storage_error)
+                    self.assertEqual(reopened["scenarioStep"], state["scenarioStep"])
+                    self.assertEqual(reopened["task"], state["task"])
+                    self.assertEqual(reopened["reportArtifact"], receipt)
+                    files = {f["path"]: f["content"] for f in reopened["scene"]["terminal"]["files"]}
+                    self.assertEqual(files[receipt["path"]], receipt["content"])
+                    self.assertNotIn("/home/student/Downloads/spectrum-report.txt", files)
+                    self.assertEqual((reopened["solved"], reopened["errors"]), (0, 0))
+                    self.assertEqual(credit(), 1)
+                    kill_engine()
+            finally:
+                if not engine.process.stdout.closed:
+                    engine.close()
+
+    def test_pause_checkpoints_unscored_terminal_edit(self):
+        import signal
+        from pathlib import Path
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+            options = dict(app="terminal", level=0, mode="sandbox", seconds=0, guidance="guided")
+            engine = Engine(verify=True)
+            try:
+                engine.call("lab-start", seed=0, **options)
+                engine.call("lab-resume")
+                def type_key(key):
+                    engine.call("lab-key", key=key, pressed=True, text=key.lower())
+                    return engine.call("lab-key", key=key, pressed=False, text="")
+                type_key("A")
+                state = type_key("B")
+                self.assertEqual(state["scene"]["terminalInput"], "ab")
+                self.assertEqual((state["solved"], state["errors"]), (0, 0))
+                profile = Path(directory) / "TouchTypingStudio-QA" / "progress.xml"
+                self.assertFalse(profile.exists(), "An ordinary character must not rewrite the profile")
+                engine.call("lab-pause")
+                self.assertFalse(engine.storage_error)
+                self.assertTrue(profile.is_file())
+                self.assertFalse(engine.process.stdin.closed)
+                engine.process.kill()
+                self.assertEqual(engine.process.wait(timeout=5), -signal.SIGKILL)
+                engine.close()
+                engine = Engine(verify=True)
+                reopened = engine.call("lab-start", **{"continue": True}, **options)
+                self.assertEqual(reopened["scene"]["terminalInput"], "ab")
+                self.assertEqual((reopened["solved"], reopened["errors"]), (0, 0))
+            finally:
+                if not engine.process.stdout.closed:
+                    engine.close()
+
+    def test_failed_save_keeps_old_run_until_explicit_retry(self):
+        from pathlib import Path
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+            engine = Engine(verify=True)
+            try:
+                old = dict(app="workday", level=0, mode="sandbox", seconds=0, guidance="guided")
+                new = dict(old, app="terminal")
+                started = engine.call("lab-start", mission="workday-report", seed=0, **old)
+                self.assertFalse(started["startBlocked"])
+                engine.call("lab-resume")
+                blocked_path = Path(directory) / "TouchTypingStudio-QA" / "progress.xml.writing"
+                # Not a fake store: obstruct the real atomic writer, before publication.
+                blocked_path.mkdir(parents=True)
+                task = started["task"]
+                sides = {"Ctrl": "RCtrl", "Alt": "LAlt", "Shift": "LShift", "Super": "LSuper"}
+                keys = [sides.get(key, key) for key in task["keys"].split("+")]
+                for key in keys:
+                    engine.call("lab-key", key=key, pressed=True, text="")
+                for key in reversed(keys):
+                    progressed = engine.call("lab-key", key=key, pressed=False, text="")
+                self.assertEqual(progressed["solved"], 1)
+                self.assertTrue(engine.storage_error)
+                self.assertTrue(progressed["saveError"])
+                marker = "lab/workday/" + task["id"]
+
+                def credit():
+                    return next((row["count"] for row in engine.call("library")["liveSkills"] if row["key"] == marker), 0)
+
+                self.assertEqual(credit(), 0)
+                rejected = engine.call("lab-start", **new)
+                self.assertTrue(rejected["startBlocked"])
+                self.assertFalse(rejected["saved"])
+                self.assertTrue(rejected["paused"])
+                self.assertFalse(rejected["finished"])
+                self.assertEqual(rejected["mission"], progressed["mission"])
+                self.assertEqual(rejected["scenarioStep"], progressed["scenarioStep"])
+                self.assertEqual(rejected["scene"], progressed["scene"])
+
+                failed_stop = engine.call("lab-stop")
+                self.assertTrue(failed_stop["finished"])
+                self.assertFalse(failed_stop["saved"])
+                self.assertEqual(failed_stop["solved"], 1)
+                self.assertEqual(credit(), 0)
+                # Polling or reading a result must not perform a hidden retry, even after storage recovers.
+                blocked_path.rmdir()
+                self.assertFalse(engine.call("lab-state")["saved"])
+                self.assertIsNone(engine.call("lab-result"))
+                self.assertEqual(credit(), 0)
+
+                saved = engine.call("lab-stop")
+                self.assertTrue(saved["saved"])
+                self.assertIsNone(saved["saveError"])
+                self.assertFalse(engine.storage_error)
+                self.assertEqual(saved["scene"], failed_stop["scene"])
+                self.assertEqual(credit(), 1)
+                self.assertTrue(engine.call("lab-stop")["saved"])
+                self.assertEqual(credit(), 1)
+                result = engine.call("lab-result")
+                self.assertEqual(result["solved"], 1)
+                self.assertEqual(len(result["history"]), 1)
+
+                replacement = engine.call("lab-start", **new)
+                self.assertFalse(replacement["startBlocked"])
+                self.assertEqual(replacement["app"], "terminal")
+                self.assertEqual(credit(), 1)
+            finally:
+                engine.close()
+
     def walk(self, engine, mission):
         state = engine.call("lab-start", app=mission["app"], level=mission["level"], mode="sandbox",
                             seconds=0, guidance="guided", mission=mission["id"], seed=0)
@@ -60,6 +359,13 @@ class MissionTest(unittest.TestCase):
                 report = files["/home/student/project/spectrum-report.txt"]
                 self.assertTrue(report.startswith("# "), report)
                 self.assertIn(report.splitlines()[0], state["scene"]["terminal"]["output"])
+                if mission["id"] == "workday-report":
+                    self.assertEqual(state["reportArtifact"], {
+                        "path": "/home/student/project/spectrum-report.txt",
+                        "content": report, "downloadStillPresent": False,
+                    })
+                else:
+                    self.assertIsNone(state["reportArtifact"])
             self.assertEqual(state["errors"], 0, (mission["id"], task, state["status"]))
 
 

@@ -96,9 +96,14 @@ namespace TouchTypingStudio
                     bool wasLab = labActive;
                     if (wasLab) PauseLab(); else PauseSession();
                     if (!ConfirmActiveClose()) { e.Cancel = true; return; }
-                    var saved = wasLab ? Request("lab-stop") : page == TypingPage ?
+                    if (wasLab)
+                    {
+                        labSaveClosePending = true;
+                        if (!TrySaveLab()) { e.Cancel = true; return; }
+                    }
+                    var saved = wasLab ? null : page == TypingPage ?
                         Request("typing-stop", "layout", CurrentLayout()) : Request("shortcut-result");
-                    if (!saved.Exists || !string.IsNullOrWhiteSpace(engine.Notice))
+                    if (!wasLab && (!saved.Exists || !string.IsNullOrWhiteSpace(engine.Notice)))
                     {
                         e.Cancel = true;
                         string problem = notice.Text.Length > 0 ? notice.Text : "Не удалось сохранить прогресс. Занятие осталось на паузе.";
@@ -946,6 +951,14 @@ namespace TouchTypingStudio
                 e.Handled = true;
                 if (paused && !e.IsRepeat)
                 {
+                    if (labSavePending)
+                    {
+                        if (Keyboard.Modifiers == ModifierKeys.None &&
+                            ((Keyboard.FocusedElement is Button &&
+                              AutomationProperties.GetAutomationId((Button)Keyboard.FocusedElement) == "LabRetrySave" &&
+                              (key == "Enter" || key == "Space")) || key == LabEndKey())) FinishLab();
+                        return;
+                    }
                     if (Keyboard.Modifiers == ModifierKeys.None)
                     {
                         var button = Keyboard.FocusedElement as Button;

@@ -20,6 +20,7 @@ def main():
     parser.add_argument("--timed", action="store_true", help="Дополнительно пройти настоящий подход на 180 секунд")
     parser.add_argument("--full", action="store_true", help="Запустить C# стресс-тесты из исходников, требуется SDK .NET 10")
     parser.add_argument("--terminal-only", action="store_true", help="Проверить ввод в окно терминала на 1366×768")
+    parser.add_argument("--save-retry", action="store_true", help="Включить проверку закрытия при ошибке сохранения")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -50,6 +51,7 @@ def main():
                        "--inside", "--output", str(args.output), "--seed", str(args.seed)]
             if args.timed: command.append("--timed")
             if args.terminal_only: command.append("--terminal-only")
+            if args.save_retry: command.append("--save-retry")
             if args.full: command.append("--full")
             return subprocess.run(command, env=environment).returncode
     return run_checks(args)
@@ -126,6 +128,9 @@ def run_checks(args):
         time.sleep(1)
         if args.terminal_only:
             check("native-terminal", [sys.executable, str(tests / "test_lab_window.py"), "--terminal-only"])
+            if args.save_retry:
+                report["coverage"].append("native GTK close retry after profile write failure")
+                check("native-save-retry", [sys.executable, str(tests / "test_ui_controls.py"), "--small"])
         else:
             check("native-small", [sys.executable, str(tests / "test_lab_window.py"), "--small"])
             check("ui-controls", [sys.executable, str(tests / "test_ui_controls.py"), "--small"])

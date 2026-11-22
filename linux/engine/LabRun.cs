@@ -42,6 +42,8 @@ internal sealed class LabRun
     }
     private int Elapsed => (int)((activeMilliseconds + (activeSince is double since ? Math.Max(0, clock() - since) : 0)) / 1000);
     internal LabScene Scene { get; private set; }
+    private LabReportArtifact verifiedReport;
+    internal LabReportArtifact ReportArtifact => verifiedReport != null && verifiedReport == Scene.ReadReportArtifact() ? verifiedReport : null;
     private LiveMission mission;
     private List<LiveGoal> pending;
     private List<(LiveGoal Goal, string Before)> watching;
@@ -179,6 +181,8 @@ internal sealed class LabRun
         var passed = Observe(key, matches && Scene.Terminal.LastSuccess ? Task.Text : null);
         if (passed != null) return passed;
         if (submitting && !Scene.Terminal.LastSuccess) return Miss(key, Scene.Active.Status);
+        if (matches && watching?.Any(item => item.Goal.Task == Task && item.Goal.VerifyReport) == true)
+            return Miss(key, "Команда выполнена, но отчёт не совпадает с заданием. Проверьте весь сохранённый файл и папку «Загрузки».");
         if (!changed) return Miss(key, "Здесь эта клавиша не выполняет действие.");
         Feedback = "ready"; LastKey = ""; Status = ""; return null;
     }
@@ -225,7 +229,7 @@ internal sealed class LabRun
     {
         if (mission == null) return;
         var eligible = Guidance == "independent" ? pending.TakeWhile(goal => goal.Phase == pending[0].Phase) : pending.Take(1);
-        watching = eligible.Select(goal => (goal, LiveCourse.Evidence(goal.Task, Scene))).ToList();
+        watching = eligible.Select(goal => (goal, LiveCourse.Evidence(goal.Task, Scene, verifyReport: goal.VerifyReport))).ToList();
     }
 
     private ShortcutAttempt Observe(string key, string equivalentCommand = null, bool acceptExistingUrlSelection = false)
@@ -234,7 +238,8 @@ internal sealed class LabRun
         foreach (var (goal, before) in watching)
         {
             if (before == goal.Target && !(acceptExistingUrlSelection && goal.Task.Id == "url")) continue;
-            if (LiveCourse.Evidence(goal.Task, Scene, goal.Task == Task ? equivalentCommand : null) != goal.Target) continue;
+            if (LiveCourse.Evidence(goal.Task, Scene, goal.Task == Task ? equivalentCommand : null, goal.VerifyReport) != goal.Target) continue;
+            if (goal.VerifyReport) verifiedReport = Scene.ReadReportArtifact();
             Task = goal.Task;
             pending.Remove(goal);
             return Pass(key);
@@ -285,6 +290,7 @@ internal sealed class LabRun
                 : courses.FirstOrDefault(m => m.Id == requestedMission) ?? throw new ArgumentException("Поручение недоступно для выбранного уровня.");
             if (!restoring) variant = random.Next(3);
             requestedMission = null; used.Add(mission.Id); trace.Clear();
+            verifiedReport = null;
             if (!restoring) trace.Add(new(ExactUrlEvent));
             initialLayout = Scene.Layout;
             initialVirtual = Scene.LayoutIsVirtual;

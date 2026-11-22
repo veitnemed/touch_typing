@@ -43,6 +43,9 @@ internal sealed class PracticeService
     private ShortcutRun run;
     private TypingRun typing;
     private LabRun lab;
+    private int persistedLabAttempts;
+    private bool labFinishAttempted;
+    private string labSaveError;
     private string[] dock;
     internal string StorageError => store.Error;
 
@@ -87,23 +90,36 @@ internal sealed class PracticeService
             case "lab-catalog": return LabCatalog.Catalog(profile.LiveDrafts);
             case "lab-start":
                 FinishLab();
+                if (lab?.Saved == false) return LabState(startBlocked: true);
                 var draft = Flag(message, "continue") ? profile.LiveDrafts.LastOrDefault(item =>
                     item.App == Text(message, "app") && item.Level == Number(message, "level") && item.Guidance == Text(message, "guidance")) : null;
                 lab = new LabRun(Text(message, "app"), Text(message, "mode"), Number(message, "level"), Number(message, "seconds", 180), layout, profile.ShortcutHistory,
                     message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit"), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: Text(message, "mission"), draft: draft);
+                persistedLabAttempts = 0;
+                labFinishAttempted = false;
+                labSaveError = null;
                 return LabState();
             case "lab-key":
                 if (lab == null) throw new InvalidOperationException("Сначала выберите учебный класс.");
                 var labAttempt = lab.Input(Text(message, "key"), Flag(message, "pressed"), Text(message, "text"));
-                if (labAttempt != null) Persist(labAttempt);
-                if (lab.Finished) FinishLab();
+                if (lab.Finished) FinishLabAutomatically();
+                else if (labAttempt != null) SaveLabCheckpoint();
                 return LabState();
-            case "lab-state": if (lab?.Finished == true) FinishLab(); return LabState();
+            case "lab-state": FinishLabAutomatically(); return LabState();
             case "lab-hint": lab?.Hint(); return LabState();
-            case "lab-pause": lab?.Pause(); return LabState();
-            case "lab-resume": lab?.Resume(); return LabState();
+            case "lab-pause":
+                lab?.Pause();
+                if (lab?.HasDraft == true && !lab.Finished && !lab.Saved) SaveLabCheckpoint();
+                return LabState();
+            case "lab-resume":
+                lab?.Resume();
+                if (lab != null && !lab.Finished && !lab.Paused && !lab.Saved) labFinishAttempted = false;
+                return LabState();
             case "lab-stop": lab?.Stop(); FinishLab(); return LabState();
-            case "lab-result": if (lab?.Finished == true) FinishLab(); return lab?.Result(profile.LabSessions, profile.LabRecords);
+            case "lab-result":
+                FinishLabAutomatically();
+                if (lab?.Finished == true && !lab.Saved) return null;
+                return lab?.Result(profile.LabSessions, profile.LabRecords);
             case "library": return Library();
             case "inspect": return Describe(Gesture.Parse(Text(message, "keys")), Text(message, "fingers"));
             case "shortcut-save": SaveShortcut(message); return Library();
@@ -150,29 +166,52 @@ internal sealed class PracticeService
         return TypingState(message);
     }
 
-    private object LabState()
+    private object LabState(bool startBlocked = false)
     {
         if (lab == null) return null;
         return new { lab.App, lab.Mode, lab.Level, task = lab.Task.Snapshot(), scene = lab.Scene.Snapshot(), held = lab.Held,
             lab.LastKey, lab.Status, lab.Feedback, lab.Errors, lab.Solved, lab.Block, index = lab.Solved % 20 + 1,
-            lab.Seconds, lab.Remaining, lab.TimeLimit, lab.ActionLimit, lab.Guidance, lab.ShowGuide, lab.Finished, lab.Paused, needsCapture = true,
+            lab.Seconds, lab.Remaining, lab.TimeLimit, lab.ActionLimit, lab.Guidance, lab.ShowGuide, lab.Finished, lab.Paused, lab.Saved, startBlocked, saveError = labSaveError, needsCapture = true,
+            reportArtifact = lab.ReportArtifact,
             mission = lab.MissionId, phase = lab.PhaseTitle, objectives = lab.Objectives, scenario = lab.ScenarioTitle, scenarioStep = lab.ScenarioStep, scenarioLength = lab.ScenarioLength,
             guide = !lab.ShowGuide || lab.Task.Keys.Length == 0 ? null : Describe(Gesture.Parse(lab.Task.Keys), "") };
+    }
+
+    private void FinishLabAutomatically()
+    {
+        // Polling keeps the scene available for retry instead of repeatedly blocking on the same failed write.
+        if (lab?.Finished == true && !labFinishAttempted) FinishLab();
     }
 
     internal void FinishLab()
     {
         if (lab == null || lab.Saved) return;
+        labFinishAttempted = true;
         lab.Pause();
         var record = lab.SessionRecord();
         if (!lab.HasDraft && record.Solved + record.Errors == 0) { lab.MarkSaved(); return; }
+        SaveLabCheckpoint(record);
+        if (store.Error == null) lab.MarkSaved();
+    }
+
+    // The profile is atomically replaced before returning a successful acknowledgement.
+    // Use the attempt's existing write cadence, plus explicit pause; do not sync every keystroke.
+    private void SaveLabCheckpoint(LabSessionRecord record = null)
+    {
+        var pending = lab.Attempts.Skip(persistedLabAttempts).ToArray();
+        var draft = lab.HasDraft ? lab.Draft() : null;
+        var previousProfile = profile;
         Save(current =>
         {
-            current.LiveDrafts.RemoveAll(item => item.App == record.App && item.Level == record.Level && item.Guidance == record.Guidance);
-            if (lab.HasDraft) current.LiveDrafts.Add(lab.Draft());
-            if (record.Solved + record.Errors > 0) LabSessionRecords.Update(current, record);
+            current.LiveDrafts.RemoveAll(item => item.App == lab.App && item.Level == lab.Level && item.Guidance == lab.Guidance);
+            if (draft != null) current.LiveDrafts.Add(draft);
+            current.ShortcutHistory.AddRange(pending);
+            TrimShortcutHistory(current);
+            if (record != null && record.Solved + record.Errors > 0) LabSessionRecords.Update(current, record);
         });
-        if (store.Error == null) lab.MarkSaved();
+        labSaveError = store.Error;
+        if (labSaveError == null) persistedLabAttempts += pending.Length;
+        else profile = previousProfile; // a failed disk write must not expose speculative credits or drafts
     }
 
     private Skill[] Skills() => ShortcutCatalog.All(profile, layout, forward, backward);
@@ -391,8 +430,13 @@ internal sealed class PracticeService
     private void Persist(ShortcutAttempt attempt) => Save(current =>
     {
         current.ShortcutHistory.Add(attempt);
-        if (current.ShortcutHistory.Count > 5000) current.ShortcutHistory.RemoveRange(0, current.ShortcutHistory.Count - 5000);
+        TrimShortcutHistory(current);
     });
+
+    private static void TrimShortcutHistory(StudioProfile current)
+    {
+        if (current.ShortcutHistory.Count > 5000) current.ShortcutHistory.RemoveRange(0, current.ShortcutHistory.Count - 5000);
+    }
 
     internal void FinishTyping()
     {

@@ -214,7 +214,12 @@ namespace TouchTypingStudio
                 Error = "Не удалось сохранить прогресс. " + e.Message;
             }
             finally { if (locked) gate.ReleaseMutex(); }
-            return current ?? Read();
+            if (current != null) return current;
+            // A fallback read must not turn a failed update into a successful acknowledgement.
+            string updateError = Error;
+            current = Read();
+            if (updateError != null) Error = updateError;
+            return current;
         }
 
         private static bool IsStorageError(Exception e)

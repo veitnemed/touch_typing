@@ -2,7 +2,7 @@ name: Live input candidate (no publish)
 
 on:
   push:
-    branches: [feature/live-input-reliability]
+    branches: [feature/live-input-reliability, feature/live-file-recovery]
   workflow_dispatch:
 
 permissions:
@@ -117,7 +117,7 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: |
           tar -xzf "$RUNNER_TEMP/candidate/touch-typing-linux-x64.tar.gz" -C "$RUNNER_TEMP/candidate"
-          bash "$RUNNER_TEMP/candidate/touch-typing-linux-x64/check.sh" --terminal-only --output "$RUNNER_TEMP/linux-evidence" || {
+          bash "$RUNNER_TEMP/candidate/touch-typing-linux-x64/check.sh" --terminal-only --save-retry --output "$RUNNER_TEMP/linux-evidence" || {
             tail -n 80 -- "$RUNNER_TEMP/linux-evidence/"*.log
             exit 1
           }

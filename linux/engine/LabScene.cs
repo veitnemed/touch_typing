@@ -147,7 +147,7 @@ internal sealed partial class LabScene
         LayoutIsVirtual = source.LayoutIsVirtual; Search = source.Search;
         windowNumber = source.windowNumber;
         historyDraft = source.historyDraft; killedText = source.killedText;
-        fileTransfer = source.fileTransfer; fileCut = source.fileCut;
+        fileTransfer = source.fileTransfer; fileCut = source.fileCut; trashSequence = source.trashSequence;
         foreach (var item in source.trash) trash[item.Key] = item.Value;
         recentUrls.AddRange(source.recentUrls); downloads.AddRange(source.downloads);
         commands.AddRange(source.commands); commandIndex = source.commandIndex;

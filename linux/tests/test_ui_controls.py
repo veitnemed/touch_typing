@@ -237,13 +237,34 @@ class ControlsTest(LabWindowTest):
             self.lab.start();yield
             self.hold()
             try:
+                # Force a real local save failure through ProfileStore's target,
+                # in the isolated QA profile only. Not a mocked engine response.
+                profile = Path(os.environ.get("TOUCH_TYPING_QA_DATA_ROOT") or os.environ["XDG_DATA_HOME"]) / "TouchTypingStudio-QA"
+                profile.mkdir(exist_ok=True, parents=True)
+                obstacle = profile / "progress.xml.writing"
+                self.lab.release_capture()
+                self.lab.waiting_capture = False
+                self.call("lab-resume")
+                state = self.call("lab-key", key="A", pressed=True, text="a")
+                self.call("lab-key", key="A", pressed=False, text="")
+                assert state
+                obstacle.mkdir()
                 self.window.close()
                 for _ in range(20):yield
                 assert self.close_dialog and self.lab.state["paused"] and self.lab.surface is None
                 self.close_dialog.response(Gtk.ResponseType.ACCEPT)
                 for _ in range(20):yield
-                assert not self.window.get_visible(), "Closing confirmation must destroy the window"
+                assert self.window.get_visible(), "Failed save must veto window close"
+                assert self.lab.active and self.lab.save_pending and self.lab.state["paused"]
+                assert not self.lab.state["saved"] and self.lab.surface is None
+                self.lab.acquire()
+                assert self.lab.surface is None, "Save retry must not re-acquire keys"
+                obstacle.rmdir()
+                yield from self.click("Повторить сохранение")
+                assert not self.window.get_visible(), "Successful retry must finish the original close"
             finally:
+                if 'obstacle' in locals() and obstacle.is_dir():
+                    obstacle.rmdir()
                 self.release()
             assert not self.signal_errors, (self.signal_errors, self.trace)
             output = Path(os.environ.get("TOUCH_TYPING_QA_OUTPUT", "."))

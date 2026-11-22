@@ -5,6 +5,7 @@ using System.Linq;
 namespace TouchTypingStudio;
 
 internal sealed record LabEntry(string Title, string Path, string Kind);
+internal sealed record LabReportArtifact(string Path, string Content, bool DownloadStillPresent);
 
 internal sealed partial class LabScene
 {
@@ -13,9 +14,13 @@ internal sealed partial class LabScene
     private const string ReportBody = "piling-main · спектральный анализ\nstatus: draft\nsource: src/spectrum.py\n";
     private string fileTransfer = "";
     private bool fileCut;
+    private long trashSequence;
     private readonly Dictionary<string, string> trash = [];
     private readonly List<string> recentUrls = [], downloads = [];
     internal int DownloadCount => downloads.Count;
+    internal LabReportArtifact ReadReportArtifact() =>
+        new(Project + "/" + Report, Terminal.ReadFile(Project + "/" + Report),
+            Terminal.Exists("/home/student/Downloads/" + Report));
     private static readonly LabEntry[] Links = [
         new("Методика расчёта спектра", "https://practice.local/spectrum", "page"),
         new("Исходники piling-main", "https://github.com/veitnemed/piling-main", "page"),
@@ -223,15 +228,24 @@ internal sealed partial class LabScene
                 if (file == null) return false;
                 Clipboard = fileTransfer = file.Path; fileCut = action == "file-cut"; return true;
             case "file-paste":
-                if (fileTransfer.Length == 0 || Clipboard != fileTransfer) return false;
+                if (fileTransfer.Length == 0 || Clipboard != fileTransfer ||
+                    !Terminal.Exists(fileTransfer) || !Terminal.DirectoryExists(w.Folder) ||
+                    fileTransfer == w.Folder || fileTransfer[..Math.Max(1, fileTransfer.LastIndexOf('/'))] == w.Folder)
+                    return false;
                 Terminal.Transfer(fileTransfer, w.Folder, fileCut);
                 if (fileCut) fileTransfer = "";
                 w.Item = Array.FindIndex(Entries(w), item => item.Title == NameOf(Clipboard)); return true;
             case "trash":
                 var selected = Entries(w).ElementAtOrDefault(w.Item);
                 if (selected == null) return false;
-                string bin = "/home/student/.Trash/" + Guid.NewGuid().ToString("N") + "-" + selected.Title;
-                Terminal.Transfer(selected.Path, bin, true); trash.Add(bin, selected.Path); w.Item = -1; return true;
+                // Replay the same path after a restart; never overwrite a file already in the bin.
+                string bin;
+                long id = trashSequence;
+                do { bin = "/home/student/.Trash/" + (++id).ToString("x") + "-" + selected.Title; }
+                while (Terminal.Exists(bin) || trash.ContainsKey(bin));
+                Terminal.Transfer(selected.Path, bin, true);
+                trashSequence = id;
+                trash.Add(bin, selected.Path); w.Item = -1; return true;
             case "restore-trash":
                 if (trash.Count == 0) return false;
                 var last = trash.Last();

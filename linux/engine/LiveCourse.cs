@@ -7,7 +7,7 @@ namespace TouchTypingStudio;
 
 internal sealed record LivePhase(string Title, string Route);
 internal sealed record LiveMission(string App, int Level, string Id, string Title, LivePhase[] Phases);
-internal sealed record LiveGoal(int Phase, LabTask Task, string Target);
+internal sealed record LiveGoal(int Phase, LabTask Task, string Target, bool VerifyReport = false);
 
 internal static partial class LiveCourse
 {
@@ -39,7 +39,8 @@ internal static partial class LiveCourse
                     goals.Add(new(phase, change with { Title = "Переключите ввод на английский для команды" }, Evidence(change, trial)));
                 }
                 var task = MakeTask(token, trial);
-                string original = Evidence(task, trial);
+                bool verifyReport = mission.Id == "workday-report" && task.Id == "command/head -n 2 spectrum-report.txt";
+                string original = Evidence(task, trial, verifyReport: verifyReport);
                 var before = trial.Clone();
                 if (token.StartsWith("pick:") || token.StartsWith("quick:") || token.StartsWith("sym:"))
                 {
@@ -53,9 +54,9 @@ internal static partial class LiveCourse
                 else if (token == "bookmark" && trial.Active.SavedBookmarks.Contains(trial.Active.Url)) continue;
                 else if (token == "first-tab" && trial.Active.ActiveTab == 0 || token == "last-tab" && trial.Active.ActiveTab == trial.Active.Tabs.Count - 1) continue;
                 else if (!Demonstrate(task, trial)) throw new InvalidOperationException(mission.Id + ": недоступно " + token);
-                string proof = Evidence(task, trial);
+                string proof = Evidence(task, trial, verifyReport: verifyReport);
                 if (original == proof) { trial = before; continue; }
-                goals.Add(new(phase, task, proof));
+                goals.Add(new(phase, task, proof, verifyReport));
             }
         }
         if (goals.Count < 20) throw new InvalidOperationException(mission.Id + ": меньше 20 результатов");
@@ -102,13 +103,13 @@ internal static partial class LiveCourse
         return true;
     }
 
-    internal static string Evidence(LabTask task, LabScene scene, string equivalentCommand = null)
+    internal static string Evidence(LabTask task, LabScene scene, string equivalentCommand = null, bool verifyReport = false)
     {
         var w = scene.Active;
         string app = w?.App ?? "", action = task.Action;
         object value = action switch
         {
-            "command" or "terminal-submit" => new { command = equivalentCommand ?? scene.Terminal.LastCommand, scene.Terminal.LastSuccess, scene.Terminal.Cwd, scene.Terminal.LastOutput, input = scene.TerminalInput },
+            "command" or "terminal-submit" => new { command = equivalentCommand ?? scene.Terminal.LastCommand, scene.Terminal.LastSuccess, scene.Terminal.Cwd, scene.Terminal.LastOutput, input = scene.TerminalInput, report = verifyReport ? scene.ReadReportArtifact() : null },
             "terminal-history-up" or "terminal-history-down" or "terminal-erase" or "terminal-kill" or "terminal-yank" or "word-left" or "word-right" or "terminal-home" or "terminal-end" or "terminal-cancel" => new { scene.TerminalInput, w?.Cursor },
             "terminal-clear" => scene.Terminal.History.Count(),
             "overview" => scene.Overview, "desktop" => scene.ShowDesktop, "layout" => scene.Layout,

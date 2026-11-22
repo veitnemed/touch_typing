@@ -130,13 +130,37 @@ internal static class LiveUiSmoke
                 Check(match.Success && int.Parse(match.Groups[1].Value) > 0, "A completed class has a positive record");
             }
             if (Exists("LabResult")) Invoke("LabChooseClass");
+            Invoke("LabClass-terminal");
+            Select("LabDuration", 4);
+            Key("F5");
+            Until(delegate { return Exists("LabClock"); }, "lesson before stop storage failure");
+            Send(Character('a')); // Record an attempt so Finish must save even with no completed action.
+            WithBlockedProfile(delegate
+            {
+                Key("F10");
+                VerifyPendingSave();
+                Key("F8");
+                VerifyPendingSave();
+                Invoke("LabRetrySave");
+                VerifyPendingSave();
+            });
+            Invoke("LabRetrySave");
+            Until(delegate { return Exists("LabResult") && !Exists("LabSaveError"); }, "explicit stop retry saves");
+            Invoke("LabChooseClass");
+            Until(delegate { return Exists("LabStart"); }, "chooser after retried stop");
             Invoke("LabClass-ubuntu");
             Select("LabDuration", 4);
             Key("F5");
             Until(delegate { return Exists("LabClock"); }, "lesson before save-and-close");
+            Send(Character('a'));
             RequestClose();
             Until(delegate { return ExitDialog() != null; }, "save-and-close dialog");
-            InvokeDialog("LabExitSave");
+            WithBlockedProfile(delegate
+            {
+                InvokeDialog("LabExitSave");
+                VerifyPendingSave();
+            });
+            Invoke("LabRetrySave");
             var closing = Stopwatch.StartNew();
             while (!app.HasExited && closing.ElapsedMilliseconds < 6000) { Wait(80); app.Refresh(); }
             Check(app.HasExited, "Confirmed close exits the trainer");
@@ -160,6 +184,23 @@ internal static class LiveUiSmoke
                 app.Dispose();
             }
         }
+    }
+
+    private static void WithBlockedProfile(Action attempt)
+    {
+        using (var gate = new Mutex(false, @"Local\TouchTypingStudio.QA.Profile"))
+        {
+            if (!gate.WaitOne(3000)) throw new InvalidOperationException("Could not seize the isolated QA profile gate.");
+            try { attempt(); }
+            finally { gate.ReleaseMutex(); }
+        }
+    }
+
+    private static void VerifyPendingSave()
+    {
+        Until(delegate { return Exists("LabSaveError") && Exists("LabRetrySave"); }, "explicit retry after failed save");
+        Check(!app.HasExited && Exists("LabDesktop") && !Exists("LabResult") && !Exists("LabStart"),
+            "A failed write keeps the live lesson without a saved result or new chooser");
     }
 
     private static void Solve(int attempts, bool full)
