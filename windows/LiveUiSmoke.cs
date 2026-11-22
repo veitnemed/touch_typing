@@ -263,12 +263,18 @@ internal static class LiveUiSmoke
         Send(new[] { ctrl.Down() });
         try
         {
-            CheckFocusLoss(delegate { Send(new[] { ctrl.Up() }); });
+            CheckFocusLoss(ReleaseProbeCtrl);
             Send(new[] { left.Down() });
             Key("Delete");
             Check(Find("LabDesktop").Current.HelpText == initial + "a", "Held pre-pause arrow is ignored after focus regain");
         }
-        finally { Send(new[] { left.Up(), ctrl.Up() }); }
+        catch
+        {
+            try { Focus(); Send(new[] { left.Up(), ctrl.Up() }); }
+            catch (Exception cleanupError) { Console.Error.WriteLine("Terminal input cleanup failed: " + cleanupError.Message); }
+            throw;
+        }
+        Send(new[] { left.Up(), ctrl.Up() });
         Key("Right");
         Key("Backspace");
         Until(delegate { return Find("LabDesktop").Current.HelpText == initial; }, "fresh editing keys work after focus recovery");
@@ -473,10 +479,21 @@ internal static class LiveUiSmoke
         var strokes = Parse((upper ? "Shift+" : "") + key);
         return strokes.Select(stroke => stroke.Down()).Concat(strokes.Reverse().Select(stroke => stroke.Up())).ToArray();
     }
-    private static void Send(Stroke[] strokes)
+    private static void Send(Stroke[] strokes) { SendTo(trainer, strokes); }
+
+    private static void ReleaseProbeCtrl()
     {
-        if (GetForegroundWindow() != trainer || app.HasExited)
-            throw new InvalidOperationException("Input stopped because the QA trainer lost foreground focus.");
+        uint owner;
+        if (focusProbe == IntPtr.Zero || GetWindowThreadProcessId(focusProbe, out owner) == 0 ||
+            owner != (uint)Process.GetCurrentProcess().Id)
+            throw new InvalidOperationException("The QA probe is not owned by the smoke runner.");
+        SendTo(focusProbe, new[] { Parse("LCtrl").Single().Up() });
+    }
+
+    private static void SendTo(IntPtr expectedForeground, Stroke[] strokes)
+    {
+        if (GetForegroundWindow() != expectedForeground || app.HasExited)
+            throw new InvalidOperationException("Input stopped because the expected QA window lost foreground focus.");
         var inputs = strokes.Select(stroke => new Input { Type = 1, Data = new InputData {
             Keyboard = new KeyboardInput { Scan = (ushort)stroke.Scan, Flags = 8u | (stroke.Extended ? 1u : 0u) | (stroke.Released ? 2u : 0u) } } }).ToArray();
         if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length)
