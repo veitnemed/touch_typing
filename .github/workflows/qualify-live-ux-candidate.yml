@@ -1,0 +1,121 @@
+name: Qualify TouchTyping Live UX candidate (no publication)
+on:
+  push:
+    branches: [qa/live-ux-compact-native]
+permissions:
+  contents: read
+env:
+  PRODUCT_SHA: da6b38a475e55beddc96a1838c8f53616bd2e45e
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: da6b38a475e55beddc96a1838c8f53616bd2e45e
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build exact production archives and verify Live profile isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRODUCT_SHA"
+          p="$RUNNER_TEMP/ux"
+          mkdir -p "$p"
+          bash linux/build-release.sh "$p/touch-typing-linux-x64"
+          export PYTHONPATH="$PWD/linux" TOUCH_TYPING_ENGINE="$p/touch-typing-linux-x64/engine/TouchTyping.Engine"
+          /usr/bin/python3 linux/tests/test_live_entry_preferences.py
+          /usr/bin/python3 linux/tests/test_live_missions.py
+          bash windows/build-release.sh "$p/windows-x64"
+          tar --sort=name --mtime='UTC 2026-11-23' --owner=0 --group=0 --numeric-owner -czf             "$p/touch-typing-live-ux-linux-x64.tar.gz" -C "$p" touch-typing-linux-x64
+          (cd "$p/windows-x64" && zip -qr "$p/touch-typing-live-ux-windows-x64.zip" .)
+          unzip -tq "$p/touch-typing-live-ux-windows-x64.zip"
+          printf '%s\n' "$PRODUCT_SHA" > "$p/SOURCE-SHA.txt"
+          (cd "$p" && sha256sum touch-typing-live-ux-* > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: live-ux-native-archives
+          path: |
+            ${{ runner.temp }}/ux/touch-typing-live-ux-linux-x64.tar.gz
+            ${{ runner.temp }}/ux/touch-typing-live-ux-windows-x64.zip
+            ${{ runner.temp }}/ux/SHA256SUMS.txt
+            ${{ runner.temp }}/ux/SOURCE-SHA.txt
+          if-no-files-found: error
+  windows-native:
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 13
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: live-ux-native-archives
+          path: ${{ runner.temp }}/input
+      - name: Launch the extracted stock Windows build and check the one-action Chrome route
+        shell: powershell
+        run: |
+          $os = Get-CimInstance Win32_OperatingSystem
+          Write-Host "$($os.Caption) $($os.BuildNumber) $env:RUNNER_ARCH"
+          if ((Get-Content -LiteralPath "$env:RUNNER_TEMP/input/SOURCE-SHA.txt" -Raw).Trim() -ne $env:PRODUCT_SHA) { throw 'Source SHA mismatch.' }
+          $zip = "$env:RUNNER_TEMP/input/touch-typing-live-ux-windows-x64.zip"
+          $want = ((Get-Content -LiteralPath "$env:RUNNER_TEMP/input/SHA256SUMS.txt" | Where-Object { $_ -match 'windows-x64\.zip$' }) -split '\s+')[0]
+          if ($want -notmatch '^[0-9a-f]{64}$' -or (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne $want) { throw 'ZIP SHA mismatch.' }
+          Write-Host "Archive SHA256: $want"
+          Expand-Archive -LiteralPath $zip -DestinationPath "$env:RUNNER_TEMP/TouchTyping Stock Extract"
+          $dir = "$env:RUNNER_TEMP/TouchTyping Stock Extract"
+          Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
+          function Find-InApp($root, [string]$id) {
+            $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, $id)
+            return $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
+          }
+          function Wait-InApp($root, [string]$id) {
+            for ($i = 0; $i -lt 90; $i++) {
+              $element = Find-InApp $root $id
+              if ($element -and -not $element.Current.IsOffscreen) { return $element }
+              Start-Sleep -Milliseconds 150
+            }
+            throw "Stock application expected visible $id."
+          }
+          if (Test-Path "$env:LOCALAPPDATA/TouchTypingStudio/progress.xml") { throw 'Stock profile was not fresh.' }
+          & "$dir/Start-Live.cmd"
+          $app = $null
+          try {
+            for ($i = 0; $i -lt 90 -and -not $app; $i++) {
+              $app = Get-Process -Name TouchTyping -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq "$dir/TouchTyping.exe".Replace('/','\') -and $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+              if (-not $app) { Start-Sleep -Milliseconds 150 }
+            }
+            if (-not $app) { throw 'Stock Start-Live.cmd did not open the trainer window.' }
+            $root = [Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
+            [void](Wait-InApp $root 'ReferenceNav-practice')
+            [void](Wait-InApp $root 'ReferenceNav-learn')
+            if ((Find-InApp $root 'ReferenceNav-home') -or (Find-InApp $root 'ReferenceNav-progress')) { throw 'Unexpected top-level section.' }
+            $card = Wait-InApp $root 'HomeClass-chrome'
+            $card.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+            [void](Wait-InApp $root 'LabTask')
+            [void](Wait-InApp $root 'LabDesktop')
+            if (Find-InApp $root 'LabMission') { throw 'Stock Chrome click opened a second chooser.' }
+            Write-Host 'PASS: ordinary Start-Live.cmd, fresh profile, two sections, one Chrome card activation to visible first task'
+          } finally {
+            if ($app -and -not $app.HasExited) { Stop-Process -Id $app.Id -ErrorAction SilentlyContinue }
+          }
+      - name: Drive the actual unpacked WPF window and retain visual evidence
+        shell: powershell
+        run: |
+          $dir = "$env:RUNNER_TEMP/TouchTyping Stock Extract"
+          $root = "$env:RUNNER_TEMP/live-ux-native-proof"
+          foreach ($mode in @('LiveUx', 'LiveUxSmall')) {
+            $report = Join-Path $root $mode
+            $options = @{ Application = "$dir/TouchTyping.exe"; OutputDirectory = $report }
+            $options[$mode] = $true
+            & "$dir/Test-Live-UI.ps1" @options
+            $status = Get-Content -LiteralPath "$report/report.json" -Raw | ConvertFrom-Json
+            if ($status.status -ne 'passed') { throw "WPF $mode did not pass." }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-ux-native-windows-proof
+          path: ${{ runner.temp }}/live-ux-native-proof/
+          if-no-files-found: warn
