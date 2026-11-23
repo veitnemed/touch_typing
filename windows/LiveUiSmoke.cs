@@ -58,7 +58,7 @@ internal static class LiveUiSmoke
             Focus();
             if (liveUx)
             {
-                if (liveUxSmall) ResizeOwnedEditorClient(1024, 600);
+                if (liveUxSmall) ResizeOwnedEditorClient(1024, 600, true);
                 CheckLiveUx(path, liveUxSmall);
                 Console.WriteLine("PASS: " + count + " WPF Live direct-catalog and Configure assertions");
                 return 0;
@@ -361,7 +361,7 @@ internal static class LiveUiSmoke
         Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "trainer restarts", 12000);
         window = AutomationElement.FromHandle(trainer);
         Focus();
-        if (small) ResizeOwnedEditorClient(1024, 600);
+        if (small) ResizeOwnedEditorClient(1024, 600, true);
         Invoke("LiveResume-chrome");
         Until(delegate { return Visible("LabDesktop") && ReadSolved() == 1; }, "explicit Continue resumes the saved first credit");
         Check(Visible("LiveAidPanel") && Find("LiveAidPanel").Current.ItemStatus == "keyboard;no-hands",
@@ -979,7 +979,7 @@ internal static class LiveUiSmoke
         }
     }
 
-    private static void ResizeOwnedEditorClient(int width, int height)
+    private static void ResizeOwnedEditorClient(int width, int height, bool fitVisibleClient = false)
     {
         Check(!app.HasExited && window.Current.ProcessId == app.Id && GetForegroundWindow() == trainer,
             "Resize only the owned foreground trainer window");
@@ -994,9 +994,19 @@ internal static class LiveUiSmoke
                 throw new InvalidOperationException("Cannot read exact editor client and outer frame.");
             int fullWidth = outer.Right - outer.Left + width - (client.Right - client.Left);
             int fullHeight = outer.Bottom - outer.Top + height - (client.Bottom - client.Top);
-            if (!bounds.Contains(new Rectangle(area.X, area.Y, fullWidth, fullHeight)))
+            int left = area.X, top = area.Y;
+            if (fitVisibleClient)
+            {
+                var origin = new CapturePoint();
+                if (!ClientToScreen(trainer, ref origin) ||
+                    !area.Contains(new Rectangle(area.X, area.Y, width, height)))
+                    throw new InvalidOperationException("Exact Live client does not fit in the visible work area: " + area);
+                left -= origin.X - outer.Left;
+                top -= origin.Y - outer.Top;
+            }
+            else if (!bounds.Contains(new Rectangle(left, top, fullWidth, fullHeight)))
                 throw new InvalidOperationException("Exact editor client needs a larger disposable display, refusing to crop or scale.");
-            if (!SetWindowPos(trainer, IntPtr.Zero, area.X, area.Y, fullWidth, fullHeight, 0x0014))
+            if (!SetWindowPos(trainer, IntPtr.Zero, left, top, fullWidth, fullHeight, 0x0014))
                 throw new InvalidOperationException("Could not size owned editor window.");
             Wait(180);
         }
@@ -1004,6 +1014,12 @@ internal static class LiveUiSmoke
         CaptureRect final;
         Check(GetClientRect(trainer, out final) && final.Right - final.Left == width && final.Bottom - final.Top == height &&
             GetDpiForWindow(trainer) == 96, "Physical editor client is exactly " + width + "x" + height + " @96 DPI");
+        if (fitVisibleClient)
+        {
+            var origin = new CapturePoint();
+            Check(ClientToScreen(trainer, ref origin) && area.Contains(new Rectangle(origin.X, origin.Y, width, height)),
+                "All physical client pixels visible unscaled: origin=" + origin.X + "," + origin.Y + "; work area=" + area + "; display=" + bounds);
+        }
     }
 
     private static bool NearColor(Color value, int r, int g, int b, int tolerance)

@@ -2424,6 +2424,8 @@ class LabPage(Gtk.Box):
         self.surface = None
         self.handler = None
         self.capture_timeout = 0
+        self.capture_denied_timer = 0
+        self.capture_generation = 0
         self.waiting_capture = False
         self.limit_modal_signature = None
         self.limit_resume_wait = False
@@ -2937,22 +2939,23 @@ class LabPage(Gtk.Box):
         self.waiting_capture = True
         self.modal_layer.set_visible(False)
         self.surface = surface
-        self.handler = surface.connect("notify::shortcuts-inhibited", lambda *_: GLib.idle_add(self.resolve_capture))
+        generation = self.capture_generation
+        self.handler = surface.connect("notify::shortcuts-inhibited",
+                                       lambda *_: GLib.idle_add(self.resolve_capture, generation))
         surface.inhibit_system_shortcuts(None)
-        self.capture_timeout = GLib.timeout_add_seconds(15, self.capture_expired)
-        GLib.timeout_add(700, self.check_denied)
+        self.capture_timeout = GLib.timeout_add_seconds(15, self.capture_expired, generation)
+        self.schedule_capture_denial(generation, 700)
         self.status.set_label("В диалоге GNOME разрешите перехват клавиш для учебного рабочего стола.")
         self.status.set_visible(True)
-        GLib.idle_add(self.resolve_capture)
+        GLib.idle_add(self.resolve_capture, generation)
 
-    def resolve_capture(self):
-        if self.limit_resume_wait or (self.state or {}).get("limitDecisionPending"):
+    def resolve_capture(self, generation):
+        if (generation != self.capture_generation or self.limit_resume_wait
+                or (self.state or {}).get("limitDecisionPending")):
             return GLib.SOURCE_REMOVE
         if self.active and self.surface and self.surface.get_property("shortcuts-inhibited") and self.host.window.is_active():
             self.waiting_capture = False
-            if self.capture_timeout:
-                GLib.source_remove(self.capture_timeout)
-                self.capture_timeout = 0
+            self.clear_capture_timers()
             state = self.host.call("lab-resume")
             if state:
                 self.render(state)
@@ -2962,7 +2965,14 @@ class LabPage(Gtk.Box):
             self.pause_run("Система вернула горячие клавиши. Разрешите их захват, чтобы продолжить.")
         return GLib.SOURCE_REMOVE
 
-    def check_denied(self):
+    def schedule_capture_denial(self, generation, delay):
+        if generation == self.capture_generation and not self.capture_denied_timer:
+            self.capture_denied_timer = GLib.timeout_add(delay, self.check_denied, generation)
+
+    def check_denied(self, generation):
+        if generation != self.capture_generation:
+            return GLib.SOURCE_REMOVE
+        self.capture_denied_timer = 0
         if self.active and self.waiting_capture and self.host.window.is_active() and self.surface and not self.surface.get_property("shortcuts-inhibited"):
             self.waiting_capture = False
             self.release_capture()
@@ -2971,7 +2981,9 @@ class LabPage(Gtk.Box):
             self.show_pause_modal()
         return GLib.SOURCE_REMOVE
 
-    def capture_expired(self):
+    def capture_expired(self, generation):
+        if generation != self.capture_generation:
+            return GLib.SOURCE_REMOVE
         self.capture_timeout = 0
         if self.waiting_capture and self.host.window.is_active():
             self.waiting_capture = False
@@ -2981,10 +2993,18 @@ class LabPage(Gtk.Box):
             self.show_pause_modal()
         return GLib.SOURCE_REMOVE
 
+    def clear_capture_timers(self):
+        for timer in ("capture_timeout", "capture_denied_timer"):
+            source = getattr(self, timer)
+            if source:
+                GLib.source_remove(source)
+                setattr(self, timer, 0)
+
     def release_capture(self):
-        if self.capture_timeout:
-            GLib.source_remove(self.capture_timeout)
-            self.capture_timeout = 0
+        # GLib may already have dispatched a notification from the old
+        # surface; it cannot resolve or deny the newer request.
+        self.capture_generation += 1
+        self.clear_capture_timers()
         if self.surface:
             self.surface.disconnect(self.handler)
             self.surface.restore_system_shortcuts()
@@ -3021,8 +3041,9 @@ class LabPage(Gtk.Box):
             return
         if active:
             if self.waiting_capture:
-                GLib.idle_add(self.resolve_capture)
-                GLib.timeout_add(300, self.check_denied)
+                generation = self.capture_generation
+                GLib.idle_add(self.resolve_capture, generation)
+                self.schedule_capture_denial(generation, 300)
         elif not self.waiting_capture:
             self.pause_run("Пауза. Вернитесь в тренажёр и нажмите пробел.")
 

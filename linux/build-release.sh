@@ -43,5 +43,5 @@ install -m 644 -- "$source_dir/tests/test_live_missions.py" "$source_dir/tests/t
 install -m 644 -- "$source_dir/tests/capture_home_reference.py" "$target/qa/"
 install -m 644 -- "$source_dir/tests/record_terminal_window.py" "$target/qa/"
 install -m 644 -- "$source_dir/tests/test_native_selection_render.py" "$target/qa/"
-install -m 644 -- "$source_dir/tests/test_debug_day.py" "$source_dir/tests/test_live_entry_preferences.py" "$target/qa/"
+install -m 644 -- "$source_dir/tests/test_debug_day.py" "$source_dir/tests/test_live_entry_preferences.py" "$source_dir/tests/test_live_capture_generation.py" "$target/qa/"
 install -m 644 -- "$source_dir/tests/fixtures/v1.7.0-workday-report.xml.gz" "$target/qa/fixtures/"

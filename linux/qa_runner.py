@@ -132,6 +132,7 @@ def run_checks(args):
             check("missions", [sys.executable, str(tests / "test_live_missions.py")], timeout=300)
             check("protocol", [sys.executable, str(tests / "test_practice.py")])
             check("live-entry-preferences", [sys.executable, str(tests / "test_live_entry_preferences.py")])
+            check("live-capture-generation", [sys.executable, str(tests / "test_live_capture_generation.py")])
         subprocess.run(["gsettings", "set", "org.gnome.desktop.input-sources", "sources",
                         "[('xkb', 'us'), ('xkb', 'ru')]"], env=environment, check=True)
         shell_output = (args.output / "compositor.log").open("w", encoding="utf-8")
