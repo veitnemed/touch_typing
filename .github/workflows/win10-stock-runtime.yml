@@ -99,7 +99,21 @@ jobs:
             Add-Content -LiteralPath (Join-Path $output 'provenance.txt')
           $probe = Join-Path $env:GITHUB_WORKSPACE 'reviewed-probe/windows/Test-HostedNormalLaunch.ps1'
           & $probe -Application (Join-Path $appDir 'TouchTyping.exe') -OutputDirectory $output
-          if (-not (Select-String -LiteralPath (Join-Path $output 'windows-normal-launch.log') -Pattern '^PASS: [1-9][0-9]* stock Windows 1\.9\.0 runtime assertions$')) {
+          # Windows PowerShell can append UTF-16LE output to a differently encoded header.
+          $raw = [IO.File]::ReadAllBytes((Join-Path $output 'windows-normal-launch.log'))
+          $normalized = [Text.Encoding]::UTF8.GetString($raw).Replace([string][char]0, '').Replace([string][char]65279, '')
+          if ($normalized -notmatch '(?m)^PASS: [1-9][0-9]* stock Windows 1\.9\.0 runtime assertions\r?
+            throw 'Proof process did not record the required positive assertion summary.'
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: touchtyping-190-stock-windows-verification
+          path: |
+            ${{ runner.temp }}/stock-evidence/provenance.txt
+            ${{ runner.temp }}/stock-evidence/windows-normal-launch.log
+          if-no-files-found: warn
+) {
             throw 'Proof process did not record the required positive assertion summary.'
           }
       - uses: actions/upload-artifact@v4
