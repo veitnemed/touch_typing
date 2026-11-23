@@ -54,6 +54,7 @@ jobs:
             "workbench.startupEditor": "none",
             "window.zoomLevel": 0,
             "window.menuBarVisibility": "compact",
+            "window.title": "${activeEditorShort}${separator}${rootName}${separator}${appName}",
             "editor.fontFamily": "'DejaVu Sans Mono', monospace",
             "editor.fontSize": 14,
             "editor.cursorBlinking": "solid",
@@ -83,27 +84,71 @@ jobs:
           mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
           openbox --sm-disable > "$work/openbox.log" 2>&1 &
           wm=$!; editor=
-          trap 'for pid in "$editor" "$wm"; do [[ ! $pid ]] || kill "$pid" 2>/dev/null || true; done' EXIT
-          code=("$work/editor/bin/code" --user-data-dir "$work/profile" --extensions-dir "$work/extensions")
-          "${code[@]}" --force-device-scale-factor=1 --disable-gpu --new-window --wait "$work/task-list" > "$work/code.log" 2>&1 &
+          cleanup() {
+            local status=$?
+            if ((status)); then
+              printf 'Capture stopped at %s with exit %s.\n' "${phase:-startup}" "$status"
+              wmctrl -lpx || true
+              xwininfo -root -tree | head -n60 || true
+              for name in openbox.log code.log navigation.log; do
+                if [[ -f "$work/$name" ]]; then
+                  printf '\n-- %s --\n' "$name"
+                  tail -n40 "$work/$name" || true
+                fi
+              done
+            fi
+            for pid in "$editor" "$wm"; do [[ ! $pid ]] || kill "$pid" 2>/dev/null || true; done
+          }
+          trap cleanup EXIT
+          phase=window-manager
+          for _ in {1..40}; do wmctrl -m >/dev/null 2>&1 && break; sleep .25; done
+          wmctrl -m
+          direct="$work/editor/code"
+          launcher="$work/editor/bin/code"
+          isolated=(--user-data-dir "$work/profile" --extensions-dir "$work/extensions")
+          phase=launch
+          "$direct" "${isolated[@]}" --force-device-scale-factor=1 --disable-gpu --password-store=basic \
+            --new-window "$work/task-list" > "$work/code.log" 2>&1 &
           editor=$!
-          win=$(timeout 40 xdotool search --sync --onlyvisible --all --limit 1 --class Code --name 'task-list.*Visual Studio Code')
+          find_owned() {
+            # Match the native PID and substring only. Unlike xdotool search, this
+            # is stable with respect to WM_CLASS and Unicode title delimiters.
+            local text=$1 listing id
+            for _ in {1..100}; do
+              if ! kill -0 "$editor" 2>/dev/null; then return 1; fi
+              listing=$(wmctrl -lp)
+              id=$(awk -v pid="$editor" -v needle="$text" '$3 == pid && index($0,needle) {print $1; exit}' <<<"$listing")
+              if [[ $id ]]; then printf '%s\n' "$id"; return; fi
+              sleep .25
+            done
+            return 124
+          }
+          phase=owned-workspace
+          win=$(find_owned task-list)
+          xprop -id "$win" _NET_WM_PID _NET_WM_NAME WM_CLASS
           xdotool windowactivate --sync "$win"
-          # This is a native Editor command line navigation in the running window.
-          "${code[@]}" --reuse-window --goto "$work/task-list/app.py:8:5"
-          win=$(timeout 30 xdotool search --sync --onlyvisible --all --limit 1 --class Code --name 'app.py.*task-list.*Visual Studio Code')
+          phase=exact-file-navigation
+          timeout 20 "$launcher" "${isolated[@]}" --reuse-window --goto "$work/task-list/app.py:8:5" \
+            > "$work/navigation.log" 2>&1
+          win=$(find_owned app.py)
+          title=$(xdotool getwindowname "$win")
+          [[ "$title" == *app.py* && "$title" == *task-list* ]]
+          xprop -id "$win" _NET_WM_PID _NET_WM_NAME
           xdotool windowactivate --sync "$win"
-          wmctrl -ir "$(printf '%#x' "$win")" -b add,maximized_vert,maximized_horz
+          wmctrl -ir "$win" -b add,maximized_vert,maximized_horz
           sleep 1
+          phase=selection
           xdotool key --clearmodifiers --repeat 8 --delay 40 shift+Right
           xdotool key --clearmodifiers ctrl+c
           selected=$(timeout 5 xclip -selection clipboard -out)
-          [[ "$selected" == add_task ]]
+          [[ "$selected" == add_task ]] || { printf 'Unexpected clipboard selection: %q\n' "$selected"; exit 1; }
+          phase=frame
           xdotool mousemove 1320 725
           import -window root "$report/vscode-github-dark-default-task-list.png"
           test "$(identify -format '%wx%h' "$report/vscode-github-dark-default-task-list.png")" = 1366x768
           # Ensure the editor background is actually rendered, rather than a blank or modal screen.
           editor_color=$(convert "$report/vscode-github-dark-default-task-list.png" -format '%[pixel:p{900,440}]' info:)
+          printf 'Editor pixel: %s\n' "$editor_color"
           [[ "$editor_color" == 'srgb(13,17,23)' || "$editor_color" == 'srgba(13,17,23,1)' ]]
           {
             xdpyinfo | grep -E 'dimensions:|resolution:'
@@ -114,7 +159,7 @@ jobs:
               "editor sampled color=$editor_color"
           } > "$report/frame-state.txt"
           CAPTURE
-          xvfb-run -a -s '-screen 0 1366x768x24 -dpi 96 -nolisten tcp' bash "$REFERENCE_WORK/capture.sh"
+          dbus-run-session -- xvfb-run -a -s '-screen 0 1366x768x24 -dpi 96 -nolisten tcp' bash "$REFERENCE_WORK/capture.sh"
       - uses: actions/upload-artifact@v4
         with:
           name: official-vscode-task-list-reference
