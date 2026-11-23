@@ -894,7 +894,7 @@ class Studio(Gtk.Application):
         scene.set_vexpand(True)
         backdrop = ReferenceCanvas(draw_reference_wave, max_height=245)
         scene.set_child(backdrop)
-        board = box(Gtk.Orientation.VERTICAL, 19, "reference-board")
+        board = box(Gtk.Orientation.VERTICAL, 23, "reference-board")
         board.set_valign(Gtk.Align.START)
         hero = box(Gtk.Orientation.VERTICAL, 6, "reference-hero")
         add(hero, text("Практика без мыши", "reference-hero-title"),
@@ -903,7 +903,7 @@ class Studio(Gtk.Application):
         commands = add(row(10, "reference-catalog-head"), expand(hero), self.configure_live())
         self.live_config.set_valign(Gtk.Align.START)
         board.append(commands)
-        modules = Gtk.Grid(column_homogeneous=True, column_spacing=0, row_spacing=15)
+        modules = Gtk.Grid(column_homogeneous=True, column_spacing=0, row_spacing=23)
         modules.add_css_class("reference-modules")
         catalog = self.call("lab-catalog") or {}
         classes = catalog.get("classes", ())
@@ -943,10 +943,10 @@ class Studio(Gtk.Application):
             self.home_cards[module] = tile
             x, y, span, left, right = [(0, 0, 16, 0, 20), (16, 0, 15, 0, 20), (31, 0, 14, 0, 0),
                                        (0, 1, 17, 9, 8), (17, 1, 19, 20, 23)][index]
-            tile.set_margin_start(left)
-            tile.set_margin_end(right)
             tile.set_vexpand(False)
             card_group = Gtk.Overlay()
+            card_group.set_margin_start(left)
+            card_group.set_margin_end(right)
             card_group.set_child(tile)
             controls = row(5, "reference-card-controls")
             controls.set_halign(Gtk.Align.END)
