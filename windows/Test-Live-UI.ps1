@@ -3,6 +3,7 @@ param(
     [string]$Application,
     [switch]$FullSession,
     [switch]$WorkdaySourceNote,
+    [switch]$ReferenceEvidence,
     [int]$Seed = 20261122,
     [string]$OutputDirectory = (Join-Path $PSScriptRoot ('ui-check-' + (Get-Date -Format 'yyyyMMdd-HHmmss')))
 )
@@ -31,6 +32,7 @@ $report = [ordered]@{
     application = $Application
     fullSession = [bool]$FullSession
     workdaySourceNote = [bool]$WorkdaySourceNote
+    referenceEvidence = [bool]$ReferenceEvidence
     profile = 'TouchTypingStudio-QA'
     log = 'windows-ui.log'
 }
@@ -43,11 +45,13 @@ try {
     $report | ConvertTo-Json | Set-Content -LiteralPath $reportFile -Encoding UTF8
     & (Join-Path $framework 'csc.exe') /nologo /target:exe /platform:x64 /codepage:65001 "/out:$test" `
         "/reference:$framework\WPF\UIAutomationClient.dll" "/reference:$framework\WPF\UIAutomationTypes.dll" `
-        "/reference:$framework\WPF\WindowsBase.dll" "/reference:$framework\System.Xml.dll" $source 2>&1 | Tee-Object -FilePath $log
+        "/reference:$framework\WPF\WindowsBase.dll" "/reference:$framework\System.Xml.dll" `
+        "/reference:$framework\System.Drawing.dll" "/reference:$framework\System.Windows.Forms.dll" $source 2>&1 | Tee-Object -FilePath $log
     if ($LASTEXITCODE -ne 0) { throw 'UI smoke runner compilation failed.' }
     $arguments = @($Application)
     if ($FullSession) { $arguments += '--full-session' }
     if ($WorkdaySourceNote) { $arguments += '--workday-source-note' }
+    if ($ReferenceEvidence) { $arguments += '--reference-evidence' }
     # Windows PowerShell 5 wraps native stderr as errors. Do not abort the
     # pipeline on the first diagnostic line; the native exit code is the gate.
     $oldPreference = $ErrorActionPreference

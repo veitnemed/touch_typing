@@ -94,7 +94,9 @@ jobs:
           $proc = Start-Process $app -ArgumentList "--qa --check-live-render `"$render`"" -Wait -PassThru
           Get-Content (Join-Path $render result.txt)
           if ($proc.ExitCode -ne 0) { throw 'WPF render failed' }
-          & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -OutputDirectory (Join-Path $out 'keyboard')
+          $visualOptions = @{}
+          if ($env:GITHUB_REF -eq 'refs/heads/feature/reference-ui') { $visualOptions.ReferenceEvidence = $true }
+          & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -OutputDirectory (Join-Path $out 'keyboard') @visualOptions
       - name: Complete the Workday source note through the native WPF window
         shell: powershell
         run: |
@@ -136,7 +138,7 @@ jobs:
         run: |
           tar -xzf "$RUNNER_TEMP/candidate/touch-typing-linux-x64.tar.gz" -C "$RUNNER_TEMP/candidate"
           extra=()
-          if [[ "$GITHUB_REF" == 'refs/heads/feature/reference-ui' ]]; then extra+=(--reference-home); fi
+          if [[ "$GITHUB_REF" == 'refs/heads/feature/reference-ui' ]]; then extra+=(--reference-home --reference-terminal); fi
           bash "$RUNNER_TEMP/candidate/touch-typing-linux-x64/check.sh" --terminal-only --save-retry --gallery --source-note "${extra[@]}" --output "$RUNNER_TEMP/linux-evidence" || {
             tail -n 80 -- "$RUNNER_TEMP/linux-evidence/"*.log
             exit 1

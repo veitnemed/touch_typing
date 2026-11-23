@@ -260,3 +260,49 @@ button.reference-card.module-code, button.reference-card.module-workday { paddin
   outline: 2px solid #dfcaff; outline-offset: -4px;
 }
 window.reference-window > .titlebar { background: #1e1734; border: 0; box-shadow: none; }
+
+/* Live practice uses the reference palette; the engine still owns every
+   objective, key chord, preview field, progress value and recovery state. */
+.reference-lesson-chrome { background: #1c173a; color: #fcf8ff; min-height: 51px; padding: 0 13px 0 11px; }
+.reference-lesson-name { color: #fdfaff; font-size: 16px; font-weight: 760; }
+.reference-lesson-chrome button { background: transparent; border-color: transparent; color: #e2d7fc; padding: 0 4px; min-width: 19px; min-height: 27px; }
+.reference-lesson-chrome button:hover { background: #3b305f; color: #fff; }
+.lab-page.reference-live { background: linear-gradient(160deg,#1a1536,#16122b 62%,#22183d); padding: 4px 16px 15px; }
+.reference-live .lab-content { padding: 0; }
+.reference-live .reference-goal { background: #241c50; border: 1px solid #4b3777; border-radius: 13px; min-height: 46px; padding: 8px 10px; margin-bottom: 12px; }
+.reference-practice-icon { background: #372c58; color: #bfb1ff; border-radius: 11px; padding: 7px; }
+.reference-step-heading { color: #d1bff9; font-size: 13px; }
+.reference-goal-title { color: #fcf8ff; font-size: 15px; font-weight: 750; }
+.reference-gesture { padding: 4px; border-radius: 10px; background: #342a60; }
+.reference-keycap { background: linear-gradient(#4d4279,#39305d); min-width: 18px; min-height: 27px; border: 1px solid #66578f; border-radius: 7px; color: #fff; font-size: 14px; font-weight: 700; padding: 2px 9px; }
+.reference-key-join { color: #e6d9ff; font-weight: 750; }
+.reference-workspace { border-radius: 11px; background: #24203c; }
+.reference-live .reference-lesson-footer { background: #211a3e; border-radius: 11px; margin-top: 8px; padding: 7px 8px 7px 12px; min-height: 48px; }
+.reference-step-footer { color: #ece2ff; font-size: 13px; }
+.reference-lesson-footer .reference-meter trough, .reference-lesson-footer .reference-meter progress { min-height: 12px; }
+button.reference-round-control { min-width: 32px; min-height: 35px; padding: 3px 7px; font-size: 22px; color: #fff; background: linear-gradient(#4c4176,#3b325d); border: 1px solid #65558e; border-radius: 10px; }
+button.reference-round-control:hover, button.reference-round-control:focus-visible { background: #66519b; }
+.reference-live-feedback { background: #302545; color: #eee4ff; padding: 4px 7px; border-radius: 6px; }
+.reference-live-feedback.bad { background: #482744; color: #ffd4dd; }
+.reference-long-help { background: #211b42; color: #e6dcff; padding: 8px 11px; font-size: 13px; }
+button.reference-hint { color: #f3eaff; background: #3c2f68; border-color: #674a96; }
+.lab-page.reference-live .lab-content { background: transparent; padding: 0; }
+.reference-live .reference-workspace { border: 1px solid #3b3062; }
+.reference-live .lab-modal-layer { background: alpha(#191331,.94); }
+.reference-modal-panel { color: #fcf7ff; background: linear-gradient(150deg,#26204a,#1b1534); border: 1px solid #4a376d; border-radius: 14px; padding: 16px; }
+.reference-modal-title { font-size: 26px; font-weight: 800; color: #fdf9ff; }
+.reference-modal-subtitle { font-size: 14px; color: #d9c9f3; }
+.reference-result-check { background: #203f3c; border-radius: 11px; padding: 8px; }
+.reference-stat { background: #272045; border: 1px solid #433663; border-radius: 10px; min-height: 52px; padding: 7px; }
+.reference-stat-icon { background: #382d60; border-radius: 8px; padding: 4px; }
+.reference-stat-label { color: #ddd0f7; font-size: 12px; }
+.reference-stat-value { color: #fcf8ff; font-size: 19px; font-weight: 770; }
+.reference-result-details { background: #30254d; border: 1px solid #574570; padding: 8px 10px; border-radius: 9px; }
+.reference-modal-actions button { color: #f7efff; background: #3d325e; border-color: #64547f; min-height: 37px; padding: 3px 11px; }
+.reference-modal-actions button:hover { background: #594580; }
+button.reference-primary { color: #fff; background: #7448ee; border-color: #9d78ff; }
+button.reference-primary:hover { background: #835af7; }
+
+.reference-stat-time { color: #87a4ff; }
+.reference-stat-count { color: #b294ff; }
+.reference-stat-speed { color: #ffd065; }

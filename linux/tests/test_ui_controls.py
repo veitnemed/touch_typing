@@ -50,6 +50,14 @@ class ControlsTest(LabWindowTest):
             yield
         assert not self.signal_errors, (self.signal_errors, self.trace)
 
+    def finish_live(self):
+        # Completion remains available under real compact lesson controls.
+        self.lab.settings_menu.popup()
+        for _ in range(8):
+            yield
+        assert self.lab.settings_menu.get_popover().get_visible()
+        yield from self.click(self.lab.finish.get_label())
+
     def check_starting_level_advice(self):
         lab = self.lab
         original_call = lab.host.call
@@ -126,7 +134,7 @@ class ControlsTest(LabWindowTest):
                 assert self.lab.state["paused"] and self.lab.state["seconds"] == 0
                 assert not self.lab.waiting_capture and self.lab.surface is None
                 assert "отклонён" in self.lab.status.get_label()
-                yield from self.click(self.lab.finish.get_label())
+                yield from self.finish_live()
                 assert self.lab.result
                 self.mark("PASS denial leaves task unscored and capture released")
                 return
@@ -206,7 +214,7 @@ class ControlsTest(LabWindowTest):
             self.close_dialog.response(Gtk.ResponseType.CANCEL)
             for _ in range(20):yield
             assert self.close_dialog is None and self.window.get_visible() and self.lab.state["paused"]
-            yield from self.click(self.lab.finish.get_label())
+            yield from self.finish_live()
             assert self.lab.result and not self.lab.active and self.lab.surface is None
             panel = self.lab.modal_layer.get_first_child()
             found, bounds = panel.compute_bounds(self.window)

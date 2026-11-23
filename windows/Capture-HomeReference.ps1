@@ -41,6 +41,9 @@ public static class ReferenceUser32 {
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hwnd, ref Point point);
+    [DllImport("user32.dll")] public static extern bool GetCursorPos(out Point point);
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
@@ -53,6 +56,7 @@ $oldRoot = $env:TOUCH_TYPING_QA_DATA_ROOT
 $oldSeed = $env:TOUCH_TYPING_QA_SEED
 $process = $null
 $displayChanged = $false
+$pointerParked = $false
 try {
     if ($oldDpi -eq [IntPtr]::Zero) { throw 'Per-monitor-aware capture could not be enabled.' }
     if ($AdjustHostedDisplay -and ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted')) {
@@ -129,6 +133,20 @@ try {
     if ($origin.X -lt $screen.Left -or $origin.Y -lt $screen.Top -or $origin.X+$ClientWidth -gt $screen.Right -or $origin.Y+$ClientHeight -gt $screen.Bottom) {
         throw 'Client rectangle not fully visible; need a larger desktop or a smaller requested client.'
     }
+    $previousPointer = New-Object 'ReferenceUser32+Point'
+    $parking = New-Object 'ReferenceUser32+Point'
+    $parking.X = $origin.X + 8
+    $parking.Y = $origin.Y + [int]($ClientHeight / 2)
+    if ([ReferenceUser32]::GetForegroundWindow() -ne $hwnd -or
+        [ReferenceUser32]::WindowFromPoint($parking) -ne $hwnd -or
+        -not [ReferenceUser32]::GetCursorPos([ref]$previousPointer) -or
+        -not [ReferenceUser32]::SetCursorPos($parking.X,$parking.Y)) {
+        throw 'Cannot safely park the pointer on the owned Home window edge.'
+    }
+    $pointerParked = $true
+    # Let the tooltip teardown and hover style update reach the compositor.
+    Start-Sleep -Milliseconds 750
+    if ([ReferenceUser32]::GetForegroundWindow() -ne $hwnd) { throw 'App lost foreground before capture.' }
     $bitmap = [Drawing.Bitmap]::new($ClientWidth,$ClientHeight)
     try {
         $graphics = [Drawing.Graphics]::FromImage($bitmap)
@@ -140,9 +158,16 @@ try {
         screen='home'; platform='WPF'; native_window=$true
         capture='physical desktop pixels of owned foreground application client'
         pixels=@($ClientWidth,$ClientHeight); dpi=[ReferenceUser32]::GetDpiForWindow($hwnd)
-        windows=[Environment]::OSVersion.VersionString; hosted_display_adjusted=$displayChanged
+        windows=[Environment]::OSVersion.VersionString; hosted_display_adjusted=$displayChanged; pointer_parked=$pointerParked
     } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $OutputDirectory 'home-wpf.json') -Encoding UTF8
 } finally {
+    if ($pointerParked) {
+        $pointerNow = New-Object 'ReferenceUser32+Point'
+        if ([ReferenceUser32]::GetCursorPos([ref]$pointerNow) -and
+            $pointerNow.X -eq $parking.X -and $pointerNow.Y -eq $parking.Y) {
+            [void][ReferenceUser32]::SetCursorPos($previousPointer.X,$previousPointer.Y)
+        }
+    }
     if ($process -and -not $process.HasExited) {
         [void]$process.CloseMainWindow()
         if (-not $process.WaitForExit(3000)) { Stop-Process -Id $process.Id }

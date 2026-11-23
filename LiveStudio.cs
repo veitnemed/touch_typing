@@ -245,6 +245,9 @@ namespace TouchTypingStudio
         private void ShowPage(string next)
         {
             if (active) return;
+            referenceHeader.Visibility = Visibility.Visible;
+            MinWidth = 748;
+            MinHeight = 540;
             page = next;
             var updated = Request("configure", "platform", "windows", "layout", CurrentLayout());
             if (updated.Exists) library = updated;
@@ -911,12 +914,15 @@ namespace TouchTypingStudio
             Key input = e.Key == Key.System ? e.SystemKey : e.Key;
             if (!active)
             {
+                if (HandleReferenceResultKey(input)) { e.Handled = true; return; }
                 if ((Keyboard.Modifiers & ModifierKeys.Alt) != 0 && input >= Key.D1 && input <= Key.D4)
                 {
                     e.Handled = true;
                     ShowPage(new[] { LivePage, TypingPage, EditorPage, ProgressPage }[input - Key.D1]);
                 }
-                else if (Keyboard.Modifiers == ModifierKeys.None && (input == Key.F5 || (input == Key.Space && !(Keyboard.FocusedElement is ComboBox))) &&
+                else if (Keyboard.Modifiers == ModifierKeys.None && (input == Key.F5 ||
+                    (input == Key.Space && !(Keyboard.FocusedElement is ComboBox) &&
+                    (!(Keyboard.FocusedElement is Button) || Keyboard.FocusedElement == beginControl))) &&
                     beginControl != null && beginControl.IsEnabled && (page == LivePage || page == TypingPage))
                 {
                     e.Handled = true;

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -17,6 +19,7 @@ internal static class LiveUiSmoke
     private static IntPtr trainer, focusProbe;
     private static AutomationElement window;
     private static int count;
+    private static string evidenceDirectory;
 
     [STAThread]
     private static int Main(string[] arguments)
@@ -24,7 +27,13 @@ internal static class LiveUiSmoke
         if (arguments.Length == 0) { Console.Error.WriteLine("Pass the full path to TouchTyping.exe."); return 2; }
         try
         {
+            if (arguments.Contains("--reference-evidence") && SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
+                throw new InvalidOperationException("Per-monitor-aware evidence capture cannot be enabled.");
             string path = Path.GetFullPath(arguments[0]);
+            if (arguments.Contains("--reference-evidence"))
+                evidenceDirectory = Directory.CreateDirectory(Path.Combine(
+                    Directory.GetParent(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT")).FullName,
+                    "native-reference-evidence")).FullName;
             Console.WriteLine("UI test seed " + Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"));
             app = Process.Start(new ProcessStartInfo(path, "--qa --live") { WorkingDirectory = Path.GetDirectoryName(path) });
             Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "trainer window", 12000);
@@ -46,6 +55,7 @@ internal static class LiveUiSmoke
             Key("F5");
             Until(delegate { return Exists("LabClock") && Name("LabPause").StartsWith("Пауза"); }, "focused terminal lesson");
             CheckPasteLayouts();
+            CheckReferenceTerminalCursor();
             CheckTerminalCursorRepeat();
             Key("F10");
             Until(delegate { return Exists("LabResult"); }, "focused terminal result");
@@ -63,12 +73,14 @@ internal static class LiveUiSmoke
                     Key("F5");
                     Until(delegate { return Exists("LabClock") && Name("LabPause").StartsWith("Пауза"); }, "active " + name + " lesson");
                     Check(Name("LabClock") == "03:00" || Name("LabClock") == "02:59", "A class starts with 180 seconds");
+                    Check(Visible("LabScenarioProgress") && !Visible("ResultMetric-accuracy"), "Active lesson shows scenario progress, not accuracy");
                     Check(Name("LabTask").Length > 0 && Exists("LabDesktop"), "Task and Ubuntu scene are accessible");
                     Key("F8");
                     Until(delegate { return Exists("LabPauseResult"); }, "pause result overlay");
                     Check(Name("LabPauseResult") == "Пауза", "Pause shows a Stamina-style result panel");
-                    Check(Exists("ResultMetric-time") && Exists("ResultMetric-count") &&
-                        Exists("ResultMetric-speed") && Exists("ResultMetric-accuracy"), "Pause shows four performance metrics");
+                    CheckThreeHeadlineMetrics("Pause");
+                    Check(!Visible("LabErrorReview"), "Pause has no mistake-review statistics");
+                    if (name == "ubuntu" && mode == 0) CaptureReferenceFrame("04-pause");
                     string frozen = Name("LabClock");
                     Chord("Ctrl+F10");
                     Check(Exists("LabClock") && Exists("LabPauseResult"), "Modified F10 keeps the paused lesson open");
@@ -108,8 +120,16 @@ internal static class LiveUiSmoke
                     Solve(24, false);
                     Key("F10");
                     Until(delegate { return Exists("LabResult"); }, "lesson result");
-                    Check(Exists("ResultMetric-time") && Exists("ResultMetric-count") &&
-                        Exists("ResultMetric-speed") && Exists("ResultMetric-accuracy"), "Result shows four performance metrics");
+                    CheckThreeHeadlineMetrics("Result");
+                    if (name == "ubuntu" && mode == 0)
+                    {
+                        CaptureReferenceFrame("05-result");
+                        CheckReferenceReview();
+                        CaptureReferenceFrame("06-result-review");
+                        Find("LabErrorReview").SetFocus();
+                        Key("Space");
+                        Until(delegate { return !Visible("ResultMetric-accuracy"); }, "mistake review closes again");
+                    }
                     Check(Find("LabResult").Current.HelpText.Contains("Ошибки"), "Result exposes completion, mistakes and record");
                     if (name == "ubuntu" && mode == 0)
                     {
@@ -432,6 +452,88 @@ internal static class LiveUiSmoke
         finally { if (!app.HasExited) SendMessage(trainer, 0x50, IntPtr.Zero, previous); }
     }
 
+    private static void CheckThreeHeadlineMetrics(string page)
+    {
+        Check(Visible("ResultMetric-time") && Visible("ResultMetric-count") &&
+            Visible("ResultMetric-speed"), page + " shows time, actions and pace");
+        Check(!Visible("ResultMetric-accuracy"), page + " does not show headline accuracy");
+    }
+
+    private static void CheckReferenceReview()
+    {
+        var review = Find("LabErrorReview");
+        Check(!Visible("ResultMetric-accuracy"), "Accuracy is initially hidden");
+        review.SetFocus();
+        Key("Space");
+        Until(delegate { return Visible("ResultMetric-accuracy"); }, "keyboard reveals optional result accuracy");
+        Check(Visible("ResultMetric-accuracy"), "Accuracy exists only in optional post-result review");
+    }
+
+    private static void CheckReferenceTerminalCursor()
+    {
+        VirtualEnglish();
+        Chord("Ctrl+U");
+        foreach (var character in "abcde") Send(Character(character));
+        CheckTerminalState("abcde", 5);
+        Key("Home");
+        Key("Right");
+        Key("Right");
+        CheckTerminalState("abcde", 2);
+        CaptureReferenceFrame("01-terminal-before-delete");
+        Key("Delete");
+        CheckTerminalState("abde", 2);
+        CaptureReferenceFrame("02-terminal-after-delete");
+        Key("Backspace");
+        CheckTerminalState("ade", 1);
+        CaptureReferenceFrame("03-terminal-after-backspace");
+        Chord("Ctrl+U");
+        CheckTerminalState("", 0);
+    }
+
+    private static void CheckTerminalState(string text, int cursor)
+    {
+        string itemStatus = "cursor:" + cursor;
+        Until(delegate {
+            var scene = Find("LabDesktop").Current;
+            return scene.HelpText == text && scene.ItemStatus == itemStatus;
+        }, "terminal text '" + text + "' at caret " + cursor);
+        Check(true, "Native terminal text '" + text + "' at caret " + cursor);
+    }
+
+    private static bool Visible(string id)
+    {
+        var node = window.FindFirst(TreeScope.Descendants,
+            new PropertyCondition(AutomationElement.AutomationIdProperty,id));
+        return node != null && node.Current.ProcessId == app.Id && !node.Current.IsOffscreen;
+    }
+
+    private static void CaptureReferenceFrame(string name)
+    {
+        if (evidenceDirectory == null) return;
+        if (app.HasExited || GetForegroundWindow() != trainer)
+            throw new InvalidOperationException("Refusing screenshot outside the owned foreground trainer.");
+        CaptureRect client;
+        var topLeft = new CapturePoint();
+        if (!GetClientRect(trainer, out client) || !ClientToScreen(trainer, ref topLeft))
+            throw new InvalidOperationException("Unable to read actual foreground client geometry.");
+        if (client.Right <= 0 || client.Bottom <= 0)
+            throw new InvalidOperationException("Actual foreground client has no area.");
+        var display = System.Windows.Forms.Screen.FromHandle(trainer).Bounds;
+        var bounds = new Rectangle(topLeft.X, topLeft.Y, client.Right, client.Bottom);
+        if (!display.Contains(bounds))
+            throw new InvalidOperationException("Foreground client does not fit on its display. No rescaling.");
+        using (var bitmap = new Bitmap(bounds.Width, bounds.Height))
+        using (var graphics = Graphics.FromImage(bitmap))
+        {
+            graphics.CopyFromScreen(bounds.X, bounds.Y, 0, 0, bounds.Size);
+            if (GetForegroundWindow() != trainer)
+                throw new InvalidOperationException("Trainer lost foreground during screenshot.");
+            bitmap.Save(Path.Combine(evidenceDirectory,name + ".png"),ImageFormat.Png);
+        }
+        Console.WriteLine("CAPTURE " + name + " " + bounds.Width + "x" + bounds.Height +
+            " physical px, DPI=" + GetDpiForWindow(trainer));
+    }
+
     private static void CheckTerminalCursorRepeat()
     {
         VirtualEnglish();
@@ -725,6 +827,12 @@ internal static class LiveUiSmoke
     [StructLayout(LayoutKind.Sequential)] private struct KeyboardInput { internal ushort Key, Scan; internal uint Flags, Time; internal UIntPtr Extra; }
     [StructLayout(LayoutKind.Sequential)] private struct MouseInput { internal int X, Y; internal uint MouseData, Flags, Time; internal UIntPtr Extra; }
     [StructLayout(LayoutKind.Sequential)] private struct Message { internal IntPtr Window; internal uint Id; internal UIntPtr WParam; internal IntPtr LParam; internal uint Time; internal int X, Y; internal uint Private; }
+    [StructLayout(LayoutKind.Sequential)] private struct CaptureRect { internal int Left,Top,Right,Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct CapturePoint { internal int X,Y; }
+    [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hwnd, out CaptureRect rect);
+    [DllImport("user32.dll")] private static extern bool ClientToScreen(IntPtr hwnd, ref CapturePoint point);
+    [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] private static extern IntPtr GetKeyboardLayout(uint thread);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr LoadKeyboardLayout(string layout, uint flags);

@@ -9,6 +9,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="LiveUiSmoke.cs" />
-    <Reference Include="UIAutomationClient;UIAutomationTypes;WindowsBase" />
+    <Reference Include="UIAutomationClient;UIAutomationTypes;WindowsBase;System.Drawing;System.Windows.Forms" />
   </ItemGroup>
 </Project>

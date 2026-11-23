@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--terminal-only", action="store_true", help="Проверить ввод в окно терминала на 1366×768")
     parser.add_argument("--gallery", action="store_true", help="Снимки открытых рабочих областей GTK")
     parser.add_argument("--reference-home", action="store_true", help="Снимок главной 1006×863 для сверки с эталоном")
+    parser.add_argument("--reference-terminal", action="store_true", help="Снимки реальной правки терминала с клавиатуры")
     parser.add_argument("--source-note", action="store_true", help="Пройти оконное поручение: методика → заметка")
     parser.add_argument("--save-retry", action="store_true", help="Включить проверку закрытия при ошибке сохранения")
     parser.add_argument("--seed", type=int, default=7)
@@ -57,6 +58,7 @@ def main():
             if args.save_retry: command.append("--save-retry")
             if args.gallery: command.append("--gallery")
             if args.reference_home: command.append("--reference-home")
+            if args.reference_terminal: command.append("--reference-terminal")
             if args.source_note: command.append("--source-note")
             if args.full: command.append("--full")
             return subprocess.run(command, env=environment).returncode
@@ -162,6 +164,15 @@ def run_checks(args):
             check("legacy-window", [sys.executable, str(tests / "test_wayland_window.py")])
             if args.timed:
                 check("native-180-seconds", [sys.executable, str(tests / "test_lab_window.py"), "--timed"], timeout=300)
+        if args.reference_terminal:
+            report["coverage"].append("GTK terminal native abcde, Home, Right, Right, Delete")
+            with tempfile.TemporaryDirectory(prefix="typing-reference-terminal-") as folder:
+                previous = environment["XDG_DATA_HOME"]
+                environment["XDG_DATA_HOME"] = folder
+                try:
+                    check("native-reference-terminal", [sys.executable, str(tests / "record_terminal_window.py")])
+                finally:
+                    environment["XDG_DATA_HOME"] = previous
         if args.source_note:
             report["coverage"].append("native GTK Workday source-note: browser, clipboard, editor, files and terminal")
             with tempfile.TemporaryDirectory(prefix="typing-source-note-") as folder:

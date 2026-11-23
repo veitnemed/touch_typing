@@ -468,6 +468,25 @@ class ReferenceGlyph(ReferenceCanvas):
             cr.line_to(44,40); cr.curve_to(36,36,29,36,24,41); cr.curve_to(19,36,11,36,4,40)
             cr.close_path(); cr.stroke()
             line((24,12),(24,40))
+        elif name == "time":
+            circle(24,27,14,False)
+            line((24,26),(24,17))
+            line((22,7),(26,7))
+            line((24,8),(24,12))
+        elif name == "count":
+            rounded(4,10,40,28,4); cr.stroke()
+            for y in (17,24,31):
+                for x in (12,20,28,36):
+                    circle(x,y,1.65)
+        elif name == "speed":
+            cr.arc(24,29,16,math.radians(146),math.radians(393)); cr.stroke()
+            line((24,29),(33,21))
+            for angle in (175,220,270,319):
+                t=math.radians(angle)
+                line((24+11*math.cos(t),29+11*math.sin(t)),(24+13*math.cos(t),29+13*math.sin(t)))
+        elif name == "check":
+            rgb(.36, 1., .46)
+            line((8,25),(20,37),(41,14))
         elif name == "moon":
             cr.move_to(33,5); cr.curve_to(18,5,11,13,11,25); cr.curve_to(11,39,28,46,41,36)
             cr.curve_to(25,37,18,20,33,5); cr.close_path(); cr.fill()
@@ -609,7 +628,33 @@ class Studio(Gtk.Application):
             control.set_tooltip_text(name)
             controls.append(control)
         bar.append(controls)
+        self.reference_title_handle = handle
+        self.reference_home_header = bar
         self.window.set_titlebar(handle)
+
+    def set_lesson_header(self, lab=None, app=""):
+        handle = self.reference_title_handle
+        handle.set_child(None)
+        if not lab:
+            self.window.set_size_request(960, 600)
+            handle.set_child(self.reference_home_header)
+            return
+        self.window.set_size_request(606, 455)
+        labels = {"ubuntu": "Ubuntu", "chrome": "Браузер", "code": "VS Code",
+                  "terminal": "Терминал", "workday": "Рабочий день"}
+        row_widget = row(8, "reference-lesson-chrome")
+        back = button("‹", lambda: self.navigate("lab"))
+        bind_name(back, "Вернуться к каталогу")
+        back.set_tooltip_text("Вернуться к каталогу")
+        title = text("Практика · " + labels.get(app, "Live"), "reference-lesson-name")
+        maximize = lambda: self.window.unmaximize() if self.window.is_maximized() else self.window.maximize()
+        add(row_widget, back, expand(title), lab.settings_menu)
+        for caption, name, action in (("−", "Свернуть", self.window.minimize), ("□", "Развернуть", maximize),
+                                      ("×", "Закрыть", self.window.close)):
+            control = button(caption, action)
+            bind_name(control, name)
+            row_widget.append(control)
+        handle.set_child(row_widget)
 
     def show_layout(self):
         for name, chip in self.layout_chips.items():
@@ -747,6 +792,7 @@ class Studio(Gtk.Application):
             self.lab = None
         if self.workout:
             self.stop(show_result=False)
+        self.set_lesson_header()
         self.recording = False
         self.result_kind = None
         self.mode = page
@@ -2182,55 +2228,118 @@ class LabPage(Gtk.Box):
         for selector in (self.mode, self.picker, self.level):
             selector.connect("notify::selected", lambda *_: self.describe())
         self.content.append(self.prep)
-        self.toolbar = row(7, "lab-taskbar")
-        self.timer = text("03:00", "lesson-timer")
-        self.task = text("Выберите класс и нажмите пробел", "lab-task")
+        self.toolbar = row(12, "reference-goal")
+        self.action_icon = ReferenceGlyph("practice", 30)
+        self.action_icon.add_css_class("reference-practice-icon")
+        self.step_heading = text("", "reference-step-heading")
+        self.task = text("", "reference-goal-title", wrap=True)
+        self.task.set_max_width_chars(39)
+        self.task.set_lines(3)
         self.task.set_ellipsize(Pango.EllipsizeMode.END)
-        self.gesture = text("", "mono", "lab-gesture", wrap=True)
-        self.status = text("", "muted", wrap=True)
-        self.status.add_css_class("lab-status")
-        self.status.set_halign(Gtk.Align.START)
-        self.status.set_valign(Gtk.Align.END)
-        self.pause = button("Ⅱ", self.toggle_pause, "lab-control")
-        self.finish = button("■", self.stop, "lab-control", "stop")
+        self.gesture = row(5, "reference-gesture")
+        self.gesture.set_valign(Gtk.Align.CENTER)
+        self.timer = text("", "reference-step-heading")
+        self.status = text("", "reference-live-feedback")
+        self.status.set_ellipsize(Pango.EllipsizeMode.END)
+        self.status.set_valign(Gtk.Align.CENTER)
+        self.status.connect("notify::label", lambda label, _: label.set_tooltip_text(label.get_label() or None))
+        self.pause = button("Ⅱ", self.toggle_pause, "reference-round-control")
+        bind_name(self.pause, "Пауза")
+        self.restart = button("↻", self.replay, "reference-round-control")
+        bind_name(self.restart, "Начать сначала")
+        self.restart.set_tooltip_text("Начать сначала после сохранения")
+        self.finish = button("Завершить и посмотреть результат", lambda: (self.settings_menu.popdown(), self.stop()))
         self.capture = button("Разрешить клавиши", self.acquire)
         self.aids = {}
-        for name, title in (("keys", "⌨"), ("hands", "👐"), ("mistakes", "●")):
-            control = Gtk.ToggleButton(label=title)
-            control.add_css_class("hint-toggle")
-            if name == "mistakes":
-                control.add_css_class("mistake-toggle")
+        aids_menu = box(gap=7)
+        for name, title in (("keys", "Экранная клавиатура"), ("hands", "Подсказки по пальцам"),
+                            ("mistakes", "Подсветка ошибки")):
+            control = Gtk.CheckButton(label=title)
             setting = {"keys": "showKeys", "hands": "showHands", "mistakes": "showMistakeKey"}[name]
             control.set_active(host.library.get(setting, True))
-            control.set_tooltip_text({"keys": "Клавиатура", "hands": "Руки", "mistakes": "Красная подсветка ошибки"}[name])
             control.connect("toggled", lambda widget, key=name: self.aid(key, widget.get_active()))
             self.aids[name] = control
-        self.hint_button = button("Подсказка · F1", lambda: self.render(self.host.call("lab-hint")), "lab-control")
-        self.diagnostic_button = button("i", self.toggle_diagnostic, "lab-control")
-        self.diagnostic_button.set_tooltip_text("Какая физическая клавиша получена")
-        add(self.toolbar, self.timer, expand(add(box(gap=1), self.task, self.gesture)),
-            self.hint_button, *self.aids.values(), self.diagnostic_button, self.pause, self.finish)
+            aids_menu.append(control)
+        self.force_guide = False
+        self.guide_override = Gtk.CheckButton(label="Подсказки в компактном окне")
+        self.guide_override.connect("toggled", self.toggle_compact_guide)
+        aids_menu.append(self.guide_override)
+        self.hint_button = button("Подсказка · F1", lambda: self.render(self.host.call("lab-hint")), "reference-hint")
+        self.diagnostic_button = button("Показать коды клавиш", self.toggle_diagnostic)
+        self.details = Gtk.Revealer()
+        self.details.set_transition_type(Gtk.RevealerTransitionType.NONE)
+        self.details_text = text("", "reference-long-help", wrap=True)
+        details_scroll = scroll(self.details_text)
+        details_scroll.set_propagate_natural_height(True)
+        details_scroll.set_max_content_height(82)
+        details_scroll.set_overlay_scrolling(False)
+        self.details.set_child(details_scroll)
+        options = Gtk.Popover()
+        options_content = add(box(gap=8), aids_menu,
+                              button("Открыть описание задания", lambda: self.toggle_goal_details(options)),
+                              self.diagnostic_button, self.finish)
+        options.set_child(options_content)
+        self.settings_menu = Gtk.MenuButton(icon_name="view-more-symbolic")
+        self.settings_menu.set_popover(options)
+        bind_name(self.settings_menu, "Параметры занятия")
+        self.settings_menu.set_tooltip_text("Подсказки и параметры занятия")
+        add(self.toolbar, self.action_icon, expand(add(box(gap=3), self.step_heading, self.task)), self.gesture,
+            self.hint_button)
         self.content.append(self.toolbar)
+        self.content.append(self.details)
         self.desktop = DesktopView()
+        self.desktop.reference_chrome = True
         self.stage = Gtk.Overlay()
+        self.stage.add_css_class("reference-workspace")
         self.stage.set_hexpand(True)
         self.stage.set_vexpand(True)
         self.stage.set_child(self.desktop)
-        self.stage.add_overlay(self.status)
         self.diagnostic = text("", "lab-diagnostic")
         self.diagnostic.set_halign(Gtk.Align.END)
         self.diagnostic.set_valign(Gtk.Align.START)
         self.stage.add_overlay(self.diagnostic)
         self.diagnostic.set_visible(False)
         self.content.append(self.stage)
+        self.lesson_meter = Gtk.ProgressBar()
+        self.lesson_meter.add_css_class("reference-meter")
+        self.lesson_meter.set_valign(Gtk.Align.CENTER)
+        self.lesson_meter.set_hexpand(True)
+        progress = Gtk.Overlay()
+        progress.set_hexpand(True)
+        progress.set_child(self.lesson_meter)
+        progress.add_overlay(self.status)
+        self.goal_progress = text("", "reference-step-footer")
+        self.footer = add(row(14, "reference-lesson-footer"), self.goal_progress, progress,
+                          self.timer, self.pause, self.restart)
+        self.content.append(self.footer)
         self.guide = LessonGuide(host.library["keyboard"])
         self.guide.add_css_class("lab-guide")
-        self.content.append(self.guide)
+        self.guide_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+                                               vscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.guide_scroll.set_propagate_natural_height(True)
+        self.guide_scroll.set_child(self.guide)
+        self.content.append(self.guide_scroll)
         self.guide.paint(host.library, host.layout)
         self.describe()
-        for widget in (self.toolbar, self.stage, self.guide):
+        for widget in (self.toolbar, self.stage, self.footer, self.guide_scroll, self.details):
             widget.set_visible(False)
         self.begin.grab_focus()
+
+    def toggle_goal_details(self, options):
+        options.popdown()
+        self.details.set_reveal_child(not self.details.get_reveal_child())
+        self.details.set_visible(self.details.get_reveal_child())
+        self.desktop.grab_focus()
+
+    def toggle_compact_guide(self, control):
+        self.force_guide = control.get_active()
+        self.layout_guide()
+
+    def layout_guide(self):
+        window = self.host.window
+        spacious = window.get_width() >= 865 and window.get_height() >= 645
+        self.guide_scroll.set_visible(self.active and (spacious or self.force_guide)
+                                     and (self.guide.show_keys or self.guide.show_hands))
 
     def describe(self):
         if self.classes:
@@ -2277,17 +2386,49 @@ class LabPage(Gtk.Box):
         self.diagnostic.set_label("Получено: " + key_label(key or "—") +
                                   (f" · код {code}" if code is not None else ""))
 
-    @staticmethod
-    def summary_metrics(result):
-        seconds = result.get("seconds", 0)
-        solved = result.get("solved", 0)
-        accuracy = result.get("accuracy", 0)
-        return [
-            ("◷", "Время", f'{seconds // 60:02}:{seconds % 60:02}', "tone-time"),
-            ("⌨", "Действия", str(solved), "tone-count"),
-            ("↗", "Действий/мин", f'{solved * 60 / max(1, seconds):.1f}', "tone-speed"),
-            ("◎", "Точность", f'{accuracy:g}%', "tone-accuracy"),
-        ]
+    def reference_lesson_panel(self, title, subtitle, result=None, completed=False):
+        panel = box(gap=14)
+        panel.add_css_class("reference-modal-panel")
+        panel.set_valign(Gtk.Align.CENTER)
+        panel.set_margin_top(11)
+        panel.set_margin_bottom(11)
+        panel.set_margin_start(14)
+        panel.set_margin_end(14)
+        headline = text(title, "reference-modal-title")
+        summary = expand(add(box(gap=3), headline, text(subtitle, "reference-modal-subtitle", wrap=True)))
+        if completed:
+            icon = ReferenceGlyph("check", 34)
+            icon.add_css_class("reference-result-check")
+            panel.append(add(row(13), icon, summary))
+        else:
+            panel.append(summary)
+        if result is not None:
+            seconds = max(0, int(result.get("seconds", 0)))
+            solved = result.get("solved", 0)
+            rate = f"{solved * 60 / max(1, seconds):.0f} д/мин"
+            metrics = Gtk.Grid(column_homogeneous=True, column_spacing=8)
+            for i, (name, value, tone) in enumerate((("Время", f"{seconds//60:02}:{seconds%60:02}", "time"),
+                     ("Действия", str(solved), "count"), ("Темп", rate, "speed"))):
+                line = row(8, "reference-stat")
+                image = ReferenceGlyph(tone, 28)
+                image.add_css_class("reference-stat-icon")
+                image.add_css_class("reference-stat-" + tone)
+                unit = text(value, "reference-stat-value")
+                unit.set_ellipsize(Pango.EllipsizeMode.END)
+                unit.set_tooltip_text(value)
+                add(line, image, expand(add(box(gap=2), text(name, "reference-stat-label"), unit)))
+                metrics.attach(line, i, 0, 1, 1)
+            panel.append(metrics)
+        return panel
+
+    def add_reference_modal(self, panel):
+        scroller = scroll(panel)
+        scroller.set_size_request(max(440, min(674, self.host.window.get_width() - 35)), -1)
+        scroller.set_halign(Gtk.Align.CENTER)
+        scroller.set_vexpand(True)
+        scroller.set_overlay_scrolling(False)
+        self.modal_layer.append(scroller)
+        self.modal_layer.set_visible(True)
 
     @staticmethod
     def append_summary_chart(panel, result):
@@ -2317,21 +2458,16 @@ class LabPage(Gtk.Box):
 
     def show_pause_modal(self):
         clear(self.modal_layer)
-        result = self.host.call("lab-result") or {"seconds": 0, "solved": 0, "errors": 0, "accuracy": 0}
-        panel = stamina_modal("Пауза", "Пробел — продолжить занятие", self.summary_metrics(result))
-        summary = text(f'Ошибки: {result.get("errors", 0)}', "stamina-summary")
-        summary.set_xalign(.5)
-        panel.append(summary)
-        self.append_summary_chart(panel, result)
-        controls = row(8, "stamina-actions")
+        result = self.host.call("lab-result") or {}
+        panel = self.reference_lesson_panel("Пауза", "Пробел — продолжить занятие", result)
+        controls = row(8, "reference-modal-actions")
         controls.set_halign(Gtk.Align.CENTER)
-        resume = button("Продолжить · Пробел", self.acquire, "primary")
-        add(controls, resume,
-            button("Начать сначала", self.replay, "stamina-blue"),
-            button("Завершить", self.stop, "stamina-blue"))
+        resume = button("Продолжить", self.acquire, "reference-primary")
+        resume.set_tooltip_text("Продолжить · Пробел")
+        add(controls, resume, button("Начать сначала", self.replay),
+            button("Завершить", self.stop))
         panel.append(controls)
-        self.modal_layer.append(panel)
-        self.modal_layer.set_visible(True)
+        self.add_reference_modal(panel)
         if not self.host.window.get_focus() or self.host.window.get_focus() == self.desktop:
             resume.grab_focus()
 
@@ -2349,10 +2485,15 @@ class LabPage(Gtk.Box):
         if not self.state:
             return
         self.active = True
+        self.host.set_lesson_header(self, app)
+        self.add_css_class("reference-live")
+        self.action_icon.name = app
+        self.action_icon.cached_key = None
+        self.action_icon.queue_draw()
         self.prep.set_visible(False)
-        for widget in (self.toolbar, self.stage, self.guide):
+        for widget in (self.toolbar, self.stage, self.footer):
             widget.set_visible(True)
-        self.desktop.set_size_request(400, 220)
+        self.desktop.set_size_request(380, 180)
         self.desktop.grab_focus()
         if self.state.get("startBlocked"):
             self.show_save_retry(show=False, on_saved=self.start)
@@ -2550,7 +2691,10 @@ class LabPage(Gtk.Box):
         task = state.get("task") or {}
         guided = state.get("showGuide", True)
         self.task.set_label(task.get("title", "") if guided else state.get("phase", ""))
-        self.task.set_tooltip_text(state.get("scenario", "") + "\n" + "\n".join(state.get("objectives", [])))
+        details = "\n".join(filter(None, [state.get("scenario", ""), *state.get("objectives", []),
+                                           task.get("hint", "") if guided else ""]))
+        self.task.set_tooltip_text(details)
+        self.details_text.set_label(details)
         gesture = display_chord(task.get("keys", ""), self.host.library) or task.get("text", "")
         if guided and not task.get("keys") and task.get("id", "").startswith("open-"):
             gesture = "⊞  →  " + task["text"] + "  →  Enter"
@@ -2559,10 +2703,24 @@ class LabPage(Gtk.Box):
         if not guided:
             gesture = ""
         self.hint_button.set_visible(not state.get("showGuide", True))
-        if state.get("scenarioLength", 0):
-            gesture += f'  ·  шаг {state["scenarioStep"]}/{state["scenarioLength"]}'
-        self.gesture.set_label((state.get("phase" if guided else "scenario", "") + "    ·    " + gesture).strip(" ·"))
-        self.gesture.set_visible(bool(self.gesture.get_label()))
+        tokens = tuple(gesture.replace(" → ", "→").split(" + ")) if gesture else ()
+        if tokens != getattr(self, "gesture_tokens", ()):
+            self.gesture_tokens = tokens
+            clear(self.gesture)
+            visible = tokens if len(tokens) <= 3 else (gesture,)
+            for index, token in enumerate(visible):
+                if index:
+                    self.gesture.append(text("+", "reference-key-join"))
+                tile = text(token, "reference-keycap")
+                tile.set_ellipsize(Pango.EllipsizeMode.END)
+                tile.set_max_width_chars(14)
+                tile.set_tooltip_text(token)
+                self.gesture.append(tile)
+        self.gesture.set_visible(bool(tokens))
+        step, total = state.get("scenarioStep", 0), state.get("scenarioLength", 0)
+        self.step_heading.set_label(f"Задание {step} из {total}" if total else "Задание")
+        self.goal_progress.set_label(f"Шаг {step} из {total}" if total else "Практика")
+        self.lesson_meter.set_fraction(min(1, max(0, step / total)) if total else 0)
         remaining = max(0, state.get("remaining", 180))
         self.timer.set_visible(bool(state.get("timeLimit") or state.get("actionLimit")))
         self.timer.set_label(f"{int(remaining) // 60:02}:{int(remaining) % 60:02}")
@@ -2582,7 +2740,7 @@ class LabPage(Gtk.Box):
                                      "Пауза · " + physical_key_hint(pause_key, self.host.library)))
         self.finish.set_tooltip_text("Результат · " + physical_key_hint(finish_key, self.host.library))
         self.pause.set_label("▶" if state["paused"] else "Ⅱ")
-        self.finish.set_label("■")
+        bind_name(self.pause, "Продолжить" if state["paused"] else "Пауза")
         self.desktop.presentation_app = state["app"]
         self.desktop.update(state["scene"])
         self.update_diagnostic()
@@ -2596,6 +2754,7 @@ class LabPage(Gtk.Box):
                 self.host.library.get("showMistakeKey", True) else None)
         self.guide.paint(self.host.library, state["scene"].get("layout", self.host.layout), targets,
                          state["held"], miss=miss, notes=notes, chosen=targets.values())
+        self.layout_guide()
         if state["paused"] and not self.waiting_capture:
             self.show_pause_modal()
         elif self.active:
@@ -2603,6 +2762,7 @@ class LabPage(Gtk.Box):
 
     def tick(self):
         self.guide.reflow(self.host.window.get_width())
+        self.layout_guide()
         if self.host.window.get_height() <= 680:
             self.add_css_class("compact-height")
         else:
@@ -2619,11 +2779,10 @@ class LabPage(Gtk.Box):
         self.status.set_visible(True)
         clear(self.modal_layer)
         details = "Занятие осталось на паузе. Закройте другое окно тренажёра или проверьте доступ к папке профиля."
-        panel = stamina_modal("Прогресс не сохранён", details, [])
-        retry = button("Повторить сохранение", self.retry_save, "primary")
+        panel = self.reference_lesson_panel("Прогресс не сохранён", details)
+        retry = button("Повторить сохранение", self.retry_save, "reference-primary")
         panel.append(retry)
-        self.modal_layer.append(panel)
-        self.modal_layer.set_visible(True)
+        self.add_reference_modal(panel)
         retry.grab_focus()
 
     def stop(self, show=True, on_saved=None, retry=False):
@@ -2652,29 +2811,29 @@ class LabPage(Gtk.Box):
             return True
         self.result = True
         clear(self.modal_layer)
-        panel = stamina_modal("Результат", self.state.get("scenario", "Практикум"), self.summary_metrics(result))
+        panel = self.reference_lesson_panel("Результат", self.state.get("scenario", "Практикум"),
+                                             result, completed=result.get("completed", False))
         note = f'Ошибки: {result["errors"]}    ·    Рекорд: {result.get("record", 0)}'
         if result.get("newRecord"):
             note += "    ·    Новый рекорд"
-        summary = text(note, "stamina-summary")
-        summary.set_xalign(.5)
-        panel.append(summary)
-        self.append_summary_chart(panel, result)
+        analysis = add(box(gap=5), text(note, "reference-modal-subtitle", wrap=True))
         weak = result.get("weak", [])[:4]
         if weak:
-            details = Gtk.Expander(label="Работа над ошибками")
-            details.set_child(text("  ·  ".join(f'{item["title"]} ×{item["errors"]}' for item in weak),
-                                   "muted", wrap=True))
-            panel.append(details)
-        actions = row(8, "stamina-actions")
+            analysis.append(text("  ·  ".join(f'{item["title"]} ×{item["errors"]}' for item in weak),
+                                 "reference-modal-subtitle", wrap=True))
+        self.append_summary_chart(analysis, result)
+        details = Gtk.Expander(label="Работа над ошибками")
+        details.add_css_class("reference-result-details")
+        details.set_child(analysis)
+        panel.append(details)
+        actions = row(8, "reference-modal-actions")
         actions.set_halign(Gtk.Align.CENTER)
-        restart = button("Начать сначала · Пробел", self.replay, "stamina-blue")
-        add(actions, button("Завершить", lambda: self.host.navigate("lab"), "stamina-blue"),
-            restart,
-            button("Прогресс", lambda: self.host.navigate("progress"), "primary"))
+        restart = button("Начать сначала", self.replay)
+        restart.set_tooltip_text("Начать сначала · Пробел")
+        add(actions, button("Завершить", lambda: self.host.navigate("lab")),
+            restart, button("К прогрессу", lambda: self.host.navigate("progress"), "reference-primary"))
         panel.append(actions)
-        self.modal_layer.append(panel)
-        self.modal_layer.set_visible(True)
+        self.add_reference_modal(panel)
         restart.grab_focus()
         self.host.refresh()
         return True

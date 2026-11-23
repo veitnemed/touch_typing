@@ -32,6 +32,7 @@ class DesktopView(Gtk.Widget):
                 except GLib.Error:
                     continue
         self.presentation_app = "ubuntu"
+        self.reference_chrome = False
         self.set_overflow(Gtk.Overflow.HIDDEN)
         self.set_size_request(400, 200)
         self.set_hexpand(True)
@@ -188,7 +189,10 @@ class DesktopView(Gtk.Widget):
                        if window.get("app") == self.presentation_app and window.get("state") != "minimized"]
             current = next((window for window in windows if window.get("active")), windows[-1] if windows else None)
             if current:
-                self.draw_window(current, 0, -27, width, height + 27)
+                if self.reference_chrome and self.presentation_app == "chrome":
+                    self.draw_window(current, 6, 4, width - 12, height - 8)
+                else:
+                    self.draw_window(current, 0, -27, width, height + 27)
             else:
                 self.label("Окно закрыто. Откройте приложение сочетанием из задания.",
                            24, height * .48, 15, width=width - 48)
@@ -281,8 +285,12 @@ class DesktopView(Gtk.Widget):
         self.fill("#303036", x, y, w, h, 7)
         self.snapshot.push_clip(self.rect(x + 1, y + 1, w - 2, h - 2))
         app = window.get("app", "terminal")
-        self.fill("#303036", x, y, w, 27)
-        self.label(window.get("title", app), x + 10, y + 6, 11, width=w - 105, bold=True)
+        purple = self.reference_chrome and self.presentation_app == app == "chrome"
+        self.fill("#282541" if purple else "#303036", x, y, w, 27)
+        if purple:
+            self.app_icon("chrome", x + 10, y + 5, 17)
+        self.label(window.get("title", app), x + (34 if purple else 10), y + 6,
+                   12 if purple else 11, width=w - 105, bold=True)
         self.label("−    □", x + w - 79, y + 5, 12)
         self.fill("#e95420" if window.get("active") else "#66616c", x + w - 25, y + 5, 17, 17, 9)
         self.label("×", x + w - 21, y + 3, 15)
@@ -337,38 +345,49 @@ class DesktopView(Gtk.Widget):
             self.label("Папка пуста", left, y + 62, 14, "#817872")
 
     def chrome(self, window, x, y, w, h):
-        self.fill("#202124", x, y, w, h)
+        purple = self.reference_chrome and self.presentation_app == "chrome"
+        self.fill("#201d36" if purple else "#202124", x, y, w, h)
         tabs = window.get("tabs", [])
-        tab_w = min(150, max(48, (w - 48) / max(1, len(tabs))))
+        tab_w = min(169 if purple else 150, max(48, (w - 48) / max(1, len(tabs))))
         for i, tab in enumerate(tabs):
-            self.fill("#3c4043" if i == window.get("activeTab", 0) else "#292a2d",
+            active_tab = i == window.get("activeTab", 0)
+            self.fill(("#41375f" if active_tab else "#25213d") if purple else
+                      ("#3c4043" if active_tab else "#292a2d"),
                       x + 6 + tab_w * i, y + 2, tab_w - 3, 26, 7)
             self.label(tab["title"], x + 15 + tab_w * i, y + 8, 10, width=tab_w - 33)
             self.label("×", x + tab_w * (i + 1) - 12, y + 7, 12)
         self.label("+", x + min(w - 22, 12 + tab_w * len(tabs)), y + 6, 16)
-        self.fill("#303134", x, y + 29, w, 33)
+        self.fill("#222039" if purple else "#303134", x, y + 29, w, 33)
         self.label("‹   ›   ↻", x + 9, y + 35, 15)
-        self.fill("#202124", x + 79, y + 32, w - 112, 27, 14)
+        if purple:
+            self.fill("#67558d", x + 89, y + 32, w - 149, 27, 14)
+            self.fill("#201c36", x + 90, y + 33, w - 151, 25, 13)
+            self.label("◈", x + 99, y + 36, 12, "#cfc0f6")
+            self.label("☆", x + w - 49, y + 34, 16)
+        else:
+            self.fill("#202124", x + 79, y + 32, w - 112, 27, 14)
         editing = window["focus"] == "url"
         address = window["input"] if editing else window["url"]
-        self.field(address, window, x + 94, y + 36, w - 144, 13, "#e6e8ec", focused=editing, mono=False)
+        self.field(address, window, x + (118 if purple else 94), y + 36,
+                   w - (181 if purple else 144), 13, "#f6f0ff" if purple else "#e6e8ec", focused=editing, mono=False)
         self.label("⋮", x + w - 21, y + 35, 16)
         body_top = 62
         if window.get("bookmarks"):
             self.fill("#303134", x, y + 62, w, 23)
             self.label("    ".join(window.get("savedBookmarks", [])), x + 15, y + 65, 10, width=w - 30)
             body_top += 23
-        self.fill("#f8f9fb", x, y + body_top, w, max(1, h - body_top))
+        self.fill("#f8f6ff" if purple else "#f8f9fb", x, y + body_top, w, max(1, h - body_top))
         body = window.get("body", "")
         tab = tabs[window["activeTab"]] if tabs else {}
         scale = window.get("zoom", 100) / 100
-        left = x + min(w * .075, 72)
+        left = x + min(w * (.059 if purple else .075), 72)
         available = w - (left - x) * 2
-        top = y + body_top + 24
-        self.label(tab.get("title", "Новая вкладка"), left, top, 23 * scale, "#222936", width=available, bold=True)
+        top = y + body_top + (15 if purple else 24)
+        self.label(tab.get("title", "Новая вкладка"), left, top, (26 if purple else 23) * scale,
+                   "#211834" if purple else "#222936", width=available, bold=True)
         body_field = dict(window, cursor=window.get("bodyCursor", 0), anchor=window.get("bodyAnchor", 0))
         offset = 0
-        top += 45 * scale
+        top += (42 if purple else 45) * scale
         for line in body.splitlines():
             if top + 20 >= y + h:
                 break

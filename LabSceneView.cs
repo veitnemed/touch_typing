@@ -33,6 +33,10 @@ namespace TouchTypingStudio
                 ". Раскладка " + scene.S("layout") + ". " +
                 string.Join(". ", scene.Items("windows").Where(w => w.B("active")).Select(w => w.S("title") + ". " + w.S("status"))));
             System.Windows.Automation.AutomationProperties.SetHelpText(this, scene.S("terminalInput"));
+            var terminal = scene.Items("windows").FirstOrDefault(w => w.B("active") &&
+                (w.S("app") == "terminal" || w.S("focus") == "terminal"));
+            System.Windows.Automation.AutomationProperties.SetItemStatus(this, terminal == null ? "" :
+                "cursor:" + terminal.I("cursor", -1).ToString(CultureInfo.InvariantCulture));
             InvalidateVisual();
         }
 
@@ -84,19 +88,21 @@ namespace TouchTypingStudio
 
         private void DrawImmersive(DrawingContext dc)
         {
-            double scale = ActualWidth / WidthUnits;
+            double width = classApp == "chrome" ? Math.Min(900, Math.Max(610, ActualWidth)) : WidthUnits;
+            double scale = ActualWidth / width;
             double height = ActualHeight / scale;
             dc.PushTransform(new ScaleTransform(scale, scale));
-            dc.PushClip(new RectangleGeometry(new Rect(0, 0, WidthUnits, height)));
-            Rectangle(0, 0, WidthUnits, height, classApp == "chrome" ? "#F8FAFC" : "#1E1E1E");
+            dc.PushClip(new RectangleGeometry(new Rect(0, 0, width, height), 10, 10));
+            Rectangle(0, 0, width, height, classApp == "chrome" ? "#F7F6FD" : "#1E1E1E");
             var candidates = scene.Items("windows").Where(w =>
                 (w.S("app") == classApp || classApp == "code" && w.S("app") == "vscode") &&
                 w.S("state") != "closed" && w.S("state") != "minimized").ToArray();
             var window = candidates.FirstOrDefault(w => w.B("active")) ?? candidates.FirstOrDefault();
             if (window != null)
             {
-                // Hide the simulated Ubuntu title bar while preserving the app's own tabs and tools.
-                DrawWindow(window, new Rect(0, -29, WidthUnits, height + 29));
+                // The compact browser reference retains its simulated title bar.
+                double caption = classApp == "chrome" ? 0 : -29;
+                DrawWindow(window, new Rect(0, caption, width, height - caption));
             }
             else
             {
@@ -158,8 +164,9 @@ namespace TouchTypingStudio
             context.PushClip(new RectangleGeometry(new Rect(0, 0, bounds.Width, bounds.Height), 8, 8));
             Rounded(0, 0, bounds.Width, bounds.Height, "#252527", 8);
             string app = window.S("app");
-            Rectangle(0, 0, bounds.Width, 29, window.B("active") ? "#303034" : "#28282C");
-            Text(window.S("title", AppTitle(app)), 14, 7, 11, "#D8D8DF");
+            Rectangle(0, 0, bounds.Width, 29, app == "chrome" ? "#24213B" : window.B("active") ? "#303034" : "#28282C");
+            if (app == "chrome") Icon("chrome", 13, 5, 19);
+            Text(window.S("title", AppTitle(app)), app == "chrome" ? 38 : 14, 7, app == "chrome" ? 14 : 11, "#F6F1FF");
             Text("—       □", bounds.Width - 89, 5, 12, "#C6C6CE");
             Rounded(bounds.Width - 26, 5, 18, 18, "#D75636", 9);
             Text("×", bounds.Width - 22, 3, 15, "#FFFFFF");
@@ -173,38 +180,36 @@ namespace TouchTypingStudio
 
         private void DrawChrome(Data window, double w, double h)
         {
-            Rectangle(0, 29, w, h - 29, "#F8FAFC");
-            Rectangle(0, 29, w, 35, "#292C34");
+            Rectangle(0, 29, w, h - 29, "#F7F6FD");
+            Rectangle(0, 29, w, 35, "#1D1A35");
             var tabs = window.Items("tabs").ToArray();
             double tabWidth = Math.Min(200, (w - 65) / Math.Max(1, tabs.Length));
             for (int i = 0; i < tabs.Length; i++)
             {
                 Rounded(7 + i * tabWidth, 35, tabWidth - 4, 29,
-                    i == window.I("activeTab") ? "#414652" : "#2C3039", 7);
+                    i == window.I("activeTab") ? "#3A345C" : "#26223E", 7);
                 Text("◉", 16 + i * tabWidth, 42, 10, "#80BCDF");
                 Text(tabs[i].S("title", "Новая вкладка"), 33 + i * tabWidth, 42, 11, "#E7EAF1", tabWidth - 53);
                 Text("×", tabWidth - 15 + i * tabWidth, 40, 12, "#A4ACBC");
             }
             Text("+", 17 + tabs.Length * tabWidth, 38, 20, "#C2C9D6");
-            Rectangle(0, 64, w, 38, "#414652");
+            Rectangle(0, 64, w, 38, "#3A345C");
             Text("‹   ›   ⟳", 13, 71, 17, "#CDD5E2");
-            Rounded(95, 70, w - 142, 26, window.S("focus") == "url" ? "#D8E9FD" : "#252A34", 13);
+            Rounded(95, 70, w - 142, 26, window.S("focus") == "url" ? "#D8E9FD" : "#242039", 13);
             Field(window.S("focus") == "url" ? window.S("input") : window.S("url"), window, 109, 76, w - 180, 12,
                 window.S("focus") == "url" ? "#1F3E5F" : "#D4DCEB", 0, window.S("focus") == "url");
             Text("⋮", w - 24, 68, 21, "#D6DDE9");
-            double left = Math.Max(28, w * .075);
+            double left = Math.Max(28, w * .065);
             double pageScale = window.N("zoom", 100) / 100;
             string body = window.S("body");
             var active = tabs.ElementAtOrDefault(window.I("activeTab"));
             if (body.Length == 0 && active != null) body = active.S("body");
-            Text(active == null ? "Рабочие материалы" : active.S("title", "Рабочие материалы"), left, 122, 25 * pageScale, "#202A3B", w - left * 2);
-            Text(window.S("url"), left, 159, 11, "#52657C", w - left * 2);
-            Rectangle(left, 185, Math.Max(10, w - left * 2), 1, "#E1E7EF");
+            Text(active == null ? "Рабочие материалы" : active.S("title", "Рабочие материалы"), left, 124, 30 * pageScale, "#211B37", w - left * 2);
             int offset = 0;
-            double lineY = 194;
+            double lineY = 172;
             foreach (string line in body.Split('\n'))
             {
-                Field(line, window, left, lineY, w - left * 2, 14 * pageScale, "#34445D", offset,
+                Field(line, window, left, lineY, w - left * 2, 14 * pageScale, "#302745", offset,
                     window.I("bodyAnchor") != window.I("bodyCursor"), true);
                 lineY += 22 * pageScale; offset += line.Length + 1;
             }

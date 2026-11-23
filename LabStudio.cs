@@ -171,81 +171,8 @@ namespace TouchTypingStudio
             paused = true;
             pressed.Clear();
             UpdateHeader();
-            var root = new Grid { Margin = new Thickness(13, 8, 13, 7), Focusable = true };
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            var header = new DockPanel();
-            labPause = ActionButton("Продолжить · F8", ToggleLabPause);
-            labFinish = ActionButton("Результат · F10", FinishLab);
-            AutomationProperties.SetAutomationId(labPause, "LabPause");
-            AutomationProperties.SetAutomationId(labFinish, "LabFinish");
-            var controls = Stack(true);
-            controls.Children.Add(labPause);
-            controls.Children.Add(labFinish);
-            DockPanel.SetDock(controls, Dock.Right);
-            header.Children.Add(controls);
-            timerLabel = Label("03:00", 24, Ink, true);
-            AutomationProperties.SetAutomationId(timerLabel, "LabClock");
-            timerLabel.FontFamily = new FontFamily("Consolas");
-            timerLabel.Margin = new Thickness(0, 0, 17, 0);
-            DockPanel.SetDock(timerLabel, Dock.Left);
-            header.Children.Add(timerLabel);
-            labCounter = Label("", 12, Dim);
-            AutomationProperties.SetAutomationId(labCounter, "LabCounter");
-            labCounter.VerticalAlignment = VerticalAlignment.Center;
-            header.Children.Add(labCounter);
-            root.Children.Add(header);
-            var prompt = Stack();
-            prompt.Margin = new Thickness(0, 7, 0, 7);
-            labTask = Label("", 20, Ink, true);
-            AutomationProperties.SetAutomationId(labTask, "LabTask");
-            labTask.TextWrapping = TextWrapping.Wrap;
-            labKeys = Label("", 17, Accent);
-            AutomationProperties.SetAutomationId(labKeys, "LabKeys");
-            labKeys.Margin = new Thickness(0, 4, 0, 0);
-            labKeys.TextWrapping = TextWrapping.Wrap;
-            prompt.Children.Add(labTask);
-            prompt.Children.Add(labKeys);
-            Grid.SetRow(prompt, 1);
-            root.Children.Add(prompt);
-            labDesktop = new LabSceneView();
-            AutomationProperties.SetAutomationId(labDesktop, "LabDesktop");
-            Grid.SetRow(labDesktop, 2);
-            root.Children.Add(labDesktop);
-            var input = new DockPanel { Margin = new Thickness(0, 4, 0, 1) };
-            var aids = Stack(true);
-            labKeyAid = ActionButton("⌨", delegate { ToggleLabAid(true); });
-            labHandAid = ActionButton("👐", delegate { ToggleLabAid(false); });
-            labMistakeAid = ActionButton("✕", ToggleLabMistake);
-            labKeyAid.ToolTip = "Показать или скрыть клавиатуру · F4";
-            labHandAid.ToolTip = "Показать или скрыть руки · F7";
-            labMistakeAid.ToolTip = "Подсвечивать ошибочную клавишу красным";
-            AutomationProperties.SetAutomationId(labMistakeAid, "LabMistakeHighlight");
-            labHint = ActionButton("Подсказка · F1", delegate { RenderLab(Request("lab-hint")); });
-            aids.Children.Add(labHint);
-            aids.Children.Add(labKeyAid);
-            aids.Children.Add(labHandAid);
-            aids.Children.Add(labMistakeAid);
-            DockPanel.SetDock(aids, Dock.Right);
-            input.Children.Add(aids);
-            feedback = labStatus = Label("", 12, Dim);
-            AutomationProperties.SetAutomationId(feedback, "LabStatus");
-            feedback.TextWrapping = TextWrapping.Wrap;
-            feedback.VerticalAlignment = VerticalAlignment.Center;
-            AutomationProperties.SetLiveSetting(feedback, AutomationLiveSetting.Polite);
-            input.Children.Add(labStatus);
-            Grid.SetRow(input, 3);
-            root.Children.Add(input);
-            keyboard = new LiveKeyboard { IsHitTestVisible = false, Width = 1050 };
-            labGuide = new Viewbox { Child = keyboard, Stretch = Stretch.Uniform,
-                StretchDirection = StretchDirection.DownOnly, MaxHeight = ActualHeight < 680 ? 128 : 147 };
-            Grid.SetRow(labGuide, 4);
-            root.Children.Add(labGuide);
-            center.Content = root;
-            root.Focus();
+            center.Content = MakeReferenceLesson();
+            ((FrameworkElement)center.Content).Focus();
             RenderLab(initial);
             ResumeLab();
         }
@@ -253,7 +180,7 @@ namespace TouchTypingStudio
         private void ToggleLabAid(bool keys)
         {
             var next = Request("settings", keys ? "keys" : "hands", !library.B(keys ? "showKeys" : "showHands", true));
-            if (next.Exists) { library = next; RenderLab(state); }
+            if (next.Exists) { library = next; referenceGuideExplicit = next.B("showKeys", true) || next.B("showHands", true); RenderLab(state); }
         }
 
         private void ToggleLabMistake()
@@ -358,7 +285,9 @@ namespace TouchTypingStudio
             else if (down ? !pressed.Add(key) : !pressed.Remove(key)) return;
             if (down && !repeat && !pressed.Any(IsModifier))
             {
-                if (key == "F1" && !state.B("showGuide", true)) { RenderLab(Request("lab-hint")); return; }
+                if (key == "F1" && !state.D("task").S("keys").Split('+').Contains("F1"))
+                { OpenReferenceLessonHelp(); return; }
+                if (key == "Esc" && referenceHelpOpen) { CloseReferenceLessonHelp(); return; }
                 if (key == LabPauseKey()) { PauseLab(); return; }
                 if (key == LabEndKey()) { FinishLab(); return; }
                 if (key == "F4" && !state.D("task").S("keys").Split('+').Contains("F4")) { ToggleLabAid(true); return; }
@@ -381,9 +310,6 @@ namespace TouchTypingStudio
             var task = state.D("task");
             labTask.Text = state.B("showGuide", true) ? task.S("title") : state.S("phase");
             labTask.ToolTip = state.S("scenario") + "\n" + string.Join("\n", state.Items("objectives").Select(item => item.Value()));
-            labKeys.Text = (!state.B("showGuide", true) ? "" : task.S("keys").Length > 0 ? DisplayLabGesture(task.S("keys")) : task.S("id").StartsWith("open-") ? "⊞  →  " + task.S("text") + "  →  Enter" : task.S("text").Length > 12 ? "Ctrl+R  ·  найдите фрагмент  →  Enter" : task.S("text")) +
-                (state.I("scenarioLength") > 0 ? "   ·   шаг " + state.I("scenarioStep") + "/" + state.I("scenarioLength") : "");
-            labHint.Visibility = state.B("showGuide", true) ? Visibility.Collapsed : Visibility.Visible;
             labKeys.ToolTip = state.B("showGuide", true) ? task.S("hint") : "";
             AutomationProperties.SetHelpText(labKeys, task.S("keys"));
             AutomationProperties.SetHelpText(labTask, task.S("text"));
@@ -401,8 +327,9 @@ namespace TouchTypingStudio
             labStatus.Text = paused ? "Пауза · пробел — продолжить" :
                 (status.Length > 0 ? status : "Нажмите сочетание из задания") + (held.Length > 0 ? "   ·   Нажато " + held : "");
             labStatus.Foreground = state.S("feedback") == "error" ? Error : state.S("feedback") == "good" ? Ui.Brush("#A6D8B0") : Dim;
-            labPause.Content = paused ? "Продолжить · пробел" : "Пауза · " + DisplayLabGesture(LabPauseKey());
-            labFinish.Content = "Результат · " + DisplayLabGesture(LabEndKey());
+            UpdateReferenceLesson(task);
+            SetReferenceLessonAction(labPause, paused ? "Продолжить · пробел" : "Пауза · " + DisplayLabGesture(LabPauseKey()));
+            SetReferenceLessonAction(labFinish, "Результат · " + DisplayLabGesture(LabEndKey()));
             labKeyAid.ToolTip = "Показать или скрыть клавиатуру · " + DisplayLabGesture("F4");
             labHandAid.ToolTip = "Показать или скрыть руки · " + DisplayLabGesture("F7");
             var guide = state.D("guide").Items("steps").FirstOrDefault();
@@ -414,8 +341,7 @@ namespace TouchTypingStudio
             labKeyAid.Opacity = library.B("showKeys", true) ? 1 : .5;
             labHandAid.Opacity = library.B("showHands", true) ? 1 : .5;
             labMistakeAid.Opacity = library.B("showMistakeKey", true) ? 1 : .5;
-            labGuide.Visibility = library.B("showKeys", true) || library.B("showHands", true)
-                ? Visibility.Visible : Visibility.Collapsed;
+            UpdateReferenceGuideVisibility();
         }
 
         private string DisplayLabGesture(string raw)
@@ -516,37 +442,7 @@ namespace TouchTypingStudio
 
         private FrameworkElement BuildLabResult(Data result, FrameworkElement backdrop, bool preview = false)
         {
-            int seconds = result.I("seconds");
-            var series = result.Items("series").ToArray();
-            int duration = Math.Max(1, seconds), stride = Math.Max(1, (duration + 599) / 600);
-            var counts = series.Where(point => point.B("correct")).GroupBy(point => point.I("second") / stride)
-                .ToDictionary(group => group.Key, group => group.Count());
-            var errorCounts = series.Where(point => !point.B("correct")).GroupBy(point => point.I("second") / stride)
-                .ToDictionary(group => group.Key, group => group.Count());
-            var tempo = Enumerable.Range(0, duration / stride + 1).Select(second =>
-            {
-                int start = Math.Max(0, second - 4 / stride);
-                int count = Enumerable.Range(start, second - start + 1)
-                    .Sum(index => counts.ContainsKey(index) ? counts[index] : 0);
-                return (double?)(count * 60.0 / (Math.Min(duration + 1, (second + 1) * stride) - start * stride));
-            }).ToArray();
-            var errors = Enumerable.Range(0, duration / stride + 1)
-                .Select(second => (double)(errorCounts.ContainsKey(second) ? errorCounts[second] : 0)).ToArray();
-            string summary = labApp == "ubuntu" ? "Ubuntu" : labApp == "chrome" ? "Chrome" :
-                labApp == "code" ? "VS Code" : labApp == "workday" ? "Рабочий день" : "Терминал";
-            string detail = "Ошибки " + result.I("errors") + "   ·   Рекорд " + result.D("record").Value("—") +
-                (result.B("newRecord") ? "   ·   Новый рекорд" : "");
-            return BuildStaminaResult(backdrop, preview ? "Пауза" : "Результат", summary, seconds, "ДЕЙСТВИЙ",
-                result.I("solved").ToString(),
-                Format(result.I("solved") * 60.0 / Math.Max(1, seconds)), "действий/м",
-                Format(result.N("accuracy")) + "%", tempo, errors, detail, preview ? "LabPauseResult" : "LabResult",
-                "Выполнено " + result.I("solved") + ". Ошибки " + result.I("errors") + ". Рекорд " +
-                    result.I("record") + ". " + (result.B("completed") ?
-                        "Цель занятия выполнена." : "Занятие сохранено."),
-                RestartLab,
-                preview ? (Action)FinishLab : delegate { legacyLive = false; ShowPage(LivePage); },
-                preview ? (Action)ResumeLab : delegate { ShowPage(ProgressPage); },
-                preview ? "Продолжить" : "Прогресс");
+            return MakeReferenceLabResult(result, backdrop, preview);
         }
     }
 }
