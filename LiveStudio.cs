@@ -1175,8 +1175,9 @@ namespace TouchTypingStudio
                 case Key.End:
                 case Key.Insert:
                 case Key.Delete:
-                case Key.PageUp:
-                case Key.PageDown:
+                // WPF also names these enum values Prior and Next.
+                case Key.PageUp: return "PageUp";
+                case Key.PageDown: return "PageDown";
                 case Key.CapsLock: return input.ToString();
                 default: return "";
             }

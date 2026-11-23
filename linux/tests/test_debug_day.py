@@ -194,11 +194,7 @@ def exercise_native(self, mode, chord, capture, output):
     lab.mission_picker.set_selected(next(i for i,(key,_) in enumerate(lab.choices) if key == 'workday-debug-' + mode))
     yield
     lab.start()
-    for _ in range(110):
-        if lab.active and not state()['paused']:
-            break
-        yield
-    assert lab.active and not state()['paused'], lab.status.get_label()
+    yield from self.await_lesson_capture(chord)
 
     def open_app(app, launcher_text):
         dock = state()['scene']['dock']

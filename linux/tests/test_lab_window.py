@@ -341,6 +341,26 @@ class LabWindowTest(Studio):
                 assert self.result_kind=='shortcuts'
         finally:call(session,api+'.Session','Stop')
 
+    def await_lesson_capture(self, chord):
+        """Acknowledge GNOME in this owned remote-desktop QA session only."""
+        lab = self.lab
+        acknowledged_prompt = False
+        for frame in range(300):
+            focused = self.window.is_active()
+            inhibited = bool(lab.surface and lab.surface.get_property("shortcuts-inhibited"))
+            if lab.active and not lab.state["paused"] and focused and inhibited and not lab.waiting_capture:
+                print("GTK lesson capture confirmed by GDK", lab.state["mission"], flush=True)
+                return
+            # Don't send Enter until the modal owns focus, or when training
+            # is paused for a reason unrelated to the compositor permission.
+            if (frame >= 45 and not acknowledged_prompt and lab.active and lab.state["paused"]
+                    and lab.waiting_capture and not focused and not inhibited):
+                yield from chord("Enter")
+                acknowledged_prompt = True
+            yield
+        raise AssertionError(("GNOME shortcut capture not ready", lab.state["mission"], lab.status.get_label(),
+                              "focused", focused, "GDK inhibited", inhibited, "acknowledged", acknowledged_prompt))
+
     def exercise_gnome_profile(self, chord, event, capture, output):
         custom = '--gnome-profile-custom' in sys.argv
         if custom:
@@ -365,11 +385,7 @@ class LabWindowTest(Studio):
             lab.time_limit.set_selected(0)
             lab.mission_picker.set_selected(next(i for i, (key, _) in enumerate(lab.choices) if key == mission))
             lab.start()
-            for _ in range(70):
-                if not lab.state["paused"]:
-                    break
-                yield
-            assert lab.active and not lab.state["paused"], lab.status.get_label()
+            yield from self.await_lesson_capture(chord)
 
         def state():
             return self.lab.state
@@ -483,15 +499,7 @@ class LabWindowTest(Studio):
             for _ in range(20):
                 yield
             lab.start()
-            for _ in range(45):
-                yield
-            if lab.state['paused'] and not self.window.is_active():
-                yield from chord('Enter')
-            for _ in range(100):
-                if lab.active and not lab.state['paused']:
-                    break
-                yield
-            assert lab.active and not lab.state['paused'], (mission, lab.status.get_label())
+            yield from self.await_lesson_capture(chord)
 
         def window(app):
             state = self.lab.state

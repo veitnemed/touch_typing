@@ -374,6 +374,15 @@ namespace TouchTypingStudio
         {
             if (!labActive || paused || !IsActive) return;
             string key = ScanKey(scan, extended, vk);
+            // Only QA builds expose the two navigation keys, not arbitrary typed input.
+            if (verifyMode && down && (vk == 0x21 || vk == 0x22))
+            {
+                var cachedModifiers = new[] { "LSuper", "RSuper", "LShift", "RShift", "LCtrl", "RCtrl", "LAlt", "RAlt" };
+                var label = "VK=" + vk.ToString("X2") + " scan=" + scan.ToString("X2") +
+                    " extended=" + extended + " key=" + key +
+                    " held=" + string.Join("+", cachedModifiers.Where(pressed.Contains));
+                AutomationProperties.SetItemStatus(labStatus, label);
+            }
             if (key.Length == 0) return;
             bool repeat = down && (nativeRepeat || pressed.Contains(key));
             if (repeat)

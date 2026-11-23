@@ -764,19 +764,35 @@ internal static class LiveUiSmoke
             Until(delegate { return Visible("LabDesktop") && Name("LabPause").StartsWith("Пауза"); }, "native lesson " + mission);
         };
         Func<AutomationElement.AutomationElementInformation> scene = () => Find("LabDesktop").Current;
+        Action<string, string, Func<bool>> expectDesktopTransition = (chord, key, expectedScene) =>
+        {
+            Chord(chord);
+            try { Until(expectedScene, chord + " changes the simulated workspace"); }
+            finally
+            {
+                Console.WriteLine("GNOME " + chord + ": " + Find("LabStatus").Current.ItemStatus +
+                    "; Scene=" + scene().Name + "; Focus=" + scene().ItemStatus + "; Solved=" + ReadSolved());
+            }
+            Check(Find("LabStatus").Current.ItemStatus.Contains(" key=" + key + " held="),
+                "The physical chord normalized to the canonical " + key);
+        };
         start("GNOME: терминал на втором рабочем столе");
         VirtualEnglish();
         Check(scene().Name.Contains("Рабочий стол 1 из 2") && scene().Name.Contains("terminal@1"), "Both windows begin on desk 1");
-        Chord("Super+Shift+PageDown");
-        Until(delegate { return scene().Name.Contains("Рабочий стол 2 из 2") && scene().Name.Contains("code@1") &&
-            scene().Name.Contains("terminal@2"); }, "only terminal moves; current desk follows");
+        expectDesktopTransition("Super+Shift+PageDown", "PageDown", delegate
+        {
+            return scene().Name.Contains("Рабочий стол 2 из 2") && scene().Name.Contains("code@1") &&
+                scene().Name.Contains("terminal@2") && ReadSolved() == 1;
+        });
         foreach (char c in "pwd") Send(Character(c));
         Key("Enter");
         Until(delegate { return Name("LabTask").Contains("рабочий стол"); }, "exact pwd advances to desktop return");
         CaptureReferenceFrame("gnome-workspace-2-terminal");
-        Chord("Super+PageUp");
-        Until(delegate { return scene().Name.Contains("Рабочий стол 1 из 2") && scene().HelpText.EndsWith("app.py") &&
-            scene().ItemStatus == "editor:body:2"; }, "original file and exact caret");
+        expectDesktopTransition("Super+PageUp", "PageUp", delegate
+        {
+            return scene().Name.Contains("Рабочий стол 1 из 2") && scene().HelpText.EndsWith("app.py") &&
+                scene().ItemStatus == "editor:body:2" && ReadSolved() == 3;
+        });
         CaptureReferenceFrame("gnome-workspace-1-editor");
         foreach (char c in "gnome") Send(Character(c));
         Until(delegate { return scene().ItemStatus == "editor:body:7"; }, "continued typing in the same file");
