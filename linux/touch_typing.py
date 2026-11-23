@@ -2591,6 +2591,7 @@ class LabPage(Gtk.Box):
         if self.active or not self.classes:
             return
         self.result = False
+        self.content.set_can_focus(True)
         self.host.refresh()
         app = self.classes[self.picker.get_selected()]["id"]
         mission = self.choices[self.mission_picker.get_selected()][0]
@@ -3005,6 +3006,9 @@ class LabPage(Gtk.Box):
         add(actions, button("Завершить", lambda: self.host.navigate("lab")),
             restart, button("К прогрессу", lambda: self.host.navigate("progress"), "reference-primary"))
         panel.append(actions)
+        # The result is modal even though it is drawn in an overlay.
+        # Exclude the covered lesson subtree from GTK's focus traversal.
+        self.content.set_can_focus(False)
         self.add_reference_modal(panel)
         restart.grab_focus()
         self.host.refresh()
