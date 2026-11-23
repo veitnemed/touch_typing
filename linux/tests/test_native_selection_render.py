@@ -15,12 +15,12 @@ gi.require_version("Graphene", "1.0")
 gi.require_version("Pango", "1.0")
 from gi.repository import GdkPixbuf, GLib, Graphene, Gtk, Pango
 
-from lab_view import DesktopView
+from lab_view import CODE_FOCUS, CODE_SELECTION, DesktopView
 
 
 def verify(window, view, output):
-    selection = bytes((53, 98, 155))
-    caret_color = bytes((210, 220, 230))
+    selection = bytes.fromhex(CODE_SELECTION[1:])
+    caret_color = bytes.fromhex(CODE_FOCUS[1:])
     first = "е\u0301🙂"
     end = view.units(first)
     assert end == 4
@@ -91,6 +91,7 @@ def verify(window, view, output):
     # the shell/title alone can leave a nonempty render node. Require actual
     # text ink and selection coverage from the second body row as well.
     view.presentation_app = "chrome"
+    selection = bytes((53, 98, 155))
     browser_first, browser_second = "Русский абзац", "Вторая строка"
     browser_offset = view.units(browser_first) + 1
     browser = {"id": "chrome-test", "app": "chrome", "active": True, "focus": "body",

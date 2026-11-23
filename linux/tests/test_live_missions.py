@@ -622,7 +622,7 @@ class MissionTest(unittest.TestCase):
                     solved(state, 10)
                 state = chord("Enter")
                 solved(state, 11)
-                self.assertEqual(window(state, "code")["body"], "# gnome\n\nfrom src.spectrum import fft\n")
+                self.assertEqual(window(state, "code")["body"], "# gnome\n\nfrom tasks import add_task\n")
                 self.assertEqual(window(state, "code")["bodyCursor"], 8)
 
                 solved(chord("LAlt", "Tab"), 12)
@@ -660,13 +660,12 @@ class MissionTest(unittest.TestCase):
         options = dict(app="workday", level=0, mode="sandbox", seconds=0,
                        guidance="guided", mission="workday-source-note", seed=0)
         target = "/home/student/project/notes.txt"
-        original = "spectrum\nsignal\nvector\nsignal\n"
-        source_url = "https://practice.local/spectrum"
+        original = "add\nfind\nsave\nfind\n"
+        source_url = "https://practice.local/task-list/guide"
         method = (
-            "Спектр сигнала\n"
-            "Прямое преобразование возвращает комплексный спектр.\n"
-            "Центрированный спектр позволяет сопоставить частоты.\n"
-            "Материалы и отчёт доступны ниже."
+            "Как вести список задач\n"
+            "Добавьте задачу с названием. Найдите её по названию и отметьте выполненной.\n"
+            "Сохраните список задач в JSON. Материалы и отчёт доступны ниже."
         )
         sides = {"Ctrl": "RCtrl", "Alt": "LAlt", "Shift": "LShift", "Super": "LSuper"}
 
@@ -774,7 +773,7 @@ class MissionTest(unittest.TestCase):
                             self.assertEqual(active(chord(["RCtrl", "LAlt", "T"]))["app"], "terminal")
                             wrong = type_command("cat notes.txt")
                             self.assertTrue(wrong["scene"]["terminal"]["lastSuccess"])
-                            self.assertEqual(wrong["scene"]["terminal"]["output"][-4:], method.splitlines())
+                            self.assertEqual(wrong["scene"]["terminal"]["output"][-len(method.splitlines()):], method.splitlines())
                             self.assertEqual(wrong["solved"], state["solved"])
                             self.assertEqual(wrong["errors"], state["errors"] + 1)
                             self.assertIn("заметка отличается", wrong["status"])
@@ -791,7 +790,7 @@ class MissionTest(unittest.TestCase):
                             reopened_note = True
                         if task_id == "command/cat notes.txt":
                             self.assertTrue(state["scene"]["terminal"]["lastSuccess"])
-                            self.assertEqual(state["scene"]["terminal"]["output"][-4:], method.splitlines())
+                            self.assertEqual(state["scene"]["terminal"]["output"][-len(method.splitlines()):], method.splitlines())
                             readback = True
                     self.assertTrue(state["finished"])
                     self.assertTrue(state["saved"])
@@ -986,7 +985,7 @@ class MissionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
             options = dict(app="workday", level=0, mode="sandbox", seconds=0, guidance="guided")
             engine = Engine(verify=True)
-            marker = "lab/workday/command/head -n 2 spectrum-report.txt"
+            marker = "lab/workday/command/head -n 2 task-list-report.txt"
             sides = {"Ctrl": "RCtrl", "Alt": "LAlt", "Shift": "LShift", "Super": "LSuper"}
 
             def chord(keys, char=""):
@@ -1045,7 +1044,7 @@ class MissionTest(unittest.TestCase):
                     self.assertEqual(reopened["reportArtifact"], receipt)
                     files = {f["path"]: f["content"] for f in reopened["scene"]["terminal"]["files"]}
                     self.assertEqual(files[receipt["path"]], receipt["content"])
-                    self.assertNotIn("/home/student/Downloads/spectrum-report.txt", files)
+                    self.assertNotIn("/home/student/Downloads/task-list-report.txt", files)
                     self.assertEqual((reopened["solved"], reopened["errors"]), (state["solved"], state["errors"]))
                     self.assertEqual(credit(), 1)
                     kill_engine()
@@ -1561,7 +1560,9 @@ class MissionTest(unittest.TestCase):
             task = state["task"]
             for attempt in range(24):
                 if task["keys"]:
-                    if task["id"] in {"code-rename-confirm", "project-search-submit"} and attempt == 0:
+                    expects_text = task["id"] in {"code-rename-confirm", "project-search-submit"} or (
+                        mission["id"] == "code-find-exact-edit" and task["id"] in {"quick-choose", "exact-find-submit", "save"})
+                    if expects_text and attempt == 0:
                         for char in task["text"]:
                             chord(["LShift", "-"] if char == "_" else ["LShift", char] if char.isupper() else ["Space" if char == " " else char.upper()], char)
                     if task["id"] == "project-search-repair" and attempt == 0:
@@ -1573,6 +1574,10 @@ class MissionTest(unittest.TestCase):
                         state = chord([sides.get(k, k) for k in task["keys"].split("+")], png_fixture())
                     else:
                         state = chord([sides.get(k, k) for k in task["keys"].split("+")])
+                elif task["id"] == "python-edit-write":
+                    for char in task["text"]:
+                        keys = {" ": ["Space"], "=": ["="], "+": ["LShift", "="]}.get(char, [char.upper()])
+                        state = chord(keys, char)
                 else:
                     for char in task["text"]:
                         chord(["Space" if char == " " else char.upper()], char)
@@ -1580,20 +1585,103 @@ class MissionTest(unittest.TestCase):
                 if state["solved"] == step + 1:
                     break
             self.assertEqual(state["solved"], step + 1, (task, state["status"], state["phase"]))
-            if task["id"] == "command/head -n 2 spectrum-report.txt":
+            if task["id"] == "command/head -n 2 task-list-report.txt":
                 files = {f["path"]: f["content"] for f in state["scene"]["terminal"]["files"]}
-                self.assertNotIn("/home/student/Downloads/spectrum-report.txt", files)
-                report = files["/home/student/project/spectrum-report.txt"]
+                self.assertNotIn("/home/student/Downloads/task-list-report.txt", files)
+                report = files["/home/student/project/task-list-report.txt"]
                 self.assertTrue(report.startswith("# "), report)
                 self.assertIn(report.splitlines()[0], state["scene"]["terminal"]["output"])
                 if mission["id"] == "workday-report":
                     self.assertEqual(state["reportArtifact"], {
-                        "path": "/home/student/project/spectrum-report.txt",
+                        "path": "/home/student/project/task-list-report.txt",
                         "content": report, "downloadStillPresent": False,
                     })
                 else:
                     self.assertIsNone(state["reportArtifact"])
             self.assertEqual(state["errors"], 0, (mission["id"], task, state["status"]))
+
+
+    def test_second_match_only_and_platform_back(self):
+        from unittest.mock import patch
+
+        for platform in ("linux", "windows"):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory, \
+                    patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+                engine = Engine(verify=True)
+                self.addCleanup(engine.close)
+
+                def chord(*keys, text=""):
+                    for key in keys:
+                        engine.call("lab-key", key=key, pressed=True, text=text if key == keys[-1] else "")
+                    for key in reversed(keys):
+                        state = engine.call("lab-key", key=key, pressed=False)
+                    return state
+
+                def type_text(text):
+                    for character in text:
+                        state = chord(character.upper(), text=character)
+                    return state
+
+                def active(state):
+                    return next(w for w in state["scene"]["windows"] if w["active"])
+
+                def fixture(state):
+                    return {f["path"].rsplit("/", 1)[-1]: f["content"]
+                            for f in state["scene"]["terminal"]["files"] if "/task-list/" in f["path"]}
+
+                engine.call("configure", platform=platform, layout="EN")
+                engine.call("lab-start", app="code", mode="sandbox", level=0,
+                            mission="code-find-exact-edit", seconds=0, seed=0, guidance="guided")
+                state = engine.call("lab-resume")
+                baseline = fixture(state)
+                self.assertEqual(set(baseline), {"app.py", "tasks.py", "storage.py", "test_tasks.py"})
+                self.assertTrue(active(state)["url"].endswith("/tasks.py"))
+                chord("LCtrl", "P")
+                state = chord("Enter")
+                self.assertEqual(state["solved"], 1)  # opening the palette alone or submitting no query is not enough
+                state = type_text("apy")  # subsequence, not substring and not a whole filename
+                self.assertEqual(active(state)["input"], "apy")
+                self.assertEqual(active(state)["entries"][0]["title"], "app.py")
+                state = chord("Enter")
+                self.assertEqual((active(state)["url"].rsplit("/", 1)[-1], state["solved"]), ("app.py", 2))
+                chord("LCtrl", "F")
+                type_text("raft")  # also finds exactly three, but isn't the specified query
+                state = chord("Enter")
+                self.assertEqual(state["solved"], 3)
+                chord("LCtrl", "A")
+                type_text("draft")
+                state = chord("Enter")
+                for i, keys in enumerate([(), ("F3",), ("F3",), ("F3",), ("LShift", "F3"), ("LShift", "F3")]):
+                    if keys:
+                        state = chord(*keys)
+                    ordinal = [1, 2, 3, 1, 3, 2][i]
+                    w = active(state)
+                    self.assertEqual(w["status"], f"Совпадение {ordinal} из 3")
+                    expected = [baseline["app.py"].index(f'draft", "{title}') for title in ("notes", "report", "archive")]
+                    self.assertEqual((w["bodyAnchor"], w["bodyCursor"]), (expected[ordinal - 1], expected[ordinal - 1] + 5))
+                    self.assertEqual(state["solved"], 4 + i)
+
+                state = chord("Esc")
+                self.assertEqual(active(state)["bodyAnchor"], expected[1])
+                type_text("wrong")
+                state = chord("LCtrl", "S")
+                self.assertNotEqual(fixture(state), baseline)
+                self.assertEqual(state["task"]["id"], "save")
+                for _ in "wrong":
+                    chord("Backspace")
+                state = type_text("ready")
+                self.assertEqual(state["task"]["id"], "save")
+                state = chord("LCtrl", "S")
+                self.assertEqual(fixture(state), {**baseline, "app.py": baseline["app.py"].replace('draft", "report', 'ready", "report')})
+                state = chord("Home")
+                origin = (active(state)["url"], active(state)["bodyAnchor"], active(state)["bodyCursor"])
+                state = chord("F12")
+                self.assertTrue(active(state)["url"].endswith("/tasks.py"))
+                self.assertEqual(active(state)["bodyCursor"], baseline["tasks.py"].index("add_task"))
+                state = chord("LCtrl", "LAlt", "-") if platform == "linux" else chord("LAlt", "Left")
+                self.assertEqual((active(state)["url"], active(state)["bodyAnchor"], active(state)["bodyCursor"]), origin)
+                self.assertTrue(state["finished"], state["task"])
+                engine.close()
 
 
 if __name__ == "__main__":

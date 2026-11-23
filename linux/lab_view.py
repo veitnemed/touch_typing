@@ -7,6 +7,20 @@ import gi
 gi.require_version("Gsk", "4.0")
 from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Graphene, Gsk, Gtk, Pango
 
+# GitHub Dark Default role mapping: primer/github-vscode-theme, src/theme.js.
+CODE_BG = "#0d1117"
+CODE_INSET = "#010409"
+CODE_FG = "#e6edf3"
+CODE_MUTED = "#7d8590"
+CODE_LINE_NO = "#6e7681"
+CODE_LIST_SELECTION = "#2d3239"
+CODE_BORDER = "#30363d"
+CODE_ROW = "#171b22"
+CODE_FOCUS = "#2f81f7"
+CODE_SELECTION = "#264f78"
+CODE_SYNTAX = {"keyword": "#ff7b72", "operator": "#ff7b72", "string": "#a5d6ff",
+               "comment": "#8b949e", "number": "#79c0ff", "function": "#d2a8ff", "variable": "#ffa657"}
+
 
 def ink(value):
     result = Gdk.RGBA()
@@ -102,12 +116,33 @@ class DesktopView(Gtk.Widget):
         return len(value.encode("utf-16-le")) // 2
 
     def field(self, value, window, x, y, width, size, color, offset=0, focused=True,
-              mono=True, scroll_key=None, *, family="Noto Sans", line_break=0):
+              mono=True, scroll_key=None, *, family="Noto Sans", line_break=0,
+              syntax=(), selection_color="#35629b", caret_color=None):
         """Draw one line using the same shaped layout for its text, selection and caret."""
         if width <= 0:
             return
         layout = self.text_layout(value, size, mono=mono, family=family)
         encoded = value.encode("utf-16-le")
+        if syntax:
+            attrs = Pango.AttrList()
+            # Pango uses UTF-8 byte indices on the original layout; resolving
+            # UTF-16 spans here doesn't split text into separate shaping runs.
+            boundaries = {0: 0}
+            units = count = 0
+            for ch in value:
+                units += 2 if ord(ch) > 0xFFFF else 1
+                count += len(ch.encode())
+                boundaries[units] = count
+            for token in syntax:
+                first = max(0, token["start"] - offset)
+                last = min(units, token["end"] - offset)
+                tone = CODE_SYNTAX.get(token["kind"])
+                if first < last and first in boundaries and last in boundaries and tone:
+                    color16 = (int(tone[i:i + 2], 16) * 257 for i in (1, 3, 5))
+                    attr = Pango.attr_foreground_new(*color16)
+                    attr.start_index, attr.end_index = boundaries[first], boundaries[last]
+                    attrs.insert(attr)
+            layout.set_attributes(attrs)
         def edge(position):
             length = min(len(encoded), max(0, (position - offset) * 2))
             byte = len(encoded[:length].decode("utf-16-le", errors="ignore").encode())
@@ -139,11 +174,11 @@ class DesktopView(Gtk.Widget):
                 if end > start:
                     self.fill("#385677", x + start, y, end - start, size * 1.45)
         if focused and right > left:
-            self.fill("#35629b", x + left, y, right - left, size * 1.45)
+            self.fill(selection_color, x + left, y, right - left, size * 1.45)
         if focused and selected_break:
             end = edge(line_end)
             space_width = self.text_layout(" ", size, mono=mono, family=family).get_size()[0] / Pango.SCALE
-            self.fill("#35629b", x + end, y, space_width, size * 1.45)
+            self.fill(selection_color, x + end, y, space_width, size * 1.45)
         point = Graphene.Point()
         point.init(x, y)
         self.snapshot.save()
@@ -151,7 +186,7 @@ class DesktopView(Gtk.Widget):
         self.snapshot.append_layout(layout, ink(color))
         self.snapshot.restore()
         if draw_caret:
-            self.fill(color, x + caret_x, y + 1, 1.5, size * 1.35)
+            self.fill(caret_color or color, x + caret_x, y + 1, 1.5, size * 1.35)
         self.snapshot.pop()
 
     def app_icon(self, app, x, y, size=30):
@@ -495,13 +530,19 @@ class DesktopView(Gtk.Widget):
                        + "  " + window.get("input", ""), x + max(20, w - 290), y + 74, 11, width=min(270, w - 40))
 
     def code(self, window, x, y, w, h):
-        self.fill("#1f1f1f", x, y, w, h)
-        self.fill("#181818", x, y, 35, max(1, h - 19))
+        self.fill(CODE_BG, x, y, w, h)
+        self.fill(CODE_BG, x, y, 35, max(1, h - 19))
+        self.fill(CODE_BORDER, x + 34, y, 1, h - 19)
         for i, icon in enumerate(("▣", "⌕", "⑂", "▷", "▧")):
-            self.label(icon, x + 8, y + 13 + i * 33, 18, "#b1b1b1")
+            active_icon = {"explorer": 0, "project-search": 1, "changes": 2, "extensions": 4}.get(window.get("view"), 0)
+            if i == active_icon and window.get("sidebar", True):
+                self.fill("#f78166", x, y + 7 + i * 33, 2, 29)
+            self.label(icon, x + 8, y + 13 + i * 33, 18,
+                       CODE_FG if i == active_icon else CODE_MUTED)
         sidebar = 155 if window.get("sidebar", True) and w > 450 else 0
         if sidebar:
-            self.fill("#181818", x + 35, y, sidebar, h - 19)
+            self.fill(CODE_INSET, x + 35, y, sidebar, h - 19)
+            self.fill(CODE_BORDER, x + 34 + sidebar, y, 1, h - 19)
             self.label({"extensions": "РАСШИРЕНИЯ", "project-search": "ПОИСК" , "changes": "ИЗМЕНЕНИЯ"}.get(window.get("view"), "ПРОВОДНИК"), x + 46, y + 10, 9, "#b9b9b9")
             view = window.get("view", "explorer")
             tabs = window.get("tabs", [])
@@ -515,14 +556,20 @@ class DesktopView(Gtk.Widget):
                 shown = window.get("searchResults", [])
             else:
                 shown = window.get("projectFiles", [])
-            project = ("DIAGNOSTICS-LAB" if self.scene.get("diagnosticWorkspace") else
-                       "SYMBOL-LAB" if any("/symbol-lab/" in tab.get("url", "") for tab in tabs) else "PILING-MAIN")
-            self.label(project if view == "explorer" else "", x + 46, y + 36, 10, "#aeb1b8")
+            project = window.get("projectName", "")
+            self.label(("⌄  " + project.upper()) if view == "explorer" and project else "",
+                       x + 44, y + 35, 10, CODE_FG, bold=True, width=sidebar - 14)
             for i, name in enumerate(shown):
-                self.label(name, x + 47, y + 60 + 23 * i, 12, "#c6ccd4", width=sidebar - 15)
+                if y + 80 + 22 * i >= y + h - 18:
+                    break
+                if view == "explorer" and name == window.get("projectRelative"):
+                    self.fill(CODE_LIST_SELECTION, x + 36, y + 55 + 22 * i, sidebar - 2, 22)
+                symbol = "◇  " if view == "explorer" and name.lower().endswith(".py") else ""
+                self.label(symbol + name, x + 49, y + 57 + 22 * i, 12, CODE_FG, width=sidebar - 18)
         editor_x = x + 35 + sidebar
         editor_w = w - 35 - sidebar
-        self.fill("#181818", editor_x, y, editor_w, 28)
+        self.fill(CODE_INSET, editor_x, y, editor_w, 28)
+        self.fill(CODE_BORDER, editor_x, y + 27, editor_w, 1)
         tabs = window.get("tabs", [])
         active_index = min(max(0, window.get("activeTab", 0)), max(0, len(tabs) - 1))
         capacity = max(1, int((editor_w - 42) / 98))
@@ -537,18 +584,20 @@ class DesktopView(Gtk.Widget):
         for i, tab in enumerate(visible_tabs):
             active = first_tab + i == active_index
             left = tab_start + i * tab_width
-            self.fill("#252526" if active else "#181818", left, y, tab_width - 2, 28)
+            self.fill(CODE_BG if active else CODE_INSET, left, y, tab_width - 1, 28)
+            self.fill(CODE_BORDER, left + tab_width - 1, y, 1, 28)
             if active:
-                self.fill("#007acc", left, y, tab_width - 2, 2)
-            self.label(tab.get("title", "fft.py"), left + 8, y + 8, 10,
-                       "#ffffff" if active else "#d5bd7c", width=tab_width - 16)
+                self.fill("#f78166", left, y, tab_width - 2, 2)
+            tab_title = tab.get("title", "")
+            self.label(("◇ " if tab_title.lower().endswith(".py") else "") + tab_title + ("  ●" if tab.get("modified") else ""),
+                       left + 8, y + 7, 11, CODE_FG if active else CODE_MUTED, width=tab_width - 16)
         name = tabs[active_index]["title"] if tabs else ""
         split = window.get("split", False)
         pane = editor_w / 2 if split else editor_w
         current = editor_x + (pane if split and window.get("group") == 1 else 0)
         lines_visible = max(1, int(((h * .54 if window.get("panel") else h - 20) - 56) / 22))
-        def document(name, body, left, active):
-            self.label(name, left + 12, y + 35, 11, "#a2a2a2", width=pane - 22)
+        def document(path, body, left, active, syntax):
+            self.label("  ›  ".join(path.split("/")), left + 12, y + 35, 11, CODE_MUTED, width=pane - 22)
             cursor = window.get("bodyCursor", 0) if active else 0
             line_num = body.encode("utf-16-le")[:cursor * 2].decode("utf-16-le", "ignore").count("\n")
             first = max(0, line_num - lines_visible + 1)
@@ -565,19 +614,21 @@ class DesktopView(Gtk.Widget):
                     break
                 if i >= first:
                     ly = y + 57 + (i - first) * 22
-                    self.label(str(i + 1), left + 9, ly, 11, "#90949b", mono=True)
-                    self.field(line, field, left + 43, ly, pane - 56, 14,
-                               "#93b484" if line.lstrip().startswith("#") else "#d2dce6", offset=offset,
-                               line_break=line_break,
+                    if i == line_num and active:
+                        self.fill(CODE_ROW, left, ly - 2, pane, 22)
+                    self.label(str(i + 1).rjust(2), left + 9, ly, 11,
+                               CODE_FG if active and i == line_num else CODE_LINE_NO, mono=True)
+                    self.field(line, field, left + 43, ly, pane - 56, 14, CODE_FG, offset=offset,
+                               line_break=line_break, syntax=syntax, selection_color=CODE_SELECTION, caret_color=CODE_FOCUS,
                                focused=active and (window.get("focus") == "body" or field["cursor"] != field["anchor"]))
                 offset += self.units(line) + line_break
-        document(name, window.get("body", ""), current, True)
+        document(window.get("projectRelative") or name, window.get("body", ""), current, True, window.get("syntax", ()))
         if split:
             other = window.get("otherTab") or {}
-            document(other.get("title", ""), other.get("body", ""), editor_x if current != editor_x else editor_x + pane, False)
-            self.fill("#464646", editor_x + pane, y + 29, 1, max(1, (h * .54 if window.get("panel") else h - 19) - 29))
+            document(other.get("title", ""), other.get("body", ""), editor_x if current != editor_x else editor_x + pane, False, other.get("syntax", ()))
+            self.fill(CODE_BORDER, editor_x + pane, y + 29, 1, max(1, (h * .54 if window.get("panel") else h - 19) - 29))
         if window.get("panel"):
-            self.fill("#181818", editor_x, y + h * .54, editor_w, h * .46 - 19)
+            self.fill(CODE_INSET, editor_x, y + h * .54, editor_w, h * .46 - 19)
             if self.scene.get("diagnosticWorkspace") and window.get("focus") != "terminal":
                 self.label("ПРОБЛЕМЫ · F8", editor_x + 10, y + h * .54 + 6, 10, "#f3cc73", bold=True)
                 problems = [item["title"] for item in window.get("entries", ()) if item.get("kind") == "problem"]
@@ -591,12 +642,12 @@ class DesktopView(Gtk.Widget):
             choices = [item.get("title", "") for item in window.get("entries", ())]
             pw = min(w - 24, 480)
             px, py = x + (w - pw) / 2, y + 37
-            self.fill("#292b30", px, py, pw, 110, 7)
+            self.fill(CODE_ROW, px, py, pw, 110, 7)
             self.label("Быстрые исправления", px + 10, py + 8, 13, "#eef1f8", width=pw - 20, bold=True)
             for index, title in enumerate(choices):
                 row = py + 32 + 23 * index
                 if index == window.get("optionIndex"):
-                    self.fill("#234d72", px + 5, row - 2, pw - 10, 22, 4)
+                    self.fill(CODE_SELECTION, px + 5, row - 2, pw - 10, 22, 4)
                 self.label(title, px + 10, row, 12, "#eef1f8", width=pw - 20)
             self.label("↑↓ — выбрать   Enter — применить   Esc — закрыть", px + 10, py + 84, 10, "#b4bfcd", width=pw-20)
         elif focus in ("symbol-references", "symbol-rename", "project-results"):
@@ -610,7 +661,7 @@ class DesktopView(Gtk.Widget):
             px = x + (w - pw) / 2
             py = y + 34
             self.fill("#121419", px - 1, py + 2, pw + 2, 76 + visible * 25, 8)
-            self.fill("#292b30", px, py, pw, 76 + visible * 25, 8)
+            self.fill(CODE_ROW, px, py, pw, 76 + visible * 25, 8)
             title = (f"Поиск «{window.get('projectSearchQuery', '')}» · {len(choices)}" if search_results else
                      f"Использования · {len(choices)}" if references else "Переименовать символ")
             self.label(title, px + 12, py + 8, 13, "#eef1f8", width=pw - 24, bold=True)
@@ -618,13 +669,13 @@ class DesktopView(Gtk.Widget):
                 for row, index in enumerate(range(first, min(len(choices), first + visible))):
                     iy = py + 34 + row * 25
                     if index == selected:
-                        self.fill("#234d72", px + 6, iy - 2, pw - 12, 23, 4)
+                        self.fill(CODE_SELECTION, px + 6, iy - 2, pw - 12, 23, 4)
                     self.label(choices[index], px + 13, iy, 12, "#eef1f8", width=pw - 26)
                 if not choices:
                     self.label("Совпадений нет" if search_results else "Использования не найдены", px + 12, py + 32, 11, "#b4bfcd", width=pw - 24)
                 tip = "↑↓ — выбрать   Enter — открыть   Esc — закрыть"
             else:
-                self.fill("#1a1d23", px + 7, py + 28, pw - 14, 22, 4)
+                self.fill(CODE_INSET, px + 7, py + 28, pw - 14, 22, 4)
                 self.field(window.get("input", ""), window, px + 12, py + 30, pw - 24, 13, "#eef1f8")
                 tip = "Enter — переименовать   Esc — отменить"
             self.label(tip, px + 12, py + 55 + visible * 25, 10, "#b4bfcd", width=pw - 24)
@@ -640,17 +691,25 @@ class DesktopView(Gtk.Widget):
             visible = min(6, len(choices), max(1, int((h - 72) / 25)))
             first = max(0, selected - visible + 1)
             self.fill("#141519", px - 1, y + 6, pw + 2, 52 + visible * 25, 7)
-            self.fill("#2a2c31", px, y + 5, pw, 51 + visible * 25, 7)
-            self.label(titles[focus], px + 12, y + 10, 10, "#b4bfcd")
+            self.fill(CODE_ROW, px, y + 5, pw, 51 + visible * 25, 7)
+            title = titles[focus]
+            if focus == "find" and window.get("status", "").startswith("Совпадение "):
+                title += " · " + window["status"]
+            self.label(title, px + 12, y + 10, 10, "#b4bfcd")
             self.field(window.get("input", ""), window, px + 12, y + 26, pw - 24, 13, "#eef1f8", mono=False)
             for index in range(first, min(len(choices), first + visible)):
                 iy = y + 52 + (index - first) * 25
                 if index == selected:
-                    self.fill("#234d72", px + 5, iy - 2, pw - 10, 24, 4)
+                    self.fill(CODE_SELECTION, px + 5, iy - 2, pw - 10, 24, 4)
                 self.label(choices[index], px + 14, iy, 13, width=pw - 28)
-        self.fill("#007acc", x, y + h - 19, w, 19)
-        self.label("⑂ main    ✓ 0   ⚠ " + str(self.scene.get("diagnosticProblemCount", 0)), x + 9, y + h - 16, 9)
-        self.label("UTF-8    Python    " + self.scene.get("layout", "EN"), x + max(170, w - 170), y + h - 16, 9)
+        self.fill(CODE_BG, x, y + h - 19, w, 19)
+        self.fill(CODE_BORDER, x, y + h - 19, w, 1)
+        self.label("⑂ main    ✓ 0   ⚠ " + str(self.scene.get("diagnosticProblemCount", 0)), x + 9, y + h - 16, 9, CODE_MUTED)
+        before = window.get("body", "").encode("utf-16-le")[:window.get("bodyCursor", 0) * 2].decode("utf-16-le", "ignore")
+        line, col = before.count("\n") + 1, self.units(before.rsplit("\n", 1)[-1]) + 1
+        support = "Python" if name.lower().endswith(".py") else "Текст"
+        status = f"Стр {line}, стлб {col}    UTF-8    {support}    {self.scene.get('layout', 'EN')}"
+        self.label(status, x + max(105, w - 265), y + h - 16, 9, CODE_MUTED, width=min(w - 110, 260))
 
     def terminal(self, window, x, y, w, h, embedded=False):
         self.fill("#181818" if embedded else "#291726", x, y, w, h)

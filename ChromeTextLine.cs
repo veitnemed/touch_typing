@@ -16,13 +16,13 @@ namespace TouchTypingStudio
         private readonly string text;
         private int[] elements;
 
-        internal ChromeTextLine(string value, Typeface face, double em, Brush foreground, double pixelsPerDip)
+        internal ChromeTextLine(string value, Typeface face, double em, Brush foreground, double pixelsPerDip, TextEffectCollection effects = null)
         {
             // Browser fields are single visual lines. Keep original UTF-16 offsets even if pasted
             // text contains a line terminator; the engine's text and selection are not changed.
             text = value.Replace('\r', ' ').Replace('\n', ' ').Replace('\u0085', ' ')
                 .Replace('\u2028', ' ').Replace('\u2029', ' ');
-            var properties = new ChromeRunProperties(face, em, foreground, pixelsPerDip);
+            var properties = new ChromeRunProperties(face, em, foreground, pixelsPerDip, effects);
             var source = new ChromeTextSource(text, properties) { PixelsPerDip = pixelsPerDip };
             formatter = TextFormatter.Create(TextFormattingMode.Ideal);
             try { line = formatter.FormatLine(source, 0, 0, new ChromeParagraphProperties(properties), null); }
@@ -116,9 +116,10 @@ namespace TouchTypingStudio
             private readonly Typeface face;
             private readonly double em;
             private readonly Brush foreground;
+            private readonly TextEffectCollection effects;
 
-            internal ChromeRunProperties(Typeface face, double em, Brush foreground, double pixelsPerDip)
-            { this.face = face; this.em = em; this.foreground = foreground; PixelsPerDip = pixelsPerDip; }
+            internal ChromeRunProperties(Typeface face, double em, Brush foreground, double pixelsPerDip, TextEffectCollection effects)
+            { this.face = face; this.em = em; this.foreground = foreground; this.effects = effects; PixelsPerDip = pixelsPerDip; }
 
             public override Typeface Typeface { get { return face; } }
             public override double FontRenderingEmSize { get { return em; } }
@@ -127,7 +128,7 @@ namespace TouchTypingStudio
             public override Brush ForegroundBrush { get { return foreground; } }
             public override Brush BackgroundBrush { get { return null; } }
             public override CultureInfo CultureInfo { get { return CultureInfo.CurrentUICulture; } }
-            public override TextEffectCollection TextEffects { get { return null; } }
+            public override TextEffectCollection TextEffects { get { return effects; } }
         }
 
         private sealed class ChromeParagraphProperties : TextParagraphProperties

@@ -23,7 +23,7 @@ internal sealed class LabTab(string title, string url, string body)
     internal FieldPosition Position = new();
     internal readonly List<int> ExtraMatches = [];
     internal readonly Stack<EditRevision> Undo = [], Redo = [];
-    internal object Snapshot() => new { Id, Title, Url, Body, SavedBody, modified = Body != SavedBody };
+    internal object Snapshot(bool editorDetail = false) => new { Id, Title, Url, Body, SavedBody, modified = Body != SavedBody, syntax = editorDetail ? PythonHighlight.For(Body, Url) : [] };
     internal LabTab Clone()
     {
         var copy = new LabTab(Title, Url, Body) { Id = Id, Origin = Origin, SavedBody = SavedBody, HistoryIndex = HistoryIndex, Position = Position.Clone() };
@@ -102,7 +102,7 @@ internal sealed class LabWindow(string app, int number, int workspace)
     internal LabTab Tab => Tabs.Count == 0 ? null : Tabs[Math.Clamp(ActiveTab, 0, Tabs.Count - 1)];
     internal string Body { get => Tab?.Body ?? ""; set { if (Tab != null) Tab.Body = value; } }
     internal string Url => Tab?.Url ?? "";
-    internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults) => new { projectFiles, changedFiles, searchResults, ProjectSearchQuery, Id, App, Title, Workspace, State, NormalSlot, restoreState = MinimizedFrom, active, Folder, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
+    internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults, string projectName, string projectRelative) => new { syntax = App == "code" ? PythonHighlight.For(Body, Url) : [], projectFiles, changedFiles, searchResults, projectName, projectRelative, ProjectSearchQuery, Id, App, Title, Workspace, State, NormalSlot, restoreState = MinimizedFrom, active, Folder, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(App == "code"), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
         tabs = Tabs.Select(tab => tab.Snapshot()), ActiveTab, Url, Body, Focus, Input, Find, Sidebar, Split, Status, Zoom, Selected, Cursor, Anchor, Panel, bodyCursor = Tab?.Position.Caret ?? 0, bodyAnchor = Tab?.Position.Anchor ?? 0, OptionIndex, Bookmarks, savedBookmarks = SavedBookmarks.ToArray() };
     internal LabWindow Clone()
     {
@@ -139,7 +139,7 @@ internal sealed partial class LabScene
     internal bool ReplayLegacyNavigation, ReplayLegacyLineEditing, UseWindowsBindings;
     internal bool GnomeWindows;
     internal const string GnomeNoteText = "gnome";
-    private const string GnomeCodeBody = "# \nfrom src.spectrum import fft\n";
+    private string GnomeCodeBody => NeutralWorkspace ? "# \nfrom tasks import add_task\n" : "# \nfrom src.spectrum import fft\n";
 
     internal void PrepareGnomeWindowMission()
     {
@@ -159,14 +159,27 @@ internal sealed partial class LabScene
     internal bool CanHistoryDown => commandIndex < commands.Count;
     internal LabWindow Active => Windows.FirstOrDefault(window => window.Id == ActiveWindow);
 
-    internal LabScene(string app, string layout)
+    internal bool NeutralWorkspace { get; }
+    internal LabScene(string app, string layout, bool neutralProject = false)
     {
-        Terminal = new VirtualTerminal();
+        NeutralWorkspace = neutralProject;
+        Terminal = new VirtualTerminal(NeutralWorkspace);
         Terminal.CreateFolder("~/Pictures/Screenshots");
         Terminal.CreateFolder("~/.Trash");
-        Terminal.CreateFolder("~/project/src");
-        foreach (var group in TypingRun.Project.GroupBy(item => item.Path))
-            Terminal.StoreFile("~/project/" + group.Key, string.Join("\n\n", group.Select(item => item.Code)) + "\n");
+        if (NeutralWorkspace)
+        {
+            foreach (var exercise in NeutralProject.Exercises)
+                Terminal.StoreFile("~/project/" + exercise.Path, exercise.Code);
+            if (app != "code")
+                Terminal.StoreFile("~/project/notes.txt", "add\nfind\nsave\nfind\n");
+            Terminal.InstallUnitTest(NeutralProject.TestSelector, NeutralProject.RunTests);
+        }
+        else
+        {
+            Terminal.CreateFolder("~/project/src");
+            foreach (var group in TypingRun.Project.GroupBy(item => item.Path))
+                Terminal.StoreFile("~/project/" + group.Key, string.Join("\n\n", group.Select(item => item.Code)) + "\n");
+        }
         foreach (var path in ProjectDocuments()) originalFiles[path] = Terminal.ReadFile(path);
         Layout = layout == "RU" ? "RU" : "EN";
         Clipboard = app == "terminal" ? "pwd" : "build: 17 tests passed";
@@ -175,10 +188,11 @@ internal sealed partial class LabScene
 
     private LabScene(LabScene source)
     {
+        NeutralWorkspace = source.NeutralWorkspace;
         Terminal = source.Terminal.Clone(); captureImage = source.captureImage;
         CloneDebugDay(source);
         symbolWorkspace = source.symbolWorkspace;
-        SearchProjectRoot = source.SearchProjectRoot;
+        SearchProjectRoot = source.SearchProjectRoot; ExactEdit = source.ExactEdit;
         foreach (var file in source.originalFiles) originalFiles[file.Key] = file.Value;
         Dock = [.. source.Dock]; LayoutKey = source.LayoutKey; SwitchTarget = source.SwitchTarget;
         Workspace = source.Workspace; WorkspaceCount = source.WorkspaceCount; Version = source.Version;
@@ -190,6 +204,7 @@ internal sealed partial class LabScene
         LayoutIsVirtual = source.LayoutIsVirtual; ReplayLegacyNavigation = source.ReplayLegacyNavigation; Search = source.Search;
         GnomeWindows = source.GnomeWindows; GnomePractice = source.GnomePractice; DesktopProfile = [.. source.DesktopProfile]; SwitchChoices = [.. source.SwitchChoices];
         ReplayLegacyLineEditing = source.ReplayLegacyLineEditing;
+        ReplayLegacyPythonEditing = source.ReplayLegacyPythonEditing; PythonEditingExercise = source.PythonEditingExercise;
         windowNumber = source.windowNumber;
         historyDraft = source.historyDraft; killedText = source.killedText;
         fileTransfer = source.fileTransfer; fileCut = source.fileCut; trashSequence = source.trashSequence;
@@ -207,12 +222,16 @@ internal sealed partial class LabScene
         if (app == "chrome")
         {
             window.Tabs.Add(new LabTab("Документация Python", "https://docs.python.org/3/", "Python\nДокументация языка Python.\nФункции, модули и примеры."));
-            window.Tabs.Add(new LabTab("Проект piling-main", "https://github.com/veitnemed/piling-main", "piling-main\nСигналы, спектр и направляющие векторы."));
+            window.Tabs.Add(NeutralWorkspace
+                ? new LabTab("Учебный проект task-list", NeutralProject.ProjectPage, NeutralProject.ProjectBody)
+                : new LabTab("Проект piling-main", "https://github.com/veitnemed/piling-main", "piling-main\nСигналы, спектр и направляющие векторы."));
         }
         else if (app == "code")
         {
             window.Tabs.Add(new LabTab("app.py", "app.py", Terminal.ReadFile("~/project/app.py") ?? ""));
-            window.Tabs.Add(new LabTab("README.md", "README.md", Terminal.ReadFile("~/project/README.md") ?? ""));
+            if (!NeutralWorkspace || GnomeWindows)
+                window.Tabs.Add(new LabTab("README.md", "README.md", Terminal.ReadFile("~/project/README.md") ??
+                    "# task-list\nДобавьте задачу, найдите по названию и сохраните список в JSON.\n"));
             if (GnomeWindows) window.Cursor = 2; // after "# " in the actual first tab
         }
         else if (app == "files") window.Tabs.Add(new LabTab("Домашняя папка", "/home/student", "project/\nДокументы/\nЗагрузки/"));
@@ -303,7 +322,7 @@ internal sealed partial class LabScene
             case "terminal-submit":
                 if (window == null || window.App != "terminal" && window.Focus != "terminal" || string.IsNullOrWhiteSpace(TerminalInput)) return false;
                 return Text("Enter", "") && Terminal.LastSuccess;
-            default: changed = ApplyProjectSearch(action, window) ?? ApplyDiagnostics(action, window) ?? ApplySymbols(action, window) ?? ApplyWorkspace(action, window) ?? ApplyWindow(action, window); break;
+            default: changed = ApplyExactEdit(action, window) ?? ApplyProjectSearch(action, window) ?? ApplyDiagnostics(action, window) ?? ApplySymbols(action, window) ?? ApplyWorkspace(action, window) ?? ApplyWindow(action, window); break;
         }
         if (changed) Version++;
         return changed;
@@ -672,7 +691,7 @@ internal sealed partial class LabScene
             }
             else if (window.Focus == "goto-line") { if (!int.TryParse(window.Input, out int line)) return false; window.Focus = "body"; window.Cursor = window.Body.Split('\n').Take(Math.Max(0, line - 1)).Sum(value => value.Length + 1); window.Cursor = Math.Min(window.Cursor, window.Body.Length); window.Focus = "body"; window.Status = "Строка " + line; }
             else if (window.Focus is "find" or "project-search") { window.Find = window.Input; FindMatch(window, false); }
-            else if (window.App == "code" && window.Focus == "body") Insert(window, "\n");
+            else if (window.App == "code" && window.Focus == "body") Insert(window, EditorNewLine(window, window.Start));
             else return false;
             Version++; return true;
         }
@@ -699,7 +718,8 @@ internal sealed partial class LabScene
                 case "Left": case "Right":
                     bool left = key == "Left";
                     if (window.Selected && !extend && !word) target = left ? window.Start : window.End;
-                    else if (word) target = ReplayLegacyNavigation ? LegacyWordBoundary(value, pos, left) : WordBoundary(value, pos, left);
+                    else if (word) target = ReplayLegacyNavigation ? LegacyWordBoundary(value, pos, left) :
+                        !ReplayLegacyPythonEditing && IsEditorBody(window) ? EditorWordEdge(value, pos, left) : WordBoundary(value, pos, left);
                     else target = left ? PreviousBoundary(value, pos) : NextBoundary(value, pos);
                     break;
                 case "Home": target = word ? 0 : LineStart(value, pos); break;
@@ -849,6 +869,8 @@ internal sealed partial class LabScene
             "chrome://history" => ("История", ""),
             "chrome://bookmarks" => ("Закладки", ""),
             "https://docs.python.org/3/" => ("Документация Python", "Python\nДокументация языка Python.\nФункции, модули и примеры."),
+            NeutralProject.ProjectPage => ("Учебный проект task-list", NeutralProject.ProjectBody),
+            NeutralProject.GuidePage => ("Как вести список задач", NeutralProject.GuideBody),
             "https://github.com/veitnemed/piling-main" => ("Проект piling-main", "piling-main\nСигналы, спектр и направляющие векторы."),
             "https://practice.local/spectrum" => ("Методика расчёта спектра", "Спектр сигнала\nПрямое преобразование возвращает комплексный спектр.\nЦентрированный спектр позволяет сопоставить частоты.\nМатериалы и отчёт доступны ниже."),
             _ => ("Учебная страница", url)

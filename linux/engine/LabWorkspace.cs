@@ -10,7 +10,8 @@ internal sealed record LabReportArtifact(string Path, string Content, bool Downl
 internal sealed partial class LabScene
 {
     private const string Project = "/home/student/project";
-    private const string Report = "spectrum-report.txt";
+    private const string LegacyReport = "spectrum-report.txt";
+    internal string Report => NeutralWorkspace ? NeutralProject.ReportName : LegacyReport;
     private const string ReportBody = "piling-main · спектральный анализ\nstatus: draft\nsource: src/spectrum.py\n";
     private string fileTransfer = "";
     private bool fileCut;
@@ -21,11 +22,12 @@ internal sealed partial class LabScene
     internal LabReportArtifact ReadReportArtifact() =>
         new(Project + "/" + Report, Terminal.ReadFile(Project + "/" + Report),
             Terminal.Exists("/home/student/Downloads/" + Report));
-    private static readonly LabEntry[] Links = [
+    private static readonly LabEntry[] LegacyLinks = [
         new("Методика расчёта спектра", "https://practice.local/spectrum", "page"),
         new("Исходники piling-main", "https://github.com/veitnemed/piling-main", "page"),
         new("Документация Python", "https://docs.python.org/3/", "page"),
-        new("Скачать отчёт спектрального анализа", Report, "download")];
+        new("Скачать отчёт спектрального анализа", LegacyReport, "download")];
+    private LabEntry[] Links => NeutralWorkspace ? NeutralProject.Links : LegacyLinks;
 
     internal LabEntry[] Entries(LabWindow w)
     {
@@ -55,6 +57,7 @@ internal sealed partial class LabScene
             }
             return result.ToArray();
         }
+        if (ExactEdit && w.Focus == "quick-open") return ExactFileEntries(w.Input);
         if (w.App == "code" && w.Focus is "quick-open" or "explorer")
             return ProjectDocuments()
                 .Where(path => (w.Focus != "quick-open" || path.Contains(w.Input, StringComparison.OrdinalIgnoreCase))).Select(path => new LabEntry(NameOf(path), path, "file")).ToArray();
@@ -62,7 +65,7 @@ internal sealed partial class LabScene
     }
 
     private readonly Dictionary<string, string> originalFiles = [];
-    private string EditorProjectRoot => DiagnosticWorkspace ? DiagnosticRoot : SearchProjectRoot ?? (symbolWorkspace ? SymbolProject : Project);
+    private string EditorProjectRoot => ExactEdit ? ExactRoot : DiagnosticWorkspace ? DiagnosticRoot : SearchProjectRoot ?? (symbolWorkspace ? SymbolProject : Project);
     private IEnumerable<string> ProjectDocuments() => DebugDay ? DebugProjectDocuments() :
         DiagnosticWorkspace ? Terminal.Entries(DiagnosticRoot).Where(path => !Terminal.DirectoryExists(path)) :
         Terminal.Entries(EditorProjectRoot)
@@ -74,13 +77,19 @@ internal sealed partial class LabScene
         string Relative(string path) => DebugDay ? DebugRelative(path) : path[(EditorProjectRoot.Length + 1)..];
         var changes = paths.Where(path => !originalFiles.TryGetValue(path, out var original) || original != Terminal.ReadFile(path)).Select(Relative);
         var results = w.App == "code" && w.View == "project-search" ? ProjectSearchSidebar(w) : [];
-        return w.Snapshot(w.Id == ActiveWindow, Entries(w), paths.Select(Relative), changes, results);
+        var activePath = w.Tab == null || w.App != "code" ? "" : EditorPath(w.Tab);
+        var projectName = w.App != "code" ? "" :
+            NeutralWorkspace && EditorProjectRoot == Project && !DebugDay ? NeutralProject.Name : NameOf(DebugDay ? debugDay.Root : EditorProjectRoot);
+        var projectRelative = w.App != "code" ? "" : w.Tab == null ? "" :
+            DebugDay && activePath.StartsWith(debugDay.Root + "/", StringComparison.Ordinal) ? DebugRelative(activePath) : activePath.StartsWith(EditorProjectRoot + "/", StringComparison.Ordinal)
+                ? Relative(activePath) : NameOf(activePath);
+        return w.Snapshot(w.Id == ActiveWindow, Entries(w), paths.Select(Relative), changes, results, projectName, projectRelative);
     }
 
     private static bool IsIdentifier(char c) => char.IsLetterOrDigit(c) || c == '_';
     private static string NameOf(string path) => path[(path.LastIndexOf('/') + 1)..];
     private static string EditorPath(LabTab tab) => tab.Url.StartsWith('/') ? tab.Url : Project + "/" + tab.Url;
-    private static LabEntry PageEntry(string url) => Links.FirstOrDefault(item => item.Path == url) ?? new(url, url, "page");
+    private LabEntry PageEntry(string url) => Links.FirstOrDefault(item => item.Path == url) ?? new(url, url, "page");
     private void OpenDocument(string path)
     {
         Ensure("code");
@@ -112,11 +121,14 @@ internal sealed partial class LabScene
     internal void PrepareCase(int variant, string app)
     {
         string[] names = ["baseline", "experiment", "review"];
-        Terminal.StoreFile(Project + "/" + names[variant] + ".md", "# " + names[variant] + "\n");
-        originalFiles[Project + "/" + names[variant] + ".md"] = Terminal.ReadFile(Project + "/" + names[variant] + ".md");
+        if (!NeutralWorkspace)
+        {
+            Terminal.StoreFile(Project + "/" + names[variant] + ".md", "# " + names[variant] + "\n");
+            originalFiles[Project + "/" + names[variant] + ".md"] = Terminal.ReadFile(Project + "/" + names[variant] + ".md");
+        }
         if (app == "chrome" && variant == 1) Active.ActiveTab = 1;
         if (app is "ubuntu" or "workday") Workspace = variant % 2;
-        if (app == "code")
+        if (app == "code" && !NeutralWorkspace)
         {
             var example = TypingRun.Project[variant];
             Active.Tab.Title = NameOf(example.Path); Active.Tab.Url = Project + "/" + example.Path;
@@ -148,6 +160,7 @@ internal sealed partial class LabScene
             case "word-left": case "word-right":
                 return Text(action == "word-left" ? "Left" : "Right", "", word: true);
             case "move-line-up": case "move-line-down":
+                if (!ReplayLegacyPythonEditing) return MoveEditorBlock(w, action == "move-line-up");
                 string body = w.Body;
                 int row = body[..Math.Clamp(w.Cursor, 0, body.Length)].Count(ch => ch == '\n');
                 var lines = body.Split('\n'); int target = row + (action == "move-line-up" ? -1 : 1);
@@ -232,8 +245,8 @@ internal sealed partial class LabScene
                     case "download":
                         string path = "/home/student/Downloads/" + entry.Path;
                         for (int copy = 1; Terminal.Exists(path); copy++)
-                            path = "/home/student/Downloads/spectrum-report (" + copy + ").txt";
-                        Terminal.StoreFile(path, ReportBody); downloads.Insert(0, path);
+                            path = "/home/student/Downloads/" + System.IO.Path.GetFileNameWithoutExtension(Report) + " (" + copy + ").txt";
+                        Terminal.StoreFile(path, NeutralWorkspace ? NeutralProject.ReportBody : ReportBody); downloads.Insert(0, path);
                         w.Status = "Загружен " + entry.Path; break;
                     case "file":
                         string content = Terminal.ReadFile(entry.Path);

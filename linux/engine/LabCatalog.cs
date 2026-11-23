@@ -91,6 +91,10 @@ internal static class LabCatalog
         T("zoom-reset", "Верните масштаб 100%", "Ctrl+0", "zoom-reset", 1),
         T("bookmark", "Сохраните страницу в закладки", "Ctrl+D", "bookmark", 1),
         T("bookmarks", "Переключите панель закладок", "Ctrl+Shift+B", "bookmarks", 2),
+        T("exact-find-submit", "Введите draft и подтвердите запрос", "Enter", "exact-find-submit"),
+        T("exact-find-next", "Выберите следующее совпадение", "F3", "exact-find-next"),
+        T("exact-find-prev", "Выберите предыдущее совпадение", "Shift+F3", "exact-find-prev"),
+        T("exact-call-home", "Поставьте курсор на вызов функции", "Home", "exact-call-home"),
         T("quick-open", "Откройте поиск файла", "Ctrl+P", "quick-open"),
         T("quick-next", "Выберите следующий файл", "Down", "quick-next"),
         T("quick-choose", "Откройте выбранный файл", "Enter", "quick-choose"),
@@ -178,9 +182,9 @@ internal static class LabCatalog
         CodeIds.UnionWith(Shortcuts.Where(task => task.Id.StartsWith("code-", StringComparison.Ordinal) || task.Id.StartsWith("project-search-", StringComparison.Ordinal)).Select(task => task.Id));
     }
     private static readonly HashSet<string> TerminalIds = new(Shortcuts.Where(task => task.Id.StartsWith("terminal-")).Select(task => task.Id).Concat(["layout", "escape"]));
-    internal static object Catalog(IEnumerable<LiveDraft> drafts, IEnumerable<ShortcutAttempt> history, string layout) => new { recommendations = LiveStartingLevel.Recommend(history, layout), drafts = (drafts ?? []).Select(d => new { d.App, d.Level, d.Mission, d.Guidance }), classes = Apps.Select(app => new { id = app, title = Title(app), description = app switch
+    internal static object Catalog(IEnumerable<LiveDraft> drafts, IEnumerable<ShortcutAttempt> history, string layout, bool neutralProject = false) => new { recommendations = LiveStartingLevel.Recommend(history, layout), drafts = (drafts ?? []).Select(d => new { d.App, d.Level, d.Mission, d.Guidance }), classes = Apps.Select(app => new { id = app, title = Title(app), description = app switch
         { "workday" => "Общее рабочее место, файлы и окна четырёх приложений", "ubuntu" => "Окна, рабочие столы и системные сочетания", "chrome" => "Вкладки, навигация, поиск и адресная строка", "code" => "Файлы, код, панели и встроенный терминал", _ => "Сочетания, команды и учебная файловая система" },
-        shortcuts = Shortcuts.Where(task => InApp(task, app)).Select(task => task.Snapshot()) }), missions = LiveCourse.Missions.Select(m => new { m.App, m.Level, m.Id, m.Title, m.Curated }), duration = 0, blockSize = 20 };
+        shortcuts = Shortcuts.Where(task => InApp(task, app)).Select(task => task.Snapshot()) }), missions = (neutralProject ? NeutralProject.MissionCatalog : LiveCourse.Missions).Select(m => new { m.App, m.Level, m.Id, m.Title, m.Curated }), duration = 0, blockSize = 20 };
     private static bool InApp(LabTask task, string app) => app == "workday" || (app switch { "ubuntu" => UbuntuIds, "chrome" => ChromeIds, "code" => CodeIds, _ => TerminalIds }).Contains(task.Id);
 
     internal static bool Available(LabTask task, LabScene scene)
@@ -192,6 +196,8 @@ internal static class LabCatalog
             "code-problem-next" or "code-fix-open" or "code-fix-next" or "code-fix-prev" or
             "code-fix-apply" or "code-fix-cancel" => scene.DiagnosticActionAvailable(task.Action),
             "document-start" or "move-line-up" or "move-line-down" or "occurrence" => window?.App == "code" && window.Focus == "body",
+            "exact-find-submit" or "exact-find-next" or "exact-find-prev" => scene.ExactEdit && window?.Focus == "find",
+            "exact-call-home" => scene.ExactEdit && window?.App == "code" && window.Focus == "body",
             "project-search-submit" => window?.Focus == "project-search" && !string.IsNullOrWhiteSpace(window.Input),
             "project-search-next" or "project-search-prev" or "project-search-open" => window?.Focus == "project-results",
             "project-search-repair" => scene.SearchRepairExercise && window?.App == "code" && window.Focus == "body" && window.Tab?.SavedBody != window.Body,
@@ -304,6 +310,7 @@ internal static class LabCatalog
             bool trigger = chord.Trigger == null ? KeyChord.IsModifier(key) : chord.Trigger == key;
             if (!trigger || !chord.FitsModifiers(held) || !Available(task, scene)) return false;
             if (scene.DebugDay && task.Id.StartsWith("debug-", StringComparison.Ordinal)) return true;
+            if (scene.ExactEdit && task.Id.StartsWith("exact-", StringComparison.Ordinal)) return true;
             if (UbuntuIds.Contains(task.Id) || task.Id is "switch-group-next" or "switch-group-prev") return true;
             return context.Contains(task.Id) || terminal && app == "code" && task.Id is "terminal-toggle" or "panel" or "escape";
         });

@@ -1580,7 +1580,7 @@ class Studio(Gtk.Application):
         self.typing_options = [
             ("Russian", "Русские фразы"), ("English", "Английские фразы"),
             ("WordsRU", "Русский словарь"), ("WordsEN", "Английский словарь"),
-            ("Project", "Python · piling-main"), ("Symbols", "Спецсимволы"),
+            ("Project", "Python · task-list"), ("Symbols", "Спецсимволы"),
             ("WeakRU", "Работа над промахами · RU"), ("WeakEN", "Работа над промахами · EN"),
         ]
         self.typing_options += [(item["id"], "Python · " + item["title"]) for item in catalog["projects"]]
@@ -2108,7 +2108,7 @@ class Studio(Gtk.Application):
             options = [item[0] for item in self.typing_options]
             self.typing_pick.set_selected(options.index("Project"))
             self.start_typing()
-            assert self.state["title"] == "Python · piling-main" and self.state["key"] == "D"
+            assert self.state["title"] == "Python · task-list" and self.state["key"] == "F"
             self.stop()
             assert self.result_kind == "typing"
             if self.smoke_live:

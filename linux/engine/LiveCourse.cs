@@ -19,7 +19,9 @@ internal static partial class LiveCourse
         BrowserMissions(result);
         EditorMissions(result);
         EditorProjectSearchMissions(result);
+        EditorExactEditMissions(result);
         LineEditMissions(result);
+        PythonEditingMissions(result);
         EditorDiagnosticMissions(result);
         TerminalMissions(result);
         DesktopMissions(result);
@@ -39,7 +41,8 @@ internal static partial class LiveCourse
             {
                 if ((IsCommandToken(token) || IsProjectSearchQuery(token) ||
                     token is "code-rename-confirm" or "debug-unit" or "debug-report-check"
-                    or "debug-project-query" or "debug-doc-submit" or "debug-rewrite") && trial.Layout == "RU")
+                    or "debug-project-query" or "debug-doc-submit" or "debug-rewrite" or "exact-find-submit" or "python-edit-write" ||
+                    trial.ExactEdit && token is "quick-choose" or "save") && trial.Layout == "RU")
                 {
                     var change = trial.WithBinding(Actions["layout"]);
                     string layout = trial.Layout;
@@ -47,7 +50,7 @@ internal static partial class LiveCourse
                     goals.Add(new(phase, change with { Title = "Переключите ввод на английский для команды" }, Evidence(change, trial), layout));
                 }
                 var task = MakeTask(token, trial);
-                bool verifyReport = mission.Id == "workday-report" && task.Id == "command/head -n 2 spectrum-report.txt";
+                bool verifyReport = mission.Id == "workday-report" && task.Id == "command/head -n 2 " + trial.Report;
                 string artifactPath = mission.Id == "workday-source-note" && task.Id == "command/cat notes.txt"
                     ? "/home/student/project/notes.txt" : null;
                 if (trial.DebugDay && token == "debug-report-check") artifactPath = trial.DebugReportArtifact(trial.DebugReportName);
@@ -62,7 +65,7 @@ internal static partial class LiveCourse
                 else if (token.StartsWith("open-") && trial.Active?.App == token[5..]) continue;
                 else if ((token == "maximize" && trial.Active?.State == "maximized") ||
                     (!trial.GnomeWindows && ((token == "tile-left" && trial.Active?.State == "left") || (token == "tile-right" && trial.Active?.State == "right")))) continue;
-                else if (token == "save" && trial.Active?.Body == trial.Active?.Tab?.SavedBody) continue;
+                else if (token == "save" && !trial.ExactEdit && trial.Active?.Body == trial.Active?.Tab?.SavedBody) continue;
                 else if (token == "bookmark" && trial.Active.SavedBookmarks.Contains(trial.Active.Url)) continue;
                 else if (token == "first-tab" && trial.Active.ActiveTab == 0 || token == "last-tab" && trial.Active.ActiveTab == trial.Active.Tabs.Count - 1) continue;
                 else if (!Demonstrate(task, trial)) throw new InvalidOperationException(mission.Id + ": недоступно " + token);
@@ -101,6 +104,7 @@ internal static partial class LiveCourse
     private static readonly Dictionary<string, LabTask> Actions = LabCatalog.Shortcuts.ToDictionary(task => task.Id);
     private static LabTask MakeTask(string token, LabScene scene)
     {
+        if (PythonEditTask(token) is LabTask edit) return edit;
         if (scene.DebugDay)
         {
             if (token == "debug-project-query") token = "search-query:" + scene.DebugCallQuery;
@@ -138,6 +142,11 @@ internal static partial class LiveCourse
             return task with { Title = "Переключите учебный ввод на " + (scene.Layout == "RU" ? "EN" : "RU") };
         if (scene.GnomePractice == "same-app" && token.StartsWith("switch-group-", StringComparison.Ordinal))
             return task with { Title = scene.Active?.Url == "app.py" ? "Выберите окно с README.md" : "Выберите окно с app.py" };
+        if (scene.ExactEdit && token == "quick-choose") return task with
+            { Title = "Введите ap и откройте app.py", Text = LabScene.ExactFileFragment };
+        if (scene.ExactEdit && token == "exact-find-submit") return task with { Text = LabScene.ExactNeedle };
+        if (scene.ExactEdit && token == "save") return task with
+            { Title = "Введите ready вместо выделенного draft и сохраните", Text = LabScene.ExactReplacement };
         if (task.Action == "code-rename-confirm") return task with { Text = LabScene.RenameTarget };
         if (scene.GnomeWindows && (token == "tile-left" && scene.Active?.State == "left" ||
             token == "tile-right" && scene.Active?.State == "right"))
@@ -152,6 +161,7 @@ internal static partial class LiveCourse
 
     private static bool Demonstrate(LabTask task, LabScene trial)
     {
+        if (task.Action.StartsWith("python-edit-", StringComparison.Ordinal)) return trial.PerformPythonEdit(task.Action);
         if (task.Action == "launch") { trial.Ensure(task.Id[5..]); return true; }
         if (task.Action == "gnome-write")
         {
@@ -164,6 +174,9 @@ internal static partial class LiveCourse
             trial.TerminalInput = task.Text;
             return trial.Text("Enter", "") && trial.Terminal.LastSuccess;
         }
+        if (trial.ExactEdit && task.Action is "quick-choose" or "exact-find-submit")
+            trial.Active.Input = task.Text;
+        if (trial.ExactEdit && task.Action == "save") trial.Insert(trial.Active, task.Text);
         if (task.Action == "project-search-submit") trial.Active.Input = task.Text;
         if (task.Action == "project-search-repair") trial.DemonstrateProjectRepair();
         if (task.Action == "debug-window-shot") trial.PrepareCompilerDebugCapture();
@@ -183,6 +196,7 @@ internal static partial class LiveCourse
     {
         var w = scene.Active;
         string app = w?.App ?? "", action = task.Action;
+        if (scene.PythonEditingExercise) return JsonSerializer.Serialize(scene.PythonEditEvidence());
         if (scene.GnomePractice is "workspaces" or "same-app")
             return JsonSerializer.Serialize(scene.GnomeScopeEvidence(task, equivalentCommand));
         if (scene.GnomePractice == "matebook")
@@ -202,7 +216,7 @@ internal static partial class LiveCourse
                     saved = v.App == "code" ? v.Tab?.SavedBody : null
                 }).ToArray()
             });
-        object value = scene.DebugEvidence(action) ?? (action switch
+        object value = scene.ExactEditEvidence(task) ?? scene.DebugEvidence(action) ?? (action switch
         {
             _ when action.StartsWith("project-search-", StringComparison.Ordinal) => scene.ProjectSearchEvidence(action),
             _ when action == "code-problem-next" || action.StartsWith("code-fix-", StringComparison.Ordinal) => scene.DiagnosticEvidence(),

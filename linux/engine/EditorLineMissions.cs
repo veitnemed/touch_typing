@@ -47,8 +47,9 @@ internal sealed partial class LabScene
 {
     internal void PrepareLineEditExercise()
     {
-        const string first = "import numpy as np";
-        const string body = first + "\ndef ifft(x): return x\nprint('next')";
+        string first = NeutralWorkspace ? "from tasks import add_task" : "import numpy as np";
+        string body = first + (NeutralWorkspace ? "\ndef count_tasks(tasks): return len(tasks)\nprint('next')"
+            : "\ndef ifft(x): return x\nprint('next')");
         const string path = Project + "/line-edit.py";
         Terminal.StoreFile(path, body);
         originalFiles[path] = body;

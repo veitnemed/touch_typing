@@ -11,7 +11,7 @@ namespace TouchTypingStudio
 
     public class LiveDraft
     {
-        public string App, Mission, Layout, Guidance, Trace, LayoutKey;
+        public string App, Mission, Layout, Guidance, Trace, LayoutKey, ProjectFixture;
         public string[] Dock, DesktopProfile;
         public int Level, Variant;
         public bool VirtualLayout;

@@ -22,13 +22,15 @@ internal sealed class LabRun
     private const string StrictReportEvent = "@strict-report";
     private const string ClusterNavigationEvent = "@cluster-navigation";
     private const string LineEditingEvent = "@line-editing";
-    private bool replayLegacyLineEditing;
+    private const string PythonEditingEvent = "@python-editing";
+    private bool replayLegacyLineEditing, replayLegacyPythonEditing;
+    private readonly bool neutralProject;
     private int variant;
     private string initialLayout, attemptLayout;
     private bool initialVirtual;
     internal bool HasDraft => !CompletedRoute && !limitAccepted && (!ReachedLimit || softFinish || FinishingMission) &&
         (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 ||
-        trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent)));
+        trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask, inputAtActiveMilliseconds;
@@ -96,11 +98,12 @@ internal sealed class LabRun
     internal string[] Held => held.ToArray();
 
     internal LabRun(string app, string mode, int level, int seconds, string layout, IEnumerable<ShortcutAttempt> history,
-        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null, bool softFinish = false, bool combinedLimits = false, bool windowsBindings = false, string[] desktopProfile = null)
+        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null, bool softFinish = false, bool combinedLimits = false, bool windowsBindings = false, string[] desktopProfile = null, bool neutralProject = false)
     {
         if (!LabCatalog.Apps.Contains(app)) throw new ArgumentException("Выберите Ubuntu, Chrome, VS Code или Терминал.");
         if (mode is not ("drill" or "sandbox")) throw new ArgumentException("Выберите тренировку или учебный рабочий стол.");
         var progress = draft?.Progress;
+        this.neutralProject = draft == null ? neutralProject : draft.ProjectFixture == NeutralProject.FixtureId;
         this.softFinish = softFinish;
         this.windowsBindings = windowsBindings;
         App = app; Mode = progress?.Mode is "drill" or "sandbox" ? progress.Mode : mode; Level = Math.Clamp(level, 0, 2);
@@ -128,9 +131,10 @@ internal sealed class LabRun
         // New traces begin with format markers. Old ones acquire the line
         // marker only after the historic keystrokes have been replayed.
         var initialFormat = savedEvents.TakeWhile(e => e.Key is
-            ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent);
+            ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent);
         replayLegacyLineEditing = draft != null && !initialFormat.Any(e => e.Key == LineEditingEvent);
-        Scene = new LabScene(app == "workday" ? "ubuntu" : app, draft?.Layout ?? layout) { LayoutKey = layoutKey, LayoutIsVirtual = draft?.VirtualLayout ?? false };
+        replayLegacyPythonEditing = draft != null && !initialFormat.Any(e => e.Key == PythonEditingEvent);
+        Scene = new LabScene(app == "workday" ? "ubuntu" : app, draft?.Layout ?? layout, this.neutralProject) { LayoutKey = layoutKey, LayoutIsVirtual = draft?.VirtualLayout ?? false };
         if (dock != null) Scene.Dock = dock;
         Next();
         if (draft != null)
@@ -147,12 +151,14 @@ internal sealed class LabRun
                 else if (e.Key == StrictReportEvent) { replayLegacyReport = false; trace.Add(e); }
                 else if (e.Key == ClusterNavigationEvent) EndLegacyNavigation(e);
                 else if (e.Key == LineEditingEvent) EndLegacyLineEditing(e);
+                else if (e.Key == PythonEditingEvent) EndLegacyPythonEditing(e);
                 else Input(e.Key, e.Down, e.Text);
             }
             if (replayLegacyUrl) trace.Add(new(ExactUrlEvent));
             if (replayLegacyReport) trace.Add(new(StrictReportEvent));
             if (replayLegacyNavigation) EndLegacyNavigation(new(ClusterNavigationEvent));
             if (replayLegacyLineEditing) EndLegacyLineEditing(new(LineEditingEvent));
+            if (replayLegacyPythonEditing) EndLegacyPythonEditing(new(PythonEditingEvent));
             replayLegacyUrl = replayLegacyReport = false;
             Pause();
             // Trace describes the current mission, not the whole attempt. Its
@@ -188,8 +194,16 @@ internal sealed class LabRun
         trace.Add(marker);
     }
 
+    private void EndLegacyPythonEditing(LiveEvent marker)
+    {
+        bool changed = replayLegacyPythonEditing;
+        replayLegacyPythonEditing = Scene.ReplayLegacyPythonEditing = false;
+        if (changed && App == "code") LiveCourse.RebaseEditorLineGoals(pending, Scene);
+        trace.Add(marker);
+    }
+
     internal LiveDraft Draft() => new() { App = App, Level = Level, Mission = MissionId, Layout = initialLayout, Guidance = Guidance,
-        Dock = Scene.Dock, DesktopProfile = Scene.GnomePractice.Length == 0 ? null : Scene.DesktopProfile, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, Trace = JsonSerializer.Serialize(trace),
+        Dock = Scene.Dock, ProjectFixture = neutralProject ? NeutralProject.FixtureId : null, DesktopProfile = Scene.GnomePractice.Length == 0 ? null : Scene.DesktopProfile, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, Trace = JsonSerializer.Serialize(trace),
         Progress = new() { Session = Session, Mode = Mode, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Solved = Solved,
             Errors = Errors, ActiveMilliseconds = ActiveMilliseconds, Series = JsonSerializer.Serialize(points),
             LimitDecisionPending = PendingLimitChoice, LimitReached = LimitReached,
@@ -311,6 +325,8 @@ internal sealed class LabRun
         if (Task.Id == "gnome-left-super" && key == "Z")
             return Miss(key, "Это клавиша Z (Я). Левый Super ⊞ находится ниже, левее Alt.");
         Watch();
+        var pythonEdit = LiveCourse.ResolvePythonEdit(key, held, Scene);
+        if (pythonEdit != null) return Perform(pythonEdit, key);
         var actual = Scene.Overview && !commandModifiers && key != "Esc" ? null : LabCatalog.Resolve(key, held, Scene);
         string before = Scene.Overview ? Scene.Search : Scene.Active?.App == "terminal" || Scene.Active?.Focus is "terminal" or "reverse-search" ? Scene.TerminalInput : Scene.Active?.Input ?? "";
         bool submitting = Task.Action == "command" && key == "Enter" && !commandModifiers;
@@ -330,7 +346,11 @@ internal sealed class LabRun
             return Miss(key, WrongKeyMessage(key));
         }
         bool changed = Scene.Text(key, VirtualText(key, text), shift, word);
-        var passed = Observe(key, matches && Scene.Terminal.LastSuccess ? Task.Text : null, actualTaskId: matches && Scene.Terminal.LastSuccess || changed && Task.Keys.Length == 0 && key == "Enter" && !submitting ? Task.Id : null);
+        bool typedEdit = changed && Task.Action == "python-edit-write" &&
+            key is not ("Left" or "Right" or "Up" or "Down" or "Home" or "End" or "Enter" or "Backspace" or "Delete") &&
+            !string.IsNullOrEmpty(text) && !text.Any(char.IsControl);
+        var passed = Observe(key, matches && Scene.Terminal.LastSuccess ? Task.Text : null, actualTaskId:
+            matches && Scene.Terminal.LastSuccess || typedEdit || changed && Task.Action != "python-edit-write" && Task.Keys.Length == 0 && key == "Enter" && !submitting ? Task.Id : null);
         if (passed != null) return passed;
         if (submitting && !Scene.Terminal.LastSuccess) return Miss(key, Scene.Active.Status);
         if (matches && watching?.Any(item => item.Goal.Task == Task && item.Goal.VerifyReport) == true)
@@ -361,8 +381,8 @@ internal sealed class LabRun
     {
 
         if (actual.Id == "screenshot" && ShowGuide && Task.Keys == "F11") return Miss(key, WrongKeyMessage(key));
-        bool eligible = LabCatalog.Available(actual, Scene);
-        bool changed = eligible && Scene.Apply(actual.Action);
+        bool changed = actual.Action.StartsWith("python-edit-", StringComparison.Ordinal)
+            ? Scene.PerformPythonEdit(actual.Action) : LabCatalog.Available(actual, Scene) && Scene.Apply(actual.Action);
         if (changed && mission != null)
         {
             if (Scene.Switcher && (actual.Id is "switch-next" or "switch-prev" or "switch-group-next" or "switch-group-prev"))
@@ -457,7 +477,8 @@ internal sealed class LabRun
 
     private void Next()
     {
-        var courses = LiveCourse.Missions.Where(m => m.App == App && m.Level == Level).ToArray();
+        var courses = (neutralProject ? NeutralProject.MissionCatalog : LiveCourse.Missions)
+            .Where(m => m.App == App && m.Level == Level).ToArray();
         if (CompletedRoute)
         {
             Stop();
@@ -524,6 +545,7 @@ internal sealed class LabRun
                 trace.Add(new(StrictReportEvent));
                 trace.Add(new(ClusterNavigationEvent));
                 trace.Add(new(LineEditingEvent));
+                trace.Add(new(PythonEditingEvent));
             }
             foreach (string key in held) trace.Add(new("@held/" + key, superUsed));
             missionLength = pending.Count;
@@ -535,9 +557,9 @@ internal sealed class LabRun
 
     private LabScene PrepareMissionScene()
     {
-        var scene = new LabScene(App == "workday" ? "ubuntu" : App, initialLayout)
+        var scene = new LabScene(App == "workday" ? "ubuntu" : App, initialLayout, neutralProject)
         { LayoutKey = layoutBinding, LayoutIsVirtual = initialVirtual, ReplayLegacyNavigation = replayLegacyNavigation,
-            ReplayLegacyLineEditing = replayLegacyLineEditing, UseWindowsBindings = windowsBindings };
+            ReplayLegacyLineEditing = replayLegacyLineEditing, ReplayLegacyPythonEditing = replayLegacyPythonEditing, UseWindowsBindings = windowsBindings };
         if (dockProfile != null) scene.Dock = dockProfile;
         scene.DesktopProfile = desktopProfile;
         scene.PrepareCase(variant, App);

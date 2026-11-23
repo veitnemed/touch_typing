@@ -354,10 +354,10 @@ namespace TouchTypingStudio
 
         private FrameworkElement BuildTyping()
         {
-            var root = PagePanel("Печать", "Слова, фразы, упражнения и Python из piling-main");
+            var root = PagePanel("Печать", "Слова, фразы, упражнения и код учебного проекта");
             var items = new List<Option>
             {
-                new Option("Project", "Python · piling-main"), new Option("Russian", "Русские фразы"),
+                new Option("Project", "Python · task-list"), new Option("Russian", "Русские фразы"),
                 new Option("English", "Английские фразы"), new Option("WordsRU", "Русские слова"),
                 new Option("WordsEN", "Английские слова"), new Option("Symbols", "Спецсимволы"),
                 new Option("WeakRU", "Промахи · русский"), new Option("WeakEN", "Промахи · английский")

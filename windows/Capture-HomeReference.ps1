@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory=$true)][string]$OutputDirectory,
     [ValidateRange(640,3840)][int]$ClientWidth = 1006,
     [ValidateRange(480,2160)][int]$ClientHeight = 863,
-    [switch]$AdjustHostedDisplay
+    [switch]$AdjustHostedDisplay,
+    [switch]$CodeTheme
 )
 $ErrorActionPreference = 'Stop'
 $Application = (Resolve-Path -LiteralPath $Application).ProviderPath
@@ -56,11 +57,13 @@ $oldRoot = $env:TOUCH_TYPING_QA_DATA_ROOT
 $oldSeed = $env:TOUCH_TYPING_QA_SEED
 $process = $null
 $displayChanged = $false
+$current = $null
+$oldCodeClient = $env:TOUCH_TYPING_QA_CODE_CLIENT
 $pointerParked = $false
 try {
     if ($oldDpi -eq [IntPtr]::Zero) { throw 'Per-monitor-aware capture could not be enabled.' }
-    if ($AdjustHostedDisplay -and ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted')) {
-        throw 'Display adjustment is restricted to a verified disposable GitHub-hosted runner.'
+    if (($AdjustHostedDisplay -or $CodeTheme) -and ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted')) {
+        throw 'Display adjustment and exact editor capture are restricted to a verified disposable GitHub-hosted runner.'
     }
     if ($AdjustHostedDisplay) {
         $current = [ReferenceUser32]::ReadMode(-1)
@@ -84,6 +87,11 @@ try {
             }
             if (-not $displayChanged) { throw 'Hosted display does not offer a safe mode large enough for physical-pixel capture.' }
         }
+    }
+    if ($CodeTheme) {
+        $env:TOUCH_TYPING_QA_CODE_CLIENT = "$($ClientWidth)x$($ClientHeight)"
+        & (Join-Path (Split-Path -Parent $Application) 'Test-Live-UI.ps1') -Application $Application -CodeTheme -OutputDirectory $OutputDirectory
+        return
     }
     $env:TOUCH_TYPING_QA_SEED = '7'
     $env:TOUCH_TYPING_QA_DATA_ROOT = Join-Path $OutputDirectory 'profile'
@@ -172,7 +180,13 @@ try {
         [void]$process.CloseMainWindow()
         if (-not $process.WaitForExit(3000)) { Stop-Process -Id $process.Id }
     }
+    $env:TOUCH_TYPING_QA_CODE_CLIENT = $oldCodeClient
     $env:TOUCH_TYPING_QA_SEED = $oldSeed
     $env:TOUCH_TYPING_QA_DATA_ROOT = $oldRoot
+    $restoreStatus = 0
+    if ($displayChanged) {
+        $restoreStatus = [ReferenceUser32]::ChangeDisplaySettings([ref]$current,0)
+    }
     if ($oldDpi -ne [IntPtr]::Zero) { [void][ReferenceUser32]::SetThreadDpiAwarenessContext($oldDpi) }
+    if ($restoreStatus -ne 0) { throw "Could not restore the prior hosted display mode (result $restoreStatus)." }
 }

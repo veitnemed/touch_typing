@@ -51,8 +51,11 @@ internal sealed class PracticeService
     private string[] dock, desktopProfile;
     internal string StorageError => store.Error;
 
+    private readonly bool neutralProject;
+
     internal PracticeService(bool verify)
     {
+        neutralProject = !verify || Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_LEGACY_PROJECT") != "1";
         string data = null;
         if (!windows)
         {
@@ -93,7 +96,7 @@ internal sealed class PracticeService
                 if (message.TryGetProperty("dock", out var pinned) && pinned.ValueKind == JsonValueKind.Array)
                     dock = pinned.EnumerateArray().Take(9).Select(item => item.GetString() ?? "").ToArray();
                 return Library();
-            case "lab-catalog": return LabCatalog.Catalog(profile.LiveDrafts, profile.ShortcutHistory, layout);
+            case "lab-catalog": return LabCatalog.Catalog(profile.LiveDrafts, profile.ShortcutHistory, layout, neutralProject);
             case "lab-start":
                 FinishLab();
                 if (lab?.Saved == false) return LabState(startBlocked: true);
@@ -102,7 +105,7 @@ internal sealed class PracticeService
                 bool combinedLimits = Flag(message, "combinedLimits");
                 lab = new LabRun(Text(message, "app"), Text(message, "mode"), Number(message, "level"),
                     Number(message, "seconds", combinedLimits ? 0 : 180), layout, profile.ShortcutHistory,
-                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit"), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: Text(message, "mission"), draft: draft, softFinish: Flag(message, "softFinish"), combinedLimits: combinedLimits, windowsBindings: windows, desktopProfile: windows ? null : desktopProfile);
+                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit"), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: Text(message, "mission"), draft: draft, softFinish: Flag(message, "softFinish"), combinedLimits: combinedLimits, windowsBindings: windows, desktopProfile: windows ? null : desktopProfile, neutralProject: neutralProject);
                 persistedLabAttempts = 0;
                 labCheckpoint = draft;
                 labLimitCheckpointAttempted = draft?.Progress?.LimitDecisionPending == true;

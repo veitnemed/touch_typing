@@ -312,8 +312,11 @@ class PracticeTest(unittest.TestCase):
         self.assertTrue(state["finished"])
         window = next(w for w in state["scene"]["windows"] if w["active"])
         self.assertEqual(window["url"], "/home/student/project/line-edit.py")
-        self.assertEqual(window["body"], "import numpy as np\ndef ifft(x): return x\nprint('next')")
-        self.assertEqual((window["bodyAnchor"], window["bodyCursor"]), (19, 41))
+        first = "from tasks import add_task"
+        middle = "def count_tasks(tasks): return len(tasks)"
+        self.assertEqual(window["body"], first + "\n" + middle + "\nprint('next')")
+        self.assertEqual((window["bodyAnchor"], window["bodyCursor"]),
+                         (len(first) + 1, len(first) + len(middle) + 2))
 
     def test_live_word_navigation_keeps_grapheme_clusters(self):
         self.open_live("terminal")

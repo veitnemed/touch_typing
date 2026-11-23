@@ -40,14 +40,19 @@ internal sealed class VirtualTerminal
     internal bool LastSuccess { get; private set; }
     internal int Version { get; private set; }
 
-    internal VirtualTerminal()
+    internal VirtualTerminal(bool neutralProject = false)
     {
         foreach (string directory in new[] { "/", "/home", Home, Home + "/project", Home + "/project/logs", Home + "/Downloads", "/tmp" })
             directories.Add(directory);
-        files[Home + "/project/README.md"] = "# piling-main\nSignal analysis project\nRun the tests before committing.\n";
-        files[Home + "/project/notes.txt"] = "spectrum\nsignal\nvector\nsignal\n";
-        files[Home + "/project/logs/app.log"] = "INFO started\nERROR missing sample\nINFO finished\n";
-        files[Home + "/project/app.py"] = "def fft(signal: np.ndarray):\n\n    fft_values = np.fft.fft(signal)\n    fft_centred = np.fft.fftshift(fft_values)\n    return fft_centred\n";
+        if (!neutralProject)
+        {
+            files[Home + "/project/README.md"] = "# piling-main\nSignal analysis project\nRun the tests before committing.\n";
+            files[Home + "/project/notes.txt"] = "spectrum\nsignal\nvector\nsignal\n";
+            files[Home + "/project/logs/app.log"] = "INFO started\nERROR missing sample\nINFO finished\n";
+            files[Home + "/project/app.py"] = "def fft(signal: np.ndarray):\n\n    fft_values = np.fft.fft(signal)\n    fft_centred = np.fft.fftshift(fft_values)\n    return fft_centred\n";
+                }
+        else
+            files[Home + "/project/logs/app.log"] = "INFO opened task-list\nERROR task title missing\nINFO saved tasks.json\n";
         history.Add("Учебный Ubuntu Terminal. Проект находится в ~/project.");
     }
 

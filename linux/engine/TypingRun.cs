@@ -31,7 +31,7 @@ internal sealed class TypingRun
     internal static object Catalog(StudioProfile profile) => new
     {
         lessons = Lessons.All.Select(item => new { id = "lesson:" + item.Id, title = item.Title, language = CodeText.LanguageName(item.Language) }),
-        projects = Project.Select(item => new { id = "project:" + item.Name, title = item.Name, source = item.Path }),
+        projects = NeutralProject.Exercises.Select(item => new { id = "project:" + item.Name, title = item.Name, source = item.Path }),
         sets = profile.PracticeSets.Where(item => item.Kind != PracticeSetKind.Shortcuts)
             .Select(item => new { id = "set:" + item.Id, title = item.Name, content = item.Content, kind = item.Kind.ToString() }),
         oldShortcuts = profile.PracticeSets.Where(item => item.Kind == PracticeSetKind.Shortcuts)
@@ -74,9 +74,9 @@ internal sealed class TypingRun
                     Enumerable.Range(0, 8 + level * 2).Select(_ => words[random.Next(words.Length)]))).ToArray();
                 break;
             case "Project":
-                title = "Python · piling-main";
-                source = "Сигналы, спектр и направляющие векторы";
-                snippets = Project.Where(item => item.Tier == level).Select(item => item.Code).ToArray();
+                title = "Python · task-list";
+                source = "Добавление, поиск и сохранение списка задач";
+                snippets = NeutralProject.Exercises.Where(item => item.Tier == level).Select(item => item.Code).ToArray();
                 break;
             case "WeakRU":
             case "WeakEN":
@@ -92,7 +92,7 @@ internal sealed class TypingRun
             default:
                 if (mode.StartsWith("project:"))
                 {
-                    var item = Project.SingleOrDefault(block => block.Name == mode[8..])
+                    var item = NeutralProject.Exercises.Concat(Project).FirstOrDefault(block => block.Name == mode[8..])
                         ?? throw new ArgumentException("Фрагмент проекта не найден.");
                     title = item.Name;
                     source = item.Path;

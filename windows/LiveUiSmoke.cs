@@ -21,6 +21,7 @@ internal static class LiveUiSmoke
     private static AutomationElement window;
     private static int count;
     private static string evidenceDirectory;
+    private static Size? expectedCodeClient;
 
     [STAThread]
     private static int Main(string[] arguments)
@@ -32,7 +33,8 @@ internal static class LiveUiSmoke
             bool dailyUse = arguments.Contains("--daily-use");
             bool gnomeProfile = arguments.Contains("--gnome-profile");
             bool debugDay = arguments.Contains("--debug-day");
-            bool referenceEvidence = referenceBrowser || dailyUse || gnomeProfile || debugDay || arguments.Contains("--reference-evidence");
+            bool codeTheme = arguments.Contains("--code-theme");
+            bool referenceEvidence = referenceBrowser || dailyUse || gnomeProfile || debugDay || codeTheme || arguments.Contains("--reference-evidence");
             if (referenceEvidence && SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
                 throw new InvalidOperationException("Per-monitor-aware evidence capture cannot be enabled.");
             string path = Path.GetFullPath(arguments[0]);
@@ -44,12 +46,18 @@ internal static class LiveUiSmoke
                 Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_SOFT_FINISH_SECONDS", "7");
             Console.WriteLine("UI test seed " + Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"));
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_NAV_TRACE", gnomeProfile ? "workspace" :
-                referenceEvidence && !referenceBrowser && !dailyUse && !debugDay ? "terminal" : null);
+                referenceEvidence && !referenceBrowser && !dailyUse && !debugDay && !codeTheme ? "terminal" : null);
             app = Process.Start(new ProcessStartInfo(path, "--qa --live") { WorkingDirectory = Path.GetDirectoryName(path) });
             Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "trainer window", 12000);
             window = AutomationElement.FromHandle(trainer);
             Check(window.Current.ProcessId == app.Id, "The automation root belongs to the new QA process");
             Focus();
+            if (codeTheme)
+            {
+                CheckCodeTheme();
+                Console.WriteLine("PASS: " + count + " native WPF GitHub Dark editor assertions");
+                return 0;
+            }
             if (gnomeProfile)
             {
                 CheckGnomeProfilePractice();
@@ -520,6 +528,125 @@ internal static class LiveUiSmoke
             "One final session persisted across close, continuation, and explicit finish");
         Check(xml.SelectSingleNode("/StudioProfile/LiveDrafts/LiveDraft[App='terminal']") == null,
             "No resumable parallel attempt after explicit finish");
+    }
+
+    private static void CheckCodeTheme()
+    {
+        Check(GetDpiForWindow(trainer) == 96, "Normal Windows laptop scale: 100% / 96 DPI");
+        string exactClient = Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_CODE_CLIENT");
+        if (!string.IsNullOrEmpty(exactClient))
+        {
+            if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true" ||
+                Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT") != "github-hosted")
+                throw new InvalidOperationException("Exact editor sizing requires a disposable hosted runner.");
+            var dimensions = exactClient.Split('x');
+            int width, height;
+            if (dimensions.Length != 2 || !int.TryParse(dimensions[0], out width) || !int.TryParse(dimensions[1], out height) ||
+                width < 640 || width > 3840 || height < 480 || height > 2160)
+                throw new InvalidOperationException("Invalid exact editor client dimensions.");
+            ResizeOwnedEditorClient(width, height);
+            expectedCodeClient = new Size(width, height);
+        }
+        if (Visible("LabChooseClass"))
+        {
+            Invoke("LabChooseClass");
+            Until(delegate { return Exists("LabStart"); }, "editor chooser");
+        }
+        Invoke("LabClass-code"); Select("LabMode", 0); Select("LabLevel", 0);
+        Select("LabDuration", 0); Select("LabTimer", 0);
+        SelectMissionByName("Составить заметку по проекту");
+        Key("F5");
+        Func<AutomationElement.AutomationElementInformation> scene = () => Find("LabDesktop").Current;
+        Until(delegate { return Visible("LabDesktop") && Name("LabPause").StartsWith("Пауза") &&
+            scene().HelpText.EndsWith("app.py") && scene().ItemStatus == "editor:body:0"; },
+            "real neutral app.py in editor at the first character");
+        CaptureReferenceFrame("editor-theme-01-open");
+        using (var opening = CaptureEditorViewport("editor-theme-01-open"))
+            Check(opening.Width >= 420, "Editor viewport captured at its actual size");
+
+        for (int i = 0; i < 7; i++) Key("Down");
+        Key("Home");
+        for (int i = 0; i < 4; i++) Key("Right");
+        Until(delegate { return scene().ItemStatus == "editor:body:149"; }, "app.py line 8 column 5");
+        CaptureReferenceFrame("editor-theme-02-active-line");
+        using (var before = CaptureEditorViewport("editor-theme-02-active-line"))
+        {
+            for (int i = 0; i < 8; i++) Chord("Shift+Right");
+            Until(delegate { return scene().ItemStatus == "editor:body:157"; }, "selection endpoint line 8 column 13");
+            CaptureReferenceFrame("editor-theme-03-add-task-selected");
+            using (var after = CaptureEditorViewport("editor-theme-03-add-task-selected"))
+            {
+                const int row = 92 + 7 * 20;
+                Check(before.Width == after.Width && before.Height == after.Height && after.Height > row + 20,
+                    "Editor evidence uses the same viewport at native 1:1 pixels");
+                int selectedPixels = 0, activePixels = 0;
+                for (int y = row; y < row + 18; y++)
+                    for (int x = 0; x < after.Width; x++)
+                    {
+                        Color pixel = after.GetPixel(x, y);
+                        if (NearColor(pixel, 38, 79, 120, 2) && !NearColor(before.GetPixel(x, y), 38, 79, 120, 2)) selectedPixels++;
+                        if (NearColor(before.GetPixel(x, y), 23, 27, 34, 2)) activePixels++;
+                    }
+                Check(activePixels > 200 && selectedPixels > 120,
+                    "Native active-line fill and selected add_task range have distinct GitHub Dark colors");
+            }
+        }
+    }
+
+    private static void ResizeOwnedEditorClient(int width, int height)
+    {
+        Check(!app.HasExited && window.Current.ProcessId == app.Id && GetForegroundWindow() == trainer,
+            "Resize only the owned foreground trainer window");
+        ShowWindow(trainer, 9); // SW_RESTORE: outer dimensions are defined for the normal window.
+        var screen = System.Windows.Forms.Screen.FromHandle(trainer);
+        var bounds = screen.Bounds;
+        var area = screen.WorkingArea;
+        for (int pass = 0; pass < 4; pass++)
+        {
+            CaptureRect client, outer;
+            if (!GetClientRect(trainer, out client) || !GetWindowRect(trainer, out outer))
+                throw new InvalidOperationException("Cannot read exact editor client and outer frame.");
+            int fullWidth = outer.Right - outer.Left + width - (client.Right - client.Left);
+            int fullHeight = outer.Bottom - outer.Top + height - (client.Bottom - client.Top);
+            if (!bounds.Contains(new Rectangle(area.X, area.Y, fullWidth, fullHeight)))
+                throw new InvalidOperationException("Exact editor client needs a larger disposable display, refusing to crop or scale.");
+            if (!SetWindowPos(trainer, IntPtr.Zero, area.X, area.Y, fullWidth, fullHeight, 0x0014))
+                throw new InvalidOperationException("Could not size owned editor window.");
+            Wait(180);
+        }
+        Focus();
+        CaptureRect final;
+        Check(GetClientRect(trainer, out final) && final.Right - final.Left == width && final.Bottom - final.Top == height &&
+            GetDpiForWindow(trainer) == 96, "Physical editor client is exactly " + width + "x" + height + " @96 DPI");
+    }
+
+    private static bool NearColor(Color value, int r, int g, int b, int tolerance)
+    {
+        return Math.Abs(value.R - r) <= tolerance && Math.Abs(value.G - g) <= tolerance &&
+            Math.Abs(value.B - b) <= tolerance;
+    }
+
+    private static Bitmap CaptureEditorViewport(string name)
+    {
+        if (app.HasExited || GetForegroundWindow() != trainer)
+            throw new InvalidOperationException("Refusing editor crop outside the owned foreground trainer.");
+        var scene = Find("LabDesktop").Current.BoundingRectangle;
+        var pixels = Rectangle.FromLTRB((int)Math.Ceiling(scene.Left), (int)Math.Ceiling(scene.Top),
+            (int)Math.Floor(scene.Right), (int)Math.Floor(scene.Bottom));
+        if (pixels.Width < 420 || pixels.Height <= 0 ||
+            !System.Windows.Forms.Screen.FromHandle(trainer).Bounds.Contains(pixels))
+            throw new InvalidOperationException("The complete native editor crop is not visible.");
+        using (var bitmap = new Bitmap(pixels.Width, pixels.Height))
+        {
+            using (var graphics = Graphics.FromImage(bitmap))
+                graphics.CopyFromScreen(pixels.X, pixels.Y, 0, 0, pixels.Size);
+            if (GetForegroundWindow() != trainer)
+                throw new InvalidOperationException("Trainer lost foreground during editor crop.");
+            bitmap.Save(Path.Combine(evidenceDirectory, name + "-viewport.png"), ImageFormat.Png);
+            Console.WriteLine("CAPTURE " + name + " editor viewport " + pixels.Width + "x" + pixels.Height +
+                " physical px, DPI=" + GetDpiForWindow(trainer));
+            return new Bitmap(bitmap);
+        }
     }
 
     private static void CheckDebugDay()
@@ -1223,6 +1350,9 @@ internal static class LiveUiSmoke
             throw new InvalidOperationException("Unable to read actual foreground client geometry.");
         if (client.Right <= 0 || client.Bottom <= 0)
             throw new InvalidOperationException("Actual foreground client has no area.");
+        if (expectedCodeClient.HasValue && (client.Right - client.Left != expectedCodeClient.Value.Width ||
+            client.Bottom - client.Top != expectedCodeClient.Value.Height || GetDpiForWindow(trainer) != 96))
+            throw new InvalidOperationException("The native editor capture no longer matches the requested physical client size and DPI.");
         var display = System.Windows.Forms.Screen.FromHandle(trainer).Bounds;
         var bounds = new Rectangle(topLeft.X, topLeft.Y, client.Right, client.Bottom);
         if (!display.Contains(bounds))
@@ -1534,6 +1664,9 @@ internal static class LiveUiSmoke
     [StructLayout(LayoutKind.Sequential)] private struct Message { internal IntPtr Window; internal uint Id; internal UIntPtr WParam; internal IntPtr LParam; internal uint Time; internal int X, Y; internal uint Private; }
     [StructLayout(LayoutKind.Sequential)] private struct CaptureRect { internal int Left,Top,Right,Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct CapturePoint { internal int X,Y; }
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out CaptureRect rect);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hwnd, int command);
     [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hwnd, out CaptureRect rect);
     [DllImport("user32.dll")] private static extern bool ClientToScreen(IntPtr hwnd, ref CapturePoint point);
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);

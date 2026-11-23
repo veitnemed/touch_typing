@@ -18,7 +18,7 @@ namespace TouchTypingStudio
             return state;
         }
 
-        private static byte[] Draw(string directory, string app, string name, Data state)
+        private static byte[] Draw(string directory, string app, string name, Data state, int dpi = 96)
         {
             var view = new LabSceneView();
             view.Update(state.D("scene"), app);
@@ -26,13 +26,14 @@ namespace TouchTypingStudio
             view.Measure(size);
             view.Arrange(new Rect(size));
             view.UpdateLayout();
-            var bitmap = new RenderTargetBitmap(960, 470, 96, 96, PixelFormats.Pbgra32);
+            int width = (int)Math.Ceiling(size.Width * dpi / 96), height = (int)Math.Ceiling(size.Height * dpi / 96);
+            var bitmap = new RenderTargetBitmap(width, height, dpi, dpi, PixelFormats.Pbgra32);
             bitmap.Render(view);
             var encoder = new PngBitmapEncoder();
             encoder.Frames.Add(BitmapFrame.Create(bitmap));
             using (var file = File.Create(Path.Combine(directory, name + ".png"))) encoder.Save(file);
-            var bytes = new byte[960 * 470 * 4];
-            bitmap.CopyPixels(bytes, 960 * 4, 0);
+            var bytes = new byte[width * height * 4];
+            bitmap.CopyPixels(bytes, width * 4, 0);
             return bytes;
         }
 
@@ -41,7 +42,8 @@ namespace TouchTypingStudio
             int count = 0;
             for (int i = 0; i < pixels.Length; i += 4)
                 if ((pixels[i] == 155 && pixels[i + 1] == 98 && pixels[i + 2] == 53) ||
-                    (pixels[i] == 240 && pixels[i + 1] == 200 && pixels[i + 2] == 173)) count++;
+                    (pixels[i] == 240 && pixels[i + 1] == 200 && pixels[i + 2] == 173) ||
+                    CodeSelectionPixel(pixels, i)) count++;
             return count;
         }
 
@@ -59,18 +61,25 @@ namespace TouchTypingStudio
             }));
         }
 
+        // Primer inherits the VS Code dark selection color (no alpha when focused).
+        private static bool CodeSelectionPixel(byte[] pixels, int index)
+        {
+            return NearPixel(pixels, index, 38, 79, 120);
+        }
+
+        private static bool NearPixel(byte[] pixels, int index, int r, int g, int b)
+        {
+            return Math.Abs(pixels[index + 2] - r) <= 2 &&
+                Math.Abs(pixels[index + 1] - g) <= 2 && Math.Abs(pixels[index] - b) <= 2;
+        }
+
         private static int[] EditorBlueColumns(byte[] pixels, int row)
         {
-            // 960 / 1200 scene scale, immersive editor origin y=-29, first row y=94,
-            // row pitch 21 scene units. Restrict both axes to the two content areas.
-            int top = row == 0 ? 52 : 69;
-            int bottom = row == 0 ? 68 : 85;
-            return Enumerable.Range(68, 110).Where(x => Enumerable.Range(top, bottom - top)
-                .Any(y =>
-                {
-                    int pixel = (y * 960 + x) * 4;
-                    return pixels[pixel] == 155 && pixels[pixel + 1] == 98 && pixels[pixel + 2] == 53;
-                })).ToArray();
+            // A code scene at 960 DIP is rendered at native editor scale.
+            // Activity rail 48 + line-number gutter 49; rows start at 92, pitch 20.
+            int top = 92 + row * 20;
+            return Enumerable.Range(96, 110).Where(x => Enumerable.Range(top, 19)
+                .Any(y => CodeSelectionPixel(pixels, (y * 960 + x) * 4))).ToArray();
         }
 
         private static void CheckEditorNewlineSelection(string directory)
@@ -102,12 +111,54 @@ namespace TouchTypingStudio
                 throw new InvalidOperationException("Rendered selection must include exactly the intended graphemes, line break and next-row glyph");
         }
 
+        private static void CheckEditorDpiRenders(string directory)
+        {
+            // This is a WPF render-target regression, not a desktop-scale
+            // session. The native -CodeTheme test separately asserts 96 DPI.
+            const string body = "def function():\n    return 1234";
+            var editor = new Dictionary<string, object>
+            {
+                { "app", "code" }, { "active", true }, { "focus", "body" }, { "sidebar", false },
+                { "projectName", "task-list" }, { "projectRelative", "app.py" },
+                { "body", body }, { "bodyAnchor", 4 }, { "bodyCursor", 12 },
+                { "syntax", new object[] {
+                    new Dictionary<string, object> { {"start", 0}, {"end", 3}, {"kind", "keyword"} },
+                    new Dictionary<string, object> { {"start", 4}, {"end", 12}, {"kind", "function"} },
+                    new Dictionary<string, object> { {"start", 27}, {"end", 31}, {"kind", "number"} }
+                } }
+            };
+            var state = new Data(new Dictionary<string, object>
+            {
+                { "scene", new Dictionary<string, object> { { "windows", new object[] { editor } } } }
+            });
+            foreach (int dpi in new[] { 96, 120, 144 })
+            {
+                var pixels = Draw(directory, "code", "code-themed-render-" + dpi + "dpi", state, dpi);
+                int width = 960 * dpi / 96;
+                int x0 = 96 * dpi / 96, x1 = 212 * dpi / 96, y0 = 92 * dpi / 96, y1 = 112 * dpi / 96;
+                int keywords = 0, functions = 0, selection = 0, caret = 0;
+                for (int y = y0; y < y1; y++)
+                    for (int x = x0; x < x1; x++)
+                    {
+                        int index = (y * width + x) * 4;
+                        if (NearPixel(pixels, index, 255, 123, 114)) keywords++;
+                        if (NearPixel(pixels, index, 210, 168, 255)) functions++;
+                        if (CodeSelectionPixel(pixels, index)) selection++;
+                        if (NearPixel(pixels, index, 47, 129, 247)) caret++;
+                    }
+                if (keywords < 1 || functions < 1 || selection < 45 || caret < 2)
+                    throw new InvalidOperationException(string.Format("WPF themed code pixels at {0} DPI: keyword {1}, function {2}, selection {3}, caret {4}",
+                        dpi, keywords, functions, selection, caret));
+            }
+        }
+
         internal static int Run(string executable, string directory)
         {
             Directory.CreateDirectory(directory);
             try
             {
                 CheckEditorNewlineSelection(directory);
+                CheckEditorDpiRenders(directory);
                 using (var engine = new PracticeEngineClient(executable, true))
                 foreach (string app in new[] { "chrome", "code", "terminal" })
                 {
@@ -146,7 +197,7 @@ namespace TouchTypingStudio
                     }
                     engine.Call("lab-stop");
                 }
-                File.WriteAllText(Path.Combine(directory, "result.txt"), "PASS WPF selection, caret, Chrome Ctrl+F, editor LF/CRLF geometry, Delete and Ctrl+J");
+                File.WriteAllText(Path.Combine(directory, "result.txt"), "PASS WPF selection, caret, Chrome Ctrl+F, editor LF/CRLF geometry and theme at 96/120/144 render DPI, Delete and Ctrl+J");
                 return 0;
             }
             catch (Exception error)

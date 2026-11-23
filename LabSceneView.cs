@@ -10,7 +10,7 @@ using System.Windows.Automation.Peers;
 
 namespace TouchTypingStudio
 {
-    internal sealed class LabSceneView : FrameworkElement
+    internal sealed partial class LabSceneView : FrameworkElement
     {
         private Data scene = Data.Empty;
         private string classApp = "ubuntu";
@@ -121,21 +121,19 @@ namespace TouchTypingStudio
 
         private void DrawImmersive(DrawingContext dc)
         {
-            double width = classApp == "chrome" ? Math.Min(900, Math.Max(610, ActualWidth)) : WidthUnits;
+            double width = classApp == "chrome" ? Math.Min(900, Math.Max(610, ActualWidth)) : Math.Max(420, ActualWidth);
             double scale = ActualWidth / width;
             double height = ActualHeight / scale;
             dc.PushTransform(new ScaleTransform(scale, scale));
             dc.PushClip(new RectangleGeometry(new Rect(0, 0, width, height), 10, 10));
-            Rectangle(0, 0, width, height, classApp == "chrome" ? "#F7F6FD" : "#1E1E1E");
+            Rectangle(0, 0, width, height, classApp == "chrome" ? "#F7F6FD" : CodeCanvas);
             var candidates = scene.Items("windows").Where(w =>
                 (w.S("app") == classApp || classApp == "code" && w.S("app") == "vscode") &&
                 w.S("state") != "closed" && w.S("state") != "minimized").ToArray();
             var window = candidates.FirstOrDefault(w => w.B("active")) ?? candidates.FirstOrDefault();
             if (window != null)
             {
-                // The compact browser reference retains its simulated title bar.
-                double caption = classApp == "chrome" ? 0 : -29;
-                DrawWindow(window, new Rect(0, caption, width, height - caption));
+                DrawWindow(window, new Rect(0, 0, width, height));
             }
             else
             {
@@ -203,6 +201,13 @@ namespace TouchTypingStudio
             context.PushClip(new RectangleGeometry(new Rect(0, 0, bounds.Width, bounds.Height), 8, 8));
             Rounded(0, 0, bounds.Width, bounds.Height, "#252527", 8);
             string app = window.S("app");
+            if (app == "code" || app == "vscode")
+            {
+                DrawCodeTitle(window, bounds.Width);
+                DrawCode(window, bounds.Width, bounds.Height);
+                context.Pop(); context.Pop();
+                return;
+            }
             Rectangle(0, 0, bounds.Width, 29, app == "chrome" ? "#24213B" : window.B("active") ? "#303034" : "#28282C");
             if (app == "chrome") Icon("chrome", 13, 5, 19);
             Text(window.S("title", AppTitle(app)), app == "chrome" ? 38 : 14, 7, app == "chrome" ? 14 : 11, "#F6F1FF");
@@ -211,7 +216,6 @@ namespace TouchTypingStudio
             Text("×", bounds.Width - 22, 3, 15, "#FFFFFF");
             double w = bounds.Width, h = bounds.Height;
             if (app == "chrome") DrawChrome(window, w, h);
-            else if (app == "code" || app == "vscode") DrawCode(window, w, h);
             else if (app == "terminal") DrawTerminal(window, w, h);
             else DrawFiles(window, w, h);
             context.Pop(); context.Pop();
@@ -266,7 +270,11 @@ namespace TouchTypingStudio
             if (window.B("bookmarks"))
             {
                 Rectangle(0, 101, w, 25, "#E5EAF0");
-                Text("☆  Python    ☆  piling-main    ☆  Ubuntu", 15, 107, 10, "#43566D");
+                var bookmarks = window.Items("savedBookmarks").Select(item => item.Value())
+                    .Where(url => !string.IsNullOrWhiteSpace(url)).OrderBy(url => url, StringComparer.Ordinal)
+                    .Select(url => BrowserBookmarkTitle(url, tabs, window.Items("entries"))).ToArray();
+                Text(bookmarks.Length == 0 ? "Нет сохранённых закладок" : string.Join("    ", bookmarks.Select(label => "☆  " + label)),
+                    15, 107, 10, "#43566D", w - 30);
             }
             if (window.S("find").Length > 0 || window.S("focus") == "find")
             {
@@ -284,70 +292,93 @@ namespace TouchTypingStudio
             }
         }
 
+        private static string BrowserBookmarkTitle(string url, IEnumerable<Data> tabs, IEnumerable<Data> entries)
+        {
+            var page = tabs.FirstOrDefault(tab => tab.S("url") == url);
+            if (page != null && page.S("title").Length > 0) return page.S("title");
+            var entry = entries.FirstOrDefault(item => item.S("path") == url);
+            if (entry != null && entry.S("title").Length > 0) return entry.S("title");
+            Uri parsed;
+            if (Uri.TryCreate(url, UriKind.Absolute, out parsed) && parsed.Host.Length > 0)
+            {
+                string path = parsed.AbsolutePath.Trim('/');
+                return path.Length > 0 ? parsed.Host + "/" + path : parsed.Host;
+            }
+            return url;
+        }
+
         private void DrawCode(Data window, double w, double h)
         {
-            Rectangle(0, 29, w, h - 29, "#1E1E1E");
-            Rectangle(0, 29, 44, h - 50, "#333333");
-            Text("▤\n\n⌕\n\n⑂\n\n▷\n\n▦", 12, 49, 21, "#A7ACB3", 30);
-            Text("⚙", 11, h - 62, 22, "#A7ACB3");
+            const double tabsTop = 29, tabsHeight = 35, breadcrumbY = 70, firstRowY = 92, rowPitch = 20;
+            const double activityWidth = 48;
+            Rectangle(0, tabsTop, w, h - tabsTop, CodeCanvas);
             bool sidebar = window.B("sidebar", true);
-            double x = sidebar ? Math.Min(219, w * .25) : 44;
-            bool symbolProject = window.Items("tabs").Any(tab => tab.S("url").Contains("/symbol-lab/"));
-            if (sidebar)
-            {
-                Rectangle(44, 29, x - 44, h - 50, "#252526");
-                string view = window.S("view");
-                string heading = view == "changes" ? "ИЗМЕНЕНИЯ" : view == "project-search" ? "ПОИСК" :
-                    view == "extensions" ? "РАСШИРЕНИЯ" : scene.B("diagnosticWorkspace") ? "DIAGNOSTICS-LAB" :
-                    symbolProject ? "SYMBOL-LAB" : "PILING-MAIN";
-                Text(heading, 58, 44, 11, "#B4BAC4");
-                var names = view == "extensions" ? new[] { "Python", "Pylance" } :
-                    window.Items(view == "changes" ? "changedFiles" : view == "project-search" ? "searchResults" : "projectFiles").Select(item => item.Value()).ToArray();
-                for (int i = 0; i < names.Length && 78 + i * 23 < h - 42; i++)
-                    Text(names[i], 58, 76 + i * 23, 12, "#C6CDD5", x - 66);
-            }
+            double x = sidebar ? activityWidth + Math.Min(226, Math.Max(116, w * .20)) : activityWidth;
+            DrawCodeActivity(window, activityWidth, h);
+            if (sidebar) DrawCodeSidebar(window, activityWidth, x - activityWidth, h);
+
             var tabs = window.Items("tabs").ToArray();
-            if (tabs.Length == 0) tabs = new[] { new Data(new System.Collections.Generic.Dictionary<string, object> { { "title", "main.py" } }) };
-            double tabWidth = Math.Min(155, (w - x - 12) / tabs.Length);
-            for (int i = 0; i < tabs.Length; i++)
+            int active = Math.Min(Math.Max(0, window.I("activeTab")), Math.Max(0, tabs.Length - 1));
+            string relative = CodeRelativePath(window);
+            string file = relative.Split('/').Last();
+            Rectangle(x, tabsTop, w - x, tabsHeight, CodeInset);
+            Rectangle(x, tabsTop + tabsHeight - 1, w - x, 1, CodeBorder);
+            double tabX = x;
+            for (int i = 0; i < tabs.Length && tabX < w - 18; i++)
             {
-                Rectangle(x + i * tabWidth, 29, tabWidth - 1, 31, i == window.I("activeTab") ? "#1E1E1E" : "#2D2D2D");
-                Text("◇  " + tabs[i].S("title"), x + i * tabWidth + 10, 39, 11, "#C1D3E2", tabWidth - 25);
+                Data tab = tabs[i];
+                string title = tab.S("title", file);
+                double tabWidth = Math.Min(w - tabX, Math.Max(103, Math.Min(177, 48 + title.Length * 7)));
+                bool selected = i == active;
+                Rectangle(tabX, tabsTop, tabWidth, tabsHeight - (selected ? 0 : 1), selected ? CodeCanvas : CodeInset);
+                Rectangle(tabX + tabWidth - 1, tabsTop, 1, tabsHeight, CodeBorder);
+                if (selected) Rectangle(tabX, tabsTop, tabWidth - 1, 2, CodeAccent);
+                DrawCodeFileIcon(title, tabX + 11, tabsTop + 9);
+                Text(title, tabX + 31, tabsTop + 8, 13, selected ? CodeForeground : CodeMuted, tabWidth - 50);
+                if (selected && tabWidth > 67)
+                    Text(tab.B("modified") ? "●" : "×", tabX + tabWidth - 19, tabsTop + 7, 13, CodeMuted, 14);
+                tabX += tabWidth;
             }
-            Text((symbolProject ? "symbol-lab" : "piling-main") + "  ›  src  ›  " +
-                tabs[Math.Min(Math.Max(0, window.I("activeTab")), tabs.Length - 1)].S("title"),
-                x + 15, 69, 10, "#8F98A7", w - x - 25);
+            string path = string.Join("  ›  ", relative.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries));
+            Text(path, x + 16, breadcrumbY - 3, 12, CodeMuted, w - x - 24);
+
             string code = window.S("body");
             if (window.S("focus") == "editor" && window.S("input").Length > 0) code = window.S("input");
-
             string[] lines = code.Split('\n');
             double editorWidth = window.B("split") ? (w - x) / 2 : w - x;
             double primary = x + (window.B("split") && window.I("group") == 1 ? editorWidth : 0);
             int caret = Math.Max(0, Math.Min(window.I("bodyCursor"), code.Length));
+            int anchor = Math.Max(0, Math.Min(window.I("bodyAnchor"), code.Length));
             int caretLine = code.Substring(0, caret).Count(c => c == '\n');
-            int visible = Math.Max(1, (int)(((window.B("panel") ? h * .55 : h - 22) - 92) / 21));
-            int first = window.S("focus") == "body" ? Math.Max(0, caretLine - visible + 1) : 0;
+            int caretColumn = caret - (caret == 0 ? -1 : code.LastIndexOf('\n', caret - 1));
+            bool bodyFocused = window.B("active") && window.S("focus") == "body";
+            double bottom = window.B("panel") ? Math.Max(155, h * .55) : h - 22;
+            int visible = Math.Max(1, (int)((bottom - firstRowY) / rowPitch));
+            int first = bodyFocused ? Math.Max(0, caretLine - visible + 1) : 0;
+            double gutter = Math.Max(49, 21 + lines.Length.ToString(CultureInfo.InvariantCulture).Length * 8);
             int offset = 0;
+            var syntax = window.Items("syntax").ToArray();
             for (int i = 0; i < Math.Min(lines.Length, first + visible); i++)
             {
                 if (i >= first)
                 {
-                    double row = 94 + (i - first) * 21;
-                    Text((i + 1).ToString(), primary + 10, row, 11, "#89909A", 24, 1, true);
+                    double row = firstRowY + (i - first) * rowPitch;
+                    if (bodyFocused && i == caretLine) Rectangle(primary, row - 1, editorWidth, rowPitch, CodeActiveLine);
+                    CodeRightText((i + 1).ToString(CultureInfo.InvariantCulture),
+                        primary + 5, row, gutter - 19, 13, bodyFocused && i == caretLine ? CodeForeground : CodeGutter);
                     bool hasLineBreak = i + 1 < lines.Length;
                     string line = hasLineBreak && lines[i].EndsWith("\r", StringComparison.Ordinal)
                         ? lines[i].Substring(0, lines[i].Length - 1) : lines[i];
-                    Field(line, window, primary + 42, row, editorWidth - 48, 13,
-                        line.TrimStart().StartsWith("#") ? "#93B484" : "#D2DCE6", offset,
-                        window.S("focus") == "body" || window.I("bodyAnchor") != window.I("bodyCursor"),
-                        document: true, hasLineBreak: hasLineBreak);
+                    DrawStyledCodeLine(line, window, syntax, primary + gutter, row, editorWidth - gutter - 10,
+                        offset, caret, anchor, bodyFocused, hasLineBreak);
                 }
                 offset += lines[i].Length + 1;
             }
             if (window.B("panel"))
             {
                 double terminalY = Math.Max(155, h * .55);
-                Rectangle(x, terminalY, w - x, h - terminalY - 21, "#181818");
+                Rectangle(x, terminalY, w - x, h - terminalY - 21, CodeInset);
+                Rectangle(x, terminalY, w - x, 1, CodeBorder);
                 if (scene.B("diagnosticWorkspace") && window.S("focus") != "terminal")
                 {
                     Text("ПРОБЛЕМЫ · F8", x + 15, terminalY + 8, 10, "#F3CC73");
@@ -372,10 +403,7 @@ namespace TouchTypingStudio
                 Text(other.S("title"), secondary + 14, 73, 11, "#BFD0DF", editorWidth - 28);
                 Text(other.S("body"), secondary + 18, 94, 12, "#C7D9E7", editorWidth - 32, visible, true);
             }
-            Rectangle(0, h - 21, w, 21, "#0879B9");
-            Text("⑂ main    ◉ 0   ⚠ " + scene.I("diagnosticProblemCount") + "      " + window.S("status", "Готово"),
-                13, h - 17, 10, "#FFFFFF", w - 205);
-            Text("UTF-8    Python    ◉", w - 164, h - 17, 10, "#FFFFFF");
+            DrawCodeStatus(window, w, h, caretLine + 1, caretColumn, file);
             string focus = window.S("focus");
             if (focus == "code-quick-fix")
             {
@@ -428,6 +456,8 @@ namespace TouchTypingStudio
                 string title = focus == "palette" ? "Палитра команд" : focus == "symbols" ? "Символы файла" :
                     focus == "replace-find" ? "Найти для замены" : focus == "replace-with" ? "Заменить на" :
                     focus == "quick-open" ? "Открыть файл" : focus == "goto-line" ? "Перейти к строке" : "Поиск";
+                if (focus == "find" && window.S("status").StartsWith("Совпадение ", StringComparison.Ordinal))
+                    title += " · " + window.S("status");
                 string[] options = focus == "palette" ? new[] { "Форматировать документ", "Переключить боковую панель", "Разделить редактор" } :
                     window.Items("entries").Select(item => item.S("title")).ToArray();
                 int index = window.I("optionIndex"), shown = Math.Min(options.Length, Math.Min(6, Math.Max(1, (int)((h - 115) / 25))));
@@ -451,7 +481,7 @@ namespace TouchTypingStudio
             string output = string.Join("\n", scene.D("terminal").Items("output").Select(line => line.Value()).Reverse().Take(13).Reverse());
             Text(output, 16, 45, 13, "#E4DCE6", w - 35, 14, true);
             string input = scene.S("terminalInput");
-            string cwd = scene.D("terminal").S("cwd", "~/piling-main");
+            string cwd = scene.D("terminal").S("cwd", "~");
             double y = Math.Min(h - 45, 72 + Math.Min(11, output.Split('\n').Length) * 20);
             TerminalField(window, 16, y, w - 32);
             if (window.S("status").Length > 0) Text(window.S("status"), 16, h - 25, 11, "#C9B3C5", w - 35);

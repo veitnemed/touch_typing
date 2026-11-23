@@ -1,0 +1,71 @@
+name: Capture the packaged Python editor on Windows
+
+on:
+  push:
+    branches: [feature/github-dark-python]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-editor-proof-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Package this exact source and run input/lexical checks
+        run: |
+          set -euo pipefail
+          dotnet run --project linux/tests/highlight/PythonHighlightRegression.csproj -c Release
+          bash windows/build-release.sh "$RUNNER_TEMP/editor-package"
+          (cd "$RUNNER_TEMP/editor-package" && zip -qr "$RUNNER_TEMP/touchtyping-python-editor.zip" .)
+          (cd "$RUNNER_TEMP" && sha256sum touchtyping-python-editor.zip > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-editor-windows-candidate
+          path: |
+            ${{ runner.temp }}/touchtyping-python-editor.zip
+            ${{ runner.temp }}/SHA256SUMS.txt
+  native-wpf:
+    needs: package
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-editor-windows-candidate
+          path: ${{ runner.temp }}/editor-candidate
+      - name: Verify exact package and exercise the real WPF editor
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candidate = Join-Path $env:RUNNER_TEMP 'editor-candidate'
+          $zip = Join-Path $candidate 'touchtyping-python-editor.zip'
+          $expected = (Get-Content (Join-Path $candidate 'SHA256SUMS.txt') -Raw).Split(' ')[0]
+          if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne $expected) { throw 'ZIP SHA mismatch' }
+          $appDir = Join-Path $env:RUNNER_TEMP 'Editor comparison app'
+          Expand-Archive -LiteralPath $zip -DestinationPath $appDir
+          $env:TOUCH_TYPING_QA_LESSON_CHROME = 'compact'
+          $out = Join-Path $env:RUNNER_TEMP 'wpf-editor-evidence'
+          Get-ComputerInfo -Property WindowsProductName,WindowsVersion,OsBuildNumber,OsArchitecture
+          & (Join-Path $env:GITHUB_WORKSPACE 'windows/Capture-HomeReference.ps1') `
+            -Application (Join-Path $appDir 'TouchTyping.exe') -CodeTheme -AdjustHostedDisplay `
+            -ClientWidth 1366 -ClientHeight 768 -OutputDirectory $out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wpf-python-editor-evidence
+          path: |
+            ${{ runner.temp }}/wpf-editor-evidence/*.png
+            ${{ runner.temp }}/wpf-editor-evidence/*.log
+            ${{ runner.temp }}/wpf-editor-evidence/report.json
+          if-no-files-found: warn

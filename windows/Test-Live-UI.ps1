@@ -10,11 +10,12 @@ param(
     [switch]$DailyUse,
     [switch]$GnomeProfilePractice,
     [switch]$DebugDay,
+    [switch]$CodeTheme,
     [int]$Seed = 20261122,
     [string]$OutputDirectory = (Join-Path $PSScriptRoot ('ui-check-' + (Get-Date -Format 'yyyyMMdd-HHmmss')))
 )
 $ErrorActionPreference = 'Stop'
-$modes = @($FullSession,$WorkdaySourceNote,$ReferenceBrowser,$SoftFinish,$NativeLayout,$DailyUse,$GnomeProfilePractice,$DebugDay) | Where-Object { [bool]$_ }
+$modes = @($FullSession,$WorkdaySourceNote,$ReferenceBrowser,$SoftFinish,$NativeLayout,$DailyUse,$GnomeProfilePractice,$DebugDay,$CodeTheme) | Where-Object { [bool]$_ }
 if (@($modes).Count -gt 1) { throw 'Choose only one standalone UI test mode.' }
 if ($ReferenceBrowser) { $Seed = 0 }
 if (-not $Application) {
@@ -46,13 +47,14 @@ $report = [ordered]@{
     nativeLayout = [bool]$NativeLayout
     gnomeProfilePractice = [bool]$GnomeProfilePractice
     debugDay = [bool]$DebugDay
+    codeTheme = [bool]$CodeTheme
     profile = 'TouchTypingStudio-QA'
     log = 'windows-ui.log'
 }
 try {
     $env:TOUCH_TYPING_QA_SEED = $Seed.ToString([Globalization.CultureInfo]::InvariantCulture)
     $env:TOUCH_TYPING_QA_DATA_ROOT = Join-Path $OutputDirectory 'profile'
-    if (($WorkdaySourceNote -or $ReferenceBrowser -or $SoftFinish -or $NativeLayout -or $DailyUse -or $GnomeProfilePractice -or $DebugDay) -and (Test-Path -LiteralPath $env:TOUCH_TYPING_QA_DATA_ROOT)) {
+    if (($WorkdaySourceNote -or $ReferenceBrowser -or $SoftFinish -or $NativeLayout -or $DailyUse -or $GnomeProfilePractice -or $DebugDay -or $CodeTheme) -and (Test-Path -LiteralPath $env:TOUCH_TYPING_QA_DATA_ROOT)) {
         throw 'Use a new output directory for the standalone UI check.'
     }
     $report | ConvertTo-Json | Set-Content -LiteralPath $reportFile -Encoding UTF8
@@ -71,6 +73,7 @@ try {
     if ($DailyUse) { $arguments += '--daily-use' }
     if ($GnomeProfilePractice) { $arguments += '--gnome-profile' }
     if ($DebugDay) { $arguments += '--debug-day' }
+    if ($CodeTheme) { $arguments += '--code-theme' }
     # Windows PowerShell 5 wraps native stderr as errors. Do not abort the
     # pipeline on the first diagnostic line; the native exit code is the gate.
     $oldPreference = $ErrorActionPreference
