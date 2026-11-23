@@ -828,10 +828,16 @@ internal static class LiveUiSmoke
 
         start("MateBook: левый Super и переключение RU/EN");
         var initial = scene().Name.Contains(". Раскладка RU.") ? "RU" : "EN";
-        foreach (var attempt in new[] { new[] { "RSuper", "правый Super" }, new[] { "LAlt", "Это Alt" }, new[] { "Z", "Это клавиша Z" } })
+        // WPF displays the Windows/Super key as ⊞ in prose, unlike the raw engine status.
+        foreach (var attempt in new[] {
+            new[] { "RSuper", "Это правый ⊞. Найдите левую клавишу ⊞ рядом с пробелом." },
+            new[] { "LAlt", "Это Alt. Сдвиньтесь на одну клавишу левее к кнопке ⊞." },
+            new[] { "Z", "Это клавиша Z (Я). Левый ⊞ ⊞ находится ниже, левее Alt." }
+        })
         {
             Key(attempt[0]);
-            Until(delegate { return Name("LabStatus").Contains(attempt[1]); }, "distinct feedback for " + attempt[0]);
+            try { Until(delegate { return Name("LabStatus") == attempt[1]; }, "distinct feedback for " + attempt[0]); }
+            finally { Console.WriteLine("MateBook " + attempt[0] + ": " + Name("LabStatus")); }
             Check(ReadSolved() == 0, "Wrong physical key does not open the lesson overview");
         }
         CaptureReferenceFrame("gnome-matebook-mistake");
