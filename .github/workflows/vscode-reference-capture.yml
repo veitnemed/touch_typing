@@ -14,16 +14,25 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -o Acquire::Retries=2
-          sudo apt-get install --no-install-recommends -y xvfb xauth xdotool xclip openbox wmctrl imagemagick fonts-dejavu-core libgtk-3-0t64 libnss3
+          sudo apt-get install --no-install-recommends -y xvfb xauth x11-utils xdotool xclip openbox wmctrl imagemagick fonts-dejavu-core libgtk-3-0t64 libnss3
           work="$RUNNER_TEMP/vscode-reference"
           report="$RUNNER_TEMP/reference-evidence"
-          mkdir -p "$work"/{editor,profile/User,extensions,task-list} "$report"
+          mkdir -p "$work"/{profile/User,extensions,task-list} "$report"
           printf 'REFERENCE_WORK=%s\nREFERENCE_REPORT=%s\n' "$work" "$report" >> "$GITHUB_ENV"
           curl --fail --silent --show-error --location --retry 3 --connect-timeout 20 --max-time 120 \
-            'https://vscode.download.prss.microsoft.com/dbazure/download/stable/8a14f0cc1b08d531eb83255ea3764ae22aa932b5/code-stable-x64-1794902874.tar.gz' \
-            -o "$work/vscode.tar.gz"
-          printf '%s  %s\n' '6fd8b14600f2a8ddb8b4833d8bf288f3dc4c34b2878d2c6c3fec7e16c81023bc' "$work/vscode.tar.gz" | sha256sum -c -
-          tar -xzf "$work/vscode.tar.gz" --strip-components=1 -C "$work/editor"
+            'https://vscode.download.prss.microsoft.com/dbazure/download/stable/8a14f0cc1b08d531eb83255ea3764ae22aa932b5/code_1.147.0-1794903003_amd64.deb' \
+            -o "$work/code.deb"
+          printf '%s  %s\n' '749efcdf5008a8323d76773b836199cdecf708fdb993f0f0544d9475176837ab' "$work/code.deb" | sha256sum -c -
+          [[ $(dpkg-deb -f "$work/code.deb" Package) == code &&
+             $(dpkg-deb -f "$work/code.deb" Version) == 1.147.0-1794903003 &&
+             $(dpkg-deb -f "$work/code.deb" Architecture) == amd64 ]]
+          # Use the package manager on this disposable runner. The official
+          # package owns chrome-sandbox as root:root mode 4755, unlike a user tar extraction.
+          printf 'code code/add-microsoft-repo boolean false\n' | sudo debconf-set-selections
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --allow-downgrades -y "$work/code.deb"
+          helper_mode=$(stat -c '%U:%G:%a' /usr/share/code/chrome-sandbox)
+          printf 'Microsoft official package chrome-sandbox: %s\n' "$helper_mode"
+          [[ "$helper_mode" == root:root:4755 ]]
           curl --fail --silent --show-error --location --compressed --retry 3 --connect-timeout 20 --max-time 60 \
             'https://marketplace.visualstudio.com/_apis/public/gallery/publishers/GitHub/vsextensions/github-vscode-theme/6.3.5/vspackage' \
             -o "$work/theme.download"
@@ -33,11 +42,11 @@ jobs:
             cp "$work/theme.download" "$work/theme.vsix"
           fi
           printf '%s  %s\n' '74e69da1804f718ae9ce6a8ea49c06fbf9cfc137c9b65b0e14353715cb5d474a' "$work/theme.vsix" | sha256sum -c -
-          "$work/editor/bin/code" --version | tee "$report/vscode-version.txt"
+          /usr/share/code/bin/code --version | tee "$report/vscode-version.txt"
           grep -Fx '1.147.0' "$report/vscode-version.txt"
           grep -Fx '8a14f0cc1b08d531eb83255ea3764ae22aa932b5' "$report/vscode-version.txt"
-          "$work/editor/bin/code" --user-data-dir "$work/profile" --extensions-dir "$work/extensions" --install-extension "$work/theme.vsix"
-          "$work/editor/bin/code" --user-data-dir "$work/profile" --extensions-dir "$work/extensions" --list-extensions --show-versions | tee "$report/theme-version.txt"
+          /usr/share/code/bin/code --user-data-dir "$work/profile" --extensions-dir "$work/extensions" --install-extension "$work/theme.vsix"
+          /usr/share/code/bin/code --user-data-dir "$work/profile" --extensions-dir "$work/extensions" --list-extensions --show-versions | tee "$report/theme-version.txt"
           grep -Fxi 'github.github-vscode-theme@6.3.5' "$report/theme-version.txt"
           printf '%s' 'ZnJvbSB0YXNrcyBpbXBvcnQgYWRkX3Rhc2ssIGZpbmRfdGFzaywgbWFya19kb25lCmZyb20gc3RvcmFnZSBpbXBvcnQgc2F2ZV90YXNrcwoKCmRlZiBtYWluKCk6CiAgICAiIiJNYW5hZ2UgYSBzaG9ydCB0YXNrIGxpc3QuIiIiCiAgICB0YXNrcyA9IFtdCiAgICBhZGRfdGFzayh0YXNrcywgIkJ1eSB0ZWEiKSAgIyBFeGFtcGxlIHRhc2sKICAgIHRhc2sgPSBmaW5kX3Rhc2sodGFza3MsICJCdXkgdGVhIikKICAgIGlmIHRhc2s6CiAgICAgICAgcHJpb3JpdHkgPSAxCiAgICAgICAgbWFya19kb25lKHRhc2spCiAgICAgICAgcHJpbnQoZiJEb25lOiB7dGFza1sndGl0bGUnXX0gI3twcmlvcml0eX0iKQogICAgc2F2ZV90YXNrcyh0YXNrcywgInRhc2tzLmpzb24iKQoKCmlmIF9fbmFtZV9fID09ICJfX21haW5fXyI6CiAgICBtYWluKCkK' | base64 -d > "$work/task-list/app.py"
           printf '%s  %s\n' 'f5f482eb437481c7f209fb5409715ec29f12cce8076227c8ebaddfdade536115' "$work/task-list/app.py" | sha256sum -c -
@@ -103,8 +112,8 @@ jobs:
           phase=window-manager
           for _ in {1..40}; do wmctrl -m >/dev/null 2>&1 && break; sleep .25; done
           wmctrl -m
-          direct="$work/editor/code"
-          launcher="$work/editor/bin/code"
+          direct="/usr/share/code/code"
+          launcher=/usr/share/code/bin/code
           isolated=(--user-data-dir "$work/profile" --extensions-dir "$work/extensions")
           phase=launch
           "$direct" "${isolated[@]}" --force-device-scale-factor=1 --disable-gpu --password-store=basic \
@@ -116,7 +125,7 @@ jobs:
             local text=$1 listing id
             for _ in {1..100}; do
               if ! kill -0 "$editor" 2>/dev/null; then return 1; fi
-              listing=$(wmctrl -lp)
+              listing=$(wmctrl -lp 2>/dev/null || true)
               id=$(awk -v pid="$editor" -v needle="$text" '$3 == pid && index($0,needle) {print $1; exit}' <<<"$listing")
               if [[ $id ]]; then printf '%s\n' "$id"; return; fi
               sleep .25
