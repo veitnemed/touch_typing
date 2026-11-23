@@ -1,0 +1,61 @@
+name: Publish TouchTyping Linux preview
+on:
+  push:
+    branches: [release/v1.8.0-preview.3-linux]
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: touchtyping-v180-preview-3-linux
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE_SHA: 'c24d21fa5a990946ad6f29e480dfb49c537a26c9'
+      RUN: '45116054674'
+      LINUX_SHA256: 'afef97708d89268f72dc6d03079aac1fc655ee0a17f365b5b6ef535e8c66fd8a'
+      REPO: 'veitnemed/touch_typing'
+      TAG: 'v1.8.0-preview.3'
+    steps:
+      - name: Verify Linux checks, artifact, and absence of Windows assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/actions/runs/$RUN" | jq -e --arg sha "$CANDIDATE_SHA" '
+            .head_sha == $sha and .head_branch == "feature/reference-ui"
+            and .path == ".github/workflows/live-input-candidate.yml"' >/dev/null
+          gh api "repos/$REPO/actions/runs/$RUN/jobs?per_page=50" | jq -e '
+            .jobs as $j | ["engine","linux-window"] |
+            all(. as $name | any($j[]; .name==$name and .conclusion=="success"))' >/dev/null
+          mkdir -p "$RUNNER_TEMP/preview"
+          cd "$RUNNER_TEMP/preview"
+          gh run download "$RUN" --repo "$REPO" --name linux-x64-candidate --dir .
+          echo "$LINUX_SHA256  touch-typing-linux-x64.tar.gz" | sha256sum -c
+          tar -tzf touch-typing-linux-x64.tar.gz > files.txt
+          grep -Fx 'touch-typing-linux-x64/install.sh' files.txt
+          grep -Fx 'touch-typing-linux-x64/engine/TouchTyping.Engine' files.txt
+          for asset in Roboto-Regular.ttf Roboto-Medium.ttf Roboto-Bold.ttf OFL.txt ROBOTO-SOURCE.txt; do
+            grep -Fx "touch-typing-linux-x64/fonts/$asset" files.txt
+          done
+          if grep -Ei '\.exe$' files.txt; then echo 'Unexpected Windows executable'; exit 1; fi
+          mv touch-typing-linux-x64.tar.gz "touch-typing-$TAG-linux-x64.tar.gz"
+          sha256sum "touch-typing-$TAG-linux-x64.tar.gz" > SHA256SUMS.txt
+          cat > notes.md <<'NOTES'
+          Отдельное превью TouchTyping для Linux x86-64. В этом выпуске нет Windows-архива и EXE.
+          
+          - Новый главный экран по референсу: пять рабочих карточек, прямой вход в каталог и реальный прогресс.
+          - Новый экран занятия: цель и клавиши наверху, большая рабочая область, шаги и управление внизу. Точность доступна после занятия в разборе, но не во время выполнения.
+          - Обновлены пауза и результат. Roboto Regular, Medium и Bold входят в архив; системная установка шрифта не нужна. Моноширинный ввод не изменён.
+          - Проверено на Ubuntu 24.04 / GNOME Wayland с запуском из точного Linux-архива, включая курсор и Delete в терминале, рабочую миссию и повтор сохранения после ошибки.
+          
+          Распакуйте архив и запустите `bash install.sh`. Требуются GTK 4, Python 3, PyGObject и Cairo. Для первого терминального упражнения используйте правильную системную раскладку.
+          
+          Это предварительная версия, не финальная приёмка всего плана: шрифт подобран по изображению и не заявлен как исходный файл эталона. Восстановление накопленного времени и исходного лимита после перезапуска ещё не включено. Windows 10/11 в этот выпуск не входит.
+          NOTES
+          printf '\nАрхив взят без пересборки из [прошедшего Linux-прогона](https://github.com/%s/actions/runs/%s) на `%s`.\n' "$REPO" "$RUN" "$CANDIDATE_SHA" >> notes.md
+          gh release create "$TAG" --repo "$REPO" --target "$CANDIDATE_SHA" --prerelease --latest=false \
+            --title "TouchTyping $TAG для Linux: новый интерфейс и Roboto" --notes-file notes.md \
+            "touch-typing-$TAG-linux-x64.tar.gz" SHA256SUMS.txt
