@@ -39,6 +39,15 @@ internal static class LabCatalog
         T("screenshot", "Откройте панель снимка экрана", "Print", "screenshot"),
         T("screenshot-confirm", "Подтвердите снимок экрана", "Enter", "screenshot-confirm"),
         T("copy-shot", "Скопируйте учебный снимок", "Ctrl+C", "copy-shot"),
+        T("code-definition", "Перейдите к определению функции", "F12", "code-definition"),
+        T("code-back", "Вернитесь к исходному вызову", "Ctrl+Alt+-", "code-back"),
+        T("code-references", "Покажите использования функции", "Shift+F12", "code-references"),
+        T("code-reference-next", "Выберите следующий вызов", "Down", "code-reference-next"),
+        T("code-reference-prev", "Выберите предыдущий вызов", "Up", "code-reference-prev"),
+        T("code-reference-open", "Откройте выбранный вызов", "Enter", "code-reference-open"),
+        T("code-rename", "Откройте переименование функции", "F2", "code-rename"),
+        T("code-rename-confirm", "Введите scale_sample и нажмите Enter", "Enter", "code-rename-confirm", hint: "Введите новое имя латиницей. Enter применит правки, Esc отменит."),
+        T("code-rename-cancel", "Отмените переименование без изменений", "Esc", "code-rename-cancel"),
         T("escape", "Закройте панель и вернитесь к работе", "Esc", "escape"),
         T("history", "Найдите страницу в истории", "Ctrl+H", "history"),
         T("downloads", "Откройте загрузки", "Ctrl+J", "downloads"),
@@ -132,14 +141,18 @@ internal static class LabCatalog
         T("terminal-history-down", "Перейдите вперёд по истории команд", "Down", "terminal-history-down", 1),
         T("terminal-submit", "Выполните введённую команду", "Enter", "terminal-submit"),
     ];
-    private static readonly HashSet<string> UbuntuIds = new(Shortcuts.Take(23).Select(task => task.Id));
+    private static readonly HashSet<string> UbuntuIds = new(Shortcuts.Where(task => !task.Id.StartsWith("code-", StringComparison.Ordinal)).Take(23).Select(task => task.Id));
     private static readonly HashSet<string> FilesIds = new(Shortcuts.Where(task => task.Id.StartsWith("file-") || task.Id is "trash" or "restore-trash").Select(task => task.Id));
     private static readonly HashSet<string> ChromeIds = new(["history", "downloads", "bookmark-manager", "link-next", "link-prev", "link-open", "new-tab", "close-tab", "restore-tab", "next-tab", "prev-tab", "first-tab", "last-tab", "url", "navigate-pasted", "find", "find-next", "refresh", "back", "forward", "fullscreen", "zoom-in", "zoom-out", "zoom-reset", "bookmark", "bookmarks", "select-all", "copy", "cut", "paste", "escape", "layout"]);
     private static readonly HashSet<string> CodeIds = new(["document-start", "move-line-up", "move-line-down", "occurrence", "replace", "replace-field", "replace-one", "symbols", "symbol-next", "symbol-open", "changes", "focus-editor", "focus-second", "panel", "extensions", "select-line", "new-file", "close-tab", "next-tab", "prev-tab", "quick-open", "quick-next", "quick-choose", "palette", "palette-next", "palette-choose", "goto-line", "explorer", "project-search", "sidebar", "split", "terminal-toggle", "save", "select-all", "copy", "cut", "paste", "undo", "redo", "comment", "delete-line", "find", "escape", "layout"]);
+    static LabCatalog()
+    {
+        CodeIds.UnionWith(Shortcuts.Where(task => task.Id.StartsWith("code-", StringComparison.Ordinal)).Select(task => task.Id));
+    }
     private static readonly HashSet<string> TerminalIds = new(Shortcuts.Where(task => task.Id.StartsWith("terminal-")).Select(task => task.Id).Concat(["layout", "escape"]));
     internal static object Catalog(IEnumerable<LiveDraft> drafts, IEnumerable<ShortcutAttempt> history, string layout) => new { recommendations = LiveStartingLevel.Recommend(history, layout), drafts = (drafts ?? []).Select(d => new { d.App, d.Level, d.Mission, d.Guidance }), classes = Apps.Select(app => new { id = app, title = Title(app), description = app switch
         { "workday" => "Общее рабочее место, файлы и окна четырёх приложений", "ubuntu" => "Окна, рабочие столы и системные сочетания", "chrome" => "Вкладки, навигация, поиск и адресная строка", "code" => "Файлы, код, панели и встроенный терминал", _ => "Сочетания, команды и учебная файловая система" },
-        shortcuts = Shortcuts.Where(task => InApp(task, app)).Select(task => task.Snapshot()) }), missions = LiveCourse.Missions.Select(m => new { m.App, m.Level, m.Id, m.Title }), duration = 0, blockSize = 20 };
+        shortcuts = Shortcuts.Where(task => InApp(task, app)).Select(task => task.Snapshot()) }), missions = LiveCourse.Missions.Select(m => new { m.App, m.Level, m.Id, m.Title, m.Curated }), duration = 0, blockSize = 20 };
     private static bool InApp(LabTask task, string app) => app == "workday" || (app switch { "ubuntu" => UbuntuIds, "chrome" => ChromeIds, "code" => CodeIds, _ => TerminalIds }).Contains(task.Id);
 
     internal static bool Available(LabTask task, LabScene scene)
@@ -149,13 +162,18 @@ internal static class LabCatalog
         return task.Id switch
         {
             "document-start" or "move-line-up" or "move-line-down" or "occurrence" => window?.App == "code" && window.Focus == "body",
+            "code-definition" or "code-references" or "code-rename" => window?.App == "code" && window.Focus == "body",
+            "code-back" => window?.App == "code" && window.Focus == "body" && window.SymbolBack.Count > 0,
+            "code-reference-prev" or "code-reference-next" or "code-reference-open" => window?.Focus == "symbol-references",
+            "code-rename-cancel" or "code-rename-confirm" => window?.Focus == "symbol-rename",
             "replace-field" => window?.Focus == "replace-find",
             "replace-one" => window?.Focus == "replace-with",
             "symbol-next" or "symbol-open" => window?.Focus == "symbols",
             "file-open" or "file-copy" or "file-cut" or "trash" => window?.App == "files" && window.Item >= 0,
             "link-open" => window?.App == "chrome" && window.Focus == "body" && window.Item >= 0,
             "link-next" or "link-prev" => window?.App == "chrome" && window.Focus == "body",
-            "switch-next" or "switch-prev" => scene.Windows.Count(item => item.Workspace == scene.Workspace) >= 2,
+            "switch-next" or "switch-prev" => scene.Windows.Count(item => item.Workspace == scene.Workspace)
+                >= (scene.GnomeWindows && window == null ? 1 : 2),
             "close-window" => window != null,
             "open-chrome" => window?.App != "chrome",
             "open-code" => window?.App != "code",
@@ -163,9 +181,10 @@ internal static class LabCatalog
             "open-files" => window?.App != "files",
             "maximize" => window != null && window.State != "maximized",
             "restore" => window != null && window.State != "normal",
-            "tile-left" => window != null && window.State != "left",
-            "tile-right" => window != null && window.State != "right",
-            "minimize" => window != null && scene.Windows.Count(item => item.Workspace == scene.Workspace && item.Id != window.Id && item.State != "minimized") > 0,
+            "tile-left" => window != null && (scene.GnomeWindows || window.State != "left"),
+            "tile-right" => window != null && (scene.GnomeWindows || window.State != "right"),
+            "minimize" => window != null && (scene.GnomeWindows || scene.Windows.Any(
+                item => item.Workspace == scene.Workspace && item.Id != window.Id && item.State != "minimized")),
             "move-next" or "move-prev" => window != null,
             "copy-shot" => scene.ScreenshotReady && !scene.ScreenshotCopied,
             "screenshot-confirm" => scene.Screenshot,

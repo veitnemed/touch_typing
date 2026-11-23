@@ -47,8 +47,13 @@ internal sealed class LabWindow(string app, int number, int workspace)
     internal string View = "explorer", Query = "";
     internal string Folder = "/home/student";
     internal int Item = -1;
+    internal readonly Stack<EditorJump> SymbolBack = [];
+    internal SymbolLocation[] SymbolReferences = [];
+    internal SymbolBinding PendingSymbol;
     internal readonly Stack<string> FolderBack = [], FolderForward = [];
     internal string State = "normal", Focus = "body", Find = "", Status = "Готово";
+    internal string MinimizedFrom = "normal", UntileTo = "normal";
+    internal int NormalSlot => int.Parse(Id.AsSpan(7)) - 1;
     internal bool Sidebar = true, Split, Panel, Bookmarks;
     private readonly Dictionary<string, FieldPosition> positions = [];
     private readonly Dictionary<string, string> fields = [];
@@ -97,7 +102,7 @@ internal sealed class LabWindow(string app, int number, int workspace)
     internal LabTab Tab => Tabs.Count == 0 ? null : Tabs[Math.Clamp(ActiveTab, 0, Tabs.Count - 1)];
     internal string Body { get => Tab?.Body ?? ""; set { if (Tab != null) Tab.Body = value; } }
     internal string Url => Tab?.Url ?? "";
-    internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults) => new { projectFiles, changedFiles, searchResults, Id, App, Title, Workspace, State, active, Folder, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
+    internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults) => new { projectFiles, changedFiles, searchResults, Id, App, Title, Workspace, State, NormalSlot, restoreState = MinimizedFrom, active, Folder, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
         tabs = Tabs.Select(tab => tab.Snapshot()), ActiveTab, Url, Body, Focus, Input, Find, Sidebar, Split, Status, Zoom, Selected, Cursor, Anchor, Panel, bodyCursor = Tab?.Position.Caret ?? 0, bodyAnchor = Tab?.Position.Anchor ?? 0, OptionIndex, Bookmarks, savedBookmarks = SavedBookmarks.ToArray() };
     internal LabWindow Clone()
     {
@@ -105,8 +110,12 @@ internal sealed class LabWindow(string app, int number, int workspace)
         {
             Activation = Activation, ShellInput = ShellInput, UntitledCount = UntitledCount, ImagePreview = ImagePreview, OtherTab = OtherTab, Group = Group, Folder = Folder, Item = Item, View = View, Query = Query, SearchIndex = SearchIndex, Title = Title, State = State, Focus = Focus, Input = Input, Find = Find, Status = Status,
             Sidebar = Sidebar, Split = Split, Panel = Panel, Bookmarks = Bookmarks,
+            MinimizedFrom = MinimizedFrom, UntileTo = UntileTo,
             ActiveTab = ActiveTab, Zoom = Zoom, OptionIndex = OptionIndex
         };
+        foreach (var jump in SymbolBack.Reverse()) copy.SymbolBack.Push(jump);
+        copy.SymbolReferences = [.. SymbolReferences];
+        copy.PendingSymbol = PendingSymbol;
         foreach (string path in FolderBack.Reverse()) copy.FolderBack.Push(path);
         foreach (string path in FolderForward.Reverse()) copy.FolderForward.Push(path);
         copy.Tabs.AddRange(Tabs.Select(tab => tab.Clone()));
@@ -127,7 +136,19 @@ internal sealed partial class LabScene
     internal string LayoutKey = "Super+Space", SwitchTarget;
     internal string Layout, Clipboard = "build: 17 tests passed", ActiveWindow;
     internal bool Overview, Switcher, Screenshot, ScreenshotReady, ScreenshotCopied, ShowDesktop, LayoutIsVirtual;
-    internal bool ReplayLegacyNavigation;
+    internal bool ReplayLegacyNavigation, ReplayLegacyLineEditing, UseWindowsBindings;
+    internal bool GnomeWindows;
+    internal const string GnomeNoteText = "gnome";
+    private const string GnomeCodeBody = "# \nfrom src.spectrum import fft\n";
+
+    internal void PrepareGnomeWindowMission()
+    {
+        GnomeWindows = true;
+        const string file = "/home/student/project/app.py";
+        Terminal.StoreFile(file, GnomeCodeBody);
+        originalFiles[file] = GnomeCodeBody;
+        Open("chrome"); // Python documentation is the first tab by default.
+    }
     internal string Search = "";
     internal string TerminalInput { get => Active?.ShellInput ?? ""; set { if (Active != null) Active.ShellInput = value; } }
     private int windowNumber;
@@ -155,6 +176,7 @@ internal sealed partial class LabScene
     private LabScene(LabScene source)
     {
         Terminal = source.Terminal.Clone(); captureImage = source.captureImage;
+        symbolWorkspace = source.symbolWorkspace;
         foreach (var file in source.originalFiles) originalFiles[file.Key] = file.Value;
         Dock = [.. source.Dock]; LayoutKey = source.LayoutKey; SwitchTarget = source.SwitchTarget;
         Workspace = source.Workspace; WorkspaceCount = source.WorkspaceCount; Version = source.Version;
@@ -162,7 +184,10 @@ internal sealed partial class LabScene
         ActiveWindow = source.ActiveWindow; Overview = source.Overview; Switcher = source.Switcher;
         Screenshot = source.Screenshot; ScreenshotReady = source.ScreenshotReady;
         ScreenshotCopied = source.ScreenshotCopied; ShowDesktop = source.ShowDesktop;
+        UseWindowsBindings = source.UseWindowsBindings;
         LayoutIsVirtual = source.LayoutIsVirtual; ReplayLegacyNavigation = source.ReplayLegacyNavigation; Search = source.Search;
+        GnomeWindows = source.GnomeWindows;
+        ReplayLegacyLineEditing = source.ReplayLegacyLineEditing;
         windowNumber = source.windowNumber;
         historyDraft = source.historyDraft; killedText = source.killedText;
         fileTransfer = source.fileTransfer; fileCut = source.fileCut; trashSequence = source.trashSequence;
@@ -186,6 +211,7 @@ internal sealed partial class LabScene
         {
             window.Tabs.Add(new LabTab("app.py", "app.py", Terminal.ReadFile("~/project/app.py") ?? ""));
             window.Tabs.Add(new LabTab("README.md", "README.md", Terminal.ReadFile("~/project/README.md") ?? ""));
+            if (GnomeWindows) window.Cursor = 2; // after "# " in the actual first tab
         }
         else if (app == "files") window.Tabs.Add(new LabTab("Домашняя папка", "/home/student", "project/\nДокументы/\nЗагрузки/"));
         if (app == "chrome" && recentUrls.Count == 0)
@@ -198,7 +224,7 @@ internal sealed partial class LabScene
         if (window == null) return;
         window.Activation = Windows.Max(w => w.Activation) + 1;
         ActiveWindow = window.Id; Workspace = window.Workspace; ShowDesktop = Overview = false;
-        if (window.State == "minimized") window.State = "normal";
+        if (window.State == "minimized") window.State = GnomeWindows ? window.MinimizedFrom : "normal";
     }
 
     internal bool Has(string app) => Windows.Any(window => window.App == app);
@@ -230,13 +256,15 @@ internal sealed partial class LabScene
             case "close-window":
                 if (window == null) return false;
                 Windows.Remove(window); ActiveWindow = null;
-                Activate(Windows.LastOrDefault(item => item.Workspace == Workspace)); break;
+                Activate(GnomeWindows ? Windows.Where(item => item.Workspace == Workspace && item.State != "minimized").MaxBy(item => item.Activation)
+                    : Windows.LastOrDefault(item => item.Workspace == Workspace)); break;
             case "maximize": if (window == null) return false; window.State = "maximized"; break;
-            case "restore": if (window == null) return false; window.State = "normal"; break;
-            case "tile-left": if (window == null) return false; window.State = "left"; break;
-            case "tile-right": if (window == null) return false; window.State = "right"; break;
+            case "restore": if (window == null) return false; window.State = window.UntileTo = "normal"; break;
+            case "tile-left": return TileWindow(window, "left");
+            case "tile-right": return TileWindow(window, "right");
             case "minimize":
                 if (window == null) return false;
+                if (GnomeWindows) window.MinimizedFrom = window.State;
                 window.State = "minimized"; ActiveWindow = null;
                 Activate(Windows.Where(item => item.Workspace == Workspace && item.State != "minimized").MaxBy(item => item.Activation)); break;
             case "desktop": ShowDesktop = !ShowDesktop; break;
@@ -265,10 +293,25 @@ internal sealed partial class LabScene
             case "terminal-submit":
                 if (window == null || window.App != "terminal" && window.Focus != "terminal" || string.IsNullOrWhiteSpace(TerminalInput)) return false;
                 return Text("Enter", "") && Terminal.LastSuccess;
-            default: changed = ApplyWorkspace(action, window) ?? ApplyWindow(action, window); break;
+            default: changed = ApplySymbols(action, window) ?? ApplyWorkspace(action, window) ?? ApplyWindow(action, window); break;
         }
         if (changed) Version++;
         return changed;
+    }
+
+    private bool TileWindow(LabWindow window, string side)
+    {
+        if (window == null) return false;
+        if (GnomeWindows && window.State == side)
+            window.State = window.UntileTo;
+        else
+        {
+            if (GnomeWindows && window.State is not ("left" or "right"))
+                window.UntileTo = window.State == "maximized" ? "maximized" : "normal";
+            window.State = side;
+        }
+        Version++;
+        return true;
     }
 
     private void Switch(int direction)
@@ -287,6 +330,7 @@ internal sealed partial class LabScene
 
     internal LabTask WithBinding(LabTask task)
     {
+        if (task.Id == "code-back" && UseWindowsBindings) return task with { Keys = "Alt+Left" };
         if (task.Id == "layout") return task with { Keys = LayoutKey };
         if (task.Id is "open-chrome" or "open-code" or "open-files")
         {
@@ -407,12 +451,15 @@ internal sealed partial class LabScene
                 window.Tab.ExtraMatches.Clear(); window.Select(revision.Anchor, revision.Cursor); break;
             case "comment":
                 if (!code) return false;
+                if (!ReplayLegacyLineEditing) return ToggleLineComment(window);
                 int lineStart = LineStart(window.Body, window.Cursor);
                 bool commented = window.Body.AsSpan(lineStart).StartsWith("# ");
                 window.Select(lineStart, lineStart + (commented ? 2 : 0));
                 Insert(window, commented ? "" : "# "); break;
             case "delete-line":
-                if (!code) return false; Remember(window);
+                if (!code) return false;
+                if (!ReplayLegacyLineEditing) return DeleteLines(window);
+                Remember(window);
                 int begin = LineStart(window.Body, window.Cursor);
                 int lineEnd = window.Body.IndexOf('\n', Math.Min(window.Cursor, window.Body.Length)); lineEnd = lineEnd < 0 ? window.Body.Length : lineEnd + 1;
                 window.Body = window.Body.Remove(begin, lineEnd - begin); window.Cursor = begin; break;
@@ -437,6 +484,74 @@ internal sealed partial class LabScene
     private static void Remember(LabWindow window) { window.Undo.Push(Revision(window)); window.Redo.Clear(); }
     private static int LineStart(string value, int at) => at <= 0 || value.Length == 0 ? 0 : value.LastIndexOf('\n', Math.Min(value.Length, at) - 1) + 1;
     private static int LineEnd(string value, int at) => value.IndexOf('\n', Math.Clamp(at, 0, value.Length)) is int n && n >= 0 ? n : value.Length;
+    // A nonempty selection covers [start, end). Ctrl+L deliberately includes
+    // the line break, making end the following line's start, not its content.
+    private static (int First, int Last) AffectedLines(LabWindow w)
+    {
+        string body = w.Body;
+        int start = Math.Clamp(w.Start, 0, body.Length), end = Math.Clamp(w.End, start, body.Length);
+        return (LineStart(body, start), LineStart(body, end > start ? end - 1 : start));
+    }
+
+    private static bool ToggleLineComment(LabWindow w)
+    {
+        string source = w.Body;
+        var (first, last) = AffectedLines(w);
+        var lines = new List<(int Start, int Marker, int End)>();
+        for (int begin = first; ;)
+        {
+            int end = LineEnd(source, begin), marker = begin;
+            while (marker < end && source[marker] is ' ' or '\t') marker++;
+            lines.Add((begin, marker, end));
+            if (begin >= last) break;
+            begin = end + 1;
+        }
+        var meaningful = lines.Where(line => line.Marker < line.End).ToArray();
+        if (meaningful.Length == 0) return false;
+        bool strip = meaningful.All(line => source[line.Marker] == '#');
+        var edits = meaningful.Select(line => (Offset: line.Marker,
+            Remove: strip ? (line.Marker + 1 < line.End && source[line.Marker + 1] == ' ' ? 2 : 1) : 0)).ToArray();
+        int Map(int position, bool leftAffinity)
+        {
+            int delta = 0;
+            foreach (var edit in edits)
+            {
+                if (position < edit.Offset || position == edit.Offset && leftAffinity) break;
+                if (strip && position < edit.Offset + edit.Remove) return edit.Offset + delta;
+                delta += strip ? -edit.Remove : 2;
+            }
+            return position + delta;
+        }
+        int anchor = Map(w.Anchor, w.Selected && w.Anchor == w.Start);
+        int cursor = Map(w.Cursor, w.Selected && w.Cursor == w.Start);
+        Remember(w); // Snapshot the real selection, before staging any edit.
+        foreach (var edit in edits.Reverse())
+            source = strip ? source.Remove(edit.Offset, edit.Remove) : source.Insert(edit.Offset, "# ");
+        w.Body = source; w.Tab.ExtraMatches.Clear(); w.Select(anchor, cursor);
+        return true;
+    }
+
+    private static bool DeleteLines(LabWindow w)
+    {
+        string source = w.Body;
+        var (first, last) = AffectedLines(w);
+        int column = Math.Clamp(w.Start, first, LineEnd(source, first)) - first;
+        int end = LineEnd(source, last);
+        int from = first, to = end < source.Length ? end + 1 : end;
+        if (end == source.Length && first > 0) from--; // Delete the last line's preceding LF.
+        if (from == to) return false;
+        string result = source.Remove(from, to - from);
+        int destination = end < source.Length ? first : LineStart(result, from);
+        int target = Math.Min(destination + column, LineEnd(result, destination));
+        if (target < result.Length)
+        {
+            int[] starts = StringInfo.ParseCombiningCharacters(result);
+            target = starts[ElementAtOrBefore(starts, result.Length, target)];
+        }
+        Remember(w);
+        w.Body = result; w.Tab.ExtraMatches.Clear(); w.Cursor = target;
+        return true;
+    }
     private static bool IsTerminal(LabWindow w) => w.App == "terminal" || w.Focus == "terminal";
     private string FieldText(LabWindow w) => IsTerminal(w) ? TerminalInput : w.Focus == "body" ? w.Body : w.Input;
     private static string Slice(LabWindow w, string value) => value[Math.Clamp(w.Start, 0, value.Length)..Math.Clamp(w.End, 0, value.Length)];
@@ -727,7 +842,7 @@ internal sealed partial class LabScene
         tab.Position = new();
     }
 
-    internal object Snapshot() => new { Workspace, WorkspaceCount, Overview, Switcher, SwitchTarget, Dock, Layout, ActiveWindow,
+    internal object Snapshot() => new { Workspace, WorkspaceCount, Overview, Switcher, SwitchTarget, Dock, Layout, ActiveWindow, GnomeWindows,
         windows = Windows.Select(WindowSnapshot), terminal = Terminal.Snapshot(), terminalInput = TerminalInput,
         Clipboard, clipboardMime = ClipboardImage == null ? "text/plain" : "image/png", Screenshot, ScreenshotReady, ScreenshotCopied, Screenshots, ShowDesktop, Search, LayoutIsVirtual, Version };
 }

@@ -6,7 +6,7 @@ using System.Text.Json;
 namespace TouchTypingStudio;
 
 internal sealed record LivePhase(string Title, string Route);
-internal sealed record LiveMission(string App, int Level, string Id, string Title, LivePhase[] Phases, bool FinishAfterRoute = false);
+internal sealed record LiveMission(string App, int Level, string Id, string Title, LivePhase[] Phases, bool FinishAfterRoute = false, bool Curated = false, Action<LabScene> Prepare = null);
 internal sealed record LiveGoal(int Phase, LabTask Task, string Target, string Layout, bool VerifyReport = false, string LegacyTarget = null, string ArtifactPath = null);
 
 internal static partial class LiveCourse
@@ -18,21 +18,23 @@ internal static partial class LiveCourse
         var result = new List<LiveMission>();
         BrowserMissions(result);
         EditorMissions(result);
+        LineEditMissions(result);
         TerminalMissions(result);
         DesktopMissions(result);
         return result;
     }
 
     // The same case has a reproducible starting desk. The user's live desk is never used for rehearsal.
-    internal static List<LiveGoal> Compile(LiveMission mission, LabScene initial)
+    internal static List<LiveGoal> Compile(LiveMission mission, LabScene initial, bool prepared = false)
     {
         var trial = initial.Clone();
+        if (!prepared) mission.Prepare?.Invoke(trial);
         var goals = new List<LiveGoal>();
         for (int phase = 0; phase < mission.Phases.Length; phase++)
         {
             foreach (string token in RouteTokens(mission.Phases[phase]))
             {
-                if (IsCommandToken(token) && trial.Layout == "RU")
+                if ((IsCommandToken(token) || token == "code-rename-confirm") && trial.Layout == "RU")
                 {
                     var change = trial.WithBinding(Actions["layout"]);
                     string layout = trial.Layout;
@@ -52,7 +54,8 @@ internal static partial class LiveCourse
                     if (!AtItem(trial, task.Text)) throw new InvalidOperationException(mission.Id + ": объект " + task.Text + " отсутствует");
                 }
                 else if (token.StartsWith("open-") && trial.Active?.App == token[5..]) continue;
-                else if ((token == "maximize" && trial.Active?.State == "maximized") || (token == "tile-left" && trial.Active?.State == "left") || (token == "tile-right" && trial.Active?.State == "right")) continue;
+                else if ((token == "maximize" && trial.Active?.State == "maximized") ||
+                    (!trial.GnomeWindows && ((token == "tile-left" && trial.Active?.State == "left") || (token == "tile-right" && trial.Active?.State == "right")))) continue;
                 else if (token == "save" && trial.Active?.Body == trial.Active?.Tab?.SavedBody) continue;
                 else if (token == "bookmark" && trial.Active.SavedBookmarks.Contains(trial.Active.Url)) continue;
                 else if (token == "first-tab" && trial.Active.ActiveTab == 0 || token == "last-tab" && trial.Active.ActiveTab == trial.Active.Tabs.Count - 1) continue;
@@ -62,7 +65,7 @@ internal static partial class LiveCourse
                 goals.Add(new(phase, task, proof, before.Layout, verifyReport, verifyReport ? Evidence(task, trial) : null, artifactPath));
             }
         }
-        if (goals.Count < 20) throw new InvalidOperationException(mission.Id + ": меньше 20 результатов");
+        if (goals.Count < (mission.Curated ? 1 : 20)) throw new InvalidOperationException(mission.Id + ": меньше 20 результатов");
         return goals;
     }
 
@@ -105,7 +108,14 @@ internal static partial class LiveCourse
             string value = DecodeCommand(token);
             return new(CommandId(value), "Выполните «" + value + "»", "", value.Length > 12 ? "Ctrl+R — найти команду по фрагменту. Enter — выполнить, стрелка — перейти к правке." : "Введите команду и нажмите Enter.", value, "command");
         }
+        if (token == "gnome-write")
+            return new(token, "Дописать комментарий: «" + LabScene.GnomeNoteText + "»", "",
+                "Наберите слово в активной строке app.py и нажмите Enter.", LabScene.GnomeNoteText, token);
         var task = scene.WithBinding(Actions[token]);
+        if (task.Action == "code-rename-confirm") return task with { Text = LabScene.RenameTarget };
+        if (scene.GnomeWindows && (token == "tile-left" && scene.Active?.State == "left" ||
+            token == "tile-right" && scene.Active?.State == "right"))
+            return task with { Title = "Снимите привязку окна повторным нажатием" };
         if (task.Action == "item-open")
         {
             var item = scene.Entries(scene.Active).ElementAtOrDefault(scene.Active.Item);
@@ -117,11 +127,18 @@ internal static partial class LiveCourse
     private static bool Demonstrate(LabTask task, LabScene trial)
     {
         if (task.Action == "launch") { trial.Ensure(task.Id[5..]); return true; }
+        if (task.Action == "gnome-write")
+        {
+            foreach (char ch in task.Text)
+                if (!trial.Text(ch.ToString().ToUpperInvariant(), ch.ToString())) return false;
+            return trial.Text("Enter", "");
+        }
         if (task.Action == "command")
         {
             trial.TerminalInput = task.Text;
             return trial.Text("Enter", "") && trial.Terminal.LastSuccess;
         }
+        if (task.Action == "code-rename-confirm") trial.Active.Input = LabScene.RenameTarget;
         if (!LabCatalog.Available(task, trial) || !trial.Apply(task.Action)) return false;
         if (trial.Switcher) trial.CommitSwitch();
         return true;
@@ -131,8 +148,24 @@ internal static partial class LiveCourse
     {
         var w = scene.Active;
         string app = w?.App ?? "", action = task.Action;
+        if (scene.GnomeWindows)
+            return JsonSerializer.Serialize(new
+            {
+                scene.ActiveWindow,
+                windows = scene.Windows.Select(v => new
+                {
+                    v.Id, v.App, v.Workspace, v.State, v.NormalSlot,
+                    restoreState = v.State == "minimized" ? v.MinimizedFrom : null,
+                    v.ActiveTab, v.Url, v.Focus,
+                    caret = v.Tab?.Position.Caret,
+                    anchor = v.Tab?.Position.Anchor,
+                    body = v.App == "code" ? v.Body : null,
+                    saved = v.App == "code" ? v.Tab?.SavedBody : null
+                }).ToArray()
+            });
         object value = action switch
         {
+            _ when action.StartsWith("code-", StringComparison.Ordinal) => scene.SymbolEvidence(action),
             "command" or "terminal-submit" => new { command = equivalentCommand ?? scene.Terminal.LastCommand, scene.Terminal.LastSuccess, scene.Terminal.Cwd, scene.Terminal.LastOutput, input = scene.TerminalInput, report = verifyReport ? scene.ReadReportArtifact() : null },
             "terminal-history-up" or "terminal-history-down" or "terminal-erase" or "terminal-kill" or "terminal-yank" or "word-left" or "word-right" or "terminal-home" or "terminal-end" or "terminal-cancel" => new { scene.TerminalInput, w?.Cursor },
             "terminal-clear" => scene.Terminal.History.Count(),
@@ -151,6 +184,8 @@ internal static partial class LiveCourse
             "quick-next" or "symbol-next" => new { w?.Focus, item = w == null ? "" : scene.Entries(w).ElementAtOrDefault(w.OptionIndex)?.Path },
             "quick-choose" or "symbol-open" => new { w?.Focus, w?.Url, w?.Cursor },
             "copy" or "terminal-copy" => new { scene.Clipboard },
+            "undo" or "comment" or "delete-line" when w?.Url == "/home/student/project/line-edit.py" =>
+                new { app, w.Focus, w.Url, w.Body, w.Anchor, w.Cursor },
             "cut" or "paste" or "undo" or "redo" or "comment" or "delete-line" or "move-line-up" or "move-line-down" => new { app, w?.Focus, w?.Url, w?.Input, w?.Body, scene.TerminalInput },
             "replace-field" or "replace-one" => new { w?.Focus, w?.Body, w?.Find },
             "zoom-in" or "zoom-out" or "zoom-reset" => new { w?.Url, w?.Zoom },

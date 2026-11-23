@@ -21,12 +21,14 @@ internal sealed class LabRun
     private const string ExactUrlEvent = "@exact-url";
     private const string StrictReportEvent = "@strict-report";
     private const string ClusterNavigationEvent = "@cluster-navigation";
+    private const string LineEditingEvent = "@line-editing";
+    private bool replayLegacyLineEditing;
     private int variant;
     private string initialLayout, attemptLayout;
     private bool initialVirtual;
     internal bool HasDraft => !CompletedRoute && !limitAccepted && (!ReachedLimit || softFinish || FinishingMission) &&
         (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 ||
-        trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent)));
+        trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask, inputAtActiveMilliseconds;
@@ -56,7 +58,8 @@ internal sealed class LabRun
     private LiveMission mission;
     private List<LiveGoal> pending;
     private List<(LiveGoal Goal, string Before)> watching;
-    private string requestedMission;
+    private string requestedMission, switchEvidenceId;
+    private readonly bool windowsBindings;
     private readonly string[] dockProfile;
     private readonly string layoutBinding;
     internal string MissionId => mission?.Id;
@@ -81,7 +84,7 @@ internal sealed class LabRun
         ActionLimit > 0 && Solved >= ActionLimit ? "actions" : null);
     private bool ReachedLimit => LimitReached != null;
     private bool CompletedRoute => !restoring && mission != null && pending.Count == 0 &&
-        (FinishingMission || softFinish && ReachedLimit || finishSingleRoute && mission.FinishAfterRoute);
+        (FinishingMission || softFinish && ReachedLimit || (finishSingleRoute || mission.Curated) && mission.FinishAfterRoute);
     private bool PendingLimitChoice => softFinish && !restoring && ReachedLimit &&
         !limitAccepted && !FinishingMission && !CompletedRoute;
     internal bool AwaitingLimitChoice => !stopped && PendingLimitChoice;
@@ -93,12 +96,13 @@ internal sealed class LabRun
     internal string[] Held => held.ToArray();
 
     internal LabRun(string app, string mode, int level, int seconds, string layout, IEnumerable<ShortcutAttempt> history,
-        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null, bool softFinish = false, bool combinedLimits = false)
+        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null, bool softFinish = false, bool combinedLimits = false, bool windowsBindings = false)
     {
         if (!LabCatalog.Apps.Contains(app)) throw new ArgumentException("Выберите Ubuntu, Chrome, VS Code или Терминал.");
         if (mode is not ("drill" or "sandbox")) throw new ArgumentException("Выберите тренировку или учебный рабочий стол.");
         var progress = draft?.Progress;
         this.softFinish = softFinish;
+        this.windowsBindings = windowsBindings;
         App = app; Mode = progress?.Mode is "drill" or "sandbox" ? progress.Mode : mode; Level = Math.Clamp(level, 0, 2);
         ActionLimit = Math.Max(0, progress?.ActionLimit ?? actionLimit);
         // Old callers preserve action-over-timer precedence. Any saved pair
@@ -114,6 +118,12 @@ internal sealed class LabRun
         finishSingleRoute = !string.IsNullOrEmpty(requestedMission) && TimeLimit == 0 && ActionLimit == 0;
         dockProfile = draft?.Dock ?? dock; layoutBinding = draft?.LayoutKey ?? layoutKey;
         variant = draft?.Variant ?? -1; restoring = replayLegacyNavigation = draft != null;
+        var savedEvents = draft == null ? Array.Empty<LiveEvent>() : JsonSerializer.Deserialize<LiveEvent[]>(draft.Trace) ?? [];
+        // New traces begin with format markers. Old ones acquire the line
+        // marker only after the historic keystrokes have been replayed.
+        var initialFormat = savedEvents.TakeWhile(e => e.Key is
+            ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent);
+        replayLegacyLineEditing = draft != null && !initialFormat.Any(e => e.Key == LineEditingEvent);
         Scene = new LabScene(app == "workday" ? "ubuntu" : app, draft?.Layout ?? layout) { LayoutKey = layoutKey, LayoutIsVirtual = draft?.VirtualLayout ?? false };
         if (dock != null) Scene.Dock = dock;
         Next();
@@ -121,7 +131,7 @@ internal sealed class LabRun
         {
             Resume();
             replayLegacyUrl = replayLegacyReport = true;
-            foreach (var e in JsonSerializer.Deserialize<LiveEvent[]>(draft.Trace) ?? [])
+            foreach (var e in savedEvents)
             {
                 if (e.Key.StartsWith("@held/")) { held.Add(e.Key[6..]); superUsed = e.Down; }
                 else if (e.Key == "@release") { Pause(); Resume(); }
@@ -130,11 +140,13 @@ internal sealed class LabRun
                 else if (e.Key == ExactUrlEvent) { replayLegacyUrl = false; trace.Add(e); }
                 else if (e.Key == StrictReportEvent) { replayLegacyReport = false; trace.Add(e); }
                 else if (e.Key == ClusterNavigationEvent) EndLegacyNavigation(e);
+                else if (e.Key == LineEditingEvent) EndLegacyLineEditing(e);
                 else Input(e.Key, e.Down, e.Text);
             }
             if (replayLegacyUrl) trace.Add(new(ExactUrlEvent));
             if (replayLegacyReport) trace.Add(new(StrictReportEvent));
             if (replayLegacyNavigation) EndLegacyNavigation(new(ClusterNavigationEvent));
+            if (replayLegacyLineEditing) EndLegacyLineEditing(new(LineEditingEvent));
             replayLegacyUrl = replayLegacyReport = false;
             Pause();
             // Trace describes the current mission, not the whole attempt. Its
@@ -159,6 +171,14 @@ internal sealed class LabRun
     {
         if (replayLegacyNavigation) Scene.EndLegacyNavigation();
         replayLegacyNavigation = false;
+        trace.Add(marker);
+    }
+
+    private void EndLegacyLineEditing(LiveEvent marker)
+    {
+        bool changed = replayLegacyLineEditing;
+        replayLegacyLineEditing = Scene.ReplayLegacyLineEditing = false;
+        if (changed && App == "code") LiveCourse.RebaseEditorLineGoals(pending, Scene);
         trace.Add(marker);
     }
 
@@ -253,7 +273,12 @@ internal sealed class LabRun
         if (!pressed)
         {
             if (!held.Remove(key)) return null;
-            if (KeyChord.Family(key) == "Alt" && Scene.Switcher) { Watch(); Scene.CommitSwitch(); return Observe(key); }
+            if (KeyChord.Family(key) == "Alt" && Scene.Switcher)
+            {
+                Watch(); Scene.CommitSwitch();
+                var credited = switchEvidenceId; switchEvidenceId = null;
+                return Observe(key, actualTaskId: credited);
+            }
             if (KeyChord.Family(key) == "Super" && !superUsed && held.Count == 0)
                 { Watch(); return Perform(LabCatalog.Shortcuts.First(task => task.Id == "overview"), key); }
             return null;
@@ -286,7 +311,7 @@ internal sealed class LabRun
             return Miss(key, WrongKeyMessage(key));
         }
         bool changed = Scene.Text(key, VirtualText(key, text), shift, word);
-        var passed = Observe(key, matches && Scene.Terminal.LastSuccess ? Task.Text : null);
+        var passed = Observe(key, matches && Scene.Terminal.LastSuccess ? Task.Text : null, actualTaskId: matches && Scene.Terminal.LastSuccess || changed && Task.Keys.Length == 0 && key == "Enter" && !submitting ? Task.Id : null);
         if (passed != null) return passed;
         if (submitting && !Scene.Terminal.LastSuccess) return Miss(key, Scene.Active.Status);
         if (matches && watching?.Any(item => item.Goal.Task == Task && item.Goal.VerifyReport) == true)
@@ -321,6 +346,8 @@ internal sealed class LabRun
         bool changed = eligible && Scene.Apply(actual.Action);
         if (changed && mission != null)
         {
+            if (Scene.Switcher && (actual.Id is "switch-next" or "switch-prev"))
+                switchEvidenceId = actual.Id;
             // Alt+D mirrors the browser behavior but does not demonstrate
             // the requested physical Ctrl+L shortcut.
             if (!replayLegacyUrl && actual.Id == "url" && actual.Keys == "Alt+D")
@@ -328,7 +355,7 @@ internal sealed class LabRun
                 if (Task.Id == "url") return Miss(key, "Адрес выделен. Это задание проверяет Ctrl+L.");
                 return null;
             }
-            var passed = Observe(key, acceptExistingUrlSelection: !replayLegacyUrl && actual.Id == "url" && actual.Keys != "Alt+D");
+            var passed = Observe(key, acceptExistingUrlSelection: !replayLegacyUrl && actual.Id == "url" && actual.Keys != "Alt+D", actualTaskId: actual.Id);
             if (passed != null) return passed;
         }
         if (changed) { Status = ""; LastKey = ""; Feedback = "ready"; return null; }
@@ -343,11 +370,12 @@ internal sealed class LabRun
             artifactPath: goal.ArtifactPath))).ToList();
     }
 
-    private ShortcutAttempt Observe(string key, string equivalentCommand = null, bool acceptExistingUrlSelection = false)
+    private ShortcutAttempt Observe(string key, string equivalentCommand = null, bool acceptExistingUrlSelection = false, string actualTaskId = null)
     {
         if (mission == null || watching == null || Scene.Switcher) return null;
         foreach (var (goal, before) in watching)
         {
+            if (mission.Curated && actualTaskId != goal.Task.Id) continue;
             bool strictReport = goal.VerifyReport && !replayLegacyReport;
             string target = goal.VerifyReport && replayLegacyReport ? goal.LegacyTarget : goal.Target;
             bool recheckingArtifact = goal.ArtifactPath != null && goal.Task == Task && equivalentCommand != null;
@@ -461,7 +489,8 @@ internal sealed class LabRun
                 mission = courses.FirstOrDefault(m => m.Id == requestedMission) ?? throw new ArgumentException("Поручение недоступно для выбранного уровня.");
                 if (!restoring) variant = random.Next(3);
                 Scene = PrepareMissionScene();
-                pending = LiveCourse.Compile(mission, Scene);
+                mission.Prepare?.Invoke(Scene);
+                pending = LiveCourse.Compile(mission, Scene, prepared: true);
             }
             requestedMission = null; used.Add(mission.Id); trace.Clear();
             verifiedReport = null;
@@ -470,6 +499,7 @@ internal sealed class LabRun
                 trace.Add(new(ExactUrlEvent));
                 trace.Add(new(StrictReportEvent));
                 trace.Add(new(ClusterNavigationEvent));
+                trace.Add(new(LineEditingEvent));
             }
             foreach (string key in held) trace.Add(new("@held/" + key, superUsed));
             missionLength = pending.Count;
@@ -482,7 +512,8 @@ internal sealed class LabRun
     private LabScene PrepareMissionScene()
     {
         var scene = new LabScene(App == "workday" ? "ubuntu" : App, initialLayout)
-        { LayoutKey = layoutBinding, LayoutIsVirtual = initialVirtual, ReplayLegacyNavigation = replayLegacyNavigation };
+        { LayoutKey = layoutBinding, LayoutIsVirtual = initialVirtual, ReplayLegacyNavigation = replayLegacyNavigation,
+            ReplayLegacyLineEditing = replayLegacyLineEditing, UseWindowsBindings = windowsBindings };
         if (dockProfile != null) scene.Dock = dockProfile;
         scene.PrepareCase(variant, App);
         return scene;

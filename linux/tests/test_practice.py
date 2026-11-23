@@ -197,6 +197,59 @@ class PracticeTest(unittest.TestCase):
         self.assertFalse(self.lab_chord("LCtrl", "J")["scene"]["windows"][0]["panel"])
         self.assertEqual(self.lab_chord("LCtrl", "LShift", "X")["scene"]["windows"][0]["focus"], "extensions")
 
+    def test_live_selected_middle_line_comment_delete_and_undo(self):
+        first, middle, last = "import numpy as np", "def ifft(x): return x", "print('next')"
+        full = "\n".join((first, middle, last))
+        begin, end = len(first) + 1, len(first) + len(middle) + 2
+        for control, reversed_selection in (("LCtrl", False), ("RCtrl", True)):
+            with self.subTest(control=control, reversed=reversed_selection):
+                self.open_live("code")
+                def edit(*keys, text=""):
+                    state = self.lab_chord(*keys, text=text)
+                    window = next(w for w in state["scene"]["windows"] if w["active"])
+                    return window["body"], window["bodyAnchor"], window["bodyCursor"]
+                edit(control, "A")
+                edit("A", text=first); edit("Enter"); edit("A", text=middle)
+                edit("Enter"); edit("A", text=last)
+                edit(control, "Home")
+                self.assertEqual(edit("Down"), (full, begin, begin))
+                if reversed_selection:
+                    edit("Down")
+                    self.assertEqual(edit("LShift", "Up"), (full, end, begin))
+                    before, after = (end, begin), (end + 2, begin)
+                else:
+                    self.assertEqual(edit(control, "L"), (full, begin, end))
+                    before, after = (begin, end), (begin, end + 2)
+                commented = "\n".join((first, "# " + middle, last))
+                self.assertEqual(edit(control, "/"), (commented, *after))
+                self.assertEqual(edit(control, "Z"), (full, *before))
+                self.assertEqual(edit(control, "LShift", "K"), (first + "\n" + last, begin, begin))
+                self.assertEqual(edit(control, "Z"), (full, *before))
+                self.engine.call("lab-stop")
+
+    def test_code_line_exercise_uses_direct_catalog_and_exact_result(self):
+        matches = [m for m in self.engine.call("lab-catalog")["missions"] if m["id"] == "code-line-edit"]
+        self.assertEqual(len(matches), 1)
+        self.engine.call("lab-start", app="code", mode="sandbox", level=0,
+                         mission="code-line-edit", seconds=0, seed=1)
+        state = self.engine.call("lab-resume")
+        self.assertEqual(state["scenarioLength"], 5)
+        self.assertEqual(state["task"]["id"], "select-line")
+        # The same endpoint range, created without Ctrl+L, is not a shortcut credit.
+        edit = self.lab_chord
+        state = edit("LShift", "Down")
+        self.assertEqual(state["solved"], 0)
+        edit("Left")
+        for count, chord in enumerate((("LCtrl", "L"), ("RCtrl", "/"), ("LCtrl", "Z"),
+                                      ("RCtrl", "LShift", "K"), ("RCtrl", "Z")), 1):
+            state = edit(*chord)
+            self.assertEqual(state["solved"], count, state["status"])
+        self.assertTrue(state["finished"])
+        window = next(w for w in state["scene"]["windows"] if w["active"])
+        self.assertEqual(window["url"], "/home/student/project/line-edit.py")
+        self.assertEqual(window["body"], "import numpy as np\ndef ifft(x): return x\nprint('next')")
+        self.assertEqual((window["bodyAnchor"], window["bodyCursor"]), (19, 41))
+
     def test_live_word_navigation_keeps_grapheme_clusters(self):
         self.open_live("terminal")
         def edit(*keys, text=""):

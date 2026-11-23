@@ -236,6 +236,101 @@ class MissionTest(unittest.TestCase):
             finally:
                 engine.close()
 
+    def test_editor_symbol_routes_require_exact_gesture_and_edit_only_imported_binding(self):
+        from unittest.mock import patch
+
+        for platform, back in (("linux", ["LCtrl", "LAlt", "-"]), ("windows", ["LAlt", "Left"])):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory, \
+                    patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+                engine = Engine(verify=True)
+                def chord(keys, text=""):
+                    for key in keys:
+                        engine.call("lab-key", key=key, pressed=True, text=text if key == keys[-1] else "")
+                    for key in reversed(keys):
+                        result = engine.call("lab-key", key=key, pressed=False)
+                    return result
+                def active(state):
+                    return next(w for w in state["scene"]["windows"] if w["active"])
+                def position(state):
+                    w = active(state)
+                    return (w["url"], w["bodyCursor"], w["bodyAnchor"])
+                def bodies(state):
+                    return {tab["title"]: tab["body"] for tab in active(state)["tabs"]}
+                def start(mission):
+                    engine.call("lab-start", app="code", mode="sandbox", level=0, mission=mission,
+                                seconds=0, seed=0, guidance="guided")
+                    return engine.call("lab-resume")
+                try:
+                    engine.call("configure", platform=platform, layout="EN")
+                    catalog = engine.call("lab-catalog")["missions"]
+                    self.assertTrue(all(any(m["id"] == name and m["curated"] for m in catalog)
+                                        for name in ["code-go-definition", "code-rename-symbol"]))
+                    state = start("code-go-definition")
+                    self.assertEqual(sorted(active(state)["projectFiles"]),
+                                     ["src/helpers.py", "src/main.py", "src/signal_ops.py"])
+                    original = position(state)
+                    self.assertEqual(original[1:], (active(state)["body"].index("normalize(12)") + 2,) * 2)
+                    state = chord(["F12"])
+                    self.assertEqual(state["solved"], 1)
+                    self.assertTrue(position(state)[0].endswith("/src/signal_ops.py"))
+                    self.assertEqual(position(state)[1:], (4, 4))
+                    wrong = ["LAlt", "Left"] if platform == "linux" else ["LCtrl", "LAlt", "-"]
+                    untouched = chord(wrong)
+                    self.assertEqual((untouched["solved"], position(untouched)), (1, position(state)))
+                    state = chord(back)
+                    self.assertEqual((state["solved"], position(state), state["finished"]), (2, original, False))
+                    self.assertEqual(state["task"]["id"], "occurrence")
+                    state = chord(["LCtrl", "D"])
+                    self.assertTrue(state["finished"])
+                    self.assertEqual(state["solved"], 3)
+                    _, cursor, anchor = position(state)
+                    self.assertEqual(active(state)["body"][anchor:cursor], "normalize")
+
+                    state = start("code-rename-symbol")
+                    before = bodies(state)
+                    state = chord(["LShift", "F12"])
+                    self.assertEqual(active(state)["focus"], "symbol-references")
+                    hits = active(state)["entries"]
+                    self.assertEqual(len(hits), 3)
+                    self.assertIn("main.py:4:10", hits[1]["title"])
+                    self.assertTrue(all(e["kind"] == "call" and "/helpers.py" not in e["path"] for e in hits))
+                    state = chord(["Down"])
+                    self.assertEqual(active(state)["optionIndex"], 1)
+                    state = chord(["Enter"])
+                    self.assertEqual(position(state)[1], active(state)["body"].index("normalize(24)"))
+                    state = chord(["F2"])
+                    self.assertEqual(active(state)["input"], "normalize")
+                    chord(["Z"], "z")
+                    state = chord(["Esc"])
+                    self.assertEqual((active(state)["focus"], bodies(state)), ("body", before))
+                    chord(["F2"])
+                    for char in "scale_sample":
+                        chord(["LShift", "-"] if char == "_" else [char.upper()], char)
+                    state = chord(["Enter"])
+                    self.assertFalse(state["finished"])
+                    self.assertEqual((state["solved"], state["errors"]), (7, 0))
+                    self.assertEqual(state["task"]["id"], "code-definition")
+                    changed = bodies(state)
+                    self.assertEqual(changed["main.py"],
+                                     before["main.py"].replace("import normalize", "import scale_sample")
+                                     .replace("normalize(12)", "scale_sample(12)").replace("normalize(24)", "scale_sample(24)"))
+                    self.assertIn('label = "normalize"', changed["main.py"])
+                    self.assertIn("    normalize = 7\n    return normalize", changed["main.py"])
+                    self.assertIn("def scale_sample(value):", changed["signal_ops.py"])
+                    self.assertIn("return scale_sample(0)", changed["signal_ops.py"])
+                    disk = {f["path"].split("/")[-1]: f["content"] for f in state["scene"]["terminal"]["files"]
+                            if "/symbol-lab/src/" in f["path"]}
+                    self.assertIn("def normalize(value):", disk["helpers.py"])
+                    self.assertEqual(disk["main.py"], before["main.py"])   # rename changes buffers, not disk
+                    state = chord(["F12"])
+                    self.assertTrue(state["finished"])
+                    self.assertEqual((state["solved"], state["errors"]), (8, 0))
+                    self.assertTrue(position(state)[0].endswith("/src/signal_ops.py"))
+                    self.assertEqual(position(state)[1:], (4, 4))
+                    self.assertIn("def scale_sample(value):", active(state)["body"])
+                finally:
+                    engine.close()
+
     def test_routes(self):
         with tempfile.TemporaryDirectory() as directory:
             original = os.environ.get("XDG_DATA_HOME")
@@ -244,8 +339,8 @@ class MissionTest(unittest.TestCase):
                 engine = Engine(verify=True)
                 try:
                     missions = engine.call("lab-catalog")["missions"]
-                    self.assertEqual(len(missions), 52)
-                    self.assertEqual(len({m["id"] for m in missions}), 52)
+                    self.assertGreaterEqual(len(missions), 52)
+                    self.assertEqual(len({m["id"] for m in missions}), len(missions))
                     for mission in missions:
                         with self.subTest(mission=mission["id"]):
                             self.walk(engine, mission)
@@ -256,6 +351,132 @@ class MissionTest(unittest.TestCase):
                     os.environ.pop("XDG_DATA_HOME", None)
                 else:
                     os.environ["XDG_DATA_HOME"] = original
+
+    def test_gnome_window_mission_preserves_editor_and_uses_exact_chords(self):
+        from pathlib import Path
+        from unittest.mock import patch
+
+        options = dict(app="ubuntu", level=1, mode="sandbox", seconds=0,
+                       guidance="guided", mission="ubuntu-gnome-windows", seed=7)
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+            engine = Engine(verify=True)
+            def stroke(key, down, text=""):
+                return engine.call("lab-key", key=key, pressed=down, text=text)
+            def chord(*keys, text=""):
+                for key in keys:
+                    stroke(key, True, text if key == keys[-1] else "")
+                for key in reversed(keys):
+                    state = stroke(key, False)
+                return state
+            def window(state, app):
+                return next(w for w in state["scene"]["windows"] if w["app"] == app)
+            def solved(state, number, action=None):
+                self.assertEqual(state["solved"], number, state["task"])
+                if action:
+                    self.assertEqual(state["task"]["id"], action)
+            def editor_identity(state):
+                w = window(state, "code")
+                return w["url"], w["activeTab"], w["body"], w["bodyCursor"], w["bodyAnchor"]
+
+            try:
+                self.assertIn(options["mission"], [m["id"] for m in engine.call("lab-catalog")["missions"]])
+                state = engine.call("lab-start", **options)
+                self.assertTrue(state["scene"]["gnomeWindows"])
+                self.assertEqual(len(state["scene"]["windows"]), 1)
+                self.assertEqual(state["scenarioLength"], 20)
+                self.assertEqual(window(state, "chrome")["url"], "https://docs.python.org/3/")
+                self.assertEqual(window(state, "chrome")["normalSlot"], 0)
+                engine.call("lab-resume")
+                solved(chord("LSuper", "Left"), 1, "open-code")
+                state = chord("LSuper", "2")
+                solved(state, 2, "tile-right")
+                self.assertEqual(window(state, "code")["normalSlot"], 1)
+                before = editor_identity(state)
+                self.assertEqual(before[0:2], ("app.py", 0))
+                self.assertEqual(before[3:], (2, 2))
+
+                stroke("LSuper", True); state = stroke("Right", True)
+                solved(state, 3, "tile-right")
+                # Auto-repeat is not a second press; a new down after key-up is.
+                for _ in range(4):
+                    state = stroke("Right", True)
+                    solved(state, 3)
+                    self.assertEqual(window(state, "code")["state"], "right")
+                stroke("Right", False); stroke("LSuper", False)
+                state = chord("LSuper", "Right")
+                self.assertEqual(window(state, "code")["state"], "normal")
+                solved(state, 4)
+                solved(chord("LSuper", "Right"), 5)
+                state = chord("LSuper", "Up")
+                self.assertEqual(window(state, "code")["state"], "maximized")
+                solved(state, 6)
+                state = chord("LSuper", "Down")
+                self.assertEqual(window(state, "code")["state"], "normal")
+                self.assertEqual(window(state, "code")["normalSlot"], 1)
+                solved(state, 7)
+                solved(chord("LSuper", "Right"), 8)
+                state = chord("LSuper", "H")
+                solved(state, 9, "switch-next")
+                self.assertTrue(window(state, "chrome")["active"])
+                self.assertEqual((window(state, "code")["state"], window(state, "code")["restoreState"]), ("minimized", "right"))
+                self.assertEqual(editor_identity(state), before)
+
+                # Backward Alt+Shift+Tab can reach the same window on this two-
+                # window desk, but cannot award the forward Alt+Tab lesson.
+                state = chord("LAlt", "LShift", "Tab")
+                self.assertTrue(window(state, "code")["active"])
+                self.assertEqual(window(state, "code")["state"], "right")
+                solved(state, 9)
+                solved(chord("LAlt", "Tab"), 9)
+                state = chord("LAlt", "Tab")
+                solved(state, 10, "gnome-write")
+                self.assertEqual(editor_identity(state), before)
+                self.assertEqual(window(state, "code")["state"], "right")
+
+                # Reopen the persisted exercise; don't replace its exact cursor
+                # with the file default, select another tab, or duplicate credit.
+                engine.call("lab-stop")
+                engine.close()
+                engine = Engine(verify=True)
+                state = engine.call("lab-start", **options, **{"continue": True})
+                solved(state, 10, "gnome-write")
+                self.assertEqual(editor_identity(state), before)
+                engine.call("lab-resume")
+                for c in "gnome":
+                    state = chord(c.upper(), text=c)
+                    solved(state, 10)
+                state = chord("Enter")
+                solved(state, 11)
+                self.assertEqual(window(state, "code")["body"], "# gnome\n\nfrom src.spectrum import fft\n")
+                self.assertEqual(window(state, "code")["bodyCursor"], 8)
+
+                solved(chord("LAlt", "Tab"), 12)
+                solved(chord("LSuper", "Left"), 13)
+                solved(chord("LSuper", "Left"), 14)
+                state = chord("LAlt", "F4")
+                solved(state, 15)
+                self.assertEqual(len(state["scene"]["windows"]), 1)
+                state = chord("LSuper", "H")
+                solved(state, 16)
+                self.assertIsNone(state["scene"]["activeWindow"])
+                state = chord("LAlt", "Tab")
+                solved(state, 17)
+                self.assertTrue(window(state, "code")["active"])
+                self.assertEqual(window(state, "code")["state"], "right")
+                self.assertEqual(window(state, "code")["bodyCursor"], 8)
+                solved(chord("LSuper", "Down"), 18)
+                solved(chord("LSuper", "Right"), 19)
+                state = chord("LCtrl", "S")
+                self.assertTrue(state["finished"])
+                solved(state, 20)
+                self.assertEqual(state["errors"], 0)
+                files = {f["path"]: f["content"] for f in state["scene"]["terminal"]["files"]}
+                self.assertEqual(files["/home/student/project/app.py"], window(state, "code")["body"])
+                self.assertTrue(engine.call("lab-result")["completed"])
+                self.assertTrue((Path(directory) / "TouchTypingStudio-QA/progress.xml").is_file())
+            finally:
+                engine.close()
 
     def test_browser_note_is_copied_saved_and_restored_after_engine_exit(self):
         from pathlib import Path
@@ -1063,7 +1284,7 @@ class MissionTest(unittest.TestCase):
         state = engine.call("lab-start", app=mission["app"], level=mission["level"], mode="sandbox",
                             seconds=0, guidance="guided", mission=mission["id"], seed=0)
         total = state["scenarioLength"]
-        self.assertGreaterEqual(total, 20)
+        self.assertGreaterEqual(total, 1 if mission.get("curated") else 20)
         state = engine.call("lab-resume")
         def chord(keys, char=""):
             for key in keys:
@@ -1077,6 +1298,9 @@ class MissionTest(unittest.TestCase):
             task = state["task"]
             for attempt in range(24):
                 if task["keys"]:
+                    if task["id"] == "code-rename-confirm" and attempt == 0:
+                        for char in task["text"]:
+                            chord(["LShift", "-"] if char == "_" else [char.upper()], char)
                     state = chord([sides.get(k, k) for k in task["keys"].split("+")])
                 else:
                     for char in task["text"]:

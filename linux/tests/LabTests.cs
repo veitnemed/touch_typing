@@ -140,7 +140,7 @@ internal static class LabTests
         {
             var courses = LiveCourse.Missions.Where(m => m.App == app && m.Level == level).ToList();
             int expectedCourses = app == "workday" ? (level == 0 ? 2 : 1) : 4;
-            Check(courses.Count == expectedCourses, "Course count: " + app);
+            Check(courses.Count(course => !course.Curated) == expectedCourses, "Course count: " + app);
             foreach (var course in courses)
             foreach (int variant in Enumerable.Range(0, 3))
             foreach (string layout in new[] { "RU", "EN" })
@@ -148,9 +148,13 @@ internal static class LabTests
                 var initial = new LabScene(app == "workday" ? "ubuntu" : app, layout);
                 initial.PrepareCase(variant, app);
                 var route = LiveCourse.Compile(course, initial);
-                Check(route.Count >= 20, course.Id + ": minimum route length");
-                Check(route.Select(step => step.Task.Id).Distinct().Count() >= 8, course.Id + ": distinct actions");
-                Check(route.Select(step => step.Phase).Distinct().Count() >= 3, course.Id + ": meaningful phases");
+                Check(route.Count >= (course.Curated ? 1 : 20), course.Id + ": minimum route length");
+                if (!course.Curated)
+                {
+                    Check(route.Select(step => step.Task.Id).Distinct().Count() >= 8, course.Id + ": distinct actions");
+                    Check(route.Select(step => step.Phase).Distinct().Count() >= 3, course.Id + ": meaningful phases");
+                }
+                else Check(course.FinishAfterRoute, course.Id + ": standalone ends at its last result");
             }
         }
         var reportRun = new LabRun("workday", "sandbox", 0, 0, "EN", [], new Random(3), missionId: "workday-report");

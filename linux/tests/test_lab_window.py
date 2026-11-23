@@ -141,6 +141,18 @@ class LabWindowTest(Studio):
                 self.window.present()
                 yield
             self.navigate('lab')
+            if '--daily-use' in sys.argv:
+                def switch_preview(frame):
+                    event('LAlt', True); yield
+                    event('Tab', True); yield
+                    event('Tab', False); yield
+                    yield from frame('gnome-04a-switcher')
+                    event('LAlt', False)
+                    for _ in range(10):
+                        yield
+                yield from self.exercise_daily_use(chord, capture_png, Path(os.environ['TOUCH_TYPING_QA_OUTPUT']),
+                                                   switch_preview=switch_preview)
+                return
             if '--gallery' in sys.argv:
                 output = Path(os.environ['TOUCH_TYPING_QA_OUTPUT'])
                 yield from self.capture_gallery(chord, capture_png, output)
@@ -319,6 +331,158 @@ class LabWindowTest(Studio):
                 self.stop()
                 assert self.result_kind=='shortcuts'
         finally:call(session,api+'.Session','Stop')
+
+    def exercise_daily_use(self, chord, capture, output, recording_boundary=lambda _name: None, switch_preview=None):
+        """Run the catalog slices with compositor-delivered keys and real GTK frames."""
+        for _ in range(4):
+            yield from chord('A')
+            if self.layout == 'EN' and getattr(self, 'last_character', '').lower() == 'a':
+                break
+            yield from chord('Super+Space')
+            for _ in range(30):
+                yield
+        else:
+            raise AssertionError("Could not verify English input for the demonstration")
+
+        def start(app, level, mission):
+            if self.lab.active:
+                assert self.lab.stop(), self.lab.status.get_label()
+            self.navigate('lab')
+            lab = self.lab
+            lab.picker.set_selected(next(i for i, item in enumerate(lab.classes) if item['id'] == app))
+            lab.level.set_selected(level)
+            lab.limit.set_selected(0)
+            lab.time_limit.set_selected(0)
+            lab.mission_picker.set_selected(next(i for i, (key, _) in enumerate(lab.choices) if key == mission))
+            for _ in range(20):
+                yield
+            lab.start()
+            for _ in range(45):
+                yield
+            if lab.state['paused'] and not self.window.is_active():
+                yield from chord('Enter')
+            for _ in range(100):
+                if lab.active and not lab.state['paused']:
+                    break
+                yield
+            assert lab.active and not lab.state['paused'], (mission, lab.status.get_label())
+
+        def window(app):
+            return next(w for w in self.lab.state['scene']['windows'] if w['app'] == app)
+
+        def position():
+            view = window('code')
+            return view['tabs'][view['activeTab']]['title'], view['bodyCursor']
+
+        def frame(name):
+            for _ in range(10):
+                yield
+            assert self.window.get_mapped() and self.window.is_active(), name
+            capture(output / (name + '.png'))
+
+        yield from start('code', 0, 'code-go-definition')
+        recording_boundary('symbols')
+        origin = position()
+        assert origin[0].endswith('main.py'), origin
+        yield from frame('symbols-01-call')
+        yield from chord('F12')
+        assert position()[0].endswith('signal_ops.py'), position()
+        yield from frame('symbols-02-definition')
+        yield from chord('Ctrl+Alt+-')
+        assert position() == origin, (position(), origin)
+        yield from frame('symbols-03-back')
+        yield from chord('Ctrl+D')
+
+        yield from start('code', 0, 'code-rename-symbol')
+        yield from chord('Shift+F12')
+        assert window('code')['focus'] == 'symbol-references'
+        assert len(window('code')['entries']) >= 2
+        yield from frame('symbols-04-usages')
+        yield from chord('Down')
+        yield from chord('Enter')
+        yield from chord('F2')
+        assert window('code')['focus'] == 'symbol-rename'
+        yield from frame('symbols-05-rename')
+        yield from chord('Esc')
+        assert window('code')['focus'] == 'body' and 'scale_sample' not in window('code')['body']
+        yield from frame('symbols-06-cancel')
+        yield from chord('F2')
+        for key in ('S','C','A','L','E','Shift+-','S','A','M','P','L','E'):
+            yield from chord(key)
+        assert window('code')['input'] == 'scale_sample', window('code')['input']
+        yield from frame('symbols-07-new-name')
+        yield from chord('Enter')
+        assert 'scale_sample' in window('code')['body']
+        yield from frame('symbols-08-renamed-source')
+        yield from chord('F12')
+        assert position()[0].endswith('signal_ops.py') and 'def scale_sample(' in window('code')['body']
+        yield from frame('symbols-09-result')
+        recording_boundary(None)
+
+        yield from start('code', 0, 'code-line-edit')
+        original = "import numpy as np\ndef ifft(x): return x\nprint('next')"
+        commented = "import numpy as np\n# def ifft(x): return x\nprint('next')"
+        deleted = "import numpy as np\nprint('next')"
+        def check_line(body, anchor, cursor):
+            view = window('code')
+            assert (view['body'], view['bodyAnchor'], view['bodyCursor']) == (body, anchor, cursor), view
+        check_line(original, 19, 19)
+        for gesture, body, anchor, caret in (
+            ('Ctrl+L', original, 19, 41), ('Ctrl+/', commented, 19, 43),
+            ('Ctrl+Z', original, 19, 41), ('Ctrl+Shift+K', deleted, 19, 19),
+            ('Ctrl+Z', original, 19, 41),
+        ):
+            yield from chord(gesture)
+            check_line(body, anchor, caret)
+
+        yield from start('ubuntu', 1, 'ubuntu-gnome-windows')
+        recording_boundary('gnome')
+        assert len(self.lab.state['scene']['windows']) == 1
+        yield from chord('Super+Left')
+        assert window('chrome')['state'] == 'left'
+        yield from frame('gnome-01-single-left')
+        yield from chord('Super+2')
+        origin = position()
+        yield from chord('Super+Right')
+        assert window('code')['state'] == 'right' and window('chrome')['state'] == 'left'
+        yield from frame('gnome-02-two-halves')
+        yield from chord('Super+Right')
+        assert window('code')['state'] == 'normal'
+        yield from chord('Super+Right')
+        yield from chord('Super+Up')
+        assert window('code')['state'] == 'maximized'
+        yield from frame('gnome-03-maximized')
+        yield from chord('Super+Down')
+        assert window('code')['state'] == 'normal'
+        yield from chord('Super+Right')
+        yield from chord('Super+H')
+        assert window('code')['state'] == 'minimized' and window('chrome')['active']
+        yield from frame('gnome-04-minimized')
+        if switch_preview:
+            yield from switch_preview(frame)
+        else:
+            yield from chord('Alt+Tab')
+        assert window('code')['state'] == 'right' and window('code')['active']
+        assert position() == origin, (position(), origin)
+        yield from frame('gnome-05-restored')
+        for key in 'GNOME':
+            yield from chord(key)
+        assert window('code')['body'].splitlines()[0] == '# gnome'
+        yield from frame('gnome-06-continued-typing')
+        yield from chord('Enter')
+        for gesture in ('Alt+Tab', 'Super+Left', 'Super+Left', 'Alt+F4'):
+            yield from chord(gesture)
+        assert len(self.lab.state['scene']['windows']) == 1 and window('code')['state'] == 'right'
+        yield from chord('Super+H')
+        assert window('code')['state'] == 'minimized' and not window('code')['active']
+        yield from chord('Alt+Tab')
+        assert window('code')['state'] == 'right' and window('code')['active']
+        for gesture in ('Super+Down', 'Super+Right', 'Ctrl+S'):
+            yield from chord(gesture)
+        assert self.lab.result, 'expected catalog mission result'
+        yield from frame('gnome-07-result')
+        recording_boundary(None)
+        print('PASS daily-use native GTK exact shortcuts, references/rename, GNOME window state and caret', flush=True)
 
     def record_lesson_chrome(self, lab, app, output):
         mode = os.environ.get("TOUCH_TYPING_QA_LESSON_CHROME")

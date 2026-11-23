@@ -29,7 +29,8 @@ internal static class LiveUiSmoke
         try
         {
             bool referenceBrowser = arguments.Contains("--reference-browser");
-            bool referenceEvidence = referenceBrowser || arguments.Contains("--reference-evidence");
+            bool dailyUse = arguments.Contains("--daily-use");
+            bool referenceEvidence = referenceBrowser || dailyUse || arguments.Contains("--reference-evidence");
             if (referenceEvidence && SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
                 throw new InvalidOperationException("Per-monitor-aware evidence capture cannot be enabled.");
             string path = Path.GetFullPath(arguments[0]);
@@ -45,6 +46,12 @@ internal static class LiveUiSmoke
             window = AutomationElement.FromHandle(trainer);
             Check(window.Current.ProcessId == app.Id, "The automation root belongs to the new QA process");
             Focus();
+            if (dailyUse)
+            {
+                CheckDailyUse();
+                Console.WriteLine("PASS: " + count + " native WPF daily-use assertions");
+                return 0;
+            }
             if (arguments.Contains("--soft-finish"))
             {
                 CheckSoftFinish(path);
@@ -497,6 +504,125 @@ internal static class LiveUiSmoke
             "One final session persisted across close, continuation, and explicit finish");
         Check(xml.SelectSingleNode("/StudioProfile/LiveDrafts/LiveDraft[App='terminal']") == null,
             "No resumable parallel attempt after explicit finish");
+    }
+
+    private static void CheckDailyUse()
+    {
+        Action<string, int, string> start = (area, level, mission) =>
+        {
+            if (Visible("LabPause") && !Visible("LabResult"))
+            {
+                Key("F10");
+                Until(delegate { return Visible("LabResult"); }, "daily-use lesson finished");
+            }
+            if (Visible("LabChooseClass"))
+            {
+                Invoke("LabChooseClass");
+                Until(delegate { return Exists("LabStart"); }, "daily-use chooser");
+            }
+            Invoke("LabClass-" + area);
+            Select("LabMode", 0);
+            Select("LabLevel", level);
+            Select("LabDuration", 0);
+            Select("LabTimer", 0);
+            SelectMissionByName(mission);
+            Key("F5");
+            Until(delegate { return Visible("LabDesktop") && Name("LabPause").StartsWith("Пауза"); }, "native lesson " + mission);
+            VirtualEnglish();
+        };
+        Func<AutomationElement.AutomationElementInformation> editor = () => Find("LabDesktop").Current;
+        Action<string> frame = label => { Wait(110); CaptureReferenceFrame(label); };
+        start("code", 0, "Перейти к определению и вернуться");
+        Until(delegate { return editor().HelpText.EndsWith("main.py") && editor().ItemStatus.StartsWith("editor:body:"); }, "original call caret");
+        string origin = editor().ItemStatus;
+        frame("symbols-01-call");
+        Key("F12");
+        Until(delegate { return editor().HelpText.EndsWith("signal_ops.py") && editor().ItemStatus == "editor:body:4"; }, "definition in imported module");
+        frame("symbols-02-definition");
+        Chord("Alt+Left");
+        Until(delegate { return editor().HelpText.EndsWith("main.py") && editor().ItemStatus == origin; }, "exact original caret after Alt+Left");
+        frame("symbols-03-back");
+        Chord("Ctrl+D");
+        Until(delegate { return Visible("LabResult"); }, "confirmed restored source selection");
+
+        start("code", 0, "Найти использования и переименовать функцию");
+        Chord("Shift+F12");
+        Until(delegate { return editor().ItemStatus.StartsWith("editor:symbol-references:") &&
+            editor().HelpText.Contains("main.py") && editor().HelpText.Contains("signal_ops.py"); }, "actual references list");
+        frame("symbols-04-usages");
+        Key("Down"); Key("Enter"); Key("F2");
+        Until(delegate { return editor().HelpText == "Переименовать символ: normalize"; }, "rename prefilled source name");
+        frame("symbols-05-rename");
+        Key("Esc");
+        Until(delegate { return editor().HelpText.EndsWith("main.py") && editor().ItemStatus.StartsWith("editor:body:"); }, "cancel returns to call");
+        frame("symbols-06-cancel");
+        Key("F2");
+        foreach (char c in "scale_sample") Send(Character(c));
+        Until(delegate { return editor().HelpText == "Переименовать символ: scale_sample"; }, "typed new symbol");
+        frame("symbols-07-new-name");
+        Key("Enter");
+        Until(delegate { return editor().HelpText.EndsWith("main.py") && editor().ItemStatus.StartsWith("editor:body:"); }, "rename returns to edited source");
+        frame("symbols-08-renamed-source");
+        Key("F12");
+        Until(delegate { return Visible("LabResult"); }, "renamed call resolves to renamed definition");
+        frame("symbols-09-result");
+
+        start("code", 0, "Правка выделенной строки");
+        Until(delegate { return editor().HelpText.EndsWith("line-edit.py") && editor().ItemStatus == "editor:body:19"; }, "initial middle line");
+        Chord("Ctrl+L");
+        Until(delegate { return editor().ItemStatus == "editor:body:41"; }, "selected middle line including its newline");
+        Chord("Ctrl+/");
+        Until(delegate { return editor().ItemStatus == "editor:body:43"; }, "comment preserves selection and adds prefix to middle line");
+        frame("line-01-comment");
+        Chord("Ctrl+Z");
+        Until(delegate { return editor().ItemStatus == "editor:body:41"; }, "undo comment recovers exact cursor");
+        Chord("Ctrl+Shift+K");
+        Until(delegate { return editor().ItemStatus == "editor:body:19"; }, "delete removes selection and returns to boundary");
+        frame("line-02-delete");
+        Chord("Ctrl+Z");
+        Until(delegate { return Visible("LabResult") || editor().ItemStatus == "editor:body:41"; }, "undo deletion");
+
+        start("ubuntu", 1, "GNOME: документация и код рядом");
+        Chord("Super+Left");
+        Until(delegate { return Name("LabDesktop").Contains("chrome=left*"); }, "single Chrome on left half");
+        frame("gnome-01-single-left");
+        Chord("Super+2");
+        Until(delegate { return editor().HelpText.EndsWith("app.py"); }, "code opens app.py");
+        origin = editor().ItemStatus;
+        Chord("Super+Right");
+        Until(delegate { return Name("LabDesktop").Contains("code=right*") && Name("LabDesktop").Contains("chrome=left"); }, "opposite halves");
+        frame("gnome-02-two-halves");
+        Chord("Super+Right");
+        Until(delegate { return Name("LabDesktop").Contains("code=normal*"); }, "repeated shortcut returns to normal");
+        Chord("Super+Right"); Chord("Super+Up");
+        Until(delegate { return Name("LabDesktop").Contains("code=maximized*"); }, "maximized code");
+        frame("gnome-03-maximized");
+        Chord("Super+Down");
+        Until(delegate { return Name("LabDesktop").Contains("code=normal*"); }, "restored normal size");
+        Chord("Super+Right"); Chord("Super+H");
+        Until(delegate { return Name("LabDesktop").Contains("code=minimized") && Name("LabDesktop").Contains("chrome=left*"); }, "Chrome stays on desktop");
+        frame("gnome-04-minimized");
+        var alt = Parse("Alt").Single();
+        var tab = Parse("Tab").Single();
+        Send(new[] { alt.Down(), tab.Down(), tab.Up() });
+        frame("gnome-04a-switcher");
+        Send(new[] { alt.Up() });
+        Until(delegate { return Name("LabDesktop").Contains("code=right*") && editor().HelpText.EndsWith("app.py") &&
+            editor().ItemStatus == origin; }, "exact active editor, tab, caret and restored half");
+        frame("gnome-05-restored");
+        foreach (char c in "gnome") Send(Character(c));
+        Until(delegate { return editor().ItemStatus == "editor:body:7"; }, "native resumed typing moved original caret by five");
+        frame("gnome-06-continued-typing");
+        Key("Enter");
+        Chord("Alt+Tab"); Chord("Super+Left"); Chord("Super+Left"); Chord("Alt+F4");
+        Until(delegate { return !Name("LabDesktop").Contains("chrome=") && Name("LabDesktop").Contains("code=right*"); }, "single editor remains");
+        Chord("Super+H");
+        Until(delegate { return Name("LabDesktop").Contains("code=minimized"); }, "single window minimizes");
+        Chord("Alt+Tab");
+        Until(delegate { return Name("LabDesktop").Contains("code=right*"); }, "single window restores to its former half");
+        Chord("Super+Down"); Chord("Super+Right"); Chord("Ctrl+S");
+        Until(delegate { return Visible("LabResult"); }, "GNOME result");
+        frame("gnome-07-result");
     }
 
     private static void SelectMissionByName(string title)

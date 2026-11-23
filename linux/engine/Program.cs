@@ -98,7 +98,7 @@ internal sealed class PracticeService
                 bool combinedLimits = Flag(message, "combinedLimits");
                 lab = new LabRun(Text(message, "app"), Text(message, "mode"), Number(message, "level"),
                     Number(message, "seconds", combinedLimits ? 0 : 180), layout, profile.ShortcutHistory,
-                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit"), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: Text(message, "mission"), draft: draft, softFinish: Flag(message, "softFinish"), combinedLimits: combinedLimits);
+                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit"), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: Text(message, "mission"), draft: draft, softFinish: Flag(message, "softFinish"), combinedLimits: combinedLimits, windowsBindings: windows);
                 persistedLabAttempts = 0;
                 labCheckpoint = draft;
                 labLimitCheckpointAttempted = draft?.Progress?.LimitDecisionPending == true;

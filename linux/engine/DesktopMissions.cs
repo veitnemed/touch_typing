@@ -57,6 +57,12 @@ internal static partial class LiveCourse
         Add("ubuntu",0,"restore","Восстановить материал и проверить его","file","recover","verify","desk");
         Add("ubuntu",1,"research","Собрать материалы исследования","fetch","deliver","desk","capture");
         Add("ubuntu",1,"window","Организовать работу в двух окнах","desk","switch","source","capture","verify","finish");
+        list.Add(new("ubuntu", 1, "ubuntu-gnome-windows", "GNOME: документация и код рядом",
+        [
+            new("Разложить два окна и сравнить состояние", "tile-left open-code tile-right tile-right tile-right maximize restore tile-right"),
+            new("Свернуть редактор, вернуть вкладку и дописать комментарий", "minimize switch-next gnome-write"),
+            new("Управлять одним оставшимся окном и сохранить правку", "switch-next tile-left tile-left close-window minimize switch-next restore tile-right save")
+        ], FinishAfterRoute: true, Curated: true, Prepare: scene => scene.PrepareGnomeWindowMission()));
         Add("ubuntu",1,"workspaces","Разнести рабочие инструменты по столам","workspaces","source","switch","file");
         Add("ubuntu",1,"languages","Подготовить двуязычную рабочую среду","sources","launch","file","recover");
         Add("ubuntu",2,"briefing","Перенести показ на отдельный стол","desk","present","verify","capture");

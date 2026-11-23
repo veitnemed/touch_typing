@@ -139,6 +139,16 @@ jobs:
           $out = Join-Path $env:RUNNER_TEMP 'windows-evidence/native-layout'
           $env:TOUCH_TYPING_QA_LESSON_CHROME = 'compact'
           & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -NativeLayout -OutputDirectory $out
+      - name: Exercise daily editor and GNOME missions in native WPF
+        if: github.ref == 'refs/heads/feature/reference-ui'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $appDir = Join-Path $env:RUNNER_TEMP 'TouchTyping QA'
+          $app = Join-Path $appDir TouchTyping.exe
+          $dest = Join-Path $env:RUNNER_TEMP 'windows-evidence/daily-use'
+          $env:TOUCH_TYPING_QA_LESSON_CHROME = 'compact'
+          & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -DailyUse -OutputDirectory $dest
       - name: Measure WPF Chrome full-line shaping at render scales
         if: github.ref == 'refs/heads/feature/reference-ui'
         shell: powershell
@@ -195,7 +205,7 @@ jobs:
           tar -xzf "$RUNNER_TEMP/candidate/touch-typing-linux-x64.tar.gz" -C "$RUNNER_TEMP/candidate"
           extra=()
           if [[ "$GITHUB_REF" == 'refs/heads/feature/reference-ui' ]]; then
-            extra+=(--reference-home --reference-terminal --soft-limit --selection-render)
+            extra+=(--reference-home --reference-terminal --soft-limit --selection-render --daily-use)
             export TOUCH_TYPING_QA_LESSON_CHROME=compact
           fi
           bash "$RUNNER_TEMP/candidate/touch-typing-linux-x64/check.sh" --terminal-only --save-retry --gallery --source-note "${extra[@]}" --output "$RUNNER_TEMP/linux-evidence" || {

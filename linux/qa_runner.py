@@ -27,6 +27,7 @@ def main():
     parser.add_argument("--save-retry", action="store_true", help="Включить проверку закрытия при ошибке сохранения")
     parser.add_argument("--soft-limit", action="store_true", help="Проверить выбор при достижении лимита в окне GTK")
     parser.add_argument("--selection-render", action="store_true", help="Проверить отображение выбранного переноса строки в GTK")
+    parser.add_argument("--daily-use", action="store_true", help="Пройти сценарии VS Code и GNOME и сохранить реальные кадры")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -64,6 +65,7 @@ def main():
             if args.source_note: command.append("--source-note")
             if args.soft_limit: command.append("--soft-limit")
             if args.selection_render: command.append("--selection-render")
+            if args.daily_use: command.append("--daily-use")
             if args.full: command.append("--full")
             return subprocess.run(command, env=environment).returncode
     return run_checks(args)
@@ -175,6 +177,15 @@ def run_checks(args):
                 environment["XDG_DATA_HOME"] = folder
                 try:
                     check("native-soft-limit", [sys.executable, str(tests / "test_lab_window.py"), "--soft-limit"])
+                finally:
+                    environment["XDG_DATA_HOME"] = previous
+        if args.daily_use:
+            report["coverage"].append("Interactive symbol navigation, rename cancellation and GNOME restoration in live GTK")
+            with tempfile.TemporaryDirectory(prefix="typing-daily-use-") as folder:
+                previous = environment["XDG_DATA_HOME"]
+                environment["XDG_DATA_HOME"] = folder
+                try:
+                    check("native-daily-use", [sys.executable, str(tests / "test_lab_window.py"), "--daily-use"])
                 finally:
                     environment["XDG_DATA_HOME"] = previous
         if args.selection_render:

@@ -39,6 +39,7 @@ internal sealed partial class LabScene
             "chrome://bookmarks" => w.SavedBookmarks.Order().Select(PageEntry).ToArray(),
             _ => Links
         };
+        if (w.Focus == "symbol-references") return ReferenceEntries(w);
         if (w.Focus == "symbols")
         {
             var result = new List<LabEntry>();
@@ -51,17 +52,19 @@ internal sealed partial class LabScene
             return result.ToArray();
         }
         if (w.App == "code" && w.Focus is "quick-open" or "explorer")
-            return Terminal.Entries(Project).Concat(Terminal.Entries(Project + "/src"))
-                .Where(path => !Terminal.DirectoryExists(path) && (w.Focus != "quick-open" || path.Contains(w.Input, StringComparison.OrdinalIgnoreCase))).Select(path => new LabEntry(NameOf(path), path, "file")).ToArray();
+            return ProjectDocuments()
+                .Where(path => (w.Focus != "quick-open" || path.Contains(w.Input, StringComparison.OrdinalIgnoreCase))).Select(path => new LabEntry(NameOf(path), path, "file")).ToArray();
         return [];
     }
 
     private readonly Dictionary<string, string> originalFiles = [];
-    private IEnumerable<string> ProjectDocuments() => Terminal.Entries(Project).Concat(Terminal.Entries(Project + "/src")).Where(path => !Terminal.DirectoryExists(path));
+    private IEnumerable<string> ProjectDocuments() => symbolWorkspace
+        ? Terminal.Entries(SymbolProject + "/src").Where(path => !Terminal.DirectoryExists(path))
+        : Terminal.Entries(Project).Concat(Terminal.Entries(Project + "/src")).Where(path => !Terminal.DirectoryExists(path));
     private object WindowSnapshot(LabWindow w)
     {
         var paths = w.App == "code" ? ProjectDocuments().ToArray() : [];
-        string Relative(string path) => path[(Project.Length + 1)..];
+        string Relative(string path) => path[((symbolWorkspace ? SymbolProject : Project).Length + 1)..];
         var changes = paths.Where(path => !originalFiles.TryGetValue(path, out var original) || original != Terminal.ReadFile(path)).Select(Relative);
         var results = w.View == "project-search" && w.Input.Length > 0
             ? paths.Where(path => Terminal.ReadFile(path).Contains(w.Input, StringComparison.OrdinalIgnoreCase)).Select(Relative) : [];
@@ -153,6 +156,25 @@ internal sealed partial class LabScene
                     int lo = w.Cursor, hi = lo;
                     while (lo > 0 && IsIdentifier(w.Body[lo - 1])) lo--;
                     while (hi < w.Body.Length && IsIdentifier(w.Body[hi])) hi++;
+                    if (hi == lo && !ReplayLegacyLineEditing)
+                    {
+                        // A corrected line comment can leave Ctrl+Home on '#'.
+                        // Only skip a leading comment prefix, not arbitrary
+                        // punctuation elsewhere in the current line.
+                        int prefix = LineStart(w.Body, lo);
+                        int limit = LineEnd(w.Body, lo);
+                        while (prefix < limit && w.Body[prefix] is ' ' or '\t') prefix++;
+                        if (prefix < limit && w.Body[prefix] == '#' && lo <= prefix + 1)
+                        {
+                            int start = prefix + 1;
+                            while (start < limit && w.Body[start] is ' ' or '\t') start++;
+                            if (start < limit && IsIdentifier(w.Body[start]))
+                            {
+                                lo = hi = start;
+                                while (hi < limit && IsIdentifier(w.Body[hi])) hi++;
+                            }
+                        }
+                    }
                     w.Select(lo, hi); return hi > lo;
                 }
                 string selection = Slice(w, w.Body);

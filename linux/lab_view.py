@@ -242,13 +242,15 @@ class DesktopView(Gtk.Widget):
             state = active.get("state")
             if state in ("maximized", "fullscreen"):
                 windows = [active]
+            elif self.scene.get("gnomeWindows"):
+                windows = windows[-2:]
             elif state in ("left", "right"):
                 other_side = "right" if state == "left" else "left"
                 windows = [v for v in windows[:-1] if v.get("state") == other_side][-1:] + [active]
             else:
                 windows = windows[-2:]
         for index, window in enumerate(windows):
-            x, y, w, h = self.window_bounds(window, index, width, height)
+            x, y, w, h = self.window_bounds(window, index, width, height, self.scene.get("gnomeWindows", False))
             if self.scene.get("overview"):
                 rows = (len(windows) + 1) // 2
                 w, h = (width - 115) / 2, (height - 83) / max(1, rows) - 10
@@ -288,7 +290,7 @@ class DesktopView(Gtk.Widget):
             self.label("Снимок в учебном буфере" if self.scene.get("screenshotCopied") else "Снимок сделан  ·  Ctrl+C — скопировать", width - min(310, width - 80), 40, 10)
 
     @staticmethod
-    def window_bounds(window, index, width, height):
+    def window_bounds(window, index, width, height, stable_normal=False):
         index = min(index, 3)
         state = window.get("state", "normal")
         if state in ("maximized", "fullscreen"):
@@ -296,6 +298,10 @@ class DesktopView(Gtk.Widget):
         if state in ("left", "right"):
             w = (width - 54) / 2
             return 52 + (w if state == "right" else 0), 27, w, height - 29
+        if stable_normal:
+            slot = max(0, min(1, window.get("normalSlot", 0)))
+            w, h = (width - 54) * .72, (height - 29) * .8
+            return 52 + (width - 54 - w) * (.15 + .7 * slot), 27 + (height - 29 - h) * (.24 + .52 * slot), w, h
         return 67 + index * 18, 39 + index * 16, width - 105 - index * 18, height - 60 - index * 16
 
     def draw_window(self, window, x, y, w, h):
@@ -470,7 +476,8 @@ class DesktopView(Gtk.Widget):
                 shown = window.get("searchResults", [])
             else:
                 shown = window.get("projectFiles", [])
-            self.label("PILING-MAIN" if view == "explorer" else "", x + 46, y + 36, 10, "#aeb1b8")
+            project = "SYMBOL-LAB" if any("/symbol-lab/" in tab.get("url", "") for tab in tabs) else "PILING-MAIN"
+            self.label(project if view == "explorer" else "", x + 46, y + 36, 10, "#aeb1b8")
             for i, name in enumerate(shown):
                 self.label(name, x + 47, y + 60 + 23 * i, 12, "#c6ccd4", width=sidebar - 15)
         editor_x = x + 35 + sidebar
@@ -534,7 +541,34 @@ class DesktopView(Gtk.Widget):
             self.label("ТЕРМИНАЛ     ВЫВОД     ПРОБЛЕМЫ", editor_x + 10, y + h * .54 + 6, 9)
             self.terminal(window, editor_x, y + h * .54 + 27, editor_w, h * .46 - 46, embedded=True)
         focus = window.get("focus", "editor")
-        if focus in ("palette", "quick-open", "symbols", "find", "replace-find", "replace-with", "project-search", "goto-line"):
+        if focus in ("symbol-references", "symbol-rename"):
+            references = focus == "symbol-references"
+            choices = [item.get("title", "") for item in window.get("entries", [])] if references else []
+            selected = min(max(0, window.get("optionIndex", 0)), max(0, len(choices) - 1))
+            visible = min(6, len(choices), max(1, int((h - 100) / 25)))
+            first = max(0, selected - visible + 1)
+            pw = min(620, w - 24)
+            px = x + (w - pw) / 2
+            py = y + 34
+            self.fill("#121419", px - 1, py + 2, pw + 2, 76 + visible * 25, 8)
+            self.fill("#292b30", px, py, pw, 76 + visible * 25, 8)
+            title = f"Использования · {len(choices)}" if references else "Переименовать символ"
+            self.label(title, px + 12, py + 8, 13, "#eef1f8", width=pw - 24, bold=True)
+            if references:
+                for row, index in enumerate(range(first, min(len(choices), first + visible))):
+                    iy = py + 34 + row * 25
+                    if index == selected:
+                        self.fill("#234d72", px + 6, iy - 2, pw - 12, 23, 4)
+                    self.label(choices[index], px + 13, iy, 12, "#eef1f8", width=pw - 26)
+                if not choices:
+                    self.label("Использования не найдены", px + 12, py + 32, 11, "#b4bfcd", width=pw - 24)
+                tip = "↑↓ — выбрать   Enter — открыть   Esc — закрыть"
+            else:
+                self.fill("#1a1d23", px + 7, py + 28, pw - 14, 22, 4)
+                self.field(window.get("input", ""), window, px + 12, py + 30, pw - 24, 13, "#eef1f8")
+                tip = "Enter — переименовать   Esc — отменить"
+            self.label(tip, px + 12, py + 55 + visible * 25, 10, "#b4bfcd", width=pw - 24)
+        elif focus in ("palette", "quick-open", "symbols", "find", "replace-find", "replace-with", "project-search", "goto-line"):
             titles = {"palette": "Палитра команд", "quick-open": "Открыть файл", "symbols": "Символы файла",
                       "find": "Найти", "replace-find": "Найти для замены", "replace-with": "Заменить на",
                       "project-search": "Поиск по проекту", "goto-line": "Перейти к строке"}

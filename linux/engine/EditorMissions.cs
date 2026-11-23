@@ -51,6 +51,18 @@ internal static partial class LiveCourse
         Add(2,"handover","Передать код и пояснение на ревью","signal","archive","model","patch","readme","tools");
         Add(2,"repair","Восстановить рабочую версию после правки","spectrum","reorder","model","review","search","layout");
         Add(2,"inspection","Проверить связанные правки в двух модулях","signal","patch","spectrum","reorder","identifiers","deduplicate");
+        list.Add(new("code", 0, "code-go-definition", "Перейти к определению и вернуться",
+            [
+                new("Найдите определение по реальному импорту", "code-definition code-back"),
+                new("Проверьте возвращённую позицию и выделите имя функции", "occurrence")
+            ],
+            FinishAfterRoute: true, Curated: true, Prepare: scene => scene.PrepareSymbolCase("code-go-definition")));
+        list.Add(new("code", 0, "code-rename-symbol", "Найти использования и переименовать функцию",
+            [
+                new("Найдите второй вызов функции", "code-references code-reference-next code-reference-open"),
+                new("Проверьте отмену и переименуйте функцию в scale_sample", "code-rename code-rename-cancel code-rename code-rename-confirm"),
+                new("Проверьте, что переименованный вызов открывает новое определение", "code-definition")
+            ], FinishAfterRoute: true, Curated: true, Prepare: scene => scene.PrepareSymbolCase("code-rename-symbol")));
         Add(2,"publish","Подготовить выдержки к разбору проекта","model","note","spectrum","archive","signal","readme");
     }
 }
