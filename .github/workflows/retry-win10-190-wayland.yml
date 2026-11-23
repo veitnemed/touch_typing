@@ -1,0 +1,47 @@
+name: Complete TouchTyping 1.9.0 Wayland qualification (no publish)
+on:
+  push:
+    branches: [qa/win10-190-wayland-retry]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  ubuntu-window:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: touchtyping-190-verified-candidate
+          path: ${{ runner.temp }}/archive
+          github-token: ${{ github.token }}
+          run-id: 45218762089
+      - name: Install GNOME and GTK test-session dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnome-shell gsettings-desktop-schemas gir1.2-gtk-4.0 python3-gi python3-gi-cairo python3-cairo dbus-x11 fonts-dejavu-core libgl1-mesa-dri
+      - name: Drive both desktop profiles using native GTK Wayland keyboard input
+        shell: bash
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/archive"
+          sha256sum -c SHA256SUMS.txt
+          echo 'f4bae44d6c2e57d6f9184e5edcd41ae74e7da29774a9cfa7925bc4f8a2a68f51  touch-typing-v1.9.0-linux-x64.tar.gz' | sha256sum -c
+          tar -xzf touch-typing-v1.9.0-linux-x64.tar.gz
+          cd touch-typing-linux-x64
+          patch --batch --fuzz=0 -p1 < "$GITHUB_WORKSPACE/qa/win10-wayland.patch"
+          bash check.sh --win10-desktop-only --output "$RUNNER_TEMP/win10-wayland-evidence" || {
+            tail -n 120 "$RUNNER_TEMP/win10-wayland-evidence/"*.log
+            exit 1
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: touchtyping-190-ubuntu-wayland
+          path: ${{ runner.temp }}/win10-wayland-evidence/

@@ -1,0 +1,237 @@
+diff -ruN '--exclude=__pycache__' base/qa/qa_win10_wayland.py patched-v2/qa/qa_win10_wayland.py
+--- a/qa/qa_win10_wayland.py
++++ b/qa/qa_win10_wayland.py
+@@ -0,0 +1,178 @@
++"""Hosted isolated GNOME Wayland probe, using the application's actual key capture."""
++from pathlib import Path
++import json
++import os
++
++from gi.repository import GdkPixbuf
++
++
++def exercise(app, chord, capture, output):
++    import touch_typing
++    expected_pkg = Path(__file__).resolve().parents[1]
++    assert Path(touch_typing.__file__).resolve().parent == expected_pkg
++    assert os.environ.get("WAYLAND_DISPLAY") == "training-qa"
++    assert app.window.get_display().__gtype__.name == "GdkWaylandDisplay"
++    assert app.window.is_active()
++    checks = []
++
++    def snapshot(name, widget=None):
++        path = output / (name + ".png")
++        capture(path, widget)
++        assert path.is_file() and path.stat().st_size > 1024
++        return path
++
++    def choose(target):
++        lab = app.lab
++        current = lab.os_selector.get_selected()
++        desired = ("ubuntu", "windows").index(target)
++        if current != desired:
++            assert lab.os_selector.grab_focus()
++            yield from chord("Space")
++            yield from chord("Down" if desired else "Up")
++            yield from chord("Enter")
++        assert lab.desktop_profile == target and lab.os_selector.get_selected() == desired
++        assert not lab.active
++        routes = {m["id"] for m in lab.missions if m["app"] == "workday"}
++        assert ("workday-windows-0" in routes) == (target == "windows")
++        assert ("workday-source-note" in routes) == (target == "ubuntu")
++        return lab
++
++    def start(lab, class_id, level, mission):
++        # Arrange a deterministic lesson; physical OS selection and key
++        # gestures below are not replaced with direct commands.
++        lab.picker.set_selected(next(i for i, c in enumerate(lab.classes) if c["id"] == class_id))
++        lab.level.set_selected(level)
++        lab.limit.set_selected(0)
++        lab.time_limit.set_selected(0)
++        lab.mission_picker.set_selected(next(i for i, (k, _) in enumerate(lab.choices) if k == mission))
++        yield
++        # Route setup is not a keyboard shortcut under test. The rebuilt
++        # chooser can briefly hold compositor focus after the result, so
++        # don't send F5 into that transition. Keep every lesson key physical.
++        assert app.lab is lab and lab.begin.get_mapped()
++        lab.start()
++        assert lab.state is not None and lab.active and not lab.state.get("startBlocked"), (
++            "mission start did not initialize", mission, app.banner.get_label())
++        assert lab.state["mission"] == mission, ("unexpected mission", lab.state["mission"], mission)
++        yield from app.await_lesson_capture(chord)
++        assert lab.surface.get_property("shortcuts-inhibited") and app.window.is_active()
++
++    def act(lab, task, key):
++        before = lab.state
++        assert before["task"]["id"] == task, (task, before["task"], before["status"])
++        assert lab.surface.get_property("shortcuts-inhibited"), ("capture lost", task)
++        yield from chord(key)
++        state = lab.state
++        assert state["solved"] == before["solved"] + 1, (task, state["status"], state["task"])
++        assert state["errors"] == before["errors"], (task, state["status"])
++        if not state["finished"]:
++            assert app.window.is_active() and not state["paused"]
++            assert lab.surface.get_property("shortcuts-inhibited"), ("capture lost after", task)
++        checks.append(task)
++        return state["scene"]
++
++    def rows(scene):
++        return {w["id"]: (w["app"], w["state"], w["workspace"]) for w in scene["windows"]}
++
++    def active(scene):
++        return rows(scene)[scene["activeWindow"]]
++
++    def windows_route(lab, frames):
++        scene = yield from act(lab, "win-start", "Super")
++        assert scene["desktopStyle"] == "win10" and scene["desktopOverlay"] == "start"
++        if frames:
++            snapshot("03-windows-start")
++            yield
++        scene = yield from act(lab, "win-overlay-open", "Enter")
++        chrome_id = scene["activeWindow"]
++        assert active(scene)[0] == "chrome" and not scene["desktopOverlay"]
++        scene = yield from act(lab, "win-explorer", "Super+E")
++        assert active(scene)[0] == "files" and not scene["desktopOverlay"]
++        ids = set(rows(scene))
++        if frames:
++            snapshot("04-windows-explorer")
++            yield
++        scene = yield from act(lab, "win-left", "Super+Left")
++        assert active(scene)[1] == "snapped-left" and scene["desktopOverlay"] == "snap"
++        assert scene["desktopOverlayWindows"] == [chrome_id]
++        if frames:
++            snapshot("05-windows-snap-assist")
++            yield
++        scene = yield from act(lab, "win-overlay-open", "Enter")
++        assert set(rows(scene)) == ids and {s for _, s, _ in rows(scene).values()} == {
++            "snapped-left", "snapped-right"
++        }
++        if frames:
++            snapshot("06-windows-snap-pair")
++            yield
++        scene = yield from act(lab, "win-maximize", "Super+Up")
++        assert active(scene)[1] == "maximized"
++        scene = yield from act(lab, "win-down", "Super+Down")
++        assert active(scene)[1] == "normal"
++        scene = yield from act(lab, "win-switch", "Alt+Tab")
++        assert active(scene)[0] == "files"
++        unchanged = rows(scene)
++        scene = yield from act(lab, "win-desktop", "Super+D")
++        assert scene["showDesktop"] and rows(scene) == unchanged
++        scene = yield from act(lab, "win-desktop", "Super+D")
++        assert not scene["showDesktop"] and rows(scene) == unchanged
++
++    lab = app.lab
++    assert lab.desktop_profile == "ubuntu"
++    snapshot("01-menu-ubuntu")
++    yield
++    lab = yield from choose("windows")
++    snapshot("02-menu-windows")
++    yield
++    yield from start(lab, "windows", 0, "windows-desktop-0")
++    yield from windows_route(lab, True)
++    assert lab.state["finished"] and lab.state["saved"] and lab.result
++    report = app.call("lab-result")
++    assert report["completed"] and report["solved"] == lab.state["solved"] == 10
++    snapshot("07-windows-saved-result")
++    yield
++
++    app.navigate("lab")
++    lab = app.lab
++    assert lab.desktop_profile == "windows"
++    yield from start(lab, "windows", 1, "windows-desktop-1")
++    yield from windows_route(lab, False)
++    scene = yield from act(lab, "win-task-view", "Super+Tab")
++    assert scene["desktopOverlay"] == "task-view"
++    snapshot("08-windows-task-view")
++    yield
++    scene = yield from act(lab, "win-new-desktop", "Super+Ctrl+D")
++    assert scene["workspace"] == 1 and scene["workspaceCount"] == 2
++    assert all(v[2] == 0 for v in rows(scene).values())
++    scene = yield from act(lab, "win-explorer", "Super+E")
++    assert active(scene)[0] == "files" and active(scene)[2] == 1
++    snapshot("09-windows-second-desktop")
++    yield
++    assert lab.stop(show=False) and lab.state["saved"]
++
++    app.navigate("lab")
++    lab = yield from choose("ubuntu")
++    yield from start(lab, "ubuntu", 1, "ubuntu-gnome-windows")
++    scene = lab.state["scene"]
++    assert scene["desktopStyle"] == "ubuntu" and scene["gnomeWindows"]
++    assert not scene["desktopOverlay"]
++    path = snapshot("10-ubuntu-gray-desktop", lab.desktop)
++    pix = GdkPixbuf.Pixbuf.new_from_file(str(path))
++    width, height = pix.get_width(), pix.get_height()
++    assert width >= 500 and height >= 200
++    data, stride, channels = pix.get_pixels(), pix.get_rowstride(), pix.get_n_channels()
++    rgb = [tuple(data[y*stride+x*channels:y*stride+x*channels+3])
++           for y in range(height//4, 3*height//4, 8) for x in range(65, 110, 4)]
++    near_gray = sum(28 <= min(v) <= 105 and max(v)-min(v) <= 18 for v in rgb)
++    assert near_gray >= len(rgb)*.6, (near_gray, len(rgb))
++    yield
++    scene = yield from act(lab, "tile-left", "Super+Left")
++    assert active(scene)[:2] == ("chrome", "left")
++    assert lab.stop(show=False) and lab.state["saved"]
++
++    proof = {"surface": "packaged GTK4 on isolated GNOME Wayland; Mutter RemoteDesktop keycodes",
++             "capture": "real GDK compositor inhibition; no substitute", "windowsMissionCredits": 10,
++             "virtualDesktops": 2, "ubuntuGraySamples": [near_gray, len(rgb)],
++             "profileChoicePhysical": True, "credits": len(checks)}
++    (output/"proof.json").write_text(json.dumps(proof, indent=2))
++    print(json.dumps(proof), flush=True)
+diff -ruN '--exclude=__pycache__' base/qa/test_lab_window.py patched-v2/qa/test_lab_window.py
+--- a/qa/test_lab_window.py
++++ b/qa/test_lab_window.py
+@@ -141,6 +141,10 @@
+                 self.window.present()
+                 yield
+             self.navigate('lab')
++            if '--win10-desktop-only' in sys.argv:
++                from qa_win10_wayland import exercise
++                yield from exercise(self, chord, capture_png, Path(os.environ['TOUCH_TYPING_QA_OUTPUT']))
++                return
+             if '--gnome-profile' in sys.argv or '--gnome-profile-custom' in sys.argv:
+                 yield from self.exercise_gnome_profile(chord, event, capture_png, Path(os.environ["TOUCH_TYPING_QA_OUTPUT"]))
+                 return
+diff -ruN '--exclude=__pycache__' base/qa_runner.py patched-v2/qa_runner.py
+--- a/qa_runner.py
++++ b/qa_runner.py
+@@ -30,6 +30,7 @@
+     parser.add_argument("--daily-use", action="store_true", help="Пройти сценарии VS Code и GNOME и сохранить реальные кадры")
+     parser.add_argument("--gnome-profile", action="store_true", help="Проверить учебные рабочие столы, окна и клавиши профиля GNOME")
+     parser.add_argument("--debug-day", action="store_true", help="Пройти обе миссии отладки с реальным снимком учебного терминала")
++    parser.add_argument("--win10-desktop-only", action="store_true", help="Check Win10 simulation on real GNOME Wayland")
+     parser.add_argument("--seed", type=int, default=7)
+     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
+     args = parser.parse_args()
+@@ -71,6 +72,7 @@
+             if args.gnome_profile: command.append("--gnome-profile")
+             if args.debug_day: command.append("--debug-day")
+             if args.full: command.append("--full")
++            if args.win10_desktop_only: command.append("--win10-desktop-only")
+             return subprocess.run(command, env=environment).returncode
+     return run_checks(args)
+ 
+@@ -128,7 +130,7 @@
+                 raise RuntimeError("Полная проверка требует исходники и SDK .NET 10.")
+             for name in projects:
+                 check(name, [dotnet, "run", "--project", str(tests / (name + ".csproj"))], timeout=300)
+-        if not args.terminal_only:
++        if not args.terminal_only and not args.win10_desktop_only:
+             check("missions", [sys.executable, str(tests / "test_live_missions.py")], timeout=300)
+             check("protocol", [sys.executable, str(tests / "test_practice.py")])
+         subprocess.run(["gsettings", "set", "org.gnome.desktop.input-sources", "sources",
+@@ -144,6 +146,12 @@
+                 raise RuntimeError("Тестовый GNOME не запустился. См. compositor.log.")
+             time.sleep(.1)
+         time.sleep(1)
++        if args.win10_desktop_only:
++            report["coverage"] = ["GNOME Wayland GTK Windows 10 simulation + separate Ubuntu gray route"]
++            ok = check("native-win10-desktop", [sys.executable, str(tests / "test_lab_window.py"),
++                                             "--win10-desktop-only"], timeout=300)
++            report["status"] = "passed" if ok else "failed"
++            return 0 if ok else 1
+         if args.reference_home:
+             report["coverage"].append("GTK 1006x863 home reference capture")
+             with tempfile.TemporaryDirectory(prefix="typing-reference-home-") as folder:
