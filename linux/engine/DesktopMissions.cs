@@ -35,6 +35,14 @@ internal static partial class LiveCourse
             "open-chrome pick:spectrum-report.txt link-open downloads link-next close-tab"),
         ["deliver"] = new("Перенести загруженный отчёт в проект и открыть его",
             "open-files file-home pick:Downloads file-open pick:spectrum-report.txt file-cut file-parent pick:project file-open file-paste file-open"),
+        ["note-source"] = new("Найти методику и скопировать её текст",
+            "open-chrome maximize pick:https://practice.local/spectrum link-open bookmark select-all copy"),
+        ["note-editor"] = new("Перенести методику в учебный файл notes.txt",
+            "open-code quick-open quick:notes.txt quick-choose select-all paste document-start save"),
+        ["note-check"] = new("Проверить сохранённый текст из терминала",
+            "open-terminal cmd:pwd cmd:cd~/home/student/project cmd:ls cmd:cat~notes.txt"),
+        ["note-reopen"] = new("Найти сохранённую заметку в проекте и снова открыть её",
+            "open-files file-home pick:project file-open pick:notes.txt file-open"),
         ["edit-report"] = new("Сохранить редакторскую пометку и проверить содержимое",
             "comment save open-terminal cmd:cd~/home/student/project cmd:head~-n~2~spectrum-report.txt"),
     };
@@ -56,6 +64,8 @@ internal static partial class LiveCourse
         Add("ubuntu",2,"archive","Проверить и восстановить рабочие материалы","fetch","deliver","recover","capture");
         Add("ubuntu",2,"return","Восстановить контекст после переключения столов","workspaces","sources","present","source","finish");
         Add("workday",0,"report","Доставить отчёт и проверить правку","fetch","deliver","edit-report","capture");
+        list.Add(new("workday", 0, "workday-source-note", "Перенести методику из браузера в заметку",
+            new[] { "note-source", "note-editor", "note-reopen", "note-check" }.Select(p => DesktopParts[p]).ToArray(), FinishAfterRoute: true));
         Add("workday",1,"analysis","Сопоставить отчёт с кодом проекта","desk","fetch","source","deliver","edit-report","present");
         Add("workday",2,"handover","Подготовить передачу рабочего проекта","workspaces","fetch","deliver","edit-report","file","capture","present");
     }

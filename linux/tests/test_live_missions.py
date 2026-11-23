@@ -189,8 +189,8 @@ class MissionTest(unittest.TestCase):
                 engine = Engine(verify=True)
                 try:
                     missions = engine.call("lab-catalog")["missions"]
-                    self.assertEqual(len(missions), 51)
-                    self.assertEqual(len({m["id"] for m in missions}), 51)
+                    self.assertEqual(len(missions), 52)
+                    self.assertEqual(len({m["id"] for m in missions}), 52)
                     for mission in missions:
                         with self.subTest(mission=mission["id"]):
                             self.walk(engine, mission)
@@ -201,6 +201,164 @@ class MissionTest(unittest.TestCase):
                     os.environ.pop("XDG_DATA_HOME", None)
                 else:
                     os.environ["XDG_DATA_HOME"] = original
+
+    def test_browser_note_is_copied_saved_and_restored_after_engine_exit(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        import xml.etree.ElementTree as ET
+
+        options = dict(app="workday", level=0, mode="sandbox", seconds=0,
+                       guidance="guided", mission="workday-source-note", seed=0)
+        target = "/home/student/project/notes.txt"
+        original = "spectrum\nsignal\nvector\nsignal\n"
+        source_url = "https://practice.local/spectrum"
+        method = (
+            "Спектр сигнала\n"
+            "Прямое преобразование возвращает комплексный спектр.\n"
+            "Центрированный спектр позволяет сопоставить частоты.\n"
+            "Материалы и отчёт доступны ниже."
+        )
+        sides = {"Ctrl": "RCtrl", "Alt": "LAlt", "Shift": "LShift", "Super": "LSuper"}
+
+        for platform, layout in (("linux", "EN"), ("windows", "RU")):
+            with self.subTest(platform=platform, layout=layout), tempfile.TemporaryDirectory() as directory, \
+                    patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+                engine = Engine(verify=True)
+
+                def chord(keys, char=""):
+                    for key in keys:
+                        state = engine.call("lab-key", key=key, pressed=True,
+                                            text=char if key == keys[-1] else "")
+                        self.assertFalse(engine.storage_error)
+                    for key in reversed(keys):
+                        state = engine.call("lab-key", key=key, pressed=False, text="")
+                        self.assertFalse(engine.storage_error)
+                    return state
+
+                def type_command(command):
+                    for char in command:
+                        chord(["Space" if char == " " else char.upper()], char)
+                    return chord(["Enter"])
+
+                def advance(state):
+                    task = state["task"]
+                    if task["keys"]:
+                        for _ in range(24):
+                            following = chord([sides.get(k, k) for k in task["keys"].split("+")])
+                            if following["solved"] != state["solved"]:
+                                break
+                    else:
+                        self.assertTrue(task["id"].startswith("command/"), task)
+                        following = type_command(task["text"])
+                    self.assertEqual(following["solved"], state["solved"] + 1, (task, following["status"]))
+                    self.assertEqual(following["errors"], state["errors"], (task, following["status"]))
+                    return following
+
+                def saved_file(state):
+                    return next(f["content"] for f in state["scene"]["terminal"]["files"] if f["path"] == target)
+
+                def active(state):
+                    return next(w for w in state["scene"]["windows"] if w["active"])
+
+                def saves():
+                    profile = Path(directory) / "TouchTypingStudio-QA" / "progress.xml"
+                    return [node for node in ET.parse(profile).findall("./ShortcutHistory/ShortcutAttempt")
+                            if node.findtext("Mission") == options["mission"]
+                            and node.findtext("Skill") == "lab/workday/save"
+                            and node.findtext("Correct") == "true"]
+
+                def start(resume=False):
+                    engine.call("configure", platform=platform, layout=layout)
+                    return engine.call("lab-start", **options, **{"continue": resume})
+
+                try:
+                    start()
+                    state = engine.call("lab-resume")
+                    milestones = []
+                    for _ in range(state["scenarioLength"]):
+                        task_id = state["task"]["id"]
+                        state = advance(state)
+                        if task_id == "copy":
+                            self.assertEqual((active(state)["url"], active(state)["body"]), (source_url, method))
+                            self.assertEqual(state["scene"]["clipboard"], method)
+                            milestones.append(task_id)
+                        elif task_id == "paste":
+                            self.assertEqual((active(state)["url"], active(state)["body"]), (target, method))
+                            self.assertEqual(saved_file(state), original)
+                            milestones.append(task_id)
+                        elif task_id == "save":
+                            self.assertEqual(saved_file(state), method)
+                            self.assertEqual((active(state)["cursor"], active(state)["anchor"]), (0, 0))
+                            self.assertEqual(len(saves()), 1)
+                            milestones.append(task_id)
+                            break
+                    self.assertEqual(milestones, ["copy", "paste", "save"])
+                    step = state["scenarioStep"]
+                    # Kill with stdin open: graceful shutdown would save again and mask a missing checkpoint.
+                    self.assertFalse(engine.process.stdin.closed)
+                    engine.process.kill()
+                    self.assertNotEqual(engine.process.wait(timeout=5), 0)
+                    engine.close()
+                    engine = Engine(verify=True)
+                    state = start(resume=True)
+                    self.assertEqual(state["scenarioStep"], step)
+                    self.assertEqual(saved_file(state), method)
+                    self.assertEqual((active(state)["url"], active(state)["body"]), (target, method))
+                    self.assertEqual((active(state)["cursor"], active(state)["anchor"]), (0, 0))
+                    self.assertEqual(state["scene"]["clipboard"], method)
+                    self.assertEqual(len(saves()), 1)
+                    state = engine.call("lab-resume")
+                    readback = reopened_note = False
+                    for _ in range(state["scenarioLength"]):
+                        if state["finished"]:
+                            break
+                        task_id = state["task"]["id"]
+                        if task_id == "command/cat notes.txt" and platform == "linux":
+                            # Even an extra trailing LF is wrong (terminal output trims it).
+                            self.assertEqual(active(chord(["LSuper", "2"]))["app"], "code")
+                            chord(["RCtrl", "A"])
+                            chord(["RCtrl", "V"])
+                            chord(["Enter"])
+                            dirty = chord(["RCtrl", "S"])
+                            self.assertEqual(saved_file(dirty), method + "\n")
+                            self.assertEqual(active(chord(["RCtrl", "LAlt", "T"]))["app"], "terminal")
+                            wrong = type_command("cat notes.txt")
+                            self.assertTrue(wrong["scene"]["terminal"]["lastSuccess"])
+                            self.assertEqual(wrong["scene"]["terminal"]["output"][-4:], method.splitlines())
+                            self.assertEqual(wrong["solved"], state["solved"])
+                            self.assertEqual(wrong["errors"], state["errors"] + 1)
+                            self.assertIn("заметка отличается", wrong["status"])
+                            self.assertFalse(wrong["finished"])
+                            self.assertEqual(active(chord(["LSuper", "2"]))["app"], "code")
+                            chord(["RCtrl", "A"])
+                            chord(["RCtrl", "V"])
+                            repaired = chord(["RCtrl", "S"])
+                            self.assertEqual(saved_file(repaired), method)
+                            state = chord(["RCtrl", "LAlt", "T"])
+                        state = advance(state)
+                        if task_id == "file-open" and active(state)["app"] == "code":
+                            self.assertEqual((active(state)["url"], active(state)["body"]), (target, method))
+                            reopened_note = True
+                        if task_id == "command/cat notes.txt":
+                            self.assertTrue(state["scene"]["terminal"]["lastSuccess"])
+                            self.assertEqual(state["scene"]["terminal"]["output"][-4:], method.splitlines())
+                            readback = True
+                    self.assertTrue(state["finished"])
+                    self.assertTrue(state["saved"])
+                    self.assertTrue(engine.call("lab-result")["completed"])
+                    self.assertEqual(state["mission"], options["mission"])
+                    self.assertTrue(reopened_note)
+                    self.assertTrue(readback)
+                    self.assertEqual(active(state)["app"], "terminal")
+                    self.assertEqual(saved_file(state), method)
+                    self.assertEqual(len(saves()), 1)
+                    engine.close()
+                    engine = Engine(verify=True)
+                    self.assertFalse(any(draft["mission"] == options["mission"]
+                                         for draft in engine.call("lab-catalog")["drafts"]))
+                    self.assertEqual(len(saves()), 1)
+                finally:
+                    engine.close()
 
     def test_file_transfer_survives_profile_restart(self):
         with tempfile.TemporaryDirectory() as directory:

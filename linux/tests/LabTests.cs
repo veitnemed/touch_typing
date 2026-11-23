@@ -139,7 +139,8 @@ internal static class LabTests
         foreach (int level in new[] { 0, 1, 2 })
         {
             var courses = LiveCourse.Missions.Where(m => m.App == app && m.Level == level).ToList();
-            Check(courses.Count == (app == "workday" ? 1 : 4), "Course count: " + app);
+            int expectedCourses = app == "workday" ? (level == 0 ? 2 : 1) : 4;
+            Check(courses.Count == expectedCourses, "Course count: " + app);
             foreach (var course in courses)
             foreach (int variant in Enumerable.Range(0, 3))
             foreach (string layout in new[] { "RU", "EN" })

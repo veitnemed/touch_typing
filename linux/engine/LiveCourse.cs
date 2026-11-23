@@ -6,8 +6,8 @@ using System.Text.Json;
 namespace TouchTypingStudio;
 
 internal sealed record LivePhase(string Title, string Route);
-internal sealed record LiveMission(string App, int Level, string Id, string Title, LivePhase[] Phases);
-internal sealed record LiveGoal(int Phase, LabTask Task, string Target, string Layout, bool VerifyReport = false, string LegacyTarget = null);
+internal sealed record LiveMission(string App, int Level, string Id, string Title, LivePhase[] Phases, bool FinishAfterRoute = false);
+internal sealed record LiveGoal(int Phase, LabTask Task, string Target, string Layout, bool VerifyReport = false, string LegacyTarget = null, string ArtifactPath = null);
 
 internal static partial class LiveCourse
 {
@@ -41,7 +41,9 @@ internal static partial class LiveCourse
                 }
                 var task = MakeTask(token, trial);
                 bool verifyReport = mission.Id == "workday-report" && task.Id == "command/head -n 2 spectrum-report.txt";
-                string original = Evidence(task, trial, verifyReport: verifyReport);
+                string artifactPath = mission.Id == "workday-source-note" && task.Id == "command/cat notes.txt"
+                    ? "/home/student/project/notes.txt" : null;
+                string original = Evidence(task, trial, verifyReport: verifyReport, artifactPath: artifactPath);
                 var before = trial.Clone();
                 if (IsPickerToken(token))
                 {
@@ -55,9 +57,9 @@ internal static partial class LiveCourse
                 else if (token == "bookmark" && trial.Active.SavedBookmarks.Contains(trial.Active.Url)) continue;
                 else if (token == "first-tab" && trial.Active.ActiveTab == 0 || token == "last-tab" && trial.Active.ActiveTab == trial.Active.Tabs.Count - 1) continue;
                 else if (!Demonstrate(task, trial)) throw new InvalidOperationException(mission.Id + ": недоступно " + token);
-                string proof = Evidence(task, trial, verifyReport: verifyReport);
+                string proof = Evidence(task, trial, verifyReport: verifyReport, artifactPath: artifactPath);
                 if (original == proof) { trial = before; continue; }
-                goals.Add(new(phase, task, proof, before.Layout, verifyReport, verifyReport ? Evidence(task, trial) : null));
+                goals.Add(new(phase, task, proof, before.Layout, verifyReport, verifyReport ? Evidence(task, trial) : null, artifactPath));
             }
         }
         if (goals.Count < 20) throw new InvalidOperationException(mission.Id + ": меньше 20 результатов");
@@ -125,7 +127,7 @@ internal static partial class LiveCourse
         return true;
     }
 
-    internal static string Evidence(LabTask task, LabScene scene, string equivalentCommand = null, bool verifyReport = false)
+    internal static string Evidence(LabTask task, LabScene scene, string equivalentCommand = null, bool verifyReport = false, string artifactPath = null)
     {
         var w = scene.Active;
         string app = w?.App ?? "", action = task.Action;
@@ -161,6 +163,8 @@ internal static partial class LiveCourse
             "save" => new { w?.Url, w?.Tab?.SavedBody },
             _ => new { app, w?.Focus, w?.OptionIndex, w?.Url, w?.Cursor, w?.View, w?.Find, scene.Overview, scene.ScreenshotReady }
         };
-        return JsonSerializer.Serialize(value);
+        // A matching terminal display can omit trailing newlines. The artifact
+        // still has to be the exact saved bytes expected for this exercise.
+        return JsonSerializer.Serialize(artifactPath == null ? value : new { state = value, file = scene.Terminal.ReadFile(artifactPath) });
     }
 }

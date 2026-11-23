@@ -22,12 +22,12 @@ internal sealed class LabRun
     private int variant;
     private string initialLayout, attemptLayout;
     private bool initialVirtual;
-    internal bool HasDraft => trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent));
+    internal bool HasDraft => !CompletedRoute && trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask;
     private double? activeSince;
-    private bool stopped, superUsed;
+    private bool stopped, superUsed, finishSingleRoute;
     private int taskInBlock;
     internal readonly string Session = Guid.NewGuid().ToString("N");
     internal readonly string App, Mode;
@@ -54,7 +54,7 @@ internal sealed class LabRun
     internal string MissionId => mission?.Id;
     internal string PhaseTitle => mission == null || pending.Count == 0 ? "" : mission.Phases[pending[0].Phase].Title;
     private int missionLength;
-    internal string[] Objectives => mission == null ? [] : mission.Phases.Skip(pending[0].Phase).Select(phase => phase.Title).ToArray();
+    internal string[] Objectives => mission == null || pending.Count == 0 ? [] : mission.Phases.Skip(pending[0].Phase).Select(phase => phase.Title).ToArray();
     internal readonly List<ShortcutAttempt> Attempts = [];
     internal LabTask Task { get; private set; }
     internal bool Paused { get; private set; } = true;
@@ -66,11 +66,12 @@ internal sealed class LabRun
     internal int Errors { get; private set; }
     internal int Block { get; private set; } = 1;
     internal string ScenarioTitle => mission?.Title ?? "";
-    internal int ScenarioStep => missionLength - pending.Count + 1;
+    internal int ScenarioStep => Math.Min(missionLength, missionLength - pending.Count + 1);
     internal int ScenarioLength => missionLength;
     internal int Seconds => TimeLimit > 0 ? Math.Min(Elapsed, TimeLimit) : Elapsed;
     private bool ReachedLimit => TimeLimit > 0 && Seconds >= TimeLimit || ActionLimit > 0 && Solved >= ActionLimit;
-    internal bool Finished => stopped || !restoring && ReachedLimit;
+    private bool CompletedRoute => finishSingleRoute && mission?.FinishAfterRoute == true && pending.Count == 0;
+    internal bool Finished => stopped || !restoring && (ReachedLimit || CompletedRoute);
     internal int Remaining => TimeLimit == 0 ? 0 : Math.Max(0, TimeLimit - Seconds);
     internal string[] Held => held.ToArray();
 
@@ -83,7 +84,11 @@ internal sealed class LabRun
         Guidance = guidance == "independent" ? guidance : "guided";
         this.random = random ?? Random.Shared; this.clock = clock ?? (() => Environment.TickCount64);
         past = history.Where(attempt => attempt.Skill?.StartsWith("lab/" + app + "/", StringComparison.Ordinal) == true).ToArray();
-        requestedMission = draft?.Mission ?? missionId; dockProfile = draft?.Dock ?? dock; layoutBinding = draft?.LayoutKey ?? layoutKey;
+        requestedMission = draft?.Mission ?? missionId;
+        // The explicit unlimited project ends once its artifact is verified.
+        // Timed and action-limit sessions continue to honor the chosen length.
+        finishSingleRoute = !string.IsNullOrEmpty(requestedMission) && TimeLimit == 0 && ActionLimit == 0;
+        dockProfile = draft?.Dock ?? dock; layoutBinding = draft?.LayoutKey ?? layoutKey;
         variant = draft?.Variant ?? -1; restoring = draft != null;
         Scene = new LabScene(app == "workday" ? "ubuntu" : app, draft?.Layout ?? layout) { LayoutKey = layoutKey, LayoutIsVirtual = draft?.VirtualLayout ?? false };
         if (dock != null) Scene.Dock = dock;
@@ -188,6 +193,8 @@ internal sealed class LabRun
         if (submitting && !Scene.Terminal.LastSuccess) return Miss(key, Scene.Active.Status);
         if (matches && watching?.Any(item => item.Goal.Task == Task && item.Goal.VerifyReport) == true)
             return Miss(key, "Команда выполнена, но отчёт не совпадает с заданием. Проверьте весь сохранённый файл и папку «Загрузки».");
+        if (matches && watching?.Any(item => item.Goal.Task == Task && item.Goal.ArtifactPath != null) == true)
+            return Miss(key, "Сохранённая заметка отличается от исходника. Вернитесь в редактор, вставьте скопированный текст целиком и сохраните файл.");
         if (!changed) return Miss(key, "Здесь эта клавиша не выполняет действие.");
         Feedback = "ready"; LastKey = ""; Status = ""; return null;
     }
@@ -234,7 +241,8 @@ internal sealed class LabRun
     {
         if (mission == null) return;
         var eligible = Guidance == "independent" ? pending.TakeWhile(goal => goal.Phase == pending[0].Phase) : pending.Take(1);
-        watching = eligible.Select(goal => (goal, LiveCourse.Evidence(goal.Task, Scene, verifyReport: goal.VerifyReport && !replayLegacyReport))).ToList();
+        watching = eligible.Select(goal => (goal, LiveCourse.Evidence(goal.Task, Scene, verifyReport: goal.VerifyReport && !replayLegacyReport,
+            artifactPath: goal.ArtifactPath))).ToList();
     }
 
     private ShortcutAttempt Observe(string key, string equivalentCommand = null, bool acceptExistingUrlSelection = false)
@@ -244,9 +252,11 @@ internal sealed class LabRun
         {
             bool strictReport = goal.VerifyReport && !replayLegacyReport;
             string target = goal.VerifyReport && replayLegacyReport ? goal.LegacyTarget : goal.Target;
-            if (before == target && !(acceptExistingUrlSelection && goal.Task.Id == "url")) continue;
+            bool recheckingArtifact = goal.ArtifactPath != null && goal.Task == Task && equivalentCommand != null;
+            if (goal.ArtifactPath != null && !recheckingArtifact) continue;
+            if (before == target && !recheckingArtifact && !(acceptExistingUrlSelection && goal.Task.Id == "url")) continue;
             string command = goal.Task == Task ? equivalentCommand : null;
-            if (LiveCourse.Evidence(goal.Task, Scene, command, strictReport) != target) continue;
+            if (LiveCourse.Evidence(goal.Task, Scene, command, strictReport, goal.ArtifactPath) != target) continue;
             // Published drafts retain earned progress, but a report receipt is only issued
             // when the reconstructed workspace also meets today's verification rules.
             if (goal.VerifyReport && (strictReport || LiveCourse.Evidence(goal.Task, Scene, command, verifyReport: true) == goal.Target))
@@ -287,11 +297,19 @@ internal sealed class LabRun
     private void Next()
     {
         var courses = LiveCourse.Missions.Where(m => m.App == App && m.Level == Level).ToArray();
+        if (CompletedRoute)
+        {
+            Stop();
+            return; // Keep the verified artifact in the final scene snapshot.
+        }
         if (mission == null || pending.Count == 0)
         {
             var last = mission?.Id;
-            var available = courses.Where(m => !used.Contains(m.Id)).ToArray();
-            if (available.Length == 0) { used.Clear(); available = courses.Where(m => m.Id != last || courses.Length == 1).ToArray(); }
+            // Standalone projects are selected from the catalog, not injected
+            // into a learner's existing continuous exercise rotation.
+            var rotation = courses.Where(m => !m.FinishAfterRoute).ToArray();
+            var available = rotation.Where(m => !used.Contains(m.Id)).ToArray();
+            if (available.Length == 0) { used.Clear(); available = rotation.Where(m => m.Id != last || rotation.Length == 1).ToArray(); }
             var recent = past.Concat(Attempts).Where(a => a.Mission != null).Select(a => a.Mission).Reverse().Distinct().Take(2).ToHashSet();
             var fresh = available.Where(m => !recent.Contains(m.Id)).ToArray();
             if (fresh.Length > 0) available = fresh;
@@ -360,7 +378,7 @@ internal sealed class LabRun
     }
 
     internal LabSessionRecord SessionRecord() => new() { Session = Session, App = App, Mode = Mode, Level = Level, Date = DateTime.Now,
-        Seconds = Seconds, Solved = Solved, Errors = Errors, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Guidance = Guidance, Completed = ReachedLimit };
+        Seconds = Seconds, Solved = Solved, Errors = Errors, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Guidance = Guidance, Completed = ReachedLimit || CompletedRoute };
 
     internal object Result(IEnumerable<LabSessionRecord> sessions, IEnumerable<LabSessionRecord> records = null)
     {
@@ -368,7 +386,7 @@ internal sealed class LabRun
         var previousBest = matching.Where(item => item.Session != Session && item.Completed)
             .OrderByDescending(item => item.Solved).ThenBy(item => item.Errors).FirstOrDefault();
         int previousRecord = previousBest?.Solved ?? 0;
-        bool complete = ReachedLimit;
+        bool complete = ReachedLimit || CompletedRoute;
         bool better = complete && (previousBest == null || Solved > previousBest.Solved || Solved == previousBest.Solved && Errors < previousBest.Errors);
         return new { App, Mode, Level, Solved, Errors, Seconds, TimeLimit, ActionLimit, Guidance, completed = complete,
             accuracy = Solved + Errors == 0 ? 0 : Math.Round(100.0 * Solved / (Solved + Errors), 1),

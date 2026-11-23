@@ -28,6 +28,8 @@ class LabWindowTest(Studio):
         self.received[(keycode, False)] = self.received.get((keycode, False), 0) + 1
         return result
     def call(self, operation, **payload):
+        if operation == "configure" and "--gallery" in sys.argv:
+            payload["dock"] = ["chrome", "code", "terminal", "files"]
         if operation == "lab-start":
             payload["seed"] = int(os.environ.get("TOUCH_TYPING_QA_SEED", "7"))
         return super().call(operation, **payload)
@@ -47,7 +49,8 @@ class LabWindowTest(Studio):
             next(self.steps)
             return GLib.SOURCE_CONTINUE
         except StopIteration:
-            print('PASS native GTK terminal editing' if '--terminal-only' in sys.argv else
+            print('PASS native GTK gallery' if '--gallery' in sys.argv else
+                  'PASS native GTK terminal editing' if '--terminal-only' in sys.argv else
                   'PASS native GTK Live classes, capture, task state, RU/EN, pause, results and screenshots',flush=True)
         except Exception:
             traceback.print_exc()
@@ -106,6 +109,10 @@ class LabWindowTest(Studio):
                 self.window.present()
                 yield
             self.navigate('lab')
+            if '--gallery' in sys.argv:
+                output = Path(os.environ['TOUCH_TYPING_QA_OUTPUT'])
+                yield from self.capture_gallery(chord, capture_png, output)
+                return
             if '--terminal-only' in sys.argv:
                 output = Path(os.environ['TOUCH_TYPING_QA_OUTPUT'])
                 yield from self.exercise_terminal(chord, hold, capture_png, output)
@@ -267,6 +274,66 @@ class LabWindowTest(Studio):
                 self.stop()
                 assert self.result_kind=='shortcuts'
         finally:call(session,api+'.Session','Stop')
+
+    def capture_gallery(self, chord, capture_png, output):
+        lab = self.lab
+        for _ in range(12):
+            yield
+        capture_png(output / "live-catalog.png")
+        for app, stage_name in (("ubuntu", "desktop"), ("terminal", "terminal"), ("chrome", "browser"),
+                                ("code", "editor"), ("workday", "workday")):
+            lab = self.lab
+            lab.picker.set_selected(next(i for i,row in enumerate(lab.classes) if row["id"] == app))
+            lab.level.set_selected(0)
+            lab.limit.set_selected(0)
+            if app == "ubuntu":
+                lab.mission_picker.set_selected(next(i for i,row in enumerate(lab.choices)
+                                                     if row[0] == "ubuntu-restore"))
+            if app == "workday":
+                lab.mission_picker.set_selected(next(i for i,row in enumerate(lab.choices)
+                                                     if row[0] == "workday-report"))
+            lab.start()
+            for _ in range(45):
+                yield
+            if lab.state["paused"] and not self.window.is_active():
+                yield from chord("Enter")
+            for _ in range(100):
+                if not lab.state["paused"]:
+                    break
+                yield
+            assert lab.state["app"] == app and not lab.state["paused"], (app, lab.status.get_label())
+
+            def active():
+                return next((w["app"] for w in lab.state["scene"]["windows"] if w["active"]), None)
+
+            if app == "ubuntu":
+                if active() is not None:
+                    yield from chord("Super+D")
+                assert active() is None or lab.state["scene"]["showDesktop"]
+            else:
+                if app == "workday":
+                    assert lab.state["task"]["keys"], lab.state["task"]
+                    yield from chord(lab.state["task"]["keys"])
+                assert active() == ("chrome" if app == "workday" else app), (app, active())
+            for _ in range(8):
+                yield
+            capture_png(output / ("live-" + stage_name + ".png"))
+            if app == "ubuntu":
+                yield from chord("Super+4")
+                assert active() == "files", lab.state["scene"]
+                for _ in range(8):
+                    yield
+                capture_png(output / "live-files.png")
+            lab.stop()
+            assert lab.result
+            self.navigate("lab")
+            for _ in range(8):
+                yield
+        for page in ("typing", "editor", "progress"):
+            self.navigate(page)
+            for _ in range(10):
+                yield
+            capture_png(output / ("studio-" + page + ".png"))
 
     def exercise_terminal(self, chord, hold, capture_png, output):
         from gi.repository import Gtk

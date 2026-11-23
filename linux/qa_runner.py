@@ -20,6 +20,7 @@ def main():
     parser.add_argument("--timed", action="store_true", help="Дополнительно пройти настоящий подход на 180 секунд")
     parser.add_argument("--full", action="store_true", help="Запустить C# стресс-тесты из исходников, требуется SDK .NET 10")
     parser.add_argument("--terminal-only", action="store_true", help="Проверить ввод в окно терминала на 1366×768")
+    parser.add_argument("--gallery", action="store_true", help="Снимки открытых рабочих областей GTK")
     parser.add_argument("--save-retry", action="store_true", help="Включить проверку закрытия при ошибке сохранения")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
@@ -52,6 +53,7 @@ def main():
             if args.timed: command.append("--timed")
             if args.terminal_only: command.append("--terminal-only")
             if args.save_retry: command.append("--save-retry")
+            if args.gallery: command.append("--gallery")
             if args.full: command.append("--full")
             return subprocess.run(command, env=environment).returncode
     return run_checks(args)
@@ -126,6 +128,15 @@ def run_checks(args):
                 raise RuntimeError("Тестовый GNOME не запустился. См. compositor.log.")
             time.sleep(.1)
         time.sleep(1)
+        if args.gallery:
+            report["coverage"].append("GTK screenshots of all practice environments")
+            with tempfile.TemporaryDirectory(prefix="typing-gallery-") as folder:
+                previous = environment["XDG_DATA_HOME"]
+                environment["XDG_DATA_HOME"] = folder
+                try:
+                    check("native-gallery", [sys.executable, str(tests / "test_lab_window.py"), "--gallery"])
+                finally:
+                    environment["XDG_DATA_HOME"] = previous
         if args.terminal_only:
             check("native-terminal", [sys.executable, str(tests / "test_lab_window.py"), "--terminal-only"])
             if args.save_retry:
