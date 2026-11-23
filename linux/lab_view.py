@@ -417,7 +417,7 @@ class DesktopView(Gtk.Widget):
             field(line, body_field, left, top, available, 14 * scale, "#334154", offset=offset,
                        focused=body_field["cursor"] != body_field["anchor"])
             top += 23 * scale
-            offset += self.units(line) + line_break
+            offset += self.units(line) + 1
         top += 12
         entries = window.get("entries", [])
         visible = max(1, int((y + h - body_top - y - 18) / (33 * scale)))
