@@ -60,12 +60,16 @@ jobs:
           & (Join-Path $env:GITHUB_WORKSPACE 'windows/Capture-HomeReference.ps1') `
             -Application (Join-Path $appDir 'TouchTyping.exe') -CodeTheme -AdjustHostedDisplay `
             -ClientWidth 1366 -ClientHeight 768 -OutputDirectory $out
+          $frames = Join-Path $out 'native-reference-evidence'
+          foreach ($file in @('editor-theme-03-add-task-selected.png','editor-theme-03-add-task-selected-viewport.png')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $frames $file) -PathType Leaf)) { throw "Missing native frame $file" }
+          }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: wpf-python-editor-evidence
           path: |
-            ${{ runner.temp }}/wpf-editor-evidence/*.png
+            ${{ runner.temp }}/wpf-editor-evidence/native-reference-evidence/*.png
             ${{ runner.temp }}/wpf-editor-evidence/*.log
             ${{ runner.temp }}/wpf-editor-evidence/report.json
           if-no-files-found: warn
