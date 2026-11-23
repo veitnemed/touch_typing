@@ -7,8 +7,9 @@ TOUCH_TYPING_QA_OUTPUT selects an existing directory for the preview images.
 import os
 from pathlib import Path
 import sys
+import time
 import traceback
-from gi.repository import Gio, GLib
+from gi.repository import Gio, GLib, Gtk
 from touch_typing import Studio
 from platform_linux import PHYSICAL
 
@@ -33,13 +34,47 @@ class LabWindowTest(Studio):
         if operation == "lab-start":
             payload["seed"] = int(os.environ.get("TOUCH_TYPING_QA_SEED", "7"))
         return super().call(operation, **payload)
+    def capture_widget_png(self, path, widget=None):
+        # GtkWidgetPaintable is populated on a widget's rendered frame. A mapped
+        # widget can briefly produce no node just after a layout/style update.
+        # Keep the paintable alive across frame dispatches rather than passing
+        # None to the renderer or replacing the evidence with a synthetic image.
+        target = self.window if widget is None else widget
+        paintable = Gtk.WidgetPaintable.new(target)
+        context = GLib.MainContext.default()
+        deadline = time.monotonic() + 1.25
+        attempts = 0
+        while True:
+            width, height = paintable.get_intrinsic_width(), paintable.get_intrinsic_height()
+            renderer = self.window.get_renderer()
+            if self.window.get_mapped() and target.get_mapped() and width > 0 and height > 0 and renderer:
+                snapshot = Gtk.Snapshot()
+                paintable.snapshot(snapshot, width, height)
+                node = snapshot.to_node()
+                if node is not None:
+                    texture = renderer.render_texture(node, None)
+                    if not texture.save_to_png(str(path)):
+                        raise RuntimeError(f"Cannot write actual GTK snapshot: {path}")
+                    return
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"No rendered GTK frame for {path} after {attempts} redraw requests "
+                    f"(window mapped={self.window.get_mapped()}, widget mapped={target.get_mapped()}, "
+                    f"intrinsic={width}×{height})")
+            attempts += 1
+            target.queue_draw()
+            self.window.queue_draw()
+            # The exercise's own GLib timer source cannot dispatch recursively.
+            # Permit frame/layout sources to run between snapshot attempts.
+            following_frame = time.monotonic() + .025
+            while time.monotonic() < following_frame:
+                if not context.iteration(False):
+                    time.sleep(.003)
+
     def failure_image(self):
-        from gi.repository import Gtk
         output = Path(os.environ.get("TOUCH_TYPING_QA_OUTPUT", "."))
-        paintable = Gtk.WidgetPaintable.new(self.window)
-        snapshot = Gtk.Snapshot()
-        paintable.snapshot(snapshot, paintable.get_intrinsic_width(), paintable.get_intrinsic_height())
-        self.window.get_renderer().render_texture(snapshot.to_node(), None).save_to_png(str(output / "failure-window.png"))
+        self.capture_widget_png(output / "failure-window.png")
+
     def smoke_test(self):
         self.steps=self.exercise()
         GLib.timeout_add(12,self.advance)
@@ -98,11 +133,7 @@ class LabWindowTest(Studio):
                 event(key, False)
             for _ in range(5):
                 yield
-        def capture_png(path, widget=None):
-            paintable=__import__('gi').repository.Gtk.WidgetPaintable.new(widget or self.window)
-            snapshot=__import__('gi').repository.Gtk.Snapshot()
-            paintable.snapshot(snapshot,paintable.get_intrinsic_width(),paintable.get_intrinsic_height())
-            self.window.get_renderer().render_texture(snapshot.to_node(),None).save_to_png(str(path))
+        capture_png = self.capture_widget_png
         try:
             if not self.window.is_active():
                 yield from chord('Esc')
