@@ -76,7 +76,7 @@
          Chord("LCtrl+U");
          foreach (char c in "abcde") Send(Character(c));
          Key("Home"); Key("Right"); Key("Right");
-@@ -435,6 +462,141 @@
+@@ -435,6 +462,175 @@
              "Reopen and re-save do not duplicate the draft");
      }
  
@@ -112,13 +112,47 @@
 +        CheckTerminalState("abcd", 3);
 +        Key("Left");
 +        CheckTerminalState("abcd", 2);
-+        CaptureReferenceFrame(label + "-caret-between-b-c");
++        CaptureExactTerminalFrame(label + "-caret-between-b-c", "abcd", 2);
 +        Key(op);
 +        CheckTerminalState(backspace ? "acd" : "abd", backspace ? 1 : 2);
 +        Send(Character('X'));
 +        CheckTerminalState(backspace ? "aXcd" : "abXd", backspace ? 2 : 3);
-+        CaptureReferenceFrame(label + "-after-insert");
++        CaptureExactTerminalFrame(label + "-after-insert", backspace ? "aXcd" : "abXd", backspace ? 2 : 3);
 +        Check(true, "Exact " + origin + " " + op + " gives " + (backspace ? "aXcd at caret 2" : "abXd at caret 3"));
++    }
++
++    private static void CaptureExactTerminalFrame(string label, string text, int caret)
++    {
++        if (evidenceDirectory == null || app.HasExited || GetForegroundWindow() != trainer)
++            throw new InvalidOperationException("Exact terminal screenshot requires the owned foreground trainer.");
++        CaptureRect client;
++        var origin = new CapturePoint();
++        if (!GetClientRect(trainer, out client) || !ClientToScreen(trainer, ref origin))
++            throw new InvalidOperationException("Unable to read actual foreground client geometry.");
++        var actual = new Rectangle(origin.X + client.Left, origin.Y + client.Top,
++            client.Right - client.Left, client.Bottom - client.Top);
++        var monitor = System.Windows.Forms.Screen.FromHandle(trainer).Bounds;
++        var visible = Rectangle.Intersect(actual, monitor);
++        var scene = Find("LabDesktop").Current;
++        var sceneBounds = scene.BoundingRectangle;
++        Console.WriteLine("TERMINAL CAMERA " + label + " client=" + actual + " monitor=" + monitor +
++            " visible=" + visible + " scene=" + sceneBounds + " dpi=" + GetDpiForWindow(trainer));
++        if (visible.Width <= 0 || visible.Height <= 0 || scene.IsOffscreen || sceneBounds.IsEmpty ||
++            sceneBounds.Width <= 0 || sceneBounds.Height <= 0 ||
++            !new System.Windows.Rect(visible.X, visible.Y, visible.Width, visible.Height).Contains(sceneBounds))
++            throw new InvalidOperationException("The complete visible terminal scene must fit inside the capture, including its custom-drawn caret.");
++        CheckTerminalState(text, caret);
++        using (var bitmap = new Bitmap(visible.Width, visible.Height))
++        using (var graphics = Graphics.FromImage(bitmap))
++        {
++            graphics.CopyFromScreen(visible.X, visible.Y, 0, 0, visible.Size);
++            if (GetForegroundWindow() != trainer)
++                throw new InvalidOperationException("Trainer lost foreground during terminal screenshot.");
++            CheckTerminalState(text, caret);
++            bitmap.Save(Path.Combine(evidenceDirectory, label + ".png"), ImageFormat.Png);
++        }
++        Console.WriteLine("CAPTURE " + label + " " + visible.Width + "x" + visible.Height +
++            " physical px 1:1; entire terminal scene verified, caret=" + caret);
 +    }
 +
 +    private static void CheckHostedNormalEditor(string executable)
