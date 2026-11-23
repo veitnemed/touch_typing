@@ -28,6 +28,12 @@ internal static class LiveUiSmoke
         if (arguments.Length == 0) { Console.Error.WriteLine("Pass the full path to TouchTyping.exe."); return 2; }
         try
         {
+            if (arguments.Contains("--hosted-normal-launch"))
+            {
+                CheckHostedNormalLaunch(Path.GetFullPath(arguments[0]));
+                Console.WriteLine("PASS: " + count + " normal-launch assertions on a fresh hosted Windows profile");
+                return 0;
+            }
             bool referenceBrowser = arguments.Contains("--reference-browser");
             bool dailyUse = arguments.Contains("--daily-use");
             bool gnomeProfile = arguments.Contains("--gnome-profile");
@@ -296,6 +302,113 @@ internal static class LiveUiSmoke
                 app.Dispose();
             }
         }
+    }
+
+    private static void OpenNormalStarter(string executable)
+    {
+        if (Process.GetProcessesByName("TouchTyping").Length != 0)
+            throw new InvalidOperationException("A TouchTyping process already exists; refusing to reuse it.");
+        var package = Path.GetDirectoryName(executable);
+        var launcher = Path.Combine(package, "Start-Live.cmd");
+        var lines = File.ReadAllLines(launcher);
+        Check(lines.SequenceEqual(new[] { "@echo off", "start \"\" \"%~dp0TouchTyping.exe\" --live" }),
+            "Extracted normal launcher calls the sibling EXE with --live and no QA switches");
+        var cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+        using (var start = Process.Start(new ProcessStartInfo(cmd, "/d /c Start-Live.cmd") {
+            WorkingDirectory = package, UseShellExecute = false, CreateNoWindow = true
+        }))
+        {
+            Check(start.WaitForExit(5000) && start.ExitCode == 0, "Normal launcher completed successfully");
+        }
+        var timeout = Stopwatch.StartNew();
+        while (app == null && timeout.ElapsedMilliseconds < 12000)
+        {
+            var candidates = Process.GetProcessesByName("TouchTyping");
+            foreach (var p in candidates)
+            {
+                string path = null;
+                try { if (!p.HasExited) path = p.MainModule.FileName; }
+                catch (System.ComponentModel.Win32Exception) { }
+                catch (InvalidOperationException) { }
+                if (path != null && string.Equals(Path.GetFullPath(path), executable, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (app != null) throw new InvalidOperationException("Multiple trainer processes from the expected extracted path.");
+                    app = p;
+                }
+                else p.Dispose();
+            }
+            if (app == null) Wait(80);
+        }
+        Check(app != null, "Only the expected extracted trainer executable is selected");
+        Console.WriteLine("Normal trainer PID=" + app.Id + " path=" + executable);
+        Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "normal trainer window", 12000);
+        window = AutomationElement.FromHandle(trainer);
+        Check(window.Current.ProcessId == app.Id, "Native automation root belongs to the normal trainer PID");
+        Focus();
+        Until(delegate { return Exists("LabStart"); }, "normal Live chooser draws");
+    }
+
+    private static void CheckHostedNormalLaunch(string executable)
+    {
+        Check(Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT") == "github-hosted" &&
+            Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true" &&
+            Environment.GetEnvironmentVariable("TOUCH_TYPING_NORMAL_LAUNCH_ISOLATED_JOB") == "1",
+            "Normal-profile check only runs in the dedicated fresh hosted job");
+        Check(string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT")),
+            "No test profile override is present");
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        Check(Path.IsPathRooted(local) && Directory.Exists(local), "Windows LocalApplicationData exists for the actual runner account");
+        var root = Path.Combine(local, "TouchTypingStudio");
+        var qa = Path.Combine(local, "TouchTypingStudio-QA");
+        Check(!Directory.Exists(root) && !File.Exists(root) &&
+            !Directory.Exists(qa) && !File.Exists(qa),
+            "Fresh hosted profile has neither normal data nor a sidecar/QA profile before launch");
+        OpenNormalStarter(executable);
+        Invoke("LabClass-terminal");
+        Select("LabMode", 1); // Guided.
+        Select("LabLevel", 0);
+        Select("LabDuration", 0);
+        Select("LabTimer", 0);
+        Key("F5");
+        Until(delegate { return Exists("LabDesktop") && Name("LabPause").StartsWith("Пауза"); }, "normal terminal lesson");
+        VirtualEnglish();
+        Chord("LCtrl+U");
+        foreach (char c in "abcde") Send(Character(c));
+        Key("Home"); Key("Right"); Key("Right");
+        CheckTerminalState("abcde", 2);
+        RequestClose();
+        Until(delegate { return ExitDialog() != null; }, "normal save and close");
+        InvokeDialog("LabExitSave");
+        Check(app.WaitForExit(6000) && app.ExitCode == 0, "First normal trainer saved and exited normally");
+        app.Dispose();
+        app = null;
+        var file = Path.Combine(root, "progress.xml");
+        Check(File.Exists(file) && !File.Exists(file + ".writing") && !Directory.Exists(file + ".writing"),
+            "Profile saved at actual runner LocalApplicationData without a leftover sidecar");
+        Check(!Directory.Exists(qa) && !File.Exists(qa), "No QA profile was created");
+        var xml = new XmlDocument { XmlResolver = null };
+        xml.Load(file);
+        Check(xml.SelectNodes("/StudioProfile/LiveDrafts/LiveDraft[App='terminal']").Count == 1,
+            "Normal persisted XML contains one unfinished terminal draft");
+        Console.WriteLine("Normal runtime profile=" + file);
+
+        OpenNormalStarter(executable);
+        Invoke("LabClass-terminal");
+        Select("LabMode", 1);
+        Select("LabLevel", 0);
+        SelectMissionByName("Продолжить с сохранённого места");
+        Key("F5");
+        Until(delegate { return Exists("LabDesktop") && Name("LabPause").StartsWith("Пауза"); }, "normal restored terminal");
+        CheckTerminalState("abcde", 2);
+        Key("Delete");
+        CheckTerminalState("abde", 2);
+        RequestClose();
+        Until(delegate { return ExitDialog() != null; }, "restored normal save and close");
+        InvokeDialog("LabExitSave");
+        Check(app.WaitForExit(6000) && app.ExitCode == 0, "Restored trainer exits cleanly");
+        xml.Load(file);
+        Check(xml.SelectNodes("/StudioProfile/LiveDrafts/LiveDraft[App='terminal']").Count == 1,
+            "Reopen and re-save do not duplicate the draft");
     }
 
     private static void CheckReferenceBrowser()

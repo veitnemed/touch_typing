@@ -236,6 +236,42 @@ jobs:
           name: windows-evidence
           path: ${{ runner.temp }}/windows-evidence/
 
+  windows-normal-profile:
+    if: github.ref == 'refs/heads/feature/reference-ui'
+    needs: windows-package
+    runs-on: windows-latest
+    timeout-minutes: 8
+    env:
+      TOUCH_TYPING_NORMAL_LAUNCH_ISOLATED_JOB: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64-candidate
+          path: ${{ runner.temp }}/normal-candidate
+      - name: Launch actual Start-Live.cmd with a fresh normal Windows profile
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'Fresh GitHub-hosted VM required.' }
+          $inputDir = Join-Path $env:RUNNER_TEMP normal-candidate
+          $archive = Join-Path $inputDir 'touch-typing-windows-x64.zip'
+          $expected = (Get-Content -LiteralPath (Join-Path $inputDir 'SHA256SUMS.txt') -Raw).Split(' ')[0]
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
+          if ($actual -ne $expected) { throw 'Candidate Windows ZIP SHA mismatch.' }
+          Write-Output "Exact candidate ZIP SHA256=$actual run SHA=$env:GITHUB_SHA"
+          $folder = Join-Path $env:RUNNER_TEMP 'TouchTyping Normal Extract'
+          Expand-Archive -LiteralPath $archive -DestinationPath $folder
+          $probe = Join-Path $env:GITHUB_WORKSPACE 'windows/Test-HostedNormalLaunch.ps1'
+          $out = Join-Path $env:RUNNER_TEMP 'windows-normal-evidence'
+          & $probe -Application (Join-Path $folder 'TouchTyping.exe') -OutputDirectory $out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-normal-profile-evidence
+          path: ${{ runner.temp }}/windows-normal-evidence/windows-normal-launch.log
+          if-no-files-found: ignore
+
   linux-window:
     needs: engine
     runs-on: ubuntu-24.04
