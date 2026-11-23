@@ -755,6 +755,31 @@ class Studio(Gtk.Application):
         else:
             self.return_live_catalog(module)
 
+    def live_environment_selector(self):
+        selector = bind_name(dropdown(["Ubuntu", "Windows 10"]), "Учебная операционная система")
+        selector.add_css_class("reference-config-dropdown")
+        selector.add_css_class("reference-environment-select")
+        selector.set_tooltip_text("Учебная система: Ubuntu или Windows 10")
+        selector.set_selected(int(self.lab_desktop_profile() == "windows"))
+        def environment_changed(*_):
+            selected = selector.get_selected()
+            if selected not in (0, 1):
+                return
+            previous = self.lab_desktop_profile()
+            chosen = ("ubuntu", "windows")[selected]
+            if chosen == previous:
+                return
+            updated = self.call("settings", desktopProfile=chosen)
+            if updated and updated.get("desktopProfile") == chosen:
+                self.library = updated
+                self.navigate("home", manual=False)
+                self.live_os_selector.grab_focus()
+            else:
+                selector.set_selected(int(previous == "windows"))
+        selector.connect("notify::selected", environment_changed)
+        self.live_os_selector = selector
+        return selector
+
     def configure_live(self):
         menu = Gtk.MenuButton(label="Настройки Live")
         menu.add_css_class("reference-config-button")
@@ -764,22 +789,6 @@ class Studio(Gtk.Application):
         options = box(gap=10)
         options.add_css_class("reference-config-content")
         options.append(text("Настройки Live", "reference-config-title"))
-        os_selector = bind_name(dropdown(["Ubuntu", "Windows 10"]), "Учебная операционная система")
-        os_selector.add_css_class("reference-config-dropdown")
-        os_selector.set_selected(int(self.lab_desktop_profile() == "windows"))
-        options.append(text("Учебная система", "reference-config-caption"))
-        options.append(os_selector)
-        def environment_changed(*_):
-            chosen = ("ubuntu", "windows")[os_selector.get_selected()]
-            if chosen == self.lab_desktop_profile():
-                return
-            updated = self.call("settings", desktopProfile=chosen)
-            if updated:
-                self.library = updated
-                popup.popdown()
-                self.navigate("home")
-        os_selector.connect("notify::selected", environment_changed)
-        self.live_os_selector = os_selector
         for key, prop, label in (("liveKeys", "liveShowKeys", "Экранная клавиатура"),
                                  ("liveHands", "liveShowHands", "Подсказки для пальцев")):
             control = Gtk.CheckButton(label=label)
@@ -814,8 +823,7 @@ class Studio(Gtk.Application):
             hardware.attach(picker, i, 1, 1, 1)
         extras.set_child(hardware)
         options.append(extras)
-        for caption, page in (("Прогресс", "progress"), ("Редактор упражнений", "editor"),
-                              ("Отдельные сочетания", "shortcuts")):
+        for caption, page in (("Редактор упражнений", "editor"), ("Отдельные сочетания", "shortcuts")):
             options.append(button(caption, lambda page=page: (popup.popdown(), self.navigate(page)), "reference-quiet"))
         check_status = text("", "reference-config-caption", wrap=True)
         check_status.set_max_width_chars(32)
@@ -900,8 +908,9 @@ class Studio(Gtk.Application):
         add(hero, text("Практика без мыши", "reference-hero-title"),
             text("Управляйте системой, приложениями и рабочими задачами\nтолько с клавиатуры.",
                  "reference-hero-subtitle", wrap=True))
-        commands = add(row(10, "reference-catalog-head"), expand(hero), self.configure_live())
-        self.live_config.set_valign(Gtk.Align.START)
+        actions = add(row(7, "reference-catalog-actions"), self.live_environment_selector(), self.configure_live())
+        actions.set_valign(Gtk.Align.START)
+        commands = add(row(10, "reference-catalog-head"), expand(hero), actions)
         board.append(commands)
         modules = Gtk.Grid(column_homogeneous=True, column_spacing=0, row_spacing=23)
         modules.add_css_class("reference-modules")

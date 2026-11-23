@@ -324,6 +324,8 @@ internal static class LiveUiSmoke
         Key("F4");
         Until(delegate { return Visible("LiveAidPanel") && Find("LiveAidPanel").Current.ItemStatus == "keyboard;no-hands"; },
             "Keyboard appears independently without enabling hands");
+        Check(Name("LiveAidPanel") == "Клавиатура", "Live keyboard has a real accessibility name");
+        CaptureLiveUxFrame("live-ux-03b-keyboard-only");
         if (Find("LabTask").Current.ItemStatus == "keys:Ctrl+L") Chord("Ctrl+L");
         else
         {

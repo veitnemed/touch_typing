@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Linq;
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
@@ -20,6 +21,22 @@ namespace TouchTypingStudio
         private Border referenceHintPanel, referenceKeysFrame;
         private Expander referenceErrorReview;
         private bool referenceHelpOpen;
+
+        // Viewbox does not expose a control peer on its own. The visible guide
+        // needs an accessible identity, actual bounds and a readable state.
+        private sealed class LiveAidViewbox : Viewbox
+        {
+            protected override AutomationPeer OnCreateAutomationPeer() { return new LiveAidViewboxPeer(this); }
+        }
+
+        private sealed class LiveAidViewboxPeer : FrameworkElementAutomationPeer
+        {
+            internal LiveAidViewboxPeer(LiveAidViewbox owner) : base(owner) { }
+            protected override string GetClassNameCore() { return "LiveAidPanel"; }
+            protected override AutomationControlType GetAutomationControlTypeCore() { return AutomationControlType.Group; }
+            protected override bool IsControlElementCore() { return true; }
+            protected override bool IsContentElementCore() { return true; }
+        }
 
         private FrameworkElement MakeReferenceLesson()
         {
@@ -148,7 +165,7 @@ namespace TouchTypingStudio
             root.Children.Add(feedbackStrip);
 
             keyboard = new LiveKeyboard { IsHitTestVisible = false, Width = 1050 };
-            labGuide = new Viewbox { Child = keyboard, Stretch = Stretch.Uniform,
+            labGuide = new LiveAidViewbox { Child = keyboard, Stretch = Stretch.Uniform,
                 StretchDirection = StretchDirection.DownOnly, MaxHeight = 142, Margin = new Thickness(16, 0, 16, 5) };
             AutomationProperties.SetAutomationId(labGuide, "LiveAidPanel");
             Grid.SetRow(labGuide, 5);
@@ -283,11 +300,14 @@ namespace TouchTypingStudio
         private void UpdateReferenceGuideVisibility()
         {
             if (labGuide == null) return;
-            bool allows = library.B("liveShowKeys") || library.B("liveShowHands");
+            bool keys = library.B("liveShowKeys"), hands = library.B("liveShowHands");
+            bool allows = keys || hands;
             bool room = ActualWidth >= 800 && ActualHeight >= 650;
             labGuide.Visibility = allows && !referenceHelpOpen ? Visibility.Visible : Visibility.Collapsed;
-            AutomationProperties.SetItemStatus(labGuide, (library.B("liveShowKeys") ? "keyboard" : "no-keyboard") +
-                ";" + (library.B("liveShowHands") ? "hands" : "no-hands"));
+            AutomationProperties.SetName(labGuide, keys && hands ? "Клавиатура и положение рук" :
+                keys ? "Клавиатура" : hands ? "Положение рук" : "Учебные подсказки скрыты");
+            AutomationProperties.SetItemStatus(labGuide, (keys ? "keyboard" : "no-keyboard") +
+                ";" + (hands ? "hands" : "no-hands"));
             labGuide.MaxHeight = room ? 142 : 86;
         }
 

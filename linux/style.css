@@ -371,3 +371,13 @@ button.reference-quiet:focus-visible, .reference-config-button > button:focus-vi
 .reference-home.compact-catalog .reference-resume > button { min-height: 23px; padding: 2px 8px; }
 .reference-card-controls { margin-top: 11px; margin-right: 12px; }
 .reference-home.compact-catalog .reference-card-controls { margin-top: 6px; margin-right: 7px; }
+.reference-catalog-actions { margin-top: 1px; }
+.reference-environment-select > button {
+  border-radius: 10px; min-height: 30px; min-width: 87px; padding: 4px 9px;
+}
+.reference-environment-select > button:focus-visible {
+  outline: 2px solid #e1caff; outline-offset: -3px;
+}
+.reference-home.compact-catalog .reference-environment-select > button {
+  min-height: 23px; padding: 2px 7px;
+}
