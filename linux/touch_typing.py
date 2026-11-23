@@ -2183,6 +2183,9 @@ class LabPage(Gtk.Box):
         self.handler = None
         self.capture_timeout = 0
         self.waiting_capture = False
+        self.limit_modal_signature = None
+        self.limit_resume_wait = False
+        self.limit_actions = ()
         self.result = False
         self.show_diagnostic = False
         self.last_physical = ("", None)
@@ -2208,7 +2211,8 @@ class LabPage(Gtk.Box):
         self.picker = dropdown([item["title"] for item in self.classes])
         self.picker.set_visible(False)
         self.mode = dropdown(["По шагам", "Самостоятельно"])
-        self.limit = dropdown(["Без таймера", "20 действий", "40 действий", "60 действий", "3 минуты", "10 минут"])
+        self.limit = dropdown(["Без таймера", "20 действий", "40 действий", "60 действий", "3 минуты", "10 минут", "100 действий"])
+        self.limit.set_tooltip_text("Действие — зачтённый шаг упражнения.")
         self.level_titles = ("Основы", "Рабочие приёмы", "Сложный")
         self.level = dropdown(self.level_titles)
         self.begin = button("Начать · Пробел", self.start, "primary")
@@ -2488,7 +2492,7 @@ class LabPage(Gtk.Box):
 
     def show_pause_modal(self):
         clear(self.modal_layer)
-        result = self.host.call("lab-result") or {}
+        result = self.host.call("lab-result") or self.state or {}
         panel = self.reference_lesson_panel("Пауза", "Пробел — продолжить занятие", result)
         controls = row(8, "reference-modal-actions")
         controls.set_halign(Gtk.Align.CENTER)
@@ -2501,6 +2505,66 @@ class LabPage(Gtk.Box):
         if not self.host.window.get_focus() or self.host.window.get_focus() == self.desktop:
             resume.grab_focus()
 
+    def show_limit_choice(self, error=""):
+        signature = ("choice", error)
+        if self.limit_modal_signature == signature:
+            return
+        self.limit_modal_signature = signature
+        self.waiting_capture = False
+        self.release_capture()
+        self.content.set_sensitive(False)
+        clear(self.modal_layer)
+        explanation = "Можно остановиться здесь или закончить текущую миссию без дополнительного лимита."
+        panel = self.reference_lesson_panel("Лимит достигнут", explanation)
+        panel.set_focusable(True)
+        if error:
+            panel.append(text(error, "bad", wrap=True))
+        panel.append(text("Tab — выбрать действие · Enter — подтвердить", "reference-modal-subtitle", wrap=True))
+        actions = row(8, "reference-modal-actions")
+        actions.set_halign(Gtk.Align.CENTER)
+        finish = button("Завершить занятие", lambda: self.choose_limit("finish"))
+        extend = button("Доработать миссию", lambda: self.choose_limit("continue"), "reference-primary")
+        self.limit_actions = (finish, extend)
+        panel.append(add(actions, finish, extend))
+        self.add_reference_modal(panel)
+        # Focus the panel, not a choice: a key already in flight when the
+        # limit arrived must not accidentally confirm a default action.
+        panel.grab_focus()
+
+    def choose_limit(self, choice):
+        if not self.active or self.save_pending or not self.state.get("limitDecisionPending"):
+            return
+        if choice == "finish":
+            self.stop(finish_limit=True)
+            return
+        state = self.host.call("lab-limit-choice", choice="continue")
+        if not state or state.get("limitDecisionPending") or not state.get("finishingMission"):
+            if state:
+                self.state = state
+            self.show_limit_choice((state or {}).get("saveError") or "Не удалось сохранить выбор. Повторите действие.")
+            return
+        self.state = state
+        self.limit_resume_wait = True
+        self.limit_modal_signature = ("release", "")
+        self.limit_actions = ()
+        self.host.message()
+        clear(self.modal_layer)
+        panel = self.reference_lesson_panel(
+            "Доработка миссии", "Отпустите клавиши. Работа продолжится с того же места.")
+        self.add_reference_modal(panel)
+        GLib.timeout_add(25, self.resume_limit_after_release)
+
+    def resume_limit_after_release(self):
+        if not self.active or self.host.lab is not self or not self.limit_resume_wait or self.save_pending:
+            return GLib.SOURCE_REMOVE
+        if self.physical_down or not self.host.window.is_active():
+            return GLib.SOURCE_CONTINUE
+        self.limit_resume_wait = False
+        self.limit_modal_signature = None
+        self.content.set_sensitive(True)
+        self.acquire()
+        return GLib.SOURCE_REMOVE
+
     def start(self):
         if self.active or not self.classes:
             return
@@ -2510,8 +2574,9 @@ class LabPage(Gtk.Box):
         choice = self.limit.get_selected()
         mission = self.choices[self.mission_picker.get_selected()][0]
         self.state = self.host.call("lab-start", app=app, mode="sandbox", level=self.level.get_selected(), mission="" if mission == "@resume" else mission,
-                                    **{"continue": mission == "@resume"}, guidance="guided" if self.mode.get_selected() == 0 else "independent",
-                                    seconds={4: 180, 5: 600}.get(choice, 0), actionLimit={1: 20, 2: 40, 3: 60}.get(choice, 0))
+                                    **{"continue": mission == "@resume"}, softFinish=True,
+                                    guidance="guided" if self.mode.get_selected() == 0 else "independent",
+                                    seconds={4: 180, 5: 600}.get(choice, 0), actionLimit={1: 20, 2: 40, 3: 60, 6: 100}.get(choice, 0))
         if not self.state:
             return
         self.active = True
@@ -2529,10 +2594,12 @@ class LabPage(Gtk.Box):
             self.show_save_retry(show=False, on_saved=self.start)
             return
         self.render(self.state)
-        self.acquire()
+        if self.active and not self.state.get("limitDecisionPending"):
+            self.acquire()
 
     def acquire(self):
-        if not self.active or self.waiting_capture or self.save_pending:
+        if (not self.active or self.waiting_capture or self.save_pending or self.limit_resume_wait
+                or (self.state or {}).get("limitDecisionPending")):
             return
         keyboard = self.host.window.get_display().get_default_seat().get_keyboard()
         modifiers = keyboard.get_modifier_state() if keyboard else Gdk.ModifierType(0)
@@ -2559,6 +2626,8 @@ class LabPage(Gtk.Box):
         GLib.idle_add(self.resolve_capture)
 
     def resolve_capture(self):
+        if self.limit_resume_wait or (self.state or {}).get("limitDecisionPending"):
+            return GLib.SOURCE_REMOVE
         if self.active and self.surface and self.surface.get_property("shortcuts-inhibited") and self.host.window.is_active():
             self.waiting_capture = False
             if self.capture_timeout:
@@ -2567,7 +2636,8 @@ class LabPage(Gtk.Box):
             state = self.host.call("lab-resume")
             if state:
                 self.render(state)
-            self.desktop.grab_focus()
+            if self.active and not self.state.get("limitDecisionPending"):
+                self.desktop.grab_focus()
         elif self.active and self.state and not self.state["paused"] and not self.waiting_capture:
             self.pause_run("Система вернула горячие клавиши. Разрешите их захват, чтобы продолжить.")
         return GLib.SOURCE_REMOVE
@@ -2602,19 +2672,31 @@ class LabPage(Gtk.Box):
         self.pressed.clear()
 
     def pause_run(self, message="Пауза. Нажмите пробел, чтобы продолжить."):
-        if not self.active or self.save_pending:
+        if (not self.active or self.save_pending or self.limit_resume_wait
+                or (self.state or {}).get("limitDecisionPending")):
             return
         state = self.host.call("lab-pause")
         self.waiting_capture = False
         self.release_capture()
         if state:
             self.render(state)
+            if self.state.get("limitDecisionPending") or not self.active:
+                return
         self.status.set_label(message)
         self.pause.grab_focus()
 
     def focus(self, active):
         if not active:
             self.physical_down.clear()
+            if self.active and self.limit_resume_wait:
+                # We cannot observe releases while another window owns input.
+                # Require an intentional normal-pause resume instead of
+                # automatically treating the emptied local key set as safe.
+                self.limit_resume_wait = False
+                self.limit_modal_signature = None
+                self.content.set_sensitive(True)
+                self.render(self.state)
+                return
         if not self.active:
             return
         if active:
@@ -2665,6 +2747,14 @@ class LabPage(Gtk.Box):
                 self.retry_save()
                 return True
             return key not in ("Enter", "Space", "Tab")
+        if self.limit_resume_wait:
+            return True
+        if self.state.get("limitDecisionPending"):
+            if key == "Tab":
+                return False  # Let GTK navigate the two explicit choices.
+            focused = self.host.window.get_focus()
+            return not (key in ("Space", "Enter") and not has_modifiers
+                        and self.physical_down <= {key} and focused in self.limit_actions)
         if key == "F1" and not has_modifiers and not self.state.get("showGuide", True) and not self.state["paused"]:
             self.render(self.host.call("lab-hint"))
             return True
@@ -2713,7 +2803,7 @@ class LabPage(Gtk.Box):
 
     def render(self, state):
         self.state = state
-        if self.save_pending:
+        if self.save_pending or self.limit_resume_wait:
             return
         if state["finished"]:
             self.stop()
@@ -2754,7 +2844,10 @@ class LabPage(Gtk.Box):
         remaining = max(0, state.get("remaining", 180))
         self.timer.set_visible(bool(state.get("timeLimit") or state.get("actionLimit")))
         self.timer.set_label(f"{int(remaining) // 60:02}:{int(remaining) % 60:02}")
-        if state.get("actionLimit"):
+        if state.get("finishingMission"):
+            self.timer.set_visible(True)
+            self.timer.set_label("Доработка")
+        elif state.get("actionLimit"):
             self.timer.set_label(f'{state["solved"]}/{state["actionLimit"]}')
         status = state.get("status", "") or task.get("hint", "")
         if state["held"]:
@@ -2785,7 +2878,9 @@ class LabPage(Gtk.Box):
         self.guide.paint(self.host.library, state["scene"].get("layout", self.host.layout), targets,
                          state["held"], miss=miss, notes=notes, chosen=targets.values())
         self.layout_guide()
-        if state["paused"] and not self.waiting_capture:
+        if state.get("limitDecisionPending"):
+            self.show_limit_choice(state.get("saveError") or "")
+        elif state["paused"] and not self.waiting_capture:
             self.show_pause_modal()
         elif self.active:
             self.modal_layer.set_visible(False)
@@ -2802,9 +2897,10 @@ class LabPage(Gtk.Box):
             if state:
                 self.render(state)
 
-    def show_save_retry(self, show, on_saved):
+    def show_save_retry(self, show, on_saved, finish_limit=False):
         self.save_pending = True
-        self.retry_save = lambda: self.stop(show=show, on_saved=on_saved, retry=True)
+        self.retry_save = lambda: self.stop(show=show, on_saved=on_saved, retry=True,
+                                            finish_limit=finish_limit)
         self.status.set_label("Не удалось сохранить занятие. Повторите сохранение.")
         self.status.set_visible(True)
         clear(self.modal_layer)
@@ -2815,19 +2911,30 @@ class LabPage(Gtk.Box):
         self.add_reference_modal(panel)
         retry.grab_focus()
 
-    def stop(self, show=True, on_saved=None, retry=False):
+    def stop(self, show=True, on_saved=None, retry=False, finish_limit=None):
         if not self.active or self.save_pending and not retry:
             return False
+        if finish_limit is None:
+            # Explicit Stop atomically distinguishes early finish from a limit
+            # crossed since the last client poll. Close/navigation never choose.
+            finish_limit = bool(show and not (self.state or {}).get("finished"))
         self.waiting_capture = False
+        self.limit_resume_wait = False
         self.release_capture()
-        state = self.host.call("lab-stop")
-        if not state or not state.get("saved", False):
+        # Closing or navigating (show=False) checkpoints; only an explicit
+        # Finish commits a result when waiting at the limit or extending.
+        state = (self.host.call("lab-limit-choice", choice="finish") if finish_limit
+                 else self.host.call("lab-stop"))
+        if not state or not state.get("saved", False) or (finish_limit and not state.get("finished")):
             if state:
                 self.state = state
                 self.desktop.update(state["scene"])
-            self.show_save_retry(show, on_saved)
+            self.show_save_retry(show, on_saved, finish_limit)
             return False
         self.state = state
+        self.limit_modal_signature = None
+        self.limit_actions = ()
+        self.content.set_sensitive(True)
         self.save_pending = False
         self.retry_save = None
         self.active = False

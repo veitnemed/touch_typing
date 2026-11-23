@@ -22,6 +22,10 @@ namespace TouchTypingStudio
         private string lastLabMission = "";
         private string[] labMissionIds = new string[0];
         private Button labHint;
+        private Button labLimitContinue, labLimitFinish, labLimitArmedButton;
+        private Key labLimitArmedKey;
+        private TextBlock labLimitError;
+        private FrameworkElement labLimitOverlay;
         private string labApp = "ubuntu", labMode = "sandbox";
         private int labLevel;
         private ComboBox labModeSelect, labLevelSelect;
@@ -100,7 +104,7 @@ namespace TouchTypingStudio
             labLevelSelect = Select("Сложность", levels, labLevel, 150);
             choices.Children.Add(labModeSelect);
             choices.Children.Add(labLevelSelect);
-            labLimitSelect = Select("Длительность", new[] { "Без таймера", "20 действий", "40 действий", "60 действий", "3 минуты", "10 минут" }, lastLabLimit, 155);
+            labLimitSelect = Select("Длительность", new[] { "Без таймера", "20 действий", "40 действий", "60 действий", "3 минуты", "10 минут", "100 действий" }, lastLabLimit, 155);
             AutomationProperties.SetAutomationId(labLimitSelect, "LabDuration");
             choices.Children.Add(labLimitSelect);
             AutomationProperties.SetAutomationId(labLevelSelect, "LabLevel");
@@ -110,6 +114,8 @@ namespace TouchTypingStudio
             choices.Children.Add(beginControl);
             root.Children.Add(choices);
             root.Children.Add(labMissionSelect);
+            AutomationProperties.SetAutomationId(labMissionSelect, "LabMission");
+            root.Children.Add(Label("Действие — зачтённый шаг упражнения.", 12, Dim));
             labModeSelect.SelectionChanged += delegate { describe(); };
             labLevelSelect.SelectionChanged += delegate { describe(); };
             var hardware = new Expander { Header = "Клавиатура и Fn", Foreground = Dim,
@@ -141,7 +147,7 @@ namespace TouchTypingStudio
             return Scroll(root);
         }
 
-        private bool labSavePending, labSaveClosePending;
+        private bool labSavePending, labSaveClosePending, labSaveBackPending, labExplicitFinishPending;
 
         private void StartLab()
         {
@@ -154,18 +160,22 @@ namespace TouchTypingStudio
             labMode = labModeSelect.SelectedIndex == 1 ? "sandbox" : "drill";
             labLevel = Math.Max(0, labLevelSelect.SelectedIndex);
             int limit = lastLabLimit = labLimitSelect.SelectedIndex;
-            int actions = limit >= 1 && limit <= 3 ? 20 * limit : 0;
+            int actions = limit >= 1 && limit <= 3 ? 20 * limit : limit == 6 ? 100 : 0;
             int seconds = limit == 4 ? 180 : limit == 5 ? 600 : 0;
+            // Opt-in native smoke test exercises the real expiry transition without waiting 3 minutes.
+            int testSeconds;
+            if (verifyMode && seconds > 0 && int.TryParse(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SOFT_FINISH_SECONDS"), out testSeconds))
+                seconds = Math.Max(1, Math.Min(seconds, testSeconds));
             string guidance = labMode == "drill" ? "independent" : "guided";
             string mission = labMissionIds[Math.Max(0, labMissionSelect.SelectedIndex)];
             bool resume = mission == "@resume";
             if (resume) mission = "";
             int seed;
             var initial = verifyMode && int.TryParse(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"), out seed)
-                ? Request("lab-start", "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "seed", seed)
-                : Request("lab-start", "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume);
+                ? Request("lab-start", "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "softFinish", true, "seed", seed)
+                : Request("lab-start", "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "softFinish", true);
             if (!initial.Exists || initial.B("startBlocked")) return;
-            labSavePending = labSaveClosePending = false;
+            labSavePending = labSaveClosePending = labSaveBackPending = labExplicitFinishPending = false;
             lastLabMission = initial.S("mission");
             labActive = active = true;
             paused = true;
@@ -196,32 +206,50 @@ namespace TouchTypingStudio
 
         private void ResumeLab()
         {
-            if (labSavePending) return;
+            if (labSavePending || state.B("limitDecisionPending")) return;
             if (!labActive || !IsActive || (!paused && labCapture != null)) return;
             if (Keyboard.Modifiers != ModifierKeys.None)
             {
                 labStatus.Text = "Отпустите модификаторы, затем нажмите «Продолжить».";
                 return;
             }
-            RestorePausedLabView();
             try
             {
                 if (labCapture == null)
+                {
                     labCapture = new LabKeyboardCapture(new WindowInteropHelper(this).Handle, Dispatcher, CaptureLabKey);
+                    labCapture.Suspend();
+                }
                 var next = Request("lab-resume");
-                if (!next.Exists) { labCapture.Suspend(); return; }
+                if (!next.Exists)
+                {
+                    if (labLimitOverlay != null) labLimitError.Text = notice.Text;
+                    return;
+                }
+                if (next.B("paused") || next.B("finished"))
+                {
+                    labCapture.Suspend();
+                    RenderLab(next);
+                    return;
+                }
+                RestorePausedLabView();
                 labCapture.Resume();
                 paused = false;
                 pressed.Clear();
                 RenderLab(next);
-                timer.Start();
+                if (labActive && !paused) timer.Start();
             }
             catch (Win32Exception)
             {
                 StopLabCapture();
                 paused = true;
-                labStatus.Text = "Захват клавиш недоступен. Нажмите «Продолжить», чтобы повторить.";
-                labStatus.Foreground = Error;
+                const string problem = "Захват клавиш недоступен. Нажмите «Продолжить», чтобы повторить.";
+                if (labLimitOverlay != null) labLimitError.Text = problem;
+                else
+                {
+                    labStatus.Text = problem;
+                    labStatus.Foreground = Error;
+                }
             }
         }
 
@@ -240,6 +268,8 @@ namespace TouchTypingStudio
             pressed.Clear();
             var next = Request("lab-pause");
             if (next.Exists) RenderLab(next);
+            if (!labActive || labSavePending || state.B("limitDecisionPending")) return;
+            if (state.B("finishingMission")) { ShowLabLimitOverlay(true); return; }
             var result = Request("lab-result");
             if (!result.Exists) return;
             pausedLabView = center.Content as FrameworkElement;
@@ -256,6 +286,9 @@ namespace TouchTypingStudio
             pausedLabView.IsHitTestVisible = true;
             center.Content = pausedLabView;
             pausedLabView = null;
+            labLimitOverlay = null;
+            labLimitArmedButton = null;
+            ((FrameworkElement)center.Content).Focus();
         }
 
         private void ToggleLabPause()
@@ -302,9 +335,16 @@ namespace TouchTypingStudio
             state = next;
             if (state.B("finished")) { FinishLab(); return; }
             paused = state.B("paused");
+            if (state.B("limitDecisionPending"))
+            {
+                if (labCapture != null) labCapture.Suspend();
+                timer.Stop();
+                pressed.Clear();
+            }
             int remaining = state.I("remaining", 180);
             timerLabel.Visibility = state.I("timeLimit") > 0 || state.I("actionLimit") > 0 ? Visibility.Visible : Visibility.Collapsed;
-            timerLabel.Text = state.I("actionLimit") > 0 ? state.I("solved") + "/" + state.I("actionLimit") : (remaining / 60).ToString("00") + ":" + (remaining % 60).ToString("00");
+            timerLabel.Text = state.B("finishingMission") ? "Дорабатываем миссию" :
+                state.I("actionLimit") > 0 ? state.I("solved") + "/" + state.I("actionLimit") : (remaining / 60).ToString("00") + ":" + (remaining % 60).ToString("00");
             string labContext = state.S("scenario") + "    ·    " + state.S("phase");
             labCounter.ToolTip = labContext;
             AutomationProperties.SetName(labCounter, labContext + " · Шаг " + state.I("scenarioStep") + " из " + state.I("scenarioLength"));
@@ -344,6 +384,69 @@ namespace TouchTypingStudio
             labHandAid.Opacity = library.B("showHands", true) ? 1 : .5;
             labMistakeAid.Opacity = library.B("showMistakeKey", true) ? 1 : .5;
             UpdateReferenceGuideVisibility();
+            if (state.B("limitDecisionPending")) ShowLabLimitOverlay(false);
+        }
+
+        private void ShowLabLimitOverlay(bool extensionPause)
+        {
+            if (labLimitOverlay != null && ReferenceEquals(center.Content, labLimitOverlay))
+            {
+                labLimitError.Text = state.S("saveError");
+                return;
+            }
+            RestorePausedLabView();
+            pausedLabView = center.Content as FrameworkElement;
+            center.Content = null;
+            var overlay = new Grid { Background = Night };
+            if (pausedLabView != null)
+            {
+                pausedLabView.IsHitTestVisible = false;
+                overlay.Children.Add(pausedLabView);
+                overlay.Children.Add(new Border { Background = Ui.Brush("#BF080B12") });
+            }
+            var card = Stack();
+            var title = Label(extensionPause ? "Миссия на паузе" :
+                (state.I("timeLimit") > 0 && state.I("remaining") == 0 ? "Время вышло" : "Лимит действий достигнут"), 19, Ink, true);
+            title.Focusable = true;
+            AutomationProperties.SetAutomationId(title, extensionPause ? "LabExtensionPause" : "LabLimitChoice");
+            card.Children.Add(title);
+            var detail = Label(extensionPause ? "Текущий шаг сохранён. Продолжите с того же места или завершите занятие." :
+                "Можно завершить занятие сейчас или доделать текущую миссию. Введённый текст останется на месте.", 13, Dim);
+            detail.TextWrapping = TextWrapping.Wrap;
+            detail.Margin = new Thickness(0, 8, 0, 12);
+            card.Children.Add(detail);
+            labLimitError = Label(state.S("saveError"), 13, Error);
+            labLimitError.TextWrapping = TextWrapping.Wrap;
+            card.Children.Add(labLimitError);
+            var actions = new WrapPanel();
+            labLimitFinish = ActionButton("Завершить", FinishLab);
+            AutomationProperties.SetAutomationId(labLimitFinish, "LabLimitFinish");
+            labLimitContinue = ActionButton(extensionPause ? "Продолжить" : "Доработать миссию", delegate
+            {
+                if (Keyboard.Modifiers != ModifierKeys.None) return;
+                if (!extensionPause)
+                {
+                    var reply = Request("lab-limit-choice", "choice", "continue");
+                    if (!reply.Exists)
+                    {
+                        labLimitError.Text = notice.Text;
+                        return;
+                    }
+                    RenderLab(reply);
+                    if (reply.B("limitDecisionPending")) return;
+                }
+                ResumeLab();
+            }, true);
+            AutomationProperties.SetAutomationId(labLimitContinue, "LabLimitContinue");
+            actions.Children.Add(labLimitFinish);
+            actions.Children.Add(labLimitContinue);
+            card.Children.Add(actions);
+            overlay.Children.Add(new Border { Child = card, Padding = new Thickness(22), Width = 470,
+                Background = Night, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
+            labLimitOverlay = overlay;
+            center.Content = overlay;
+            Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(delegate
+            { if (ReferenceEquals(center.Content, overlay)) title.Focus(); }));
         }
 
         private string DisplayLabGesture(string raw)
@@ -412,7 +515,29 @@ namespace TouchTypingStudio
 
         private void FinishLab()
         {
-            if (!labActive || !TrySaveLab()) return;
+            if (!labActive) return;
+            if (labSaveBackPending && !labSaveClosePending) { BackFromLab(); return; }
+            if (!labSaveClosePending && (!state.B("finished") || labExplicitFinishPending))
+            {
+                // Let the server freeze its clock and decide whether the cap was
+                // reached. The previous UI snapshot can be stale by one tick.
+                StopLabCapture();
+                timer.Stop();
+                paused = true;
+                pressed.Clear();
+                labExplicitFinishPending = true;
+                var next = Request("lab-limit-choice", "choice", "finish");
+                if (next.Exists) state = next;
+                if (!next.Exists || !next.B("finished") || !next.B("saved") || !string.IsNullOrWhiteSpace(engine.Notice))
+                {
+                    labSavePending = true;
+                    ShowLabSaveRetry(string.IsNullOrWhiteSpace(notice.Text) ?
+                        "Не удалось сохранить результат. Повторите сохранение." : notice.Text);
+                    return;
+                }
+                labExplicitFinishPending = labSavePending = false;
+            }
+            else if (!TrySaveLab()) return;
             if (labSaveClosePending)
             {
                 labSaveClosePending = false;
@@ -430,6 +555,17 @@ namespace TouchTypingStudio
             var backdrop = center.Content as FrameworkElement;
             center.Content = null;
             center.Content = result.Exists ? BuildLabResult(result, backdrop) : BuildLabHome();
+        }
+
+        private void BackFromLab()
+        {
+            if (!state.B("limitDecisionPending") && !state.B("finishingMission")) { FinishLab(); return; }
+            labSaveBackPending = true;
+            if (!TrySaveLab()) return;
+            labSaveBackPending = false;
+            labActive = active = paused = false;
+            RestorePausedLabView();
+            ShowPage(LivePage);
         }
 
         private void RestartLab()

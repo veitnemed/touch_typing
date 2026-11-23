@@ -120,7 +120,7 @@ namespace TouchTypingStudio
             var feedbackStrip = new DockPanel { Margin = new Thickness(17, 4, 17, 6), MinHeight = 32 };
             var aids = Stack(true);
             aids.VerticalAlignment = VerticalAlignment.Center;
-            var back = ReferenceLessonButton("‹", "Назад к результату", FinishLab, "LabBack", 24);
+            var back = ReferenceLessonButton("‹", "Назад", BackFromLab, "LabBack", 24);
             back.Background = Brushes.Transparent;
             KeyboardNavigation.SetTabIndex(back, 0);
             aids.Children.Add(back);

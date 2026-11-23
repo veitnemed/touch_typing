@@ -22,13 +22,15 @@ internal sealed class LabRun
     private int variant;
     private string initialLayout, attemptLayout;
     private bool initialVirtual;
-    internal bool HasDraft => !CompletedRoute && !ReachedLimit &&
+    internal bool HasDraft => !CompletedRoute && !limitAccepted && (!ReachedLimit || softFinish || FinishingMission) &&
         (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 || trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask;
     private double? activeSince;
-    private bool stopped, superUsed, finishSingleRoute;
+    private bool stopped, superUsed, finishSingleRoute, limitAccepted, explicitFinish;
+    private readonly bool softFinish;
+    internal bool FinishingMission { get; private set; }
     private int taskInBlock;
     internal readonly string Session = Guid.NewGuid().ToString("N");
     internal readonly string App, Mode;
@@ -70,19 +72,27 @@ internal sealed class LabRun
     internal string ScenarioTitle => mission?.Title ?? "";
     internal int ScenarioStep => Math.Min(missionLength, missionLength - pending.Count + 1);
     internal int ScenarioLength => missionLength;
-    internal int Seconds => TimeLimit > 0 ? Math.Min(Elapsed, TimeLimit) : Elapsed;
-    private bool ReachedLimit => TimeLimit > 0 && Seconds >= TimeLimit || ActionLimit > 0 && Solved >= ActionLimit;
-    private bool CompletedRoute => finishSingleRoute && mission?.FinishAfterRoute == true && pending.Count == 0;
-    internal bool Finished => stopped || !restoring && (ReachedLimit || CompletedRoute);
+    internal int Seconds => TimeLimit > 0 && !FinishingMission ? Math.Min(Elapsed, TimeLimit) : Elapsed;
+    private bool ReachedLimit => TimeLimit > 0 && Elapsed >= TimeLimit || ActionLimit > 0 && Solved >= ActionLimit;
+    private bool CompletedRoute => !restoring && mission != null && pending.Count == 0 &&
+        (FinishingMission || softFinish && ReachedLimit || finishSingleRoute && mission.FinishAfterRoute);
+    private bool PendingLimitChoice => softFinish && !restoring && ReachedLimit &&
+        !limitAccepted && !FinishingMission && !CompletedRoute;
+    internal bool AwaitingLimitChoice => !stopped && PendingLimitChoice;
+    internal bool LimitFlowInProgress => !Completed && (FinishingMission || PendingLimitChoice);
+    internal bool LimitAccepted => limitAccepted;
+    private bool Completed => limitAccepted || CompletedRoute || !softFinish && !FinishingMission && ReachedLimit;
+    internal bool Finished => stopped || !restoring && Completed;
     internal int Remaining => TimeLimit == 0 ? 0 : Math.Max(0, TimeLimit - Seconds);
     internal string[] Held => held.ToArray();
 
     internal LabRun(string app, string mode, int level, int seconds, string layout, IEnumerable<ShortcutAttempt> history,
-        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null)
+        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null, bool softFinish = false)
     {
         if (!LabCatalog.Apps.Contains(app)) throw new ArgumentException("Выберите Ubuntu, Chrome, VS Code или Терминал.");
         if (mode is not ("drill" or "sandbox")) throw new ArgumentException("Выберите тренировку или учебный рабочий стол.");
         var progress = draft?.Progress;
+        this.softFinish = softFinish;
         App = app; Mode = progress?.Mode is "drill" or "sandbox" ? progress.Mode : mode; Level = Math.Clamp(level, 0, 2);
         ActionLimit = Math.Max(0, progress?.ActionLimit ?? actionLimit);
         TimeLimit = ActionLimit > 0 ? 0 : Math.Max(progress?.TimeLimit ?? seconds, 0);
@@ -128,6 +138,7 @@ internal sealed class LabRun
             if (progress?.Series != null)
                 points.AddRange(JsonSerializer.Deserialize<LabPoint[]>(progress.Series) ?? []);
             Attempts.Clear(); LastKey = ""; Feedback = "ready";
+            FinishingMission = progress?.FinishingMission == true;
             restoring = false;
         }
     }
@@ -135,7 +146,9 @@ internal sealed class LabRun
     internal LiveDraft Draft() => new() { App = App, Level = Level, Mission = MissionId, Layout = initialLayout, Guidance = Guidance,
         Dock = Scene.Dock, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, Trace = JsonSerializer.Serialize(trace),
         Progress = new() { Session = Session, Mode = Mode, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Solved = Solved,
-            Errors = Errors, ActiveMilliseconds = ActiveMilliseconds, Series = JsonSerializer.Serialize(points) } };
+            Errors = Errors, ActiveMilliseconds = ActiveMilliseconds, Series = JsonSerializer.Serialize(points),
+            LimitDecisionPending = PendingLimitChoice,
+            FinishingMission = FinishingMission } };
 
     internal void Pause()
     {
@@ -146,17 +159,47 @@ internal sealed class LabRun
     }
     internal void Resume()
     {
-        if (Finished) return;
+        if (Finished || AwaitingLimitChoice) return;
         if (!Paused) return;
         Paused = false; held.Clear(); activeSince = clock(); sinceTask = clock();
         Feedback = "ready"; Status = "Клавиши принимаются. Выполните задание.";
     }
+    internal void HoldForLimit()
+    {
+        if (!PendingLimitChoice) return;
+        Pause();
+        // Polling and focus handling may notice a deadline after it passed.
+        // Time waiting for the choice is not time spent in the mission.
+        if (TimeLimit > 0) activeMilliseconds = Math.Min(activeMilliseconds, TimeLimit * 1000.0);
+    }
+    internal bool ChooseLimit(string choice)
+    {
+        if (choice == "finish")
+        {
+            // Retry the same accepted action after a failed atomic write.
+            // Navigation/close never enters this branch.
+            if (explicitFinish) return !Saved;
+            if (Finished || !softFinish && !FinishingMission) return false;
+            Pause(); // Freeze the clock before checking a cap the UI may not have observed yet.
+            HoldForLimit();
+            limitAccepted = PendingLimitChoice || FinishingMission;
+            explicitFinish = true;
+            stopped = true;
+            return true;
+        }
+        HoldForLimit();
+        if (choice != "continue" || !AwaitingLimitChoice) return false;
+        // Reacquire the owner's keyboard before counting active time again.
+        FinishingMission = true;
+        return true;
+    }
+    internal void CancelContinuation() => FinishingMission = false;
     internal void Stop() { Pause(); stopped = true; }
     internal void MarkSaved() => Saved = true;
 
     internal ShortcutAttempt Input(string key, bool pressed, string text)
     {
-        if (Finished || Paused || string.IsNullOrEmpty(key)) return null;
+        if (Finished || AwaitingLimitChoice || Paused || string.IsNullOrEmpty(key)) return null;
         if (pressed && held.Contains(key))
         {
             if (!replayLegacyUrl && Scene.CanRepeatEditing(key) && !held.Any(item => KeyChord.Family(item) is "Alt" or "Super")
@@ -398,7 +441,7 @@ internal sealed class LabRun
     }
 
     internal LabSessionRecord SessionRecord() => new() { Session = Session, App = App, Mode = Mode, Level = Level, Date = DateTime.Now,
-        Seconds = Seconds, Solved = Solved, Errors = Errors, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Guidance = Guidance, Completed = ReachedLimit || CompletedRoute };
+        Seconds = Seconds, Solved = Solved, Errors = Errors, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Guidance = Guidance, Completed = Completed };
 
     internal object Result(IEnumerable<LabSessionRecord> sessions, IEnumerable<LabSessionRecord> records = null)
     {
@@ -406,7 +449,7 @@ internal sealed class LabRun
         var previousBest = matching.Where(item => item.Session != Session && item.Completed)
             .OrderByDescending(item => item.Solved).ThenBy(item => item.Errors).FirstOrDefault();
         int previousRecord = previousBest?.Solved ?? 0;
-        bool complete = ReachedLimit || CompletedRoute;
+        bool complete = Completed;
         bool better = complete && (previousBest == null || Solved > previousBest.Solved || Solved == previousBest.Solved && Errors < previousBest.Errors);
         return new { App, Mode, Level, Solved, Errors, Seconds, TimeLimit, ActionLimit, Guidance, completed = complete,
             accuracy = Solved + Errors == 0 ? 0 : Math.Round(100.0 * Solved / (Solved + Errors), 1),

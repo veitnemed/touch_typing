@@ -89,7 +89,7 @@ namespace TouchTypingStudio
             Activated += delegate { if (!active && (page == LivePage || page == HomePage)) RefreshLayoutIfChanged(); };
             Deactivated += delegate
             {
-                if (labActive) { PauseLab(); return; }
+                if (labActive) { labLimitArmedButton = null; PauseLab(); return; }
                 if (active && !paused && (page == TypingPage || !LayoutStep)) PauseSession();
             };
             Closing += delegate(object sender, System.ComponentModel.CancelEventArgs e)
@@ -159,7 +159,9 @@ namespace TouchTypingStudio
             var panel = Stack();
             panel.Margin = new Thickness(22, 17, 22, 14);
             panel.Children.Add(Label("Сохранить прогресс и закрыть тренажёр?", 16, Ink, true));
-            var detail = Label("Текущее занятие остановится; результаты сохранятся.", 12, Dim);
+            var detail = Label(labActive && (state.B("limitDecisionPending") || state.B("finishingMission")) ?
+                "Миссию можно будет продолжить с сохранённого места." :
+                "Текущее занятие остановится; результаты сохранятся.", 12, Dim);
             detail.Margin = new Thickness(0, 7, 0, 16);
             panel.Children.Add(detail);
             var actions = Stack(true);
@@ -937,6 +939,27 @@ namespace TouchTypingStudio
             if (labActive)
             {
                 e.Handled = true;
+                if (labLimitOverlay != null && ReferenceEquals(center.Content, labLimitOverlay))
+                {
+                    if (input == Key.F4 && Keyboard.Modifiers == ModifierKeys.Alt) { e.Handled = false; return; }
+                    var focused = Keyboard.FocusedElement as Button;
+                    if (!e.IsRepeat && input == Key.Tab &&
+                        (Keyboard.Modifiers == ModifierKeys.None || Keyboard.Modifiers == ModifierKeys.Shift))
+                    {
+                        labLimitArmedButton = null;
+                        (focused == labLimitContinue ||
+                            focused == null && Keyboard.Modifiers == ModifierKeys.Shift
+                            ? labLimitFinish : labLimitContinue).Focus();
+                    }
+                    else if (!e.IsRepeat && Keyboard.Modifiers == ModifierKeys.None &&
+                        (input == Key.Enter || input == Key.Space) &&
+                        (focused == labLimitContinue || focused == labLimitFinish))
+                    {
+                        labLimitArmedButton = focused;
+                        labLimitArmedKey = input;
+                    }
+                    return;
+                }
                 if (paused && !e.IsRepeat)
                 {
                     if (labSavePending)
@@ -986,8 +1009,23 @@ namespace TouchTypingStudio
 
         private void OnKeyUp(object sender, KeyEventArgs e)
         {
-            if (!active || page != LivePage || labActive) return;
+            if (!active || page != LivePage) return;
             Key input = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (labActive)
+            {
+                if (labLimitOverlay != null && ReferenceEquals(center.Content, labLimitOverlay))
+                {
+                    e.Handled = true;
+                    if (labLimitArmedButton != null && input == labLimitArmedKey)
+                    {
+                        var button = labLimitArmedButton;
+                        labLimitArmedButton = null;
+                        if (Keyboard.FocusedElement == button && Keyboard.Modifiers == ModifierKeys.None)
+                            button.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                    }
+                }
+                return;
+            }
             string key = PhysicalKey(input);
             if (key.Length > 0) e.Handled = HandleLiveKey(key, false, false, "");
         }

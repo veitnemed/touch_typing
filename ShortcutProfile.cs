@@ -24,6 +24,7 @@ namespace TouchTypingStudio
         public string Session, Mode, Series, Revision;
         public int TimeLimit, ActionLimit, Solved, Errors;
         public double ActiveMilliseconds;
+        public bool LimitDecisionPending, FinishingMission;
     }
 
     public class LabSessionRecord

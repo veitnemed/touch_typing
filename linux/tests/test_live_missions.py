@@ -769,6 +769,123 @@ class MissionTest(unittest.TestCase):
             finally:
                 engine.close()
 
+    def test_soft_timer_choice_restarts_with_same_input_and_one_result(self):
+        from pathlib import Path
+        from time import monotonic, sleep
+        from unittest.mock import patch
+        import xml.etree.ElementTree as ET
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+            opts = dict(app="terminal", level=1, mode="sandbox", seconds=2, guidance="guided",
+                        mission="terminal-access", seed=7, softFinish=True)
+            saved_path = Path(directory) / "TouchTypingStudio-QA" / "progress.xml"
+
+            def type_text(engine, value):
+                for char in value:
+                    key = {" ": "Space", "/": "Slash"}.get(char, char.upper())
+                    engine.call("lab-key", key=key, pressed=True, text=char)
+                    engine.call("lab-key", key=key, pressed=False, text="")
+
+            def crash(engine):
+                engine.process.kill()
+                engine.process.wait(timeout=5)
+
+            engine = Engine(verify=True)
+            try:
+                engine.call("configure", layout="EN")
+                started = engine.call("lab-start", **opts)
+                self.assertTrue(started["task"]["text"].startswith("cd "))
+                target = started["task"]["text"]
+                prefix = target[:-3]
+                engine.call("lab-resume")
+                type_text(engine, prefix)
+                deadline = monotonic() + 6
+                pending = engine.call("lab-state")
+                while not pending["limitDecisionPending"] and monotonic() < deadline:
+                    sleep(0.05)
+                    pending = engine.call("lab-state")
+                self.assertTrue(pending["limitDecisionPending"])
+                self.assertTrue(pending["paused"])
+                self.assertFalse(pending["finished"])
+                self.assertEqual(pending["scene"]["terminalInput"], prefix)
+                self.assertEqual(pending["remaining"], 0)
+                self.assertIsNone(engine.call("lab-result"))
+                session = ET.parse(saved_path).findtext("./LiveDrafts/LiveDraft/Progress/Session")
+                self.assertTrue(session)
+                crash(engine)
+            finally:
+                engine.close()
+
+            engine = Engine(verify=True)
+            try:
+                engine.call("configure", layout="EN")
+                changed = dict(opts, seconds=0, actionLimit=20, **{"continue": True})
+                held = engine.call("lab-start", **changed)
+                self.assertTrue(held["limitDecisionPending"])
+                self.assertEqual(held["scene"]["terminalInput"], prefix)
+                self.assertEqual((held["timeLimit"], held["actionLimit"]), (2, 0))
+                self.assertTrue(engine.call("lab-resume")["paused"])
+                side = saved_path.with_suffix(".xml.writing")
+                original = saved_path.read_bytes()
+                side.mkdir()
+                rejected = engine.call("lab-limit-choice", choice="continue")
+                self.assertTrue(rejected["limitDecisionPending"])
+                self.assertFalse(rejected["finishingMission"])
+                self.assertTrue(rejected["saveError"])
+                self.assertEqual(saved_path.read_bytes(), original)
+                side.rmdir()
+                extended = engine.call("lab-limit-choice", choice="continue")
+                self.assertTrue(extended["finishingMission"])
+                self.assertFalse(extended["limitDecisionPending"])
+                self.assertTrue(extended["paused"])
+                self.assertEqual(extended["scene"]["terminalInput"], prefix)
+                self.assertIsNone(engine.call("lab-result"))
+                self.assertTrue(engine.call("lab-stop")["saved"])  # close/pause without grading
+                self.assertIsNone(engine.call("lab-result"))
+                self.assertFalse(ET.parse(saved_path).findall("./LabSessions/LabSessionRecord"))
+                crash(engine)
+            finally:
+                engine.close()
+
+            engine = Engine(verify=True)
+            try:
+                engine.call("configure", layout="EN")
+                extended = engine.call("lab-start", **changed)
+                self.assertTrue(extended["finishingMission"])
+                self.assertFalse(extended["limitDecisionPending"])
+                engine.call("lab-resume")
+                type_text(engine, target[-3:])
+                engine.call("lab-key", key="Enter", pressed=True, text="")
+                counted = engine.call("lab-key", key="Enter", pressed=False, text="")
+                self.assertEqual((counted["solved"], counted["errors"]), (1, 0))
+                self.assertFalse(counted["finished"])
+                self.assertIsNone(engine.call("lab-result"))
+                side = saved_path.with_suffix(".xml.writing")
+                original = saved_path.read_bytes()
+                side.mkdir()
+                blocked_finish = engine.call("lab-limit-choice", choice="finish")
+                self.assertTrue(blocked_finish["finished"])
+                self.assertFalse(blocked_finish["saved"])
+                self.assertTrue(blocked_finish["saveError"])
+                self.assertIsNone(engine.call("lab-result"))
+                self.assertEqual(saved_path.read_bytes(), original)
+                side.rmdir()
+                done = engine.call("lab-limit-choice", choice="finish")
+                self.assertTrue(done["finished"])
+                self.assertTrue(done["saved"])
+                self.assertTrue(engine.call("lab-result")["completed"])
+                for _ in range(2):
+                    engine.call("lab-limit-choice", choice="finish")
+                    engine.call("lab-stop")
+                profile = ET.parse(saved_path)
+                self.assertFalse(profile.findall("./LiveDrafts/LiveDraft"))
+                self.assertEqual([row.findtext("Session") for row in profile.findall("./LabSessions/LabSessionRecord")],
+                                 [session])
+                self.assertEqual([row.findtext("Session") for row in profile.findall("./ShortcutHistory/ShortcutAttempt")],
+                                 [session])
+            finally:
+                engine.close()
+
     def test_failed_save_keeps_old_run_until_explicit_retry(self):
         from pathlib import Path
         from unittest.mock import patch

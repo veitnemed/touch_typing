@@ -37,12 +37,20 @@ internal static class LiveUiSmoke
                 evidenceDirectory = Directory.CreateDirectory(Path.Combine(
                     Directory.GetParent(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT")).FullName,
                     "native-reference-evidence")).FullName;
+            if (arguments.Contains("--soft-finish"))
+                Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_SOFT_FINISH_SECONDS", "7");
             Console.WriteLine("UI test seed " + Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"));
             app = Process.Start(new ProcessStartInfo(path, "--qa --live") { WorkingDirectory = Path.GetDirectoryName(path) });
             Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "trainer window", 12000);
             window = AutomationElement.FromHandle(trainer);
             Check(window.Current.ProcessId == app.Id, "The automation root belongs to the new QA process");
             Focus();
+            if (arguments.Contains("--soft-finish"))
+            {
+                CheckSoftFinish(path);
+                Console.WriteLine("PASS: " + count + " native WPF soft finish assertions");
+                return 0;
+            }
             if (referenceBrowser)
             {
                 CheckReferenceBrowser();
@@ -402,12 +410,82 @@ internal static class LiveUiSmoke
             "Completed Workday project leaves no unfinished draft");
     }
 
+    private static void CheckSoftFinish(string path)
+    {
+        Invoke("LabClass-terminal");
+        Select("LabMode", 0);
+        Check(Exists("LabDuration"), "Lesson duration options are accessible");
+        Select("LabDuration", 6); // The 100-action option.
+        Select("LabDuration", 4); // QA-only seven-second clock cap.
+        Key("F5");
+        Until(delegate { return Exists("LabDesktop") && Name("LabPause").StartsWith("Пауза"); }, "active terminal lesson");
+        VirtualEnglish();
+        Chord("Ctrl+U");
+        foreach (var character in "abcde") Send(Character(character));
+        Key("Home"); Key("Right"); Key("Right");
+        CheckTerminalState("abcde", 2);
+        Until(delegate { return Visible("LabLimitChoice"); }, "actual engine deadline", 14000);
+        Check(!Visible("LabResult"), "Deadline offers a choice, not a result");
+        CheckTerminalState("abcde", 2);
+        Key("Delete"); Key("F10"); Key("Enter"); Key("Space");
+        Check(Visible("LabLimitChoice"), "Background exercise shortcuts do not escape the modal");
+        CheckTerminalState("abcde", 2);
+
+        RequestClose();
+        Until(delegate { return ExitDialog() != null; }, "save and close dialog");
+        InvokeDialog("LabExitSave");
+        Until(delegate { return app.HasExited; }, "soft-finish draft closes without a result");
+        app.Dispose();
+        app = Process.Start(new ProcessStartInfo(path, "--qa --live") { WorkingDirectory = Path.GetDirectoryName(path) });
+        Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "reopened trainer window", 12000);
+        window = AutomationElement.FromHandle(trainer);
+        Focus();
+        Invoke("LabClass-terminal");
+        Select("LabMode", 0);
+        SelectMissionByName("Продолжить с сохранённого места");
+        Key("F5");
+        Until(delegate { return Visible("LabLimitChoice"); }, "recovered deadline decision");
+        CheckTerminalState("abcde", 2);
+        Until(delegate { return AutomationElement.FocusedElement.Current.AutomationId == "LabLimitChoice"; }, "limit dialog starts with neither choice selected");
+        Key("Enter");
+        Check(Visible("LabLimitChoice"), "Enter on neutral focus does not accept a resumed choice");
+        Key("Tab");
+        Key("Tab");
+        Check(AutomationElement.FocusedElement.Current.AutomationId == "LabLimitFinish", "Tab stays inside the limit choice");
+        Key("Tab");
+        var activation = Parse("Space")[0];
+        Send(new[] { activation });
+        Wait(550);
+        Check(Visible("LabLimitChoice"), "Holding Space does not accept the choice before physical release");
+        Send(new[] { activation.Up() });
+        Until(delegate { return !Visible("LabLimitChoice") && Name("LabPause").StartsWith("Пауза"); }, "extension regains keyboard");
+        CheckTerminalState("abcde", 2);
+        Key("Delete");
+        CheckTerminalState("abde", 2);
+        Key("F8");
+        Until(delegate { return Visible("LabExtensionPause"); }, "extension pause visibly exposes both choices");
+        Key("Tab"); Key("Space");
+        Until(delegate { return !Visible("LabExtensionPause"); }, "extension resumes by keyboard");
+        Key("F10");
+        Until(delegate { return Visible("LabResult"); }, "explicit finish accepts one result");
+
+        var profile = Path.Combine(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT"),
+            "TouchTypingStudio-QA", "progress.xml");
+        var xml = new XmlDocument();
+        xml.XmlResolver = null;
+        xml.Load(profile);
+        Check(xml.SelectNodes("/StudioProfile/LabSessions/LabSessionRecord[App='terminal' and TimeLimit='7']").Count == 1,
+            "One final session persisted across close, continuation, and explicit finish");
+        Check(xml.SelectSingleNode("/StudioProfile/LiveDrafts/LiveDraft[App='terminal']") == null,
+            "No resumable parallel attempt after explicit finish");
+    }
+
     private static void SelectMissionByName(string title)
     {
         var combos = window.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ComboBox));
         foreach (AutomationElement combo in combos)
         {
-            if (combo.Current.ProcessId != app.Id || !string.IsNullOrEmpty(combo.Current.AutomationId)) continue;
+            if (combo.Current.ProcessId != app.Id || combo.Current.AutomationId != "LabMission") continue;
             object pattern;
             if (!combo.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out pattern)) continue;
             var expand = (ExpandCollapsePattern)pattern;

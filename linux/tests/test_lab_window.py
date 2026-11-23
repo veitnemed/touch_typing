@@ -145,6 +145,10 @@ class LabWindowTest(Studio):
                 output = Path(os.environ['TOUCH_TYPING_QA_OUTPUT'])
                 yield from self.capture_gallery(chord, capture_png, output)
                 return
+            if '--soft-limit' in sys.argv:
+                yield from self.exercise_soft_limit(chord, hold, capture_png,
+                                                   Path(os.environ['TOUCH_TYPING_QA_OUTPUT']))
+                return
             if '--terminal-only' in sys.argv:
                 output = Path(os.environ['TOUCH_TYPING_QA_OUTPUT'])
                 yield from self.exercise_terminal(chord, hold, capture_png, output)
@@ -216,7 +220,7 @@ class LabWindowTest(Studio):
                     if task['keys']:
                         for _ in range(28):
                             yield from chord(task['keys'])
-                            if not lab.active or lab.state['solved'] != old:
+                            if not lab.active or lab.state.get('limitDecisionPending') or lab.state['solved'] != old:
                                 break
                     else:
                         if task['id'].startswith('open-') and not lab.state['scene']['overview']:
@@ -237,10 +241,17 @@ class LabWindowTest(Studio):
                                 yield from chord(key)
                         if task['id']!='type-code':
                             yield from chord('Enter')
-                    if not lab.active:break
+                    if not lab.active or lab.state.get('limitDecisionPending'):break
                     assert self.lab.state['solved']==old+1, (index,task,self.lab.state['status'],self.lab.state['scene'])
                 yield
                 if '--timed' in sys.argv:
+                    assert self.lab.state.get('limitDecisionPending') and self.lab.state['seconds']==180
+                    self.lab.limit_actions[0].grab_focus()
+                    yield from chord('Enter')
+                    for _ in range(30):
+                        if self.lab.result:
+                            break
+                        yield
                     assert self.lab.result and self.lab.state['seconds']==180
                     results=self.call('lab-result')
                     assert results['completed'] and results['record']>=results['solved']
@@ -399,6 +410,94 @@ class LabWindowTest(Studio):
             for _ in range(10):
                 yield
             capture_png(output / ("studio-" + page + ".png"))
+
+    def exercise_soft_limit(self, chord, hold, capture_png, output):
+        for _ in range(3):
+            yield from chord("A")
+            for _ in range(6):
+                yield
+            if getattr(self, "last_character", "").lower() == "a" and self.layout == "EN":
+                break
+            yield from chord("Super+Space")
+            for _ in range(40):
+                yield
+        else:
+            raise AssertionError("Could not establish native English input source")
+        lab = self.lab
+        lab.picker.set_selected(next(i for i, row in enumerate(lab.classes) if row["id"] == "terminal"))
+        lab.level.set_selected(1)
+        lab.limit.set_selected(1)  # the actual 20-action picker, no mocked quota
+        lab.mission_picker.set_selected(next(i for i,row in enumerate(lab.choices) if row[0] == "terminal-access"))
+        lab.start()
+        for _ in range(45):
+            yield
+        if lab.state["paused"] and not self.window.is_active():
+            yield from chord("Enter")
+        for _ in range(100):
+            if lab.active and not lab.state["paused"]:
+                break
+            yield
+        assert lab.active and not lab.state["paused"]
+        for _ in range(20):
+            task, old = lab.state["task"], lab.state["solved"]
+            if task["keys"]:
+                for _ in range(28):
+                    yield from chord(task["keys"])
+                    if lab.state["solved"] != old:
+                        break
+            else:
+                if task["id"].startswith("open-") and not lab.state["scene"]["overview"]:
+                    yield from chord("Super")
+                layout = lab.state["scene"]["layout"].lower()
+                letters = {" ": "Space"}
+                for group in self.library["keyboard"]:
+                    for cap in group:
+                        for suffix, modifier in (("", ""), ("Shift", "Shift+")):
+                            letter = cap[layout + suffix]
+                            if len(letter) == 1:
+                                letters[letter] = modifier + cap["key"]
+                for char in task["text"]:
+                    yield from chord(letters[char])
+                if task["id"] != "type-code":
+                    yield from chord("Enter")
+            assert lab.state["solved"] == old + 1, (task,lab.state["status"])
+        state = lab.state
+        assert (state["solved"],state["actionLimit"]) == (20,20)
+        assert state["limitDecisionPending"] and state["paused"] and not state["finished"]
+        assert not lab.content.get_sensitive() and lab.modal_layer.get_mapped()
+        assert self.call("lab-result") is None
+        capture_png(output / "soft-limit-decision.png")
+        await_scene = state["scene"]
+        yield from chord("Enter")   # no automatic/default selection
+        yield from chord("A")       # no leaked text into the simulated terminal
+        assert lab.state["limitDecisionPending"] and lab.state["scene"] == await_scene
+        for _ in range(6):
+            if self.window.get_focus() == lab.limit_actions[1]:
+                break
+            yield from chord("Tab")
+        assert self.window.get_focus() == lab.limit_actions[1]
+        yield from hold("Enter")  # letting it physically release is part of reacquisition
+        for _ in range(130):
+            if not lab.state["paused"] and self.window.get_focus() == lab.desktop:
+                break
+            yield
+        assert lab.state["finishingMission"] and not lab.state["limitDecisionPending"] and not lab.state["paused"]
+        assert lab.state["solved"] == 20 and lab.state["scene"] == await_scene
+        assert self.window.get_focus() == lab.desktop
+        capture_png(output / "soft-limit-continue.png")
+        yield from chord("F8")
+        assert lab.state["paused"] and lab.state["finishingMission"] and lab.modal_layer.get_mapped()
+        yield from chord("Space")
+        for _ in range(100):
+            if not lab.state["paused"]:
+                break
+            yield
+        assert not lab.state["paused"]
+        yield from chord("F10")
+        assert lab.result and self.call("lab-result")["solved"] == 20
+        capture_png(output / "soft-limit-result.png")
+        print("PASS native GTK soft action limit: blocked input, held Enter, same scene and focus, pause and finish",
+              flush=True)
 
     def exercise_terminal(self, chord, hold, capture_png, output):
         from gi.repository import Gtk

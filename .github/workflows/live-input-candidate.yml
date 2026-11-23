@@ -141,6 +141,16 @@ jobs:
           $proc = Start-Process $app -ArgumentList "--qa --check-live-chrome-shaping `"$dest`"" -Wait -PassThru
           Get-Content (Join-Path $dest 'chrome-shaping.txt')
           if ($proc.ExitCode -ne 0) { throw 'WPF shaping diagnostic failed' }
+      - name: Finish or continue the same timed mission in native WPF
+        if: github.ref == 'refs/heads/feature/reference-ui'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $appDir = Join-Path $env:RUNNER_TEMP 'TouchTyping QA'
+          $app = Join-Path $appDir TouchTyping.exe
+          $out = Join-Path $env:RUNNER_TEMP 'windows-evidence/soft-finish'
+          $env:TOUCH_TYPING_QA_LESSON_CHROME = 'compact'
+          & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -SoftFinish -OutputDirectory $out
       - name: Capture exact-size native WPF Home
         if: github.ref == 'refs/heads/feature/reference-ui'
         shell: powershell
@@ -175,7 +185,7 @@ jobs:
           tar -xzf "$RUNNER_TEMP/candidate/touch-typing-linux-x64.tar.gz" -C "$RUNNER_TEMP/candidate"
           extra=()
           if [[ "$GITHUB_REF" == 'refs/heads/feature/reference-ui' ]]; then
-            extra+=(--reference-home --reference-terminal)
+            extra+=(--reference-home --reference-terminal --soft-limit)
             export TOUCH_TYPING_QA_LESSON_CHROME=compact
           fi
           bash "$RUNNER_TEMP/candidate/touch-typing-linux-x64/check.sh" --terminal-only --save-retry --gallery --source-note "${extra[@]}" --output "$RUNNER_TEMP/linux-evidence" || {

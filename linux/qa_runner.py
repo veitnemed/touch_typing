@@ -25,6 +25,7 @@ def main():
     parser.add_argument("--reference-terminal", action="store_true", help="Снимки реальной правки терминала с клавиатуры")
     parser.add_argument("--source-note", action="store_true", help="Пройти оконное поручение: методика → заметка")
     parser.add_argument("--save-retry", action="store_true", help="Включить проверку закрытия при ошибке сохранения")
+    parser.add_argument("--soft-limit", action="store_true", help="Проверить выбор при достижении лимита в окне GTK")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -60,6 +61,7 @@ def main():
             if args.reference_home: command.append("--reference-home")
             if args.reference_terminal: command.append("--reference-terminal")
             if args.source_note: command.append("--source-note")
+            if args.soft_limit: command.append("--soft-limit")
             if args.full: command.append("--full")
             return subprocess.run(command, env=environment).returncode
     return run_checks(args)
@@ -164,6 +166,15 @@ def run_checks(args):
             check("legacy-window", [sys.executable, str(tests / "test_wayland_window.py")])
             if args.timed:
                 check("native-180-seconds", [sys.executable, str(tests / "test_lab_window.py"), "--timed"], timeout=300)
+        if args.soft_limit:
+            report["coverage"].append("GTK keeps the same lesson at the action cap, isolates keys, and saves one result")
+            with tempfile.TemporaryDirectory(prefix="typing-soft-limit-") as folder:
+                previous = environment["XDG_DATA_HOME"]
+                environment["XDG_DATA_HOME"] = folder
+                try:
+                    check("native-soft-limit", [sys.executable, str(tests / "test_lab_window.py"), "--soft-limit"])
+                finally:
+                    environment["XDG_DATA_HOME"] = previous
         if args.reference_terminal:
             report["coverage"].append("GTK terminal native abcde, Home, Right, Right, Delete")
             with tempfile.TemporaryDirectory(prefix="typing-reference-terminal-") as folder:

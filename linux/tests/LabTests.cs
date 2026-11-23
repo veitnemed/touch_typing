@@ -449,6 +449,74 @@ internal static class LabTests
             Check(unlimitedReopened.TimeLimit == 0 && unlimitedReopened.ActionLimit == 0,
                 "Stored unlimited is distinct from an unknown legacy limit");
         }
+        {
+            double softNow = 0;
+            LabRun OpenSoft(int seconds, int actions, LiveDraft saved = null) =>
+                new LabRun("terminal", "sandbox", 1, seconds, "EN", [], new Random(7), () => softNow,
+                    actionLimit: actions, missionId: "terminal-access", draft: saved, softFinish: true);
+            var soft = OpenSoft(10, 0);
+            soft.Resume(); Type(soft, "cd /home/student/");
+            softNow = 15800;
+            soft.HoldForLimit();
+            Check(soft.AwaitingLimitChoice && soft.Paused && !soft.Finished && soft.HasDraft,
+                "Timer cap holds the open mission instead of making a result");
+            Check(soft.Scene.TerminalInput == "cd /home/student/" && soft.Remaining == 0,
+                "The unfinished command and timer boundary remain available");
+            soft.Resume(); Type(soft, "ignored");
+            Check(soft.Scene.TerminalInput == "cd /home/student/" && soft.Paused,
+                "Normal resume or keyboard input cannot bypass choice");
+            softNow += 500000;
+            var softRestored = OpenSoft(123, 20, soft.Draft());
+            Check(softRestored.Session == soft.Session && softRestored.AwaitingLimitChoice &&
+                softRestored.Scene.TerminalInput == soft.Scene.TerminalInput,
+                "Restored cap decision preserves attempt, scene, and current keyboard input");
+            Check(softRestored.ChooseLimit("continue") && softRestored.FinishingMission &&
+                softRestored.Paused && !softRestored.AwaitingLimitChoice, "Continuation is explicit and waits for input capture");
+            softRestored.Resume(); softNow += 1200;
+            Type(softRestored, "project"); Chord(softRestored, "Enter");
+            Check(softRestored.Solved == 1 && softRestored.Errors == 0 && softRestored.Seconds == 11 &&
+                !softRestored.Finished, "Only active post-choice time and fresh action are credited");
+            var actionSoft = OpenSoft(0, 1);
+            string currentMission = actionSoft.MissionId;
+            actionSoft.Resume(); Complete(actionSoft); actionSoft.HoldForLimit();
+            Check(actionSoft.AwaitingLimitChoice && actionSoft.Solved == 1 && actionSoft.HasDraft,
+                "The last in-budget action pauses at the same mission");
+            var finishNow = OpenSoft(0, 0, actionSoft.Draft());
+            Check(finishNow.ChooseLimit("finish") && finishNow.Finished && finishNow.Session == actionSoft.Session &&
+                finishNow.Solved == 1 && finishNow.SessionRecord().Completed && !finishNow.HasDraft &&
+                finishNow.ChooseLimit("finish"), "An accepted but unsaved finish can be retried");
+            finishNow.MarkSaved();
+            Check(!finishNow.ChooseLimit("finish"), "An already saved finish will never write again");
+            softNow = 0;
+            var stopRacingLimit = OpenSoft(10, 0);
+            stopRacingLimit.Resume(); Type(stopRacingLimit, "cd ");
+            softNow = 9999;
+            Check(!stopRacingLimit.AwaitingLimitChoice, "Last UI snapshot can be below the timer limit");
+            softNow = 10001;
+            Check(stopRacingLimit.ChooseLimit("finish") && stopRacingLimit.Finished &&
+                stopRacingLimit.SessionRecord().Completed && !stopRacingLimit.HasDraft &&
+                stopRacingLimit.Scene.TerminalInput == "cd ", "Explicit Stop at a cap wins without an earlier engine poll");
+            var stopBeforeLimit = OpenSoft(10, 0);
+            stopBeforeLimit.Resume(); Type(stopBeforeLimit, "cd ");
+            Check(stopBeforeLimit.ChooseLimit("finish") && stopBeforeLimit.Finished &&
+                !stopBeforeLimit.SessionRecord().Completed && stopBeforeLimit.HasDraft,
+                "Explicit Stop before an unexpired cap remains an early, resumable result");
+            Check(actionSoft.ChooseLimit("continue"), "Action cap can explicitly extend the current mission");
+            var continuation = OpenSoft(0, 0, actionSoft.Draft());
+            Check(continuation.FinishingMission && !continuation.AwaitingLimitChoice && continuation.Session == actionSoft.Session,
+                "Continuation choice survives reopening");
+            continuation.Resume();
+            for (int step = 0; step < continuation.ScenarioLength && !continuation.Finished; step++)
+                Complete(continuation);
+            Check(continuation.Finished && continuation.MissionId == currentMission && continuation.Solved == continuation.ScenarioLength &&
+                continuation.SessionRecord().Completed && !continuation.HasDraft, "Continued mission completes without rotation or residual checkpoint");
+            var capAtBoundary = OpenSoft(0, continuation.ScenarioLength);
+            capAtBoundary.Resume();
+            for (int step = 0; step < capAtBoundary.ScenarioLength && !capAtBoundary.Finished; step++)
+                Complete(capAtBoundary);
+            Check(capAtBoundary.Finished && capAtBoundary.MissionId == currentMission && !capAtBoundary.AwaitingLimitChoice,
+                "No continuation is offered if the limit coincides with the mission's final action");
+        }
         var oldWinner = new LabSessionRecord { Session = "old-winner", App = "chrome", Mode = "sandbox", Level = 2,
             Completed = true, Seconds = 180, Solved = 250, Errors = 2, Date = DateTime.Now.AddYears(-2) };
         var migrated = new StudioProfile(); migrated.LabSessions.Add(oldWinner);

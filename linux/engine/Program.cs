@@ -44,6 +44,7 @@ internal sealed class PracticeService
     private TypingRun typing;
     private LabRun lab;
     private LiveDraft labCheckpoint;
+    private bool labLimitCheckpointAttempted;
     private int persistedLabAttempts;
     private bool labFinishAttempted;
     private string labSaveError;
@@ -95,9 +96,10 @@ internal sealed class PracticeService
                 var draft = Flag(message, "continue") ? profile.LiveDrafts.LastOrDefault(item =>
                     item.App == Text(message, "app") && item.Level == Number(message, "level") && item.Guidance == Text(message, "guidance")) : null;
                 lab = new LabRun(Text(message, "app"), Text(message, "mode"), Number(message, "level"), Number(message, "seconds", 180), layout, profile.ShortcutHistory,
-                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit"), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: Text(message, "mission"), draft: draft);
+                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit"), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: Text(message, "mission"), draft: draft, softFinish: Flag(message, "softFinish"));
                 persistedLabAttempts = 0;
                 labCheckpoint = draft;
+                labLimitCheckpointAttempted = draft?.Progress?.LimitDecisionPending == true;
                 labFinishAttempted = false;
                 labSaveError = null;
                 FinishLabAutomatically();
@@ -106,23 +108,46 @@ internal sealed class PracticeService
                 if (lab == null) throw new InvalidOperationException("Сначала выберите учебный класс.");
                 var labAttempt = lab.Input(Text(message, "key"), Flag(message, "pressed"), Text(message, "text"));
                 if (lab.Finished) FinishLabAutomatically();
+                else if (lab.AwaitingLimitChoice) CheckLabLimit();
                 else if (labAttempt != null) SaveLabCheckpoint();
                 return LabState();
-            case "lab-state": FinishLabAutomatically(); return LabState();
-            case "lab-hint": lab?.Hint(); return LabState();
+            case "lab-state": CheckLabLimit(); FinishLabAutomatically(); return LabState();
+            case "lab-hint":
+                CheckLabLimit();
+                if (lab?.AwaitingLimitChoice != true) lab?.Hint();
+                return LabState();
+            case "lab-limit-choice":
+                if (lab == null || !lab.ChooseLimit(Text(message, "choice"))) return LabState();
+                if (lab.Finished) FinishLab();
+                else
+                {
+                    SaveLabCheckpoint();
+                    if (labSaveError != null) lab.CancelContinuation();
+                }
+                return LabState();
             case "lab-pause":
                 lab?.Pause();
                 if (lab?.Finished == true) FinishLabAutomatically();
-                else if (lab?.HasDraft == true && !lab.Saved) SaveLabCheckpoint();
+                else if (lab?.HasDraft == true && !lab.Saved)
+                {
+                    if (lab.AwaitingLimitChoice)
+                    {
+                        lab.HoldForLimit();
+                        labLimitCheckpointAttempted = true;
+                    }
+                    SaveLabCheckpoint();
+                }
                 return LabState();
             case "lab-resume":
+                CheckLabLimit();
                 lab?.Resume();
                 if (lab != null && !lab.Finished && !lab.Paused && !lab.Saved) labFinishAttempted = false;
                 return LabState();
             case "lab-stop": lab?.Stop(); FinishLab(); return LabState();
             case "lab-result":
+                CheckLabLimit();
                 FinishLabAutomatically();
-                if (lab?.Finished == true && !lab.Saved) return null;
+                if (lab?.LimitFlowInProgress == true || lab?.Finished == true && !lab.Saved) return null;
                 return lab?.Result(profile.LabSessions, profile.LabRecords);
             case "library": return Library();
             case "inspect": return Describe(Gesture.Parse(Text(message, "keys")), Text(message, "fingers"));
@@ -176,9 +201,19 @@ internal sealed class PracticeService
         return new { lab.App, lab.Mode, lab.Level, task = lab.Task.Snapshot(), scene = lab.Scene.Snapshot(), held = lab.Held,
             lab.LastKey, lab.Status, lab.Feedback, lab.Errors, lab.Solved, lab.Block, index = lab.Solved % 20 + 1,
             lab.Seconds, lab.Remaining, lab.TimeLimit, lab.ActionLimit, lab.Guidance, lab.ShowGuide, lab.Finished, lab.Paused, lab.Saved, startBlocked, saveError = labSaveError, needsCapture = true,
+            limitDecisionPending = lab.AwaitingLimitChoice, finishingMission = lab.FinishingMission,
             reportArtifact = lab.ReportArtifact,
             mission = lab.MissionId, phase = lab.PhaseTitle, objectives = lab.Objectives, scenario = lab.ScenarioTitle, scenarioStep = lab.ScenarioStep, scenarioLength = lab.ScenarioLength,
             guide = !lab.ShowGuide || lab.Task.Keys.Length == 0 ? null : Describe(Gesture.Parse(lab.Task.Keys), "") };
+    }
+
+    private void CheckLabLimit()
+    {
+        if (lab?.AwaitingLimitChoice != true) return;
+        lab.HoldForLimit();
+        if (labLimitCheckpointAttempted) return;
+        labLimitCheckpointAttempted = true;
+        SaveLabCheckpoint();
     }
 
     private void FinishLabAutomatically()
@@ -192,13 +227,14 @@ internal sealed class PracticeService
         if (lab == null || lab.Saved) return;
         labFinishAttempted = true;
         lab.Pause();
+        lab.HoldForLimit();
         var record = lab.SessionRecord();
         bool hasOldDraft = profile.LiveDrafts.Any(item => item.App == lab.App && item.Level == lab.Level && item.Guidance == lab.Guidance);
         // An elapsed-only timed session has no credits but its previous
         // checkpoint must still be retired if this attempt reached its limit.
-        if (!lab.HasDraft && record.Solved + record.Errors == 0 && !(record.Completed && hasOldDraft))
+        if (!lab.HasDraft && record.Solved + record.Errors == 0 && !lab.LimitAccepted && !(record.Completed && hasOldDraft))
         { lab.MarkSaved(); return; }
-        SaveLabCheckpoint(record);
+        SaveLabCheckpoint(lab.LimitFlowInProgress ? null : record);
         if (store.Error == null) lab.MarkSaved();
     }
 
@@ -224,7 +260,7 @@ internal sealed class PracticeService
             if (draft != null) current.LiveDrafts.Add(draft);
             current.ShortcutHistory.AddRange(pending);
             TrimShortcutHistory(current);
-            if (record != null && record.Solved + record.Errors > 0) LabSessionRecords.Update(current, record);
+            if (record != null && (record.Solved + record.Errors > 0 || lab.LimitAccepted)) LabSessionRecords.Update(current, record);
         });
         labSaveError = store.Error;
         if (labSaveError == null)
