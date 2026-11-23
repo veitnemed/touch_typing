@@ -21,6 +21,7 @@ def main():
     parser.add_argument("--full", action="store_true", help="Запустить C# стресс-тесты из исходников, требуется SDK .NET 10")
     parser.add_argument("--terminal-only", action="store_true", help="Проверить ввод в окно терминала на 1366×768")
     parser.add_argument("--gallery", action="store_true", help="Снимки открытых рабочих областей GTK")
+    parser.add_argument("--reference-home", action="store_true", help="Снимок главной 1006×863 для сверки с эталоном")
     parser.add_argument("--source-note", action="store_true", help="Пройти оконное поручение: методика → заметка")
     parser.add_argument("--save-retry", action="store_true", help="Включить проверку закрытия при ошибке сохранения")
     parser.add_argument("--seed", type=int, default=7)
@@ -55,6 +56,7 @@ def main():
             if args.terminal_only: command.append("--terminal-only")
             if args.save_retry: command.append("--save-retry")
             if args.gallery: command.append("--gallery")
+            if args.reference_home: command.append("--reference-home")
             if args.source_note: command.append("--source-note")
             if args.full: command.append("--full")
             return subprocess.run(command, env=environment).returncode
@@ -130,6 +132,15 @@ def run_checks(args):
                 raise RuntimeError("Тестовый GNOME не запустился. См. compositor.log.")
             time.sleep(.1)
         time.sleep(1)
+        if args.reference_home:
+            report["coverage"].append("GTK 1006x863 home reference capture")
+            with tempfile.TemporaryDirectory(prefix="typing-reference-home-") as folder:
+                previous = environment["XDG_DATA_HOME"]
+                environment["XDG_DATA_HOME"] = folder
+                try:
+                    check("native-reference-home", [sys.executable, str(tests / "capture_home_reference.py")])
+                finally:
+                    environment["XDG_DATA_HOME"] = previous
         if args.gallery:
             report["coverage"].append("GTK screenshots of all practice environments")
             with tempfile.TemporaryDirectory(prefix="typing-gallery-") as folder:

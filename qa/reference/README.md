@@ -1,0 +1,11 @@
+# Reproducible visual QA: TouchTyping Home
+
+The left view in the supplied 1672×941 reference montage has half-open bounds [20,38,1026,901), or 1006×863. Practice and result examples on the right are different states. Never stretch the capture to fit. Keep the reference file outside the repo.
+
+1. GTK: on the candidate Linux package run `bash check.sh --terminal-only --reference-home --save-retry --output "$PWD/evidence"`. A separate disposable QA profile maps the GTK app at 1006×863 and captures its real toolkit window texture (no compositor shadow). Preserve home-gtk.json with the image.
+2. WPF: on a Windows desktop with at least 1006×863 usable physical pixels use `powershell -File windows/Capture-HomeReference.ps1 -Application C:\candidate\TouchTyping.exe -OutputDirectory C:\qa\reference-home`. The capture is onscreen pixels of the foreground client and checks the UI Automation root and actual DPI. Preserve home-wpf.json with the image. Do separate genuine 125% and 150% runs for readability; capture geometry and DPI in the report.
+3. Compare: `python qa/reference/compare_home.py /path/reference-montage.png evidence/real-home-gtk.png evidence/gtk-compare --platform GTK`. This writes the reference crop and real capture in the same size, side-by-side, a 50% overlay, SHA-256 identifiers and per-region mean RGB discrepancy. The metric is diagnostic, not proof of a match.
+
+Use an empty disposable profile as the baseline. Its real progress values need not match illustrative values in the montage; report the difference instead of inserting fake progress. Declare the actual input layout, font/decoration or rendering differences. Correct the largest discrepancies in geometry, typography and hierarchy, then repeat. Store each iteration separately.
+
+Before claiming parity: verify accessible keyboard navigation to five cards and all exercises; real progress and theme state; small-window fit; long Russian hints and focus recovery; selection, mistake feedback and subsequent input. Run the existing input regressions for abcde → Home → Right → Right (caret index 2) → Delete (abde at index 2). Save actual before/after frames and state assertions. Capture Home, catalog, practice environments, pause and result at genuine platform scales. A slideshow is not a keyboard recording.

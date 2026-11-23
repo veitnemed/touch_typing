@@ -55,7 +55,9 @@ namespace TouchTypingStudio
             {
                 try
                 {
-                    app.Run(new LiveStudio(Array.IndexOf(args, "--typing") >= 0 ? "Печать" : "Live", verify));
+                    bool captureHome = verify && Array.IndexOf(args, "--qa-home") >= 0;
+                    app.Run(new LiveStudio(Array.IndexOf(args, "--typing") >= 0 ? "Печать" : captureHome || !verify ? "Главная" : "Live",
+                        verify, captureHome));
                 }
                 catch (Exception error)
                 {

@@ -169,3 +169,94 @@ button.class-button.selected { border-color: #e95420; background: #4c313a; color
 .stamina-actions button.stamina-blue { background: #367ac5; border-color: #367ac5; color: white; }
 .stamina-actions button.stamina-blue:hover { background: #438bd9; }
 .stamina-modal expander { color: #bcc7d3; }
+
+/* Reference home. The native decoration controls and labels stay interactive. */
+.reference-header {
+  min-height: 72px; padding: 0 9px 0 22px;
+  background: linear-gradient(110deg, #211933, #18132e 65%, #19142f);
+  color: #f8f5ff; border-bottom: 1px solid #2a2050; box-shadow: none;
+}
+.reference-brand, .reference-nav, .reference-icon-control {
+  background: transparent; color: #f8f5ff; border: 1px solid transparent; border-radius: 12px;
+}
+.reference-header button.reference-brand { padding: 1px 0; }
+.reference-mark {
+  min-width: 32px; min-height: 44px; font-family: "DejaVu Sans Mono", monospace;
+  font-size: 20px; font-weight: 800; border-radius: 11px; color: #fff;
+  background: linear-gradient(150deg,#7757ff,#522fba); padding: 0 6px;
+}
+.reference-wordmark { color: #fff; font-size: 21px; font-weight: 850; }
+.reference-header button.reference-nav { padding: 8px 9px; font-size: 13px; min-height: 23px; border: 1px solid transparent; }
+.reference-header button.reference-nav.active {
+  background: linear-gradient(160deg, #8e6aff, #6b40ed); color: #fff; border-color: #9b77ff;
+  box-shadow: 0 0 12px alpha(#8f60ff,.31);
+}
+.reference-header button.reference-nav:hover, .reference-header button.reference-icon-control:hover { background: #383058; }
+.reference-header button.reference-icon-control { color: #d3c4ff; padding: 4px 5px; min-width: 22px; }
+.reference-layout { padding: 5px 7px; color: #e4d9ff; font-size: 13px; font-weight: 600; border-radius: 8px; }
+.reference-layout.active { background: linear-gradient(163deg,#8b5ef7,#6240dc); color: #fff; }
+.reference-home {
+  background: radial-gradient(ellipse at bottom right, #38205d, transparent 41%),
+              linear-gradient(150deg,#171331 0%,#16122a 49%,#19132c 100%);
+  color: #fbf8ff;
+}
+.reference-board { padding: 44px 26px 33px 35px; }
+.reference-hero { margin: 0 0 27px 18px; }
+.reference-hero-title { color: #faf7ff; font-family: "Noto Sans", sans-serif; font-size: 39px; font-weight: 820; }
+.reference-hero-subtitle { color: #d8cdee; font-size: 17px; font-weight: 400; }
+button.reference-card {
+  min-height: 227px; padding: 18px 29px 24px; border: 1px solid #3d325f; margin: 0;
+  border-radius: 19px; color: #f9f4ff; background: linear-gradient(150deg,#241e44,#1b1833);
+}
+button.reference-card.reference-card-lower { min-height: 210px; padding-top: 16px; }
+button.reference-card.reference-selected {
+  border: 2px solid #ad7cf8; background: linear-gradient(142deg,#4b2e83 0%,#2c2251 58%,#312254 100%);
+  box-shadow: inset 0 0 16px alpha(#7440dc,.42), 0 0 21px alpha(#8f4aff,.26);
+}
+button.reference-card:hover { background: linear-gradient(150deg,#382565,#221a3d); border-color: #9271d3; }
+button.reference-card:focus-visible, .reference-header button.reference-nav:focus-visible,
+.reference-header button.reference-brand:focus-visible, .reference-header button.reference-icon-control:focus-visible {
+  outline: 2px solid #dfcaff; outline-offset: -5px;
+}
+.reference-app-icon { padding: 11px; border-radius: 15px; background: #353359; }
+.reference-card.module-ubuntu .reference-app-icon { background: #773747; }
+.reference-card.module-code .reference-app-icon { background: #30345a; }
+.reference-card.module-terminal .reference-app-icon { background: #3d375e; }
+.reference-card.module-workday .reference-app-icon { background: #22423d; }
+.reference-card-title { color: #faf6ff; font-size: 25px; font-weight: 820; margin: 6px 0 4px; }
+.reference-card-description { color: #e4dbf4; font-family: "Liberation Sans", sans-serif; font-size: 18px; font-weight: 430; }
+.reference-progress { color: #ae94fa; margin: 10px 0 8px; }
+.reference-progress-label { color: #e8dcff; font-size: 16px; font-weight: 450; }
+.reference-meter trough, .reference-meter progress { min-height: 11px; border: none; border-radius: 6px; }
+.reference-meter trough { background: #4b416a; }
+.reference-meter progress { background: linear-gradient(165deg, #a17cff, #7445e9); }
+window.reference-light .reference-header { background: #eee7fb; border-color: #d1c0ea; color: #2c1e49; }
+window.reference-light .reference-wordmark, window.reference-light .reference-icon-control,
+window.reference-light .reference-layout, window.reference-light .reference-nav { color: #352452; }
+window.reference-light button.reference-nav.active, window.reference-light .reference-layout.active { color: #fff; }
+window.reference-light .reference-home { background: linear-gradient(150deg,#fbf8ff,#e8ddff); color: #271a42; }
+window.reference-light .reference-hero-title, window.reference-light .reference-card-title { color: #23173f; }
+window.reference-light .reference-hero-subtitle, window.reference-light .reference-card-description,
+window.reference-light .reference-progress-label { color: #442d67; }
+window.reference-light button.reference-card { background: #f8f3ff; border-color: #c9b4ec; }
+window.reference-light button.reference-card.reference-selected { background: #eee1ff; border-color: #945cdb; }
+window.reference-light .reference-meter trough { background: #d7c8ed; }
+
+.reference-header .reference-brand { margin-right: 22px; }
+.reference-header .reference-window-controls button { min-width: 18px; padding: 1px 2px; border: none; background: transparent; color: inherit; }
+.reference-header .reference-window-controls button:hover { background: #383058; }
+.reference-header .reference-icon-control button { border: 1px solid transparent; background: transparent; color: #d3c4ff; min-width: 18px; padding: 1px; }
+.reference-header .reference-icon-control button:hover { background: #383058; }
+.reference-navigation { margin-right: 2px; }
+.reference-progress-label { min-height: 19px; }
+
+window.reference-window.solid-csd, window.reference-window.csd {
+  box-shadow: 0 0 0 1px #382951; border: 0; outline: none; margin: 0;
+}
+
+button.reference-card.module-code, button.reference-card.module-workday { padding-right: 24px; }
+.reference-card.module-code .reference-meter, .reference-card.module-workday .reference-meter { margin-right: 5px; }
+.reference-header button.reference-nav:focus-visible, .reference-header .reference-window-controls button:focus-visible {
+  outline: 2px solid #dfcaff; outline-offset: -4px;
+}
+window.reference-window > .titlebar { background: #1e1734; border: 0; box-shadow: none; }

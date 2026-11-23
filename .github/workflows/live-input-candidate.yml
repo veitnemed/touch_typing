@@ -2,7 +2,7 @@ name: Live input candidate (no publish)
 
 on:
   push:
-    branches: [feature/live-input-reliability, feature/live-file-recovery, feature/live-level-advice, feature/live-skill-identity]
+    branches: [feature/live-input-reliability, feature/live-file-recovery, feature/live-level-advice, feature/live-skill-identity, feature/reference-ui]
   workflow_dispatch:
 
 permissions:
@@ -67,6 +67,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v4
+        if: github.ref == 'refs/heads/feature/reference-ui'
       - uses: actions/download-artifact@v4
         with:
           name: windows-x64-candidate
@@ -101,6 +103,14 @@ jobs:
           $app = Join-Path $appDir TouchTyping.exe
           $out = Join-Path $env:RUNNER_TEMP windows-evidence
           & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -WorkdaySourceNote -Seed 0 -OutputDirectory (Join-Path $out 'workday-source-note')
+      - name: Capture exact-size native WPF Home
+        if: github.ref == 'refs/heads/feature/reference-ui'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = Join-Path $env:RUNNER_TEMP 'TouchTyping QA/TouchTyping.exe'
+          $destination = Join-Path $env:RUNNER_TEMP 'windows-evidence/reference-home'
+          & (Join-Path $env:GITHUB_WORKSPACE 'windows/Capture-HomeReference.ps1') -Application $app -OutputDirectory $destination -AdjustHostedDisplay
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -125,7 +135,9 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: |
           tar -xzf "$RUNNER_TEMP/candidate/touch-typing-linux-x64.tar.gz" -C "$RUNNER_TEMP/candidate"
-          bash "$RUNNER_TEMP/candidate/touch-typing-linux-x64/check.sh" --terminal-only --save-retry --gallery --source-note --output "$RUNNER_TEMP/linux-evidence" || {
+          extra=()
+          if [[ "$GITHUB_REF" == 'refs/heads/feature/reference-ui' ]]; then extra+=(--reference-home); fi
+          bash "$RUNNER_TEMP/candidate/touch-typing-linux-x64/check.sh" --terminal-only --save-retry --gallery --source-note "${extra[@]}" --output "$RUNNER_TEMP/linux-evidence" || {
             tail -n 80 -- "$RUNNER_TEMP/linux-evidence/"*.log
             exit 1
           }

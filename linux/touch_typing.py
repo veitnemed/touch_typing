@@ -1,5 +1,8 @@
 #!/usr/bin/python3
 import argparse
+import math
+
+import cairo
 from datetime import datetime
 import os
 from pathlib import Path
@@ -8,7 +11,8 @@ import sys
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gdk, Gio, GLib, Gtk, Pango
+gi.require_version("Graphene", "1.0")
+from gi.repository import Gdk, Gio, GLib, Graphene, Gtk, Pango
 
 from platform_linux import APP_ID, Engine, EngineError, FINGERS, InputSources, MODIFIERS, PHYSICAL, ROOT, chord_label, key_label
 from lab_view import DesktopView
@@ -285,6 +289,180 @@ class LessonGuide(Gtk.Box):
         self.set_visible(profile["showKeys"] or profile["showHands"])
 
 
+def draw_reference_wave(_widget, cr, width, height):
+    # The decorative sweep is generated as vector paths; it does not carry
+    # any text/controls or make the supplied mock part of the application.
+    scale = width / 1006
+    cr.save()
+    cr.scale(scale, 1)
+    def ribbon(line=0):
+        cr.move_to(502, 204 + line)
+        cr.curve_to(602, 151 + line, 656, 158 + line, 716, 133 + line)
+        cr.curve_to(789, 101 + line, 807, 65 + line, 878, 42 + line)
+        cr.curve_to(920, 23 + line, 966, 26 + line, 1006, 42 + line)
+
+    cr.save()
+    cr.rectangle(0, 0, 1006, height)
+    cr.clip()
+    cr.set_operator(cairo.OPERATOR_ADD)
+    for line in range(-55, 76, 3):
+        cr.set_source_rgba(.34, .10, .72, .019 * math.exp(-(line / 31)**2))
+        ribbon(line)
+        cr.set_line_width(4.0)
+        cr.stroke()
+    cr.restore()
+
+    ribbon()
+    cr.line_to(1006, 130)
+    cr.curve_to(943, 95, 881, 130, 842, 155)
+    cr.curve_to(768, 210, 716, 178, 644, 207)
+    cr.curve_to(570, 226, 542, 223, 502, 204)
+    cr.close_path()
+    upper = cairo.LinearGradient(650, 196, 910, 52)
+    upper.add_color_stop_rgba(0, .28, .13, .62, .03)
+    upper.add_color_stop_rgba(.49, .35, .14, .65, .25)
+    upper.add_color_stop_rgba(.74, .48, .20, .91, .79)
+    upper.add_color_stop_rgba(1, .35, .23, .75, .37)
+    cr.set_source(upper)
+    cr.fill()
+    crest = cairo.LinearGradient(502, 204, 1006, 42)
+    crest.add_color_stop_rgba(0, .28, .12, .64, 0)
+    crest.add_color_stop_rgba(.5, .58, .24, 1., .45)
+    crest.add_color_stop_rgba(.76, .74, .46, 1., .92)
+    crest.add_color_stop_rgba(1, .44, .25, .81, .33)
+    cr.set_source(crest)
+    ribbon()
+    cr.set_line_width(1.45)
+    cr.stroke()
+    cr.restore()
+
+
+class ReferenceCanvas(Gtk.Widget):
+    """Snapshot authored Cairo vectors without a cairo GI callback dependency."""
+    def __init__(self, draw, size=0, max_height=0):
+        super().__init__()
+        self.draw_vector, self.vector_size, self.max_height = draw, size, max_height
+        self.cached_key = self.cached_texture = None
+        self.set_can_target(False)
+
+    def do_measure(self, _orientation, _constraint):
+        return self.vector_size, self.vector_size, -1, -1
+
+    def do_snapshot(self, snapshot):
+        width, height = self.get_width(), self.get_height()
+        if self.max_height:
+            height = min(height, self.max_height)
+        if not width or not height:
+            return
+        color = self.get_style_context().get_color().to_string()
+        key = width, height, self.get_scale_factor(), color
+        if key != self.cached_key:
+            scale = key[2]
+            surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width * scale, height * scale)
+            context = cairo.Context(surface)
+            context.scale(scale, scale)
+            self.draw_vector(self, context, width, height)
+            surface.flush()
+            fmt = (Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED if sys.byteorder == "little"
+                   else Gdk.MemoryFormat.A8R8G8B8_PREMULTIPLIED)
+            self.cached_texture = Gdk.MemoryTexture.new(width * scale, height * scale, fmt,
+                GLib.Bytes.new(bytes(surface.get_data())), surface.get_stride())
+            self.cached_key = key
+        snapshot.append_texture(self.cached_texture, Graphene.Rect().init(0, 0, width, height))
+
+
+class ReferenceGlyph(ReferenceCanvas):
+    """Small native vector glyph. Names and focus belong to the owning button."""
+    def __init__(self, name, size):
+        self.name = name
+        super().__init__(self.draw, size)
+
+    def draw(self, widget, cr, width, height):
+        size = min(width, height)
+        cr.translate((width - size) / 2, (height - size) / 2)
+        cr.scale(size / 48, size / 48)
+        cr.set_line_width(4.3)
+        cr.set_line_cap(cairo.LINE_CAP_ROUND)
+        cr.set_line_join(cairo.LINE_JOIN_ROUND)
+        def rgb(red, green, blue):
+            cr.set_source_rgb(red, green, blue)
+        def polygon(*points):
+            cr.move_to(*points[0])
+            for point in points[1:]:
+                cr.line_to(*point)
+            cr.close_path()
+            cr.fill()
+        def line(*points):
+            cr.move_to(*points[0])
+            for point in points[1:]:
+                cr.line_to(*point)
+            cr.stroke()
+        def circle(x, y, radius, solid=True):
+            cr.arc(x, y, radius, 0, math.tau)
+            cr.fill() if solid else cr.stroke()
+        def rounded(x, y, w, h, r):
+            cr.new_sub_path()
+            for cx, cy, a in ((x+w-r, y+r, -90), (x+w-r, y+h-r, 0),
+                              (x+r, y+h-r, 90), (x+r, y+r, 180)):
+                cr.arc(cx, cy, r, math.radians(a), math.radians(a+90))
+            cr.close_path()
+
+        color = widget.get_style_context().get_color()
+        cr.set_source_rgba(color.red, color.green, color.blue, color.alpha)
+        name = self.name
+        if name == "ubuntu":
+            rgb(1, .47, 0)
+            cr.set_line_width(5)
+            for angle in (23, 143, 263):
+                cr.arc(24, 24, 12.4, math.radians(angle+12), math.radians(angle+106))
+                cr.stroke()
+                theta = math.radians(angle)
+                circle(24+18*math.cos(theta), 24+18*math.sin(theta), 4)
+        elif name == "chrome":
+            for (r, g, b), begin, end in (((.93, .24, .14), 210, 335), ((.99, .75, .04), 335, 450),
+                                          ((.01, .62, .27), 90, 210)):
+                rgb(r,g,b)
+                cr.move_to(24,24)
+                cr.arc(24, 24, 24, math.radians(begin), math.radians(end))
+                cr.close_path()
+                cr.fill()
+            rgb(.98,.99,1); circle(24,24,11.2)
+            rgb(.15,.50,.94); circle(24,24,9.4)
+        elif name == "code":
+            rgb(0, .48, .83)
+            polygon((3,13),(9,10),(34,29),(34,12),(42,6),(42,42),(34,39),(4,19))
+            rgb(0, .65, .92)
+            polygon((34,8),(43,4),(47,8),(47,39),(43,43),(34,39),(34,21),(9,36),(3,31))
+            rgb(.15, .77, .97)
+            polygon((43,4),(47,8),(47,39),(43,43))
+        elif name == "terminal":
+            rgb(.99,.97,1)
+            line((7,11),(19,24),(7,37))
+            line((24,36),(42,36))
+        elif name == "workday":
+            rgb(.42,1,.51)
+            cr.set_line_width(4)
+            rounded(6,16,36,25,4); cr.stroke()
+            line((16,16),(16,11),(19,8),(29,8),(32,11),(32,16))
+        elif name == "bars":
+            for x, y in ((4,28),(19,17),(34,6)):
+                cr.rectangle(x,y,9,42-y)
+            cr.fill()
+        elif name == "home":
+            line((5,22),(24,6),(43,22),(38,22),(38,43),(29,43),(29,30),(19,30),(19,43),(10,43),(10,22),(5,22))
+        elif name == "practice":
+            circle(24,24,19,False); circle(24,24,11,False)
+            line((24,24),(38,11),(41,5))
+        elif name == "book":
+            cr.move_to(4,9); cr.curve_to(12,5,19,6,24,11); cr.curve_to(30,6,38,5,44,9)
+            cr.line_to(44,40); cr.curve_to(36,36,29,36,24,41); cr.curve_to(19,36,11,36,4,40)
+            cr.close_path(); cr.stroke()
+            line((24,12),(24,40))
+        elif name == "moon":
+            cr.move_to(33,5); cr.curve_to(18,5,11,13,11,25); cr.curve_to(11,39,28,46,41,36)
+            cr.curve_to(25,37,18,20,33,5); cr.close_path(); cr.fill()
+
+
 class Studio(Gtk.Application):
     def __init__(self, smoke=None, smoke_size=None, smoke_live=False):
         flags = Gio.ApplicationFlags.NON_UNIQUE if smoke else Gio.ApplicationFlags.DEFAULT_FLAGS
@@ -333,18 +511,9 @@ class Studio(Gtk.Application):
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.window = Gtk.ApplicationWindow(application=self, title="Код вслепую — Linux")
         self.window.set_default_size(*self.window_size)
+        self.window.add_css_class("reference-window")
         self.window.set_size_request(960, 600)
-        bar = Gtk.HeaderBar()
-        menu = Gtk.MenuButton(icon_name="open-menu-symbolic")
-        pop = Gtk.Popover()
-        items = box(gap=4)
-        for page, title in (("lab", "Live"), ("shortcuts", "Клавиши"), ("typing", "Печать"), ("editor", "Редактор"), ("progress", "Прогресс")):
-            items.append(button(title, lambda dest=page: (pop.popdown(), self.navigate(dest))))
-        pop.set_child(items)
-        menu.set_popover(pop)
-        bar.pack_start(menu)
-        bar.pack_start(text("КОД ВСЛЕПУЮ", "brand"))
-        self.window.set_titlebar(bar)
+        self.build_header()
         self.window.connect("close-request", self.close_request)
         self.window.connect("notify::is-active", self.focus_changed)
         controller = Gtk.EventControllerKey()
@@ -352,22 +521,6 @@ class Studio(Gtk.Application):
         controller.connect("key-pressed", self.key_pressed)
         controller.connect("key-released", self.key_released)
         self.window.add_controller(controller)
-
-        self.navigation = {}
-        self.tabs = row(3)
-        for page, title, key in (
-            ("lab", "Live", "1"), ("typing", "Печать", "2"),
-            ("editor", "Редактор", "3"), ("progress", "Прогресс", "4"),
-        ):
-            nav = button(title, lambda value=page: self.navigate(value), "nav")
-            nav.set_tooltip_text("Alt+" + key)
-            bind_name(nav, title + " Alt+" + key)
-            self.tabs.append(nav)
-            self.navigation[page] = nav
-        bar.set_title_widget(expand(box()))
-        bar.pack_end(self.tabs)
-        self.layout_tag = text(self.layout, "tag")
-        bar.pack_end(self.layout_tag)
 
         main = box(gap=0)
         self.banner = text("", "bad", wrap=True)
@@ -378,14 +531,170 @@ class Studio(Gtk.Application):
         add(main, self.banner, self.body)
         main.add_css_class("shell")
         self.window.set_child(main)
-        self.navigate("shortcuts" if self.smoke else "lab")
+        self.navigate("shortcuts" if self.smoke else "home")
         if not self.smoke:
             self.window.maximize()
         self.window.present()
-        (self.start_button if self.smoke else self.lab.begin).grab_focus()
+        if self.smoke:
+            self.start_button.grab_focus()
         GLib.timeout_add(200, self.tick)
         if self.smoke:
             GLib.timeout_add(450, self.smoke_test)
+
+    # Visible header order follows the design. Retain the existing Alt
+    # bindings (especially Alt+1 for Live) independently of visual order.
+    NAV_SHORTCUTS = {"0": "home", "1": "lab", "2": "typing", "3": "editor", "4": "progress"}
+    HOME_MODULES = (
+        ("ubuntu", "Ubuntu", "Работа в Linux: окна, файлы,\nприложения, система."),
+        ("chrome", "Chrome", "Эффективная работа\nв браузере без мыши."),
+        ("code", "VS Code", "Навигация, редактирование\nи управление проектом."),
+        ("terminal", "Терминал", "Быстрая работа в консоли:\nкоманды, файлы, процессы."),
+        ("workday", "Рабочий день", "Реальные сценарии:\nпереключение, поиск, организация."),
+    )
+
+    def build_header(self):
+        handle = Gtk.WindowHandle()
+        bar = row(9, "reference-header")
+        handle.set_child(bar)
+        brand = button("", lambda: self.navigate("home"), "reference-brand")
+        brand.set_child(add(row(14), text("</>", "reference-mark"), text("КОД ВСЛЕПУЮ", "reference-wordmark")))
+        bind_name(brand, "Код вслепую, главная")
+        brand.set_valign(Gtk.Align.CENTER)
+        bar.append(brand)
+        self.tabs = row(9, "reference-navigation")
+        self.navigation = {}
+        for page, glyph, title, key in (
+            ("home", "home", "Главная", "0"), ("lab", "practice", "Практика", "1"),
+            ("typing", "book", "Обучение", "2"), ("progress", "bars", "Прогресс", "4"),
+        ):
+            nav = button("", lambda dest=page: self.navigate(dest), "reference-nav")
+            nav.set_child(add(row(7), ReferenceGlyph(glyph, 19), text(title)))
+            bind_name(nav, f"{title} Alt+{key}")
+            nav.set_tooltip_text("Alt+" + key)
+            self.tabs.append(nav)
+            self.navigation[page] = nav
+        self.tabs.set_valign(Gtk.Align.CENTER)
+        bar.append(self.tabs)
+        bar.append(expand(box()))
+        self.layout_tag = row(4, "reference-layouts")
+        self.layout_chips = {lang: text(lang, "reference-layout") for lang in ("EN", "RU")}
+        add(self.layout_tag, *self.layout_chips.values())
+        self.show_layout()
+        self.layout_tag.set_valign(Gtk.Align.CENTER)
+        self.layout_tag.set_tooltip_text("Активная раскладка клавиатуры. Переключите её системным сочетанием.")
+        bar.append(self.layout_tag)
+        theme = button("", self.toggle_reference_theme, "reference-icon-control")
+        theme.set_child(ReferenceGlyph("moon", 18))
+        bind_name(theme, "Сменить оформление")
+        theme.set_tooltip_text("Переключить тёмное и светлое оформление")
+        theme.set_valign(Gtk.Align.CENTER)
+        bar.append(theme)
+        menu = Gtk.MenuButton(icon_name="open-menu-symbolic")
+        menu.add_css_class("reference-icon-control")
+        menu.set_tooltip_text("Дополнительные разделы")
+        bind_name(menu, "Дополнительные разделы")
+        pop = Gtk.Popover()
+        items = box(gap=4)
+        for page, title in (("shortcuts", "Клавиши"), ("editor", "Редактор упражнений")):
+            items.append(button(title, lambda dest=page: (pop.popdown(), self.navigate(dest))))
+        pop.set_child(items)
+        menu.set_popover(pop)
+        menu.set_valign(Gtk.Align.CENTER)
+        bar.append(menu)
+        controls = row(1, "reference-window-controls")
+        controls.set_valign(Gtk.Align.CENTER)
+        maximize = lambda: self.window.unmaximize() if self.window.is_maximized() else self.window.maximize()
+        for caption, name, action in (("−", "Свернуть", self.window.minimize), ("□", "Развернуть", maximize),
+                                      ("×", "Закрыть", self.window.close)):
+            control = button(caption, action)
+            bind_name(control, name)
+            control.set_tooltip_text(name)
+            controls.append(control)
+        bar.append(controls)
+        self.window.set_titlebar(handle)
+
+    def show_layout(self):
+        for name, chip in self.layout_chips.items():
+            if name == self.layout:
+                chip.add_css_class("active")
+            else:
+                chip.remove_css_class("active")
+
+    def toggle_reference_theme(self):
+        if self.window.has_css_class("reference-light"):
+            self.window.remove_css_class("reference-light")
+        else:
+            self.window.add_css_class("reference-light")
+
+    def open_reference_module(self, module):
+        self.navigate("lab")
+        if self.lab is None:
+            return
+        index = next((i for i, item in enumerate(self.lab.classes) if item["id"] == module), None)
+        if index is not None:
+            self.lab.picker.set_selected(index)
+            self.lab.begin.grab_focus()
+
+    @staticmethod
+    def module_progress(module, classes, skills):
+        shortcuts = {task["id"] for item in classes if item["id"] == module for task in item["shortcuts"]}
+        prefix = f"lab/{module}/"
+        confirmed = {item["key"][len(prefix):] for item in skills if item.get("confirmed") and item["key"].startswith(prefix)}
+        return (len(shortcuts & confirmed), len(shortcuts))
+
+    def build_home(self):
+        scene = Gtk.Overlay()
+        scene.add_css_class("reference-home")
+        scene.set_vexpand(True)
+        backdrop = ReferenceCanvas(draw_reference_wave, max_height=245)
+        scene.set_child(backdrop)
+        board = box(Gtk.Orientation.VERTICAL, 26, "reference-board")
+        board.set_valign(Gtk.Align.START)
+        hero = box(Gtk.Orientation.VERTICAL, 6, "reference-hero")
+        add(hero, text("Практика без мыши", "reference-hero-title"),
+            text("Управляйте системой, приложениями и рабочими задачами\nтолько с клавиатуры.",
+                 "reference-hero-subtitle", wrap=True))
+        board.append(hero)
+        modules = Gtk.Grid(column_homogeneous=True, column_spacing=0, row_spacing=23)
+        modules.add_css_class("reference-modules")
+        catalog = self.call("lab-catalog") or {}
+        classes = catalog.get("classes", ())
+        skills = self.library.get("liveSkills", ())
+        self.home_cards = {}
+        for index, (module, title, description) in enumerate(self.HOME_MODULES):
+            tile = button("", lambda dest=module: self.open_reference_module(dest), "reference-card", "module-" + module)
+            if index == 0:
+                tile.add_css_class("reference-selected")
+            if index > 2:
+                tile.add_css_class("reference-card-lower")
+            tile.set_tooltip_text(f"Открыть класс «{title}». Прогресс: подтверждённые сочетания из каталога для текущей раскладки.")
+            inner = box(Gtk.Orientation.VERTICAL, 0, "reference-card-inner")
+            picture = ReferenceGlyph(module, 43 if index > 2 else 48)
+            picture.add_css_class("reference-app-icon")
+            picture.set_halign(Gtk.Align.START)
+            tally, total = self.module_progress(module, classes, skills)
+            fraction = tally / total if total else 0
+            bind_name(tile, f"{title}. Прогресс: {fraction:.0%}. Открыть класс.")
+            label = text(f"Прогресс: {fraction:.0%}", "reference-progress-label")
+            status = add(row(12, "reference-progress"), ReferenceGlyph("bars", 19), label)
+            meter = Gtk.ProgressBar(fraction=fraction)
+            meter.add_css_class("reference-meter")
+            details = text(description, "reference-card-description", wrap=True)
+            details.set_max_width_chars(34)
+            add(inner, picture, text(title, "reference-card-title"), details, expand(box(), True), status, meter)
+            tile.set_child(inner)
+            self.home_cards[module] = tile
+            x, y, span, left, right = [(0, 0, 16, 0, 20), (16, 0, 15, 0, 20), (31, 0, 14, 0, 0),
+                                       (0, 1, 17, 9, 8), (17, 1, 19, 20, 23)][index]
+            tile.set_margin_start(left)
+            tile.set_margin_end(right)
+            tile.set_vexpand(False)
+            modules.attach(tile, x, y, span, 1)
+        modules.set_vexpand(False)
+        board.append(modules)
+        scene.add_overlay(board)
+        scene.set_measure_overlay(board, True)
+        self.body.append(expand(scroll(scene), True))
 
     def run_checks(self, control, status):
         if self.check_process:
@@ -457,6 +766,9 @@ class Studio(Gtk.Application):
         if page == "lab":
             self.lab = LabPage(self)
             self.body.append(expand(self.lab, True))
+            return
+        if page == "home":
+            self.build_home()
             return
         practice = page in ("shortcuts", "typing")
         self.page = box(Gtk.Orientation.VERTICAL, 9 if practice else 14, "lesson-page" if practice else "page")
@@ -1051,7 +1363,7 @@ class Studio(Gtk.Application):
                 candidate = {"a": "EN", "ф": "RU"}.get(chr(codepoint).lower())
         if candidate and candidate != self.layout:
             self.layout = candidate
-            self.layout_tag.set_label(self.layout)
+            self.show_layout()
             if not self.workout and not self.recording and not self.result_kind and self.mode == "shortcuts":
                 self.refresh()
                 self.change_group()
@@ -1062,8 +1374,8 @@ class Studio(Gtk.Application):
         self.update_layout(controller, character)
         if self.lab:
             handled = self.lab.key_down(key, character, modifiers, keycode)
-            if not self.lab.active and not handled and modifiers & Gdk.ModifierType.ALT_MASK and key in ("1", "2", "3", "4"):
-                self.navigate(list(self.navigation)[int(key) - 1])
+            if not self.lab.active and not handled and modifiers & Gdk.ModifierType.ALT_MASK and key in self.NAV_SHORTCUTS:
+                self.navigate(self.NAV_SHORTCUTS[key])
                 return True
             return handled
         if self.recording:
@@ -1135,8 +1447,8 @@ class Studio(Gtk.Application):
                 and not (modifiers & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SUPER_MASK))):
             self.hint_key("keys" if key == "F4" else "hands")
             return True
-        if modifiers & Gdk.ModifierType.ALT_MASK and key in ("1", "2", "3", "4"):
-            self.navigate(list(self.navigation)[int(key) - 1])
+        if modifiers & Gdk.ModifierType.ALT_MASK and key in self.NAV_SHORTCUTS:
+            self.navigate(self.NAV_SHORTCUTS[key])
             return True
         if (not self.result_kind and self.mode in ("shortcuts", "typing") and key == "Space"
                 and not (modifiers & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SUPER_MASK))):

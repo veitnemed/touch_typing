@@ -19,6 +19,7 @@ namespace TouchTypingStudio
 {
     internal sealed partial class LiveStudio : Window
     {
+        private const string HomePage = "Главная";
         private const string LivePage = "Live";
         private const string TypingPage = "Печать";
         private const string EditorPage = "Редактор";
@@ -62,18 +63,21 @@ namespace TouchTypingStudio
         private Button beginControl;
         private Data[] groupSkills = new Data[0];
 
-        public LiveStudio(string initial, bool verify)
+        public LiveStudio(string initial, bool verify, bool captureHome = false)
         {
             verifyMode = verify;
             engine = new PracticeEngineClient(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "engine", "TouchTyping.Engine.exe"), verify);
             Title = "Код вслепую";
-            Width = 1280;
-            Height = 750;
-            MinWidth = 960;
-            MinHeight = 600;
+            Width = captureHome ? 1006 : 1280;
+            Height = captureHome ? 863 : 750;
+            MinWidth = 748;
+            MinHeight = 540;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             Background = new LinearGradientBrush(Color.FromRgb(28,34,45), Color.FromRgb(44,49,61), 0);
-            WindowState = WindowState.Maximized;
+            WindowState = captureHome ? WindowState.Normal : WindowState.Maximized;
+            FontFamily = new FontFamily("Segoe UI");
+            customLiveChrome = !verify || captureHome;
+            if (customLiveChrome) ConfigureLiveChrome();
             Foreground = Ink;
             UseLayoutRounding = true;
             Content = BuildShell();
@@ -82,7 +86,7 @@ namespace TouchTypingStudio
                 nativeWindow = PresentationSource.FromVisual(this) as HwndSource;
                 if (nativeWindow != null) nativeWindow.AddHook(NativeInput);
             };
-            Activated += delegate { if (!active && page == LivePage) RefreshLayoutIfChanged(); };
+            Activated += delegate { if (!active && (page == LivePage || page == HomePage)) RefreshLayoutIfChanged(); };
             Deactivated += delegate
             {
                 if (labActive) { PauseLab(); return; }
@@ -176,19 +180,7 @@ namespace TouchTypingStudio
         private UIElement BuildShell()
         {
             var root = new DockPanel();
-            var brand = Label("КОД ВСЛЕПУЮ", 21, Ink, true);
-            brand.VerticalAlignment = VerticalAlignment.Center;
-            brand.Margin = new Thickness(0, 0, 19, 0);
-            var headerRow = new DockPanel();
-            DockPanel.SetDock(brand, Dock.Left);
-            headerRow.Children.Add(brand);
-            top.HorizontalAlignment = HorizontalAlignment.Right;
-            headerRow.Children.Add(top);
-            var header = new Border
-            {
-                Background = Ui.Brush("#29292C"), BorderThickness = new Thickness(0, 0, 0, 1),
-                BorderBrush = Edge, Padding = new Thickness(22, 10, 22, 8), Child = headerRow
-            };
+            var header = BuildReferenceHeader();
             DockPanel.SetDock(header, Dock.Top);
             root.Children.Add(header);
             notice.Foreground = Error;
@@ -203,21 +195,8 @@ namespace TouchTypingStudio
 
         private void UpdateHeader()
         {
-            top.Children.Clear();
-            foreach (string tab in new[] { LivePage, TypingPage, EditorPage, ProgressPage })
-            {
-                var current = tab;
-                var button = ActionButton(tab, delegate { if (active) FinishSession(); ShowPage(current); });
-                button.Background = Brushes.Transparent;
-                button.BorderThickness = new Thickness(0);
-                if (tab == page)
-                {
-                    button.BorderBrush = Accent;
-                    button.Foreground = Accent;
-                    button.Background = Ui.Brush("#3C414A");
-                }
-                top.Children.Add(button);
-            }
+            UpdateReferenceHeader();
+
         }
 
         private void SetNotice(string message)
@@ -260,18 +239,19 @@ namespace TouchTypingStudio
             var next = Request("configure", "platform", "windows", "layout", layout);
             if (!next.Exists) return;
             library = next;
-            if (center.Content != null) ShowPage(LivePage);
+            if (center.Content != null) ShowPage(page);
         }
 
         private void ShowPage(string next)
         {
             if (active) return;
             page = next;
-            UpdateHeader();
             var updated = Request("configure", "platform", "windows", "layout", CurrentLayout());
             if (updated.Exists) library = updated;
+            UpdateHeader();
             switch (page)
             {
+                case HomePage: beginControl = null; center.Content = BuildReferenceHome(); break;
                 case TypingPage: center.Content = BuildTyping(); break;
                 case EditorPage: center.Content = BuildEditor(); break;
                 case ProgressPage: center.Content = BuildProgress(); break;
@@ -1042,6 +1022,11 @@ namespace TouchTypingStudio
 
         private IntPtr NativeInput(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
+            if (message == 0x51 && !active && (page == HomePage || page == LivePage))
+                Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(delegate
+                {
+                    if (!active && (page == HomePage || page == LivePage)) RefreshLayoutIfChanged();
+                }));
             if (!active || labActive) return IntPtr.Zero;
             long code = lParam.ToInt64();
             if (message == 0x112 && (wParam.ToInt32() & 0xfff0) == 0xf060)
