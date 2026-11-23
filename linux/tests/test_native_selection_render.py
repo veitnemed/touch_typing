@@ -1,4 +1,4 @@
-"""Render deterministic editor scene states in a real GTK window (no engine/input claims).
+"""Render deterministic editor and browser scene states in a real GTK window (no engine/input claims).
 
 Run with the Linux GTK dependencies and a desktop display:
   PYTHONPATH=linux /usr/bin/python3 linux/tests/test_native_selection_render.py OUTPUT_DIR
@@ -33,6 +33,9 @@ def verify(window, view, output):
         view.update({"windows": [{"id": "code-test", "app": "code", "active": True,
                      "sidebar": False, "focus": "body", "title": "notes.txt",
                      "body": first + separator + "Я", "bodyAnchor": anchor, "bodyCursor": cursor}]})
+        return capture_frame(name, start=origin)
+
+    def capture_frame(name, start=0):
         paintable = Gtk.WidgetPaintable.new(view)
         ctx = GLib.MainContext.default()
         deadline = time.monotonic() + 2
@@ -52,13 +55,17 @@ def verify(window, view, output):
                 data = image.get_pixels()
                 stride, channels = image.get_rowstride(), image.get_n_channels()
                 def row(y, color, tolerance=0):
-                    return [x for x in range(origin, view.get_width())
-                            if data[y*stride+x*channels:y*stride+x*channels+3]  and all(abs(actual - expected) <= tolerance
-                                    for actual, expected in zip(data[y*stride+x*channels:y*stride+x*channels+3], color))]
+                    matches = []
+                    for x in range(start, image.get_width()):
+                        i = y * stride + x * channels
+                        if all(abs(actual - expected) <= tolerance
+                               for actual, expected in zip(data[i:i+3], color)):
+                            matches.append(x)
+                    return matches
                 return row
             view.queue_draw()
             time.sleep(.015)
-        raise AssertionError("No actual GTK rendered editor frame")
+        raise AssertionError("No actual GTK rendered frame for " + name)
     before_emoji = capture("caret-after-combining-mark", 2, 2)
     assert any(abs(x - origin - after_cluster) <= 1 for x in before_emoji(73, caret_color, 25))
     assert before_emoji(73, selection) == []
@@ -80,7 +87,29 @@ def verify(window, view, output):
     assert crlf(73, selection) == first_row
     assert crlf(95, selection) == []
     assert any(abs(x - origin) <= 1 for x in crlf(95, caret_color, 25)), "CRLF advances two UTF-16 units"
-    print(f"PASS real GTK selection, combining mark and emoji offsets {after_cluster}/{after_emoji}px, "
+    # Separate native browser state: if drawing aborts inside the body loop,
+    # the shell/title alone can leave a nonempty render node. Require actual
+    # text ink and selection coverage from the second body row as well.
+    view.presentation_app = "chrome"
+    browser_first, browser_second = "Русский абзац", "Вторая строка"
+    browser_offset = view.units(browser_first) + 1
+    browser = {"id": "chrome-test", "app": "chrome", "active": True, "focus": "body",
+               "url": "https://docs.example.test/lesson", "body": browser_first + "\n" + browser_second, "activeTab": 0,
+               "tabs": [{"title": "Учебная страница"}]}
+    view.update({"windows": [dict(browser, bodyAnchor=0, bodyCursor=0)]})
+    ordinary = capture_frame("chrome-multiline-body")
+    def body_ink(frame, top):
+        return sum(len(frame(y, bytes((51, 65, 84)), 12)) for y in range(top, top + 20))
+    assert body_ink(ordinary, 131) > 20
+    assert body_ink(ordinary, 154) > 20, "Chrome rendered shell but not the second paragraph"
+    assert ordinary(170, selection) == []
+
+    view.update({"windows": [dict(browser, bodyAnchor=browser_offset,
+                                 bodyCursor=browser_offset + view.units("Вторая"))]})
+    selected = capture_frame("chrome-second-line-selection")
+    assert selected(147, selection) == [], "Chrome highlight leaked to the first paragraph"
+    assert len(selected(170, selection)) >= 10, "Chrome second-line selection was not rendered"
+    print(f"PASS real GTK editor and multi-line Chrome selection, combining mark and emoji offsets {after_cluster}/{after_emoji}px, "
           f"newline marker {len(first_row)}px; frames={output}", flush=True)
 
 

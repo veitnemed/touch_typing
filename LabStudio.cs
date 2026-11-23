@@ -17,8 +17,10 @@ namespace TouchTypingStudio
     internal sealed partial class LiveStudio
     {
         private bool legacyLive, labActive;
-        private ComboBox labLimitSelect, labMissionSelect;
-        private int lastLabLimit;
+        private ComboBox labLimitSelect, labTimerSelect, labMissionSelect;
+        private static readonly int[] LabActionLimits = { 0, 20, 40, 60, 100 };
+        private static readonly int[] LabTimeLimits = { 0, 180, 600 };
+        private int lastLabLimit, lastLabTimer;
         private string lastLabMission = "";
         private string[] labMissionIds = new string[0];
         private Button labHint;
@@ -104,18 +106,32 @@ namespace TouchTypingStudio
             labLevelSelect = Select("Сложность", levels, labLevel, 150);
             choices.Children.Add(labModeSelect);
             choices.Children.Add(labLevelSelect);
-            labLimitSelect = Select("Длительность", new[] { "Без таймера", "20 действий", "40 действий", "60 действий", "3 минуты", "10 минут", "100 действий" }, lastLabLimit, 155);
-            AutomationProperties.SetAutomationId(labLimitSelect, "LabDuration");
-            choices.Children.Add(labLimitSelect);
             AutomationProperties.SetAutomationId(labLevelSelect, "LabLevel");
+            root.Children.Add(choices);
+            var budgets = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
+            labLimitSelect = Select("Лимит действий", new[] { "Без лимита действий", "20 действий", "40 действий", "60 действий", "100 действий" }, lastLabLimit, 200);
+            AutomationProperties.SetAutomationId(labLimitSelect, "LabDuration");
+            budgets.Children.Add(labLimitSelect);
+            labTimerSelect = Select("Таймер", new[] { "Без таймера", "3 минуты", "10 минут" }, lastLabTimer, 145);
+            AutomationProperties.SetAutomationId(labTimerSelect, "LabTimer");
+            budgets.Children.Add(labTimerSelect);
             beginControl = ActionButton("Начать · F5", StartLab, true);
             AutomationProperties.SetAutomationId(beginControl, "LabStart");
             beginControl.IsEnabled = classes.Length > 0;
-            choices.Children.Add(beginControl);
-            root.Children.Add(choices);
+            budgets.Children.Add(beginControl);
+            root.Children.Add(budgets);
             root.Children.Add(labMissionSelect);
             AutomationProperties.SetAutomationId(labMissionSelect, "LabMission");
-            root.Children.Add(Label("Действие — зачтённый шаг упражнения.", 12, Dim));
+            var budgetNote = Label("Действие — зачтённый шаг. Можно включить оба ограничения.", 12, Dim);
+            root.Children.Add(budgetNote);
+            labMissionSelect.SelectionChanged += delegate
+            {
+                int index = labMissionSelect.SelectedIndex;
+                bool resume = index >= 0 && index < labMissionIds.Length && labMissionIds[index] == "@resume";
+                labLimitSelect.IsEnabled = labTimerSelect.IsEnabled = !resume;
+                budgetNote.Text = resume ? "Используются ограничения сохранённой попытки." :
+                    "Действие — зачтённый шаг. Можно включить оба ограничения.";
+            };
             labModeSelect.SelectionChanged += delegate { describe(); };
             labLevelSelect.SelectionChanged += delegate { describe(); };
             var hardware = new Expander { Header = "Клавиатура и Fn", Foreground = Dim,
@@ -159,9 +175,10 @@ namespace TouchTypingStudio
             }
             labMode = labModeSelect.SelectedIndex == 1 ? "sandbox" : "drill";
             labLevel = Math.Max(0, labLevelSelect.SelectedIndex);
-            int limit = lastLabLimit = labLimitSelect.SelectedIndex;
-            int actions = limit >= 1 && limit <= 3 ? 20 * limit : limit == 6 ? 100 : 0;
-            int seconds = limit == 4 ? 180 : limit == 5 ? 600 : 0;
+            lastLabLimit = Math.Max(0, labLimitSelect.SelectedIndex);
+            lastLabTimer = Math.Max(0, labTimerSelect.SelectedIndex);
+            int actions = LabActionLimits[lastLabLimit];
+            int seconds = LabTimeLimits[lastLabTimer];
             // Opt-in native smoke test exercises the real expiry transition without waiting 3 minutes.
             int testSeconds;
             if (verifyMode && seconds > 0 && int.TryParse(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SOFT_FINISH_SECONDS"), out testSeconds))
@@ -172,8 +189,8 @@ namespace TouchTypingStudio
             if (resume) mission = "";
             int seed;
             var initial = verifyMode && int.TryParse(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"), out seed)
-                ? Request("lab-start", "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "softFinish", true, "seed", seed)
-                : Request("lab-start", "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "softFinish", true);
+                ? Request("lab-start", "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "softFinish", true, "combinedLimits", true, "seed", seed)
+                : Request("lab-start", "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "softFinish", true, "combinedLimits", true);
             if (!initial.Exists || initial.B("startBlocked")) return;
             labSavePending = labSaveClosePending = labSaveBackPending = labExplicitFinishPending = false;
             lastLabMission = initial.S("mission");
@@ -341,10 +358,14 @@ namespace TouchTypingStudio
                 timer.Stop();
                 pressed.Clear();
             }
-            int remaining = state.I("remaining", 180);
-            timerLabel.Visibility = state.I("timeLimit") > 0 || state.I("actionLimit") > 0 ? Visibility.Visible : Visibility.Collapsed;
-            timerLabel.Text = state.B("finishingMission") ? "Дорабатываем миссию" :
-                state.I("actionLimit") > 0 ? state.I("solved") + "/" + state.I("actionLimit") : (remaining / 60).ToString("00") + ":" + (remaining % 60).ToString("00");
+            int remaining = state.I("remaining"), actions = state.I("actionLimit"), seconds = state.I("timeLimit");
+            timerLabel.Visibility = actions > 0 || seconds > 0 ? Visibility.Visible : Visibility.Collapsed;
+            var limits = new List<string>();
+            if (actions > 0) limits.Add(state.I("solved") + "/" + actions);
+            if (seconds > 0) limits.Add((remaining / 60).ToString("00") + ":" + (remaining % 60).ToString("00"));
+            timerLabel.Text = state.B("finishingMission") ? "Дорабатываем миссию" : string.Join(" · ", limits);
+            timerLabel.ToolTip = state.B("finishingMission") ? "Ограничение снято до конца текущей миссии." :
+                actions > 0 && seconds > 0 ? "Действия и оставшееся время" : actions > 0 ? "Действия" : "Оставшееся время";
             string labContext = state.S("scenario") + "    ·    " + state.S("phase");
             labCounter.ToolTip = labContext;
             AutomationProperties.SetName(labCounter, labContext + " · Шаг " + state.I("scenarioStep") + " из " + state.I("scenarioLength"));
@@ -405,8 +426,12 @@ namespace TouchTypingStudio
                 overlay.Children.Add(new Border { Background = Ui.Brush("#BF080B12") });
             }
             var card = Stack();
+            // The engine latches which limit actually won (a late UI timer
+            // repaint must not turn an actions-first outcome into a timeout).
+            string cause = state.S("limitReached");
+            bool timerReached = cause == "timer" || cause.Length == 0 && state.I("timeLimit") > 0 && state.I("remaining") == 0;
             var title = Label(extensionPause ? "Миссия на паузе" :
-                (state.I("timeLimit") > 0 && state.I("remaining") == 0 ? "Время вышло" : "Лимит действий достигнут"), 19, Ink, true);
+                timerReached ? "Время вышло" : "Лимит действий достигнут", 19, Ink, true);
             title.Focusable = true;
             AutomationProperties.SetAutomationId(title, extensionPause ? "LabExtensionPause" : "LabLimitChoice");
             card.Children.Add(title);

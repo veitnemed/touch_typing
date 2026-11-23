@@ -95,8 +95,10 @@ internal sealed class PracticeService
                 if (lab?.Saved == false) return LabState(startBlocked: true);
                 var draft = Flag(message, "continue") ? profile.LiveDrafts.LastOrDefault(item =>
                     item.App == Text(message, "app") && item.Level == Number(message, "level") && item.Guidance == Text(message, "guidance")) : null;
-                lab = new LabRun(Text(message, "app"), Text(message, "mode"), Number(message, "level"), Number(message, "seconds", 180), layout, profile.ShortcutHistory,
-                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit"), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: Text(message, "mission"), draft: draft, softFinish: Flag(message, "softFinish"));
+                bool combinedLimits = Flag(message, "combinedLimits");
+                lab = new LabRun(Text(message, "app"), Text(message, "mode"), Number(message, "level"),
+                    Number(message, "seconds", combinedLimits ? 0 : 180), layout, profile.ShortcutHistory,
+                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit"), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: Text(message, "mission"), draft: draft, softFinish: Flag(message, "softFinish"), combinedLimits: combinedLimits);
                 persistedLabAttempts = 0;
                 labCheckpoint = draft;
                 labLimitCheckpointAttempted = draft?.Progress?.LimitDecisionPending == true;
@@ -201,7 +203,7 @@ internal sealed class PracticeService
         return new { lab.App, lab.Mode, lab.Level, task = lab.Task.Snapshot(), scene = lab.Scene.Snapshot(), held = lab.Held,
             lab.LastKey, lab.Status, lab.Feedback, lab.Errors, lab.Solved, lab.Block, index = lab.Solved % 20 + 1,
             lab.Seconds, lab.Remaining, lab.TimeLimit, lab.ActionLimit, lab.Guidance, lab.ShowGuide, lab.Finished, lab.Paused, lab.Saved, startBlocked, saveError = labSaveError, needsCapture = true,
-            limitDecisionPending = lab.AwaitingLimitChoice, finishingMission = lab.FinishingMission,
+            limitDecisionPending = lab.AwaitingLimitChoice, finishingMission = lab.FinishingMission, limitReached = lab.LimitReached,
             reportArtifact = lab.ReportArtifact,
             mission = lab.MissionId, phase = lab.PhaseTitle, objectives = lab.Objectives, scenario = lab.ScenarioTitle, scenarioStep = lab.ScenarioStep, scenarioLength = lab.ScenarioLength,
             guide = !lab.ShowGuide || lab.Task.Keys.Length == 0 ? null : Describe(Gesture.Parse(lab.Task.Keys), "") };

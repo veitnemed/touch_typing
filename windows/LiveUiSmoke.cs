@@ -68,7 +68,7 @@ internal static class LiveUiSmoke
             // Keep key/cursor evidence independent of later window-close assertions.
             Invoke("LabClass-terminal");
             Select("LabMode", 0);
-            Select("LabDuration", 4);
+            Select("LabTimer", 1);
             Key("F5");
             Until(delegate { return Exists("LabClock") && Name("LabPause").StartsWith("Пауза"); }, "focused terminal lesson");
             CheckPasteLayouts();
@@ -86,7 +86,7 @@ internal static class LiveUiSmoke
                 {
                     Invoke("LabClass-" + name);
                     Select("LabMode", mode);
-                    Select("LabDuration", 4);
+                    Select("LabTimer", 1);
                     var started = Stopwatch.StartNew();
                     Key("F5");
                     Until(delegate { return Exists("LabClock") && Name("LabPause").StartsWith("Пауза"); }, "active " + name + " lesson");
@@ -172,7 +172,7 @@ internal static class LiveUiSmoke
             {
                 Invoke("LabClass-terminal");
                 Select("LabMode", 1);
-                Select("LabDuration", 4);
+                Select("LabTimer", 1);
                 Key("F5");
                 Until(delegate { return Exists("LabClock"); }, "full timed session");
                 VirtualEnglish();
@@ -185,7 +185,7 @@ internal static class LiveUiSmoke
             }
             if (Exists("LabResult")) Invoke("LabChooseClass");
             Invoke("LabClass-terminal");
-            Select("LabDuration", 4);
+            Select("LabTimer", 1);
             Key("F5");
             Until(delegate { return Exists("LabClock"); }, "lesson before stop storage failure");
             Send(Character('a')); // Record an attempt so Finish must save even with no completed action.
@@ -203,7 +203,7 @@ internal static class LiveUiSmoke
             Invoke("LabChooseClass");
             Until(delegate { return Exists("LabStart"); }, "chooser after retried stop");
             Invoke("LabClass-ubuntu");
-            Select("LabDuration", 4);
+            Select("LabTimer", 1);
             Key("F5");
             Until(delegate { return Exists("LabClock"); }, "lesson before save-and-close");
             Send(Character('a'));
@@ -248,6 +248,7 @@ internal static class LiveUiSmoke
         Select("LabMode", 1);
         Select("LabLevel", 0);
         Select("LabDuration", 0);
+        Select("LabTimer", 0);
         SelectMissionByName("Подготовить справочник к чтению");
         Key("F5");
         Until(delegate { return Exists("LabTask") && Exists("LabDesktop") && Name("LabPause").StartsWith("Пауза"); },
@@ -306,6 +307,7 @@ internal static class LiveUiSmoke
         Select("LabMode", 1);
         Select("LabLevel", 0);
         Select("LabDuration", 0);
+        Select("LabTimer", 0);
         SelectMissionByName("Перенести методику из браузера в заметку");
         Key("F5");
         Until(delegate { return Exists("LabTask") && Exists("LabDesktop") && Name("LabPause").StartsWith("Пауза"); },
@@ -414,17 +416,20 @@ internal static class LiveUiSmoke
     {
         Invoke("LabClass-terminal");
         Select("LabMode", 0);
-        Check(Exists("LabDuration"), "Lesson duration options are accessible");
-        Select("LabDuration", 6); // The 100-action option.
-        Select("LabDuration", 4); // QA-only seven-second clock cap.
+        Check(Exists("LabDuration") && Exists("LabTimer"), "Action limit and timer are independent controls");
+        Select("LabDuration", 4); // 100 actions, alongside the timer.
+        Select("LabTimer", 1); // QA-only seven-second clock cap.
         Key("F5");
         Until(delegate { return Exists("LabDesktop") && Name("LabPause").StartsWith("Пауза"); }, "active terminal lesson");
+        Check(Regex.IsMatch(Name("LabClock"), @"^0/100 · 00:0[0-7]$"), "Both selected budgets have live values");
         VirtualEnglish();
         Chord("Ctrl+U");
         foreach (var character in "abcde") Send(Character(character));
         Key("Home"); Key("Right"); Key("Right");
         CheckTerminalState("abcde", 2);
         Until(delegate { return Visible("LabLimitChoice"); }, "actual engine deadline", 14000);
+        Check(Name("LabLimitChoice") == "Время вышло" && Name("LabClock") == "0/100 · 00:00",
+            "Timer wins and both budgets remain visible at the choice");
         Check(!Visible("LabResult"), "Deadline offers a choice, not a result");
         CheckTerminalState("abcde", 2);
         Key("Delete"); Key("F10"); Key("Enter"); Key("Space");
@@ -440,7 +445,7 @@ internal static class LiveUiSmoke
         var xml = new XmlDocument();
         xml.XmlResolver = null;
         xml.Load(profile);
-        Check(xml.SelectSingleNode("/StudioProfile/LiveDrafts/LiveDraft[App='terminal' and Progress/LimitDecisionPending='true']") != null &&
+        Check(xml.SelectSingleNode("/StudioProfile/LiveDrafts/LiveDraft[App='terminal' and Progress/LimitDecisionPending='true' and Progress/TimeLimit='7' and Progress/ActionLimit='100' and Progress/LimitReached='timer']") != null &&
             xml.SelectSingleNode("/StudioProfile/LabSessions/LabSessionRecord[App='terminal']") == null,
             "A capped draft survives closing without a premature session result");
         app.Dispose();
@@ -451,8 +456,12 @@ internal static class LiveUiSmoke
         Invoke("LabClass-terminal");
         Select("LabMode", 0);
         SelectMissionByName("Продолжить с сохранённого места");
+        Check(!Find("LabDuration").Current.IsEnabled && !Find("LabTimer").Current.IsEnabled,
+            "A resumed attempt does not offer to overwrite its budgets");
         Key("F5");
         Until(delegate { return Visible("LabLimitChoice"); }, "recovered deadline decision");
+        Check(Name("LabLimitChoice") == "Время вышло" && Name("LabClock") == "0/100 · 00:00",
+            "Recovered attempt displays its saved pair and trigger, not default selectors");
         CheckTerminalState("abcde", 2);
         Until(delegate { return AutomationElement.FocusedElement.Current.AutomationId == "LabLimitChoice"; }, "limit dialog starts with neither choice selected");
         Key("Enter");
@@ -478,7 +487,7 @@ internal static class LiveUiSmoke
         Until(delegate { return Visible("LabResult"); }, "explicit finish accepts one result");
 
         xml.Load(profile);
-        Check(xml.SelectNodes("/StudioProfile/LabSessions/LabSessionRecord[App='terminal' and TimeLimit='7']").Count == 1,
+        Check(xml.SelectNodes("/StudioProfile/LabSessions/LabSessionRecord[App='terminal' and TimeLimit='7' and ActionLimit='100']").Count == 1,
             "One final session persisted across close, continuation, and explicit finish");
         Check(xml.SelectSingleNode("/StudioProfile/LiveDrafts/LiveDraft[App='terminal']") == null,
             "No resumable parallel attempt after explicit finish");

@@ -170,7 +170,8 @@ class LabWindowTest(Studio):
                 assert self.layout == desired, (self.layout, desired)
                 self.lab.picker.set_selected(index)
                 self.lab.level.set_selected(1)
-                self.lab.limit.set_selected(4 if '--timed' in sys.argv else 0)
+                self.lab.limit.set_selected(0)
+                self.lab.time_limit.set_selected(1 if '--timed' in sys.argv else 0)
                 self.lab.start()
                 assert 'RSuper' not in self.lab.guide.board.cells
                 assert self.lab.guide.board.cells['LSuper'][0].get_label() == '⊞'
@@ -246,6 +247,7 @@ class LabWindowTest(Studio):
                 yield
                 if '--timed' in sys.argv:
                     assert self.lab.state.get('limitDecisionPending') and self.lab.state['seconds']==180
+                    assert self.lab.state.get('limitReached') == 'timer'
                     self.lab.limit_actions[0].grab_focus()
                     yield from chord('Enter')
                     for _ in range(30):
@@ -427,6 +429,7 @@ class LabWindowTest(Studio):
         lab.picker.set_selected(next(i for i, row in enumerate(lab.classes) if row["id"] == "terminal"))
         lab.level.set_selected(1)
         lab.limit.set_selected(1)  # the actual 20-action picker, no mocked quota
+        lab.time_limit.set_selected(1)  # both budgets are live
         lab.mission_picker.set_selected(next(i for i,row in enumerate(lab.choices) if row[0] == "terminal-access"))
         lab.start()
         for _ in range(45):
@@ -462,7 +465,9 @@ class LabWindowTest(Studio):
                     yield from chord("Enter")
             assert lab.state["solved"] == old + 1, (task,lab.state["status"])
         state = lab.state
-        assert (state["solved"],state["actionLimit"]) == (20,20)
+        assert (state["solved"],state["actionLimit"],state["timeLimit"]) == (20,20,180)
+        assert state.get("limitReached") == "actions" and state["remaining"] > 0
+        assert lab.timer.get_label().startswith("20/20 · ")
         assert state["limitDecisionPending"] and state["paused"] and not state["finished"]
         assert not lab.content.get_sensitive() and lab.modal_layer.get_mapped()
         assert self.call("lab-result") is None

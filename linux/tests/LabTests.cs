@@ -517,6 +517,67 @@ internal static class LabTests
             Check(capAtBoundary.Finished && capAtBoundary.MissionId == currentMission && !capAtBoundary.AwaitingLimitChoice,
                 "No continuation is offered if the limit coincides with the mission's final action");
         }
+        {
+            double nowCombo = 0;
+            LabRun OpenCombo(int seconds, int actions, bool combined, LiveDraft saved = null, Func<double> clock = null) =>
+                new LabRun("terminal", "sandbox", 1, seconds, "EN", [], new Random(7), clock ?? (() => nowCombo),
+                    actionLimit: actions, missionId: "terminal-access", draft: saved, softFinish: true, combinedLimits: combined);
+            var timerWins = OpenCombo(10, 1, true);
+            timerWins.Resume(); Type(timerWins, timerWins.Task.Text);
+            nowCombo = 10000;
+            Chord(timerWins, "Enter");
+            timerWins.HoldForLimit();
+            Check(timerWins.LimitReached == "timer" && timerWins.Solved == 0 &&
+                timerWins.Scene.TerminalInput == timerWins.Task.Text && timerWins.AwaitingLimitChoice,
+                "An Enter observed at the exact deadline cannot consume the action limit");
+            var timerRestored = OpenCombo(100, 20, false, timerWins.Draft());
+            Check(timerRestored.TimeLimit == 10 && timerRestored.ActionLimit == 1 && timerRestored.LimitReached == "timer" &&
+                timerRestored.Session == timerWins.Session, "Saved pair and timer winner outrank both new picker choices and opt-in flag");
+            Check(timerRestored.ChooseLimit("continue"), "Timer-won attempt can continue its current scene");
+            timerRestored.Resume(); nowCombo += 2000; Chord(timerRestored, "Enter");
+            Check(timerRestored.Solved == 1 && timerRestored.Seconds == 12 && timerRestored.LimitReached == "timer",
+                "Extending past both thresholds does not replace the timer winner with actions");
+
+            nowCombo = 0;
+            int reads = 0;
+            bool processing = false;
+            var actionWins = OpenCombo(10, 1, true, clock: () => processing && ++reads > 2 ? 11001 : nowCombo);
+            actionWins.Resume(); Type(actionWins, actionWins.Task.Text);
+            nowCombo = 9999; processing = true;
+            Chord(actionWins, "Enter");
+            actionWins.HoldForLimit();
+            Check(actionWins.LimitReached == "actions" && actionWins.Solved == 1 && actionWins.AwaitingLimitChoice &&
+                actionWins.Seconds == 9 && actionWins.Remaining == 1,
+                "Admitted Enter before the deadline wins on actions even if processing crosses the deadline");
+            var actionRestored = OpenCombo(0, 0, true, actionWins.Draft());
+            Check(actionRestored.ActionLimit == 1 && actionRestored.TimeLimit == 10 && actionRestored.LimitReached == "actions" &&
+                actionRestored.Session == actionWins.Session, "The action winner and original pair survive a new process");
+            Check(actionRestored.ChooseLimit("continue"), "Action-won attempt can continue");
+            actionRestored.Resume(); nowCombo += 5000;
+            Check(actionRestored.Seconds == 14 && actionRestored.Remaining == 0 && actionRestored.LimitReached == "actions" &&
+                OpenCombo(600, 40, true, actionRestored.Draft()).LimitReached == "actions",
+                "Crossing the timer after action extension never changes the original cap notification");
+
+            var oldCaller = OpenCombo(180, 20, false);
+            Check(oldCaller.TimeLimit == 0 && oldCaller.ActionLimit == 20 && oldCaller.LimitReached == null,
+                "Unopted action cap still disables the legacy/default timer");
+            var profile = new StudioProfile();
+            var timerRecord = new LabSessionRecord { Session = "combo-timer", App = "terminal", Mode = "sandbox", Level = 1,
+                TimeLimit = 180, ActionLimit = 20, Seconds = 180, Solved = 9, Completed = true };
+            var actionRecord = new LabSessionRecord { Session = "combo-action", App = "terminal", Mode = "sandbox", Level = 1,
+                TimeLimit = 180, ActionLimit = 40, Seconds = 90, Solved = 40, Completed = true };
+            var oldTimerRecord = new LabSessionRecord { Session = "legacy-timer", App = "terminal", Mode = "sandbox", Level = 1,
+                TimeLimit = 180, ActionLimit = 0, Seconds = 180, Solved = 12, Completed = true };
+            var oldActionRecord = new LabSessionRecord { Session = "legacy-action", App = "terminal", Mode = "sandbox", Level = 1,
+                TimeLimit = 0, ActionLimit = 20, Seconds = 45, Solved = 20, Completed = true };
+            foreach (var budgetRecord in new[] { timerRecord, actionRecord, oldTimerRecord, oldActionRecord })
+                LabSessionRecords.Update(profile, budgetRecord);
+            Check(profile.LabRecords.Count == 4, "Either combined winner is eligible, and both single-cap groups remain distinct");
+            var resultTimerCombo = JsonSerializer.SerializeToElement(OpenCombo(180, 20, true)
+                .Result(profile.LabSessions, profile.LabRecords), Program.Json);
+            Check(resultTimerCombo.GetProperty("previousRecord").GetInt32() == 9 &&
+                resultTimerCombo.GetProperty("history").GetArrayLength() == 1, "Comparable history still uses the exact pair");
+        }
         var oldWinner = new LabSessionRecord { Session = "old-winner", App = "chrome", Mode = "sandbox", Level = 2,
             Completed = true, Seconds = 180, Solved = 250, Errors = 2, Date = DateTime.Now.AddYears(-2) };
         var migrated = new StudioProfile(); migrated.LabSessions.Add(oldWinner);

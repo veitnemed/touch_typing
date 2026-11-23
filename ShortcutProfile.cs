@@ -21,7 +21,7 @@ namespace TouchTypingStudio
 
     public class LiveDraftProgress
     {
-        public string Session, Mode, Series, Revision;
+        public string Session, Mode, Series, Revision, LimitReached;
         public int TimeLimit, ActionLimit, Solved, Errors;
         public double ActiveMilliseconds;
         public bool LimitDecisionPending, FinishingMission;

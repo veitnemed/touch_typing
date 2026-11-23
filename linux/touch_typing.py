@@ -2211,8 +2211,14 @@ class LabPage(Gtk.Box):
         self.picker = dropdown([item["title"] for item in self.classes])
         self.picker.set_visible(False)
         self.mode = dropdown(["По шагам", "Самостоятельно"])
-        self.limit = dropdown(["Без таймера", "20 действий", "40 действий", "60 действий", "3 минуты", "10 минут", "100 действий"])
+        self.action_limits = (0, 20, 40, 60, 100)
+        self.time_limits = (0, 180, 600)
+        self.limit = bind_name(dropdown(["Без лимита действий", "20 действий", "40 действий",
+                                         "60 действий", "100 действий"]), "Лимит действий")
         self.limit.set_tooltip_text("Действие — зачтённый шаг упражнения.")
+        self.time_limit = bind_name(dropdown(["Без таймера", "3 минуты", "10 минут"]), "Таймер")
+        self.time_limit.set_tooltip_text("Таймер считает только активное время занятия.")
+        self.mission_picker.connect("notify::selected", self.update_budget_controls)
         self.level_titles = ("Основы", "Рабочие приёмы", "Сложный")
         self.level = dropdown(self.level_titles)
         self.begin = button("Начать · Пробел", self.start, "primary")
@@ -2227,7 +2233,11 @@ class LabPage(Gtk.Box):
             self.class_buttons.append(select)
         self.prep.append(class_cards)
         self.prep.append(self.mission_picker)
-        self.prep.append(add(row(8), self.picker, self.mode, self.level, self.limit, expand(box()), self.begin))
+        self.prep.append(add(row(8), self.picker, self.mode, self.level, expand(box()), self.begin))
+        self.prep.append(add(row(8), self.limit, self.time_limit))
+        self.resume_budget_note = text("Продолжатся лимиты сохранённого занятия.", "muted", wrap=True)
+        self.resume_budget_note.set_visible(False)
+        self.prep.append(self.resume_budget_note)
         self.summary = text("", "muted", wrap=True)
         self.prep.append(self.summary)
         self.keyboard_profile = dropdown(["Huawei MateBook D16", "Обычная клавиатура"])
@@ -2400,6 +2410,14 @@ class LabPage(Gtk.Box):
             self.choices.extend((m["id"], m["title"]) for m in self.missions if m["app"] == app and m["level"] == level)
             self.mission_picker.set_model(Gtk.StringList.new([title for _, title in self.choices]))
             self.mission_picker.set_selected(0)
+            self.update_budget_controls()
+
+    def update_budget_controls(self, *_):
+        index = self.mission_picker.get_selected()
+        resume = index < len(self.choices) and self.choices[index][0] == "@resume"
+        self.limit.set_sensitive(not resume)
+        self.time_limit.set_sensitive(not resume)
+        self.resume_budget_note.set_visible(resume)
 
     def hardware_setting(self):
         profile = "matebook-d16" if self.keyboard_profile.get_selected() == 0 else "standard"
@@ -2506,7 +2524,8 @@ class LabPage(Gtk.Box):
             resume.grab_focus()
 
     def show_limit_choice(self, error=""):
-        signature = ("choice", error)
+        reason = (self.state or {}).get("limitReached")
+        signature = ("choice", reason, error)
         if self.limit_modal_signature == signature:
             return
         self.limit_modal_signature = signature
@@ -2515,7 +2534,8 @@ class LabPage(Gtk.Box):
         self.content.set_sensitive(False)
         clear(self.modal_layer)
         explanation = "Можно остановиться здесь или закончить текущую миссию без дополнительного лимита."
-        panel = self.reference_lesson_panel("Лимит достигнут", explanation)
+        title = {"timer": "Время вышло", "actions": "Лимит действий достигнут"}.get(reason, "Лимит достигнут")
+        panel = self.reference_lesson_panel(title, explanation)
         panel.set_focusable(True)
         if error:
             panel.append(text(error, "bad", wrap=True))
@@ -2571,12 +2591,12 @@ class LabPage(Gtk.Box):
         self.result = False
         self.host.refresh()
         app = self.classes[self.picker.get_selected()]["id"]
-        choice = self.limit.get_selected()
         mission = self.choices[self.mission_picker.get_selected()][0]
         self.state = self.host.call("lab-start", app=app, mode="sandbox", level=self.level.get_selected(), mission="" if mission == "@resume" else mission,
-                                    **{"continue": mission == "@resume"}, softFinish=True,
+                                    **{"continue": mission == "@resume"}, softFinish=True, combinedLimits=True,
                                     guidance="guided" if self.mode.get_selected() == 0 else "independent",
-                                    seconds={4: 180, 5: 600}.get(choice, 0), actionLimit={1: 20, 2: 40, 3: 60, 6: 100}.get(choice, 0))
+                                    seconds=self.time_limits[self.time_limit.get_selected()],
+                                    actionLimit=self.action_limits[self.limit.get_selected()])
         if not self.state:
             return
         self.active = True
@@ -2842,13 +2862,22 @@ class LabPage(Gtk.Box):
         self.goal_progress.set_label(f"Шаг {step} из {total}" if total else "Практика")
         self.lesson_meter.set_fraction(min(1, max(0, step / total)) if total else 0)
         remaining = max(0, state.get("remaining", 180))
-        self.timer.set_visible(bool(state.get("timeLimit") or state.get("actionLimit")))
-        self.timer.set_label(f"{int(remaining) // 60:02}:{int(remaining) % 60:02}")
+        budget = []
         if state.get("finishingMission"):
-            self.timer.set_visible(True)
-            self.timer.set_label("Доработка")
-        elif state.get("actionLimit"):
-            self.timer.set_label(f'{state["solved"]}/{state["actionLimit"]}')
+            budget.append("Доработка")
+        else:
+            if state.get("actionLimit"):
+                budget.append(f'{state["solved"]}/{state["actionLimit"]}')
+            if state.get("timeLimit"):
+                minutes, seconds = divmod(int(remaining), 60)
+                budget.append(f"{minutes:02}:{seconds:02}")
+        self.timer.set_visible(bool(budget))
+        self.timer.set_label(" · ".join(budget))
+        self.timer.set_tooltip_text(
+            "Действия и оставшееся активное время" if len(budget) == 2 else
+            "Зачтённые действия" if state.get("actionLimit") and not state.get("finishingMission") else
+            "Оставшееся активное время" if state.get("timeLimit") and not state.get("finishingMission") else
+            None)
         status = state.get("status", "") or task.get("hint", "")
         if state["held"]:
             status += "  ·  Нажато " + " + ".join(key_label(k) for k in state["held"])
@@ -2982,12 +3011,17 @@ class LabPage(Gtk.Box):
         selected_class = self.picker.get_selected()
         selected_mode = self.mode.get_selected()
         selected_level = self.level.get_selected()
-        limit = self.limit.get_selected()
+        def selection(widget, options, key):
+            value = (self.state or {}).get(key)
+            return options.index(value) if value in options else widget.get_selected()
+        limit = selection(self.limit, self.action_limits, "actionLimit")
+        time_limit = selection(self.time_limit, self.time_limits, "timeLimit")
         self.host.navigate("lab")
         self.host.lab.picker.set_selected(selected_class)
         self.host.lab.mode.set_selected(selected_mode)
         self.host.lab.level.set_selected(selected_level)
         self.host.lab.limit.set_selected(limit)
+        self.host.lab.time_limit.set_selected(time_limit)
         mission = self.state.get("mission")
         for index, (identifier, _) in enumerate(self.host.lab.choices):
             if identifier == mission:

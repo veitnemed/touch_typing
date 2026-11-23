@@ -777,7 +777,7 @@ class MissionTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
             opts = dict(app="terminal", level=1, mode="sandbox", seconds=2, guidance="guided",
-                        mission="terminal-access", seed=7, softFinish=True)
+                        mission="terminal-access", seed=7, softFinish=True, combinedLimits=True, actionLimit=20)
             saved_path = Path(directory) / "TouchTypingStudio-QA" / "progress.xml"
 
             def type_text(engine, value):
@@ -805,6 +805,7 @@ class MissionTest(unittest.TestCase):
                     sleep(0.05)
                     pending = engine.call("lab-state")
                 self.assertTrue(pending["limitDecisionPending"])
+                self.assertEqual(pending["limitReached"], "timer")
                 self.assertTrue(pending["paused"])
                 self.assertFalse(pending["finished"])
                 self.assertEqual(pending["scene"]["terminalInput"], prefix)
@@ -819,11 +820,11 @@ class MissionTest(unittest.TestCase):
             engine = Engine(verify=True)
             try:
                 engine.call("configure", layout="EN")
-                changed = dict(opts, seconds=0, actionLimit=20, **{"continue": True})
+                changed = dict(opts, seconds=0, actionLimit=100, **{"continue": True})
                 held = engine.call("lab-start", **changed)
                 self.assertTrue(held["limitDecisionPending"])
                 self.assertEqual(held["scene"]["terminalInput"], prefix)
-                self.assertEqual((held["timeLimit"], held["actionLimit"]), (2, 0))
+                self.assertEqual((held["timeLimit"], held["actionLimit"], held["limitReached"]), (2, 20, "timer"))
                 self.assertTrue(engine.call("lab-resume")["paused"])
                 side = saved_path.with_suffix(".xml.writing")
                 original = saved_path.read_bytes()
@@ -836,6 +837,7 @@ class MissionTest(unittest.TestCase):
                 side.rmdir()
                 extended = engine.call("lab-limit-choice", choice="continue")
                 self.assertTrue(extended["finishingMission"])
+                self.assertEqual(extended["limitReached"], "timer")
                 self.assertFalse(extended["limitDecisionPending"])
                 self.assertTrue(extended["paused"])
                 self.assertEqual(extended["scene"]["terminalInput"], prefix)
@@ -852,6 +854,7 @@ class MissionTest(unittest.TestCase):
                 engine.call("configure", layout="EN")
                 extended = engine.call("lab-start", **changed)
                 self.assertTrue(extended["finishingMission"])
+                self.assertEqual(extended["limitReached"], "timer")
                 self.assertFalse(extended["limitDecisionPending"])
                 engine.call("lab-resume")
                 type_text(engine, target[-3:])
@@ -883,6 +886,51 @@ class MissionTest(unittest.TestCase):
                                  [session])
                 self.assertEqual([row.findtext("Session") for row in profile.findall("./ShortcutHistory/ShortcutAttempt")],
                                  [session])
+            finally:
+                engine.close()
+
+    def test_combined_action_cap_wins_and_survives_restart(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        import xml.etree.ElementTree as ET
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+            opts = dict(app="terminal", level=1, mode="sandbox", seconds=180, guidance="guided",
+                        mission="terminal-access", seed=7, softFinish=True, combinedLimits=True, actionLimit=1)
+            profile_path = Path(directory) / "TouchTypingStudio-QA" / "progress.xml"
+            engine = Engine(verify=True)
+            try:
+                engine.call("configure", layout="EN")
+                initial = engine.call("lab-start", **opts)
+                self.assertEqual((initial["timeLimit"], initial["actionLimit"]), (180, 1))
+                self.assertIsNone(initial["limitReached"])
+                engine.call("lab-resume")
+                for char in initial["task"]["text"]:
+                    key = {" ": "Space", "/": "Slash"}.get(char, char.upper())
+                    engine.call("lab-key", key=key, pressed=True, text=char)
+                    engine.call("lab-key", key=key, pressed=False, text="")
+                waiting = engine.call("lab-key", key="Enter", pressed=True, text="")
+                self.assertTrue(waiting["limitDecisionPending"])
+                self.assertEqual((waiting["limitReached"], waiting["solved"]), ("actions", 1))
+                self.assertGreater(waiting["remaining"], 0)
+                session = ET.parse(profile_path).findtext("./LiveDrafts/LiveDraft/Progress/Session")
+                engine.process.kill()
+                engine.process.wait(timeout=5)
+            finally:
+                engine.close()
+
+            engine = Engine(verify=True)
+            try:
+                restored = engine.call("lab-start", **dict(opts, seconds=600, actionLimit=100, **{"continue": True}))
+                self.assertTrue(restored["limitDecisionPending"])
+                self.assertEqual((restored["timeLimit"], restored["actionLimit"], restored["limitReached"]),
+                                 (180, 1, "actions"))
+                self.assertEqual(restored["scene"]["terminalInput"], waiting["scene"]["terminalInput"])
+                self.assertTrue(engine.call("lab-limit-choice", choice="finish")["saved"])
+                profile = ET.parse(profile_path)
+                self.assertEqual([r.findtext("Session") for r in profile.findall("./LabSessions/LabSessionRecord")], [session])
+                self.assertEqual([r.findtext("Session") for r in profile.findall("./LabRecords/LabSessionRecord")], [session])
+                self.assertFalse(profile.findall("./LiveDrafts/LiveDraft"))
             finally:
                 engine.close()
 

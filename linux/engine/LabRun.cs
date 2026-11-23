@@ -27,7 +27,8 @@ internal sealed class LabRun
         (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 || trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
-    private double activeMilliseconds, sinceTask;
+    private double activeMilliseconds, sinceTask, inputAtActiveMilliseconds;
+    private string latchedLimit;
     private double? activeSince;
     private bool stopped, superUsed, finishSingleRoute, limitAccepted, explicitFinish;
     private readonly bool softFinish;
@@ -74,7 +75,9 @@ internal sealed class LabRun
     internal int ScenarioStep => Math.Min(missionLength, missionLength - pending.Count + 1);
     internal int ScenarioLength => missionLength;
     internal int Seconds => TimeLimit > 0 && !FinishingMission ? Math.Min(Elapsed, TimeLimit) : Elapsed;
-    private bool ReachedLimit => TimeLimit > 0 && Elapsed >= TimeLimit || ActionLimit > 0 && Solved >= ActionLimit;
+    internal string LimitReached => latchedLimit ?? (TimeLimit > 0 && Elapsed >= TimeLimit ? "timer" :
+        ActionLimit > 0 && Solved >= ActionLimit ? "actions" : null);
+    private bool ReachedLimit => LimitReached != null;
     private bool CompletedRoute => !restoring && mission != null && pending.Count == 0 &&
         (FinishingMission || softFinish && ReachedLimit || finishSingleRoute && mission.FinishAfterRoute);
     private bool PendingLimitChoice => softFinish && !restoring && ReachedLimit &&
@@ -88,7 +91,7 @@ internal sealed class LabRun
     internal string[] Held => held.ToArray();
 
     internal LabRun(string app, string mode, int level, int seconds, string layout, IEnumerable<ShortcutAttempt> history,
-        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null, bool softFinish = false)
+        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null, bool softFinish = false, bool combinedLimits = false)
     {
         if (!LabCatalog.Apps.Contains(app)) throw new ArgumentException("Выберите Ubuntu, Chrome, VS Code или Терминал.");
         if (mode is not ("drill" or "sandbox")) throw new ArgumentException("Выберите тренировку или учебный рабочий стол.");
@@ -96,7 +99,9 @@ internal sealed class LabRun
         this.softFinish = softFinish;
         App = app; Mode = progress?.Mode is "drill" or "sandbox" ? progress.Mode : mode; Level = Math.Clamp(level, 0, 2);
         ActionLimit = Math.Max(0, progress?.ActionLimit ?? actionLimit);
-        TimeLimit = ActionLimit > 0 ? 0 : Math.Max(progress?.TimeLimit ?? seconds, 0);
+        // Old callers preserve action-over-timer precedence. Any saved pair
+        // has already been normalized by the client that started the attempt.
+        TimeLimit = Math.Max(0, progress?.TimeLimit ?? (ActionLimit > 0 && !combinedLimits ? 0 : seconds));
         if (!string.IsNullOrEmpty(progress?.Session)) Session = progress.Session;
         Guidance = guidance == "independent" ? guidance : "guided";
         this.random = random ?? Random.Shared; this.clock = clock ?? (() => Environment.TickCount64);
@@ -142,6 +147,7 @@ internal sealed class LabRun
                 points.AddRange(JsonSerializer.Deserialize<LabPoint[]>(progress.Series) ?? []);
             Attempts.Clear(); LastKey = ""; Feedback = "ready";
             FinishingMission = progress?.FinishingMission == true;
+            latchedLimit = progress?.LimitReached is "timer" or "actions" ? progress.LimitReached : null;
             restoring = false;
         }
     }
@@ -157,7 +163,7 @@ internal sealed class LabRun
         Dock = Scene.Dock, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, Trace = JsonSerializer.Serialize(trace),
         Progress = new() { Session = Session, Mode = Mode, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Solved = Solved,
             Errors = Errors, ActiveMilliseconds = ActiveMilliseconds, Series = JsonSerializer.Serialize(points),
-            LimitDecisionPending = PendingLimitChoice,
+            LimitDecisionPending = PendingLimitChoice, LimitReached = LimitReached,
             FinishingMission = FinishingMission } };
 
     internal void Pause()
@@ -177,10 +183,11 @@ internal sealed class LabRun
     internal void HoldForLimit()
     {
         if (!PendingLimitChoice) return;
+        latchedLimit ??= LimitReached;
         Pause();
         // Polling and focus handling may notice a deadline after it passed.
         // Time waiting for the choice is not time spent in the mission.
-        if (TimeLimit > 0) activeMilliseconds = Math.Min(activeMilliseconds, TimeLimit * 1000.0);
+        if (latchedLimit == "timer") activeMilliseconds = Math.Min(activeMilliseconds, TimeLimit * 1000.0);
     }
     internal bool ChooseLimit(string choice)
     {
@@ -210,6 +217,11 @@ internal sealed class LabRun
     internal ShortcutAttempt Input(string key, bool pressed, string text)
     {
         if (Finished || AwaitingLimitChoice || Paused || string.IsNullOrEmpty(key)) return null;
+        if (!restoring && !FinishingMission && TimeLimit > 0 && ActionLimit > 0)
+        {
+            inputAtActiveMilliseconds = ActiveMilliseconds;
+            if (inputAtActiveMilliseconds >= TimeLimit * 1000.0) return null;
+        }
         if (pressed && held.Contains(key))
         {
             if (!replayLegacyUrl && Scene.CanRepeatEditing(key) && !held.Any(item => KeyChord.Family(item) is "Alt" or "Super")
@@ -343,6 +355,17 @@ internal sealed class LabRun
 
     private ShortcutAttempt Pass(string key)
     {
+        if (!restoring && ActionLimit > 0 && Solved == ActionLimit - 1 && latchedLimit == null)
+        {
+            latchedLimit = "actions";
+            // If an admitted key consumes the last action, processing that key
+            // may finish after the timer boundary. Its receipt won, not CPU time.
+            if (TimeLimit > 0 && !FinishingMission)
+            {
+                activeMilliseconds = inputAtActiveMilliseconds;
+                activeSince = null;
+            }
+        }
         var attempt = Record(true, key);
         Solved++; taskInBlock++;
         string result = Task.Title + " — выполнено.";
@@ -481,7 +504,7 @@ internal static class LabSessionRecords
         profile.LabSessions.Add(record);
         // Read legacy history before pruning so its best completed run survives migration.
         profile.LabRecords = profile.LabRecords.Concat(profile.LabSessions)
-            .Where(item => item.Completed && (item.ActionLimit > 0 ? item.Solved >= item.ActionLimit : item.TimeLimit > 0 && item.Seconds >= item.TimeLimit) && LabCatalog.Apps.Contains(item.App) &&
+            .Where(item => item.Completed && ((item.ActionLimit > 0 && item.Solved >= item.ActionLimit) || (item.TimeLimit > 0 && item.Seconds >= item.TimeLimit)) && LabCatalog.Apps.Contains(item.App) &&
                 item.Mode is "drill" or "sandbox" && item.Level is >= 0 and <= 2)
             .GroupBy(item => new { item.App, item.Mode, item.Level, item.Guidance, item.TimeLimit, item.ActionLimit })
             .Select(group => group.OrderByDescending(item => item.Solved).ThenBy(item => item.Errors)
