@@ -1,0 +1,57 @@
+name: Publish TouchTyping Linux preview
+on:
+  push:
+    branches: [release/v1.8.0-preview.2-linux]
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: touchtyping-v180-preview-2-linux
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE_SHA: 'd85918e70302333d302e040e95474e9d56a51e9e'
+      RUN: '45111097394'
+      LINUX_SHA256: '8c082a773fd8c705fb1a8e6de64fd15d32bc159dcf393bbbdb61dc253f59c6cb'
+      REPO: 'veitnemed/touch_typing'
+      TAG: 'v1.8.0-preview.2'
+    steps:
+      - name: Verify Linux checks, artifact, and absence of Windows assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/actions/runs/$RUN" | jq -e --arg sha "$CANDIDATE_SHA" '
+            .head_sha == $sha and .head_branch == "feature/live-skill-identity"
+            and .path == ".github/workflows/live-input-candidate.yml"' >/dev/null
+          gh api "repos/$REPO/actions/runs/$RUN/jobs?per_page=50" | jq -e '
+            .jobs as $j | ["engine","linux-window"] |
+            all(. as $name | any($j[]; .name==$name and .conclusion=="success"))' >/dev/null
+          mkdir -p "$RUNNER_TEMP/preview"
+          cd "$RUNNER_TEMP/preview"
+          gh run download "$RUN" --repo "$REPO" --name linux-x64-candidate --dir .
+          echo "$LINUX_SHA256  touch-typing-linux-x64.tar.gz" | sha256sum -c
+          tar -tzf touch-typing-linux-x64.tar.gz > files.txt
+          grep -Fx 'touch-typing-linux-x64/install.sh' files.txt
+          grep -Fx 'touch-typing-linux-x64/engine/TouchTyping.Engine' files.txt
+          if grep -Ei '\.exe$' files.txt; then echo 'Unexpected Windows executable'; exit 1; fi
+          mv touch-typing-linux-x64.tar.gz "touch-typing-$TAG-linux-x64.tar.gz"
+          sha256sum "touch-typing-$TAG-linux-x64.tar.gz" > SHA256SUMS.txt
+          cat > notes.md <<'NOTES'
+          Предварительный выпуск для Linux x86-64. Сборки Windows и файлов EXE здесь нет.
+          
+          - Новая миссия «Перенести методику из браузера в заметку»: найти источник, скопировать текст в VS Code, сохранить заметку, открыть её через файловый менеджер и сверить содержимое в терминале.
+          - Восстановление рабочего состояния и сохранённых шагов после перезапуска. Исправлен откат уже пройденного шага в части профилей v1.7.0.
+          - Подбор упражнений различает ошибки в RU и EN и объясняет рекомендацию уровня.
+          
+          Распакуйте Linux-архив и запустите `bash install.sh` из распакованной папки. Нужен GTK 4; проверено на Ubuntu 24.04 / GNOME Wayland. Если отображаемая раскладка отличается от системной, выберите EN в GNOME перед началом новой миссии.
+          
+          Это превью, не стабильная версия. Восстановление накопленного активного времени и исходного лимита занятия после перезапуска ещё не входит в выпуск. Клиентская Windows 10/11 и физический ввод в рамках этого выпуска не проверялись.
+          NOTES
+          printf '\nАрхив взят без пересборки из [прошедшего Linux-прогона](https://github.com/%s/actions/runs/%s) на `%s`.\n' "$REPO" "$RUN" "$CANDIDATE_SHA" >> notes.md
+          gh release create "$TAG" --repo "$REPO" --target "$CANDIDATE_SHA" --prerelease --latest=false \
+            --title "TouchTyping $TAG для Linux: рабочая миссия и восстановление" --notes-file notes.md \
+            "touch-typing-$TAG-linux-x64.tar.gz" SHA256SUMS.txt
