@@ -1,0 +1,49 @@
+name: Build TouchTyping 1.8.0 candidate archives (no publish)
+on:
+  push:
+    branches: [qa/stable18-candidate-archives]
+permissions:
+  contents: read
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 9c7773ab1bb319285e2ec341224c5714ee2efc86
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Verify source and package both x64 platforms
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 9c7773ab1bb319285e2ec341224c5714ee2efc86
+          p="$RUNNER_TEMP/packages"
+          mkdir -p "$p"
+          bash linux/build-release.sh "$p/touch-typing-linux-x64"
+          bash windows/build-release.sh "$p/touch-typing-windows-x64"
+          tar -czf "$p/touch-typing-v1.8.0-linux-x64.tar.gz" -C "$p" touch-typing-linux-x64
+          (cd "$p/touch-typing-windows-x64" && zip -qr "$p/touch-typing-v1.8.0-windows-x64.zip" .)
+          tar -tzf "$p/touch-typing-v1.8.0-linux-x64.tar.gz" > "$p/linux-paths.txt"
+          unzip -tq "$p/touch-typing-v1.8.0-windows-x64.zip"
+          unzip -Z1 "$p/touch-typing-v1.8.0-windows-x64.zip" > "$p/windows-paths.txt"
+          if grep -Ei '(^|/)(\.env(\.|$)|\.git(/|$)|progress\.xml($|[.~])|.*\.(pem|pfx|p12|key)$|profiles?/|secrets?/|credentials($|\.))' "$p/"*-paths.txt; then exit 1; fi
+          if grep -Ei '\.exe$' "$p/linux-paths.txt"; then exit 1; fi
+          (cd "$p" && sha256sum touch-typing-v1.8.0-* | tee SHA256SUMS.txt)
+          export PYTHONPATH="$PWD/linux"
+          export TOUCH_TYPING_ENGINE="$p/touch-typing-linux-x64/engine/TouchTyping.Engine"
+          /usr/bin/python3 linux/tests/test_python_editor.py
+          /usr/bin/python3 linux/tests/test_neutral_project.py
+          /usr/bin/python3 linux/tests/test_practice.py
+          /usr/bin/python3 linux/tests/test_live_missions.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: touchtyping-180-candidate-archives
+          path: |
+            ${{ runner.temp }}/packages/touch-typing-v1.8.0-linux-x64.tar.gz
+            ${{ runner.temp }}/packages/touch-typing-v1.8.0-windows-x64.zip
+            ${{ runner.temp }}/packages/SHA256SUMS.txt
+          if-no-files-found: error
