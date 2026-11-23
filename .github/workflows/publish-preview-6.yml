@@ -1,0 +1,74 @@
+name: Publish TouchTyping Windows x64 beta
+on:
+  push:
+    branches: [release/v1.8.0-preview.6-windows-beta]
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: touchtyping-windows-beta-preview-6
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE_SHA: '845766c8d82793228da9af808c45c7b1f6aab767'
+      RUN: '45141943599'
+      WINDOWS_SHA256: '31c2145a2f479efcd766f29272269913db4c398959e955e8564e7c04721e773c'
+      REPO: 'veitnemed/touch_typing'
+      TAG: 'v1.8.0-preview.6-windows-beta'
+    steps:
+      - name: Publish only the exact verified Windows ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/actions/runs/$RUN" | jq -e --arg sha "$CANDIDATE_SHA" '
+            .head_sha == $sha and .head_branch == "feature/reference-ui"
+            and .path == ".github/workflows/live-input-candidate.yml"' >/dev/null
+          gh api "repos/$REPO/actions/runs/$RUN/jobs?per_page=50" | jq -e '
+            .jobs as $j | ["engine","windows-package","windows-window"] |
+            all(. as $name | any($j[]; .name==$name and .conclusion=="success")) and
+            any($j[]; .name=="windows-window" and (
+              .steps as $steps | [
+                "Exercise daily editor and GNOME missions in native WPF",
+                "Verify GNOME profile workspace and layout practice in WPF",
+                "Verify both native WPF debug missions and scoped screenshot"
+              ] | all(. as $expected | any($steps[]; .name == $expected and .conclusion == "success"))))' >/dev/null
+          mkdir -p "$RUNNER_TEMP/windows-beta"
+          cd "$RUNNER_TEMP/windows-beta"
+          gh run download "$RUN" --repo "$REPO" --name windows-x64-candidate --dir .
+          sha256sum -c SHA256SUMS.txt
+          echo "$WINDOWS_SHA256  touch-typing-windows-x64.zip" | sha256sum -c
+          unzip -tq touch-typing-windows-x64.zip
+          unzip -Z1 touch-typing-windows-x64.zip > files.txt
+          grep -Fx 'Start-Live.cmd' files.txt
+          grep -Fx 'TouchTyping.exe' files.txt
+          for asset in Roboto-Regular.ttf Roboto-Medium.ttf Roboto-Bold.ttf OFL.txt ROBOTO-SOURCE.txt; do
+            grep -Fx "fonts/$asset" files.txt
+          done
+          if grep -E '(^|/)progress\.xml$' files.txt; then echo 'Unexpected user profile'; exit 1; fi
+          if grep -Ei '(^|/)(\.env(\.|$)|\.git(/|$)|progress\.xml($|[.~])|.*\.(pem|pfx|p12|key)$|profiles?/|secrets?/|credentials($|\.))' files.txt; then
+            echo 'Potential private profile/secret found in archive'; exit 1
+          fi
+          mv touch-typing-windows-x64.zip "touch-typing-$TAG-x64.zip"
+          sha256sum "touch-typing-$TAG-x64.zip" > SHA256SUMS.txt
+          cat > notes.md <<'NOTES'
+          Отдельная переносимая бета Windows x64. Распакуйте ZIP целиком и запустите `Start-Live.cmd`. Нужен .NET Framework 4.8 или совместимая более новая версия.
+          
+          Из распакованного ZIP проверены реальное окно WPF, поиск ошибки и диагностика, практика профиля GNOME и обе миссии отладки со снимком учебного терминала. Проверки выполнены на Windows Server 2025. Клиентская Windows 10/11 на рабочем ПК, масштаб 125–150% и физическая клавиатура MateBook этим прогоном не подтверждены. Обновление пользовательского профиля с v1.7.0 на клиентской Windows пока не проверено.
+          
+          ### Что нового относительно preview.5
+          
+          - **VS Code:** поиск по фрагменту сообщения об ошибке теперь ведёт к нужной строке. Отдельная миссия: перейти к проблеме, выбрать исправление и запустить относящийся к нему учебный тест. Зачёт требует сохранённой правки и правильного результата, а не просто открытия панели.
+          - **Ubuntu / GNOME:** перенос терминала на другой рабочий стол и возврат к коду, выбор между окнами одного приложения, отдельная практика левой Super и переключения раскладки для MateBook.
+          - **«Разобрать ошибку без мыши»:** два разных проекта, с подсказками и самостоятельно. Найдите вызов, сверитесь со справкой, исправьте исходник, запустите профильный тест и приложите в отчёт снимок только учебного терминала. На компьютере пользователя учебный код не исполняется.
+          
+          Это предварительный выпуск, не полная приёмка всех функций.
+          
+          Сборка без пересборки из [прошедшего прогона](https://github.com/veitnemed/touch_typing/actions/runs/45141943599) на `845766c8d82793228da9af808c45c7b1f6aab767`.
+          NOTES
+          gh release create "$TAG" --repo "$REPO" --target "$CANDIDATE_SHA" --prerelease --latest=false \
+            --title "TouchTyping v1.8.0-preview.6 — Windows x64 beta" --notes-file notes.md \
+            "touch-typing-$TAG-x64.zip" SHA256SUMS.txt
