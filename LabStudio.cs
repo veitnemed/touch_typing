@@ -43,12 +43,20 @@ namespace TouchTypingStudio
             var shortcuts = Label("", 13, Dim);
             shortcuts.MaxWidth = 1000;
             var selected = Label("", 18, Ink, true);
+            var levels = new[] { "Базовый", "Средний", "Сложный" };
             labMissionSelect = new ComboBox { MinWidth = 270, MaxWidth = 600, HorizontalAlignment = HorizontalAlignment.Left };
             Action describe = delegate
             {
                 var item = classes.FirstOrDefault(c => c.S("id") == labApp);
                 selected.Text = item == null ? "Выберите класс" : item.S("title");
                 shortcuts.Text = item == null ? "" : item.S("description");
+                var advice = catalog.Items("recommendations").FirstOrDefault(r => r.S("app") == labApp);
+                if (advice != null && !string.IsNullOrWhiteSpace(advice.S("reason")))
+                {
+                    int suggested = advice.I("level", -1);
+                    string title = suggested >= 0 && suggested < levels.Length ? "Рекомендуемый уровень: " + levels[suggested] + ". " : "";
+                    shortcuts.Text += "\n" + title + advice.S("reason");
+                }
                 int level = labLevelSelect == null ? 0 : Math.Max(0, labLevelSelect.SelectedIndex);
                 var ids = new List<string> { "" }; var titles = new List<string> { "Подобрать поручение" };
                 string guidance = labModeSelect != null && labModeSelect.SelectedIndex == 0 ? "independent" : "guided";
@@ -89,7 +97,7 @@ namespace TouchTypingStudio
             var choices = Stack(true);
             labModeSelect = Select("Режим", new[] { "Самостоятельно", "По шагам" }, labMode == "sandbox" ? 1 : 0, 315);
             AutomationProperties.SetAutomationId(labModeSelect, "LabMode");
-            labLevelSelect = Select("Сложность", new[] { "Базовый", "Средний", "Сложный" }, labLevel, 150);
+            labLevelSelect = Select("Сложность", levels, labLevel, 150);
             choices.Children.Add(labModeSelect);
             choices.Children.Add(labLevelSelect);
             labLimitSelect = Select("Длительность", new[] { "Без таймера", "20 действий", "40 действий", "60 действий", "3 минуты", "10 минут" }, lastLabLimit, 155);

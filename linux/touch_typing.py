@@ -1836,7 +1836,8 @@ class LabPage(Gtk.Box):
         self.picker.set_visible(False)
         self.mode = dropdown(["По шагам", "Самостоятельно"])
         self.limit = dropdown(["Без таймера", "20 действий", "40 действий", "60 действий", "3 минуты", "10 минут"])
-        self.level = dropdown(["Основы", "Рабочие приёмы", "Сложный"])
+        self.level_titles = ("Основы", "Рабочие приёмы", "Сложный")
+        self.level = dropdown(self.level_titles)
         self.begin = button("Начать · Пробел", self.start, "primary")
         self.prep = box(Gtk.Orientation.VERTICAL, 12, "lab-prep")
         self.prep.append(text("Практика без мыши", "h2"))
@@ -1925,11 +1926,18 @@ class LabPage(Gtk.Box):
                 item.remove_css_class("selected")
                 if index == self.picker.get_selected():
                     item.add_css_class("selected")
-            self.summary.set_label(selected["description"])
             app = selected["id"]
             level = self.level.get_selected()
             guidance = "guided" if self.mode.get_selected() == 0 else "independent"
             catalog = self.host.call("lab-catalog") or {}
+            description = selected["description"]
+            advice = next((r for r in catalog.get("recommendations", []) if r.get("app") == app), None)
+            if advice and advice.get("reason", "").strip():
+                suggested = advice.get("level")
+                title = (f"Рекомендуемый уровень: {self.level_titles[suggested]}. "
+                         if type(suggested) is int and 0 <= suggested < len(self.level_titles) else "")
+                description += "\n" + title + advice["reason"]
+            self.summary.set_label(description)
             self.choices = [("", "Подобрать поручение")]
             if any(d["app"] == app and d["level"] == level and d["guidance"] == guidance for d in catalog.get("drafts", [])):
                 self.choices.append(("@resume", "Продолжить с сохранённого места"))

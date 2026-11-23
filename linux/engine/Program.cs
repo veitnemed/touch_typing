@@ -87,7 +87,7 @@ internal sealed class PracticeService
                 if (message.TryGetProperty("dock", out var pinned) && pinned.ValueKind == JsonValueKind.Array)
                     dock = pinned.EnumerateArray().Take(9).Select(item => item.GetString() ?? "").ToArray();
                 return Library();
-            case "lab-catalog": return LabCatalog.Catalog(profile.LiveDrafts);
+            case "lab-catalog": return LabCatalog.Catalog(profile.LiveDrafts, profile.ShortcutHistory);
             case "lab-start":
                 FinishLab();
                 if (lab?.Saved == false) return LabState(startBlocked: true);

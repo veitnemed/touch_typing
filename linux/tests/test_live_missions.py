@@ -7,6 +7,90 @@ from platform_linux import Engine
 
 
 class MissionTest(unittest.TestCase):
+    def test_starting_recommendations_are_advisory_and_never_select_a_draft(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        import xml.etree.ElementTree as ET
+
+        names = [("guide", "first-fix", "scratch"), ("refactor", "extract", "console"),
+                 ("handover", "repair", "inspection")]
+        tasks = ("explorer", "quick-open", "quick-choose", "save")
+
+        def sample(level, *, count=10, independent=True, assisted=False, correct=True,
+                   skill_app="code", one_mission=False, one_session=False, one_task=False):
+            return [
+                {"Mission": "code-" + names[level][0 if one_mission else index % 3],
+                 "Skill": f"lab/{skill_app}/" + tasks[0 if one_task else index % 4],
+                 "Verification": "lab-scene", "InputMode": "exact",
+                 "Session": f"session-{0 if one_session else index % 2}",
+                 "Independent": str(independent).lower(), "Assisted": str(assisted).lower(),
+                 "Correct": str(correct).lower(), "FirstTry": str(correct).lower()}
+                for index in range(count)
+            ]
+
+        serial = [
+            {**x, "Mission": "code-" + name, "Session": f"serial-{session}"}
+            for session, name in enumerate(names[0])
+            for x in sample(0, count=25)
+        ]
+
+        for label, history, expected in (
+            ("new", [], None),
+            ("guided", sample(0, independent=False, assisted=True), None),
+            ("helped", sample(0, assisted=True), None),
+            ("cross-class", sample(0, skill_app="chrome"), None),
+            ("unknown-mission", [{**x, "Mission": "missing"} for x in sample(0)], None),
+            ("single-mission", sample(0, one_mission=True), None),
+            ("single-session", sample(0, one_session=True), None),
+            ("single-task", sample(0, one_task=True), None),
+            ("recent-misses", sample(0) + sample(0, count=3, correct=False), None),
+            ("three-complete-sessions", serial, 1),
+            ("three-complete-sessions-then-misses", serial + sample(0, count=3, correct=False), None),
+            ("tiers-not-pooled", sample(0, count=5) + sample(1, count=5), None),
+            ("at-boundary", sample(0, count=9) + sample(0, count=1, correct=False), 1),
+            ("editor-basic", sample(0), 1),
+            ("editor-middle", sample(1), 2),
+            ("editor-advanced", sample(2), 2),
+        ):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory, \
+                    patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+                profile = Path(directory) / "TouchTypingStudio-QA" / "progress.xml"
+                profile.parent.mkdir()
+                root = ET.Element("StudioProfile")
+                old_attempts = ET.SubElement(root, "ShortcutHistory")
+                for record in [{}] + history:  # includes an old/incomplete history row
+                    item = ET.SubElement(old_attempts, "ShortcutAttempt")
+                    for key, value in record.items():
+                        ET.SubElement(item, key).text = value
+                drafts = ET.SubElement(root, "LiveDrafts")
+                draft = ET.SubElement(drafts, "LiveDraft")
+                for key, value in {"App": "code", "Level": "0", "Mission": "code-first-fix",
+                                   "Layout": "EN", "Guidance": "guided", "Trace": "[]"}.items():
+                    ET.SubElement(draft, key).text = value
+                ET.ElementTree(root).write(profile, encoding="utf-8")
+                previous = profile.read_bytes()
+
+                engine = Engine(verify=True)
+                try:
+                    catalog = engine.call("lab-catalog")
+                    tips = {item["app"]: item for item in catalog["recommendations"]}
+                    self.assertEqual(set(tips), {entry["id"] for entry in catalog["classes"]})
+                    self.assertEqual(tips["code"]["level"], expected)
+                    self.assertTrue(all(tips[entry]["level"] is None for entry in tips if entry != "code"))
+                    self.assertEqual(catalog["drafts"], [dict(app="code", level=0, mission="code-first-fix", guidance="guided")])
+                    self.assertEqual(profile.read_bytes(), previous)
+                    if label == "editor-basic":
+                        self.assertIn("ещё не подтверждён", tips["code"]["reason"])
+                        # Learner ignores advisory level 1, chooses level 2,
+                        # then resumes the still-present basic draft.
+                        options = dict(app="code", mode="sandbox", seconds=0, guidance="guided", seed=0)
+                        manual = engine.call("lab-start", **options, level=2, mission="code-handover")
+                        self.assertEqual(manual["mission"], "code-handover")
+                        resumed = engine.call("lab-start", **options, level=0, **{"continue": True})
+                        self.assertEqual(resumed["mission"], "code-first-fix")
+                finally:
+                    engine.close()
+
     def test_routes(self):
         with tempfile.TemporaryDirectory() as directory:
             original = os.environ.get("XDG_DATA_HOME")

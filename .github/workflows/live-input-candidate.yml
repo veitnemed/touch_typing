@@ -2,7 +2,7 @@ name: Live input candidate (no publish)
 
 on:
   push:
-    branches: [feature/live-input-reliability, feature/live-file-recovery]
+    branches: [feature/live-input-reliability, feature/live-file-recovery, feature/live-level-advice]
   workflow_dispatch:
 
 permissions:
@@ -32,7 +32,7 @@ jobs:
           bash linux/build-release.sh "$RUNNER_TEMP/touch-typing-linux-x64"
           export TOUCH_TYPING_ENGINE="$RUNNER_TEMP/touch-typing-linux-x64/engine/TouchTyping.Engine"
           /usr/bin/python3 linux/tests/test_practice.py
-          /usr/bin/python3 linux/tests/test_live_missions.py
+          PYTHONPATH="$RUNNER_TEMP/touch-typing-linux-x64" /usr/bin/python3 "$RUNNER_TEMP/touch-typing-linux-x64/qa/test_live_missions.py"
           /usr/bin/python3 linux/tests/test_live_visual_fields.py
           node tests/workday-editor-state.js
           tar -czf "$RUNNER_TEMP/touch-typing-linux-x64.tar.gz" -C "$RUNNER_TEMP" touch-typing-linux-x64

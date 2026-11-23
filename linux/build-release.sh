@@ -35,5 +35,6 @@ install -m 644 -- "$source_dir"/result-*.png "$target/"
 
 install -m 755 -- "$source_dir/check.sh" "$target/"
 install -m 644 -- "$source_dir/qa_runner.py" "$target/"
-mkdir -p -- "$target/qa"
+mkdir -p -- "$target/qa/fixtures"
 install -m 644 -- "$source_dir/tests/test_live_missions.py" "$source_dir/tests/test_practice.py" "$source_dir/tests/test_lab_window.py" "$source_dir/tests/test_wayland_window.py" "$source_dir/tests/test_ui_controls.py" "$target/qa/"
+install -m 644 -- "$source_dir/tests/fixtures/v1.7.0-workday-report.xml.gz" "$target/qa/fixtures/"

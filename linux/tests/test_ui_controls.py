@@ -50,6 +50,40 @@ class ControlsTest(LabWindowTest):
             yield
         assert not self.signal_errors, (self.signal_errors, self.trace)
 
+    def check_starting_level_advice(self):
+        lab = self.lab
+        original_call = lab.host.call
+
+        def catalog_fixture(command, **kwargs):
+            catalog = original_call(command, **kwargs)
+            if command != "lab-catalog":
+                return catalog
+            return dict(catalog, drafts=[{"app": "code", "level": 0, "guidance": "guided"}],
+                        recommendations=[{"app": "code", "level": 2, "reason": "Самостоятельная практика."},
+                                         {"app": "ubuntu", "level": None, "reason": "Пока мало попыток."}])
+
+        lab.host.call = catalog_fixture
+        try:
+            lab.mode.set_selected(0)
+            lab.level.set_selected(0)
+            lab.picker.set_selected(next(i for i, item in enumerate(lab.classes) if item["id"] == "code"))
+            assert "Рекомендуемый уровень: Сложный. Самостоятельная практика." in lab.summary.get_label()
+            assert lab.level.get_selected() == 0 and lab.mode.get_selected() == 0
+            assert ("@resume", "Продолжить с сохранённого места") in lab.choices
+            lab.level.set_selected(2)
+            assert ("@resume", "Продолжить с сохранённого места") not in lab.choices
+            assert any(mission for mission, _ in lab.choices)
+            lab.level.set_selected(0)
+            assert ("@resume", "Продолжить с сохранённого места") in lab.choices
+            lab.picker.set_selected(next(i for i, item in enumerate(lab.classes) if item["id"] == "ubuntu"))
+            assert "Пока мало попыток." in lab.summary.get_label()
+            assert "Рекомендуемый уровень:" not in lab.summary.get_label()
+            lab.picker.set_selected(next(i for i, item in enumerate(lab.classes) if item["id"] == "chrome"))
+            assert lab.summary.get_label() == lab.classes[lab.picker.get_selected()]["description"]
+        finally:
+            lab.host.call = original_call
+            lab.describe()
+
     def exercise(self):
         assert PracticeLine.printable(" ", current=True) == " "
         assert display_chord("Alt+F4", {"keyboardProfile": "matebook-d16", "fnMode": "hotkeys"}) == "Fn + Alt + F4"
@@ -68,6 +102,8 @@ class ControlsTest(LabWindowTest):
                 key(1, False); yield
                 self.window.present()
             self.navigate("lab")
+            self.mark("starting level advice leaves saved draft and manual levels available")
+            self.check_starting_level_advice()
             for title in ("Ubuntu", "Chrome", "VS Code", "Терминал"):
                 yield from self.click(title)
                 assert self.lab.classes[self.lab.picker.get_selected()]["title"] == title
