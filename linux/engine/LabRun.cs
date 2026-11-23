@@ -17,6 +17,7 @@ internal sealed class LabRun
     private readonly List<LabPoint> points = [];
     private readonly List<LiveEvent> trace = [];
     private bool restoring, replayLegacyUrl, replayLegacyReport, replayLegacyNavigation;
+    private const string NativeLayoutEvent = "@native-layout";
     private const string ExactUrlEvent = "@exact-url";
     private const string StrictReportEvent = "@strict-report";
     private const string ClusterNavigationEvent = "@cluster-navigation";
@@ -24,7 +25,8 @@ internal sealed class LabRun
     private string initialLayout, attemptLayout;
     private bool initialVirtual;
     internal bool HasDraft => !CompletedRoute && !limitAccepted && (!ReachedLimit || softFinish || FinishingMission) &&
-        (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 || trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent)));
+        (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 ||
+        trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask, inputAtActiveMilliseconds;
@@ -124,6 +126,7 @@ internal sealed class LabRun
                 if (e.Key.StartsWith("@held/")) { held.Add(e.Key[6..]); superUsed = e.Down; }
                 else if (e.Key == "@release") { Pause(); Resume(); }
                 else if (e.Key == "@hint") Hint();
+                else if (e.Key == NativeLayoutEvent) ApplyNativeLayout(e.Text, true);
                 else if (e.Key == ExactUrlEvent) { replayLegacyUrl = false; trace.Add(e); }
                 else if (e.Key == StrictReportEvent) { replayLegacyReport = false; trace.Add(e); }
                 else if (e.Key == ClusterNavigationEvent) EndLegacyNavigation(e);
@@ -213,6 +216,16 @@ internal sealed class LabRun
     internal void CancelContinuation() => FinishingMission = false;
     internal void Stop() { Pause(); stopped = true; }
     internal void MarkSaved() => Saved = true;
+
+    internal void ApplyNativeLayout(string value, bool takeOver)
+    {
+        if (value is not ("EN" or "RU") || !restoring && Finished ||
+            Scene.LayoutIsVirtual && !takeOver ||
+            value == Scene.Layout && !Scene.LayoutIsVirtual) return;
+        Scene.Layout = value;
+        Scene.LayoutIsVirtual = false;
+        trace.Add(new(NativeLayoutEvent, Text: value));
+    }
 
     internal ShortcutAttempt Input(string key, bool pressed, string text)
     {

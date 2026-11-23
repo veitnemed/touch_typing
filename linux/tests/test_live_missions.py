@@ -181,6 +181,61 @@ class MissionTest(unittest.TestCase):
             finally:
                 engine.close()
 
+    def test_windows_native_layout_changes_badge_and_attempt_without_credit_and_replays(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        import xml.etree.ElementTree as ET
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+            options = dict(app="terminal", level=1, mode="sandbox", seconds=0,
+                           guidance="guided", mission="terminal-access", seed=7)
+            engine = Engine(verify=True)
+            def chord(*keys):
+                for key in keys:
+                    engine.call("lab-key", key=key, pressed=True)
+                for key in reversed(keys):
+                    state = engine.call("lab-key", key=key, pressed=False)
+                return state
+            try:
+                engine.call("configure", platform="windows", layout="EN")
+                initial = engine.call("lab-start", **options)
+                state = engine.call("lab-native-layout", layout="RU", takeOver=True)
+                self.assertEqual((state["scene"]["layout"], state["scene"]["layoutIsVirtual"]), ("RU", False))
+                self.assertEqual((state["solved"], state["errors"], state["task"]),
+                                 (initial["solved"], initial["errors"], initial["task"]))
+                self.assertTrue(state["paused"])
+                self.assertEqual(engine.call("lab-native-layout", layout="EL", takeOver=True)["scene"]["layout"], "RU")
+                engine.call("lab-resume")
+                for key, value in [("J", "о"), ("N", "т"), ("X", "ч"), ("Grave", "ё"), ("N", "т")]:
+                    engine.call("lab-key", key=key, pressed=True, text=value)
+                    engine.call("lab-key", key=key, pressed=False)
+                state = chord("RCtrl", "F12")
+                self.assertEqual(state["scene"]["terminalInput"], "отчёт")
+                self.assertEqual(state["solved"], 0)
+                self.assertEqual(state["errors"], 1)
+                engine.call("lab-stop")
+                profile = Path(directory) / "TouchTypingStudio-QA" / "progress.xml"
+                attempts = ET.parse(profile).findall("./ShortcutHistory/ShortcutAttempt")
+                self.assertEqual([(a.findtext("Layout"), a.findtext("Correct")) for a in attempts], [("RU", "false")])
+                engine.close()
+                engine = Engine(verify=True)
+                engine.call("configure", platform="windows", layout="EN")
+                reopened = engine.call("lab-start", **options, **{"continue": True})
+                self.assertEqual((reopened["scene"]["layout"], reopened["scene"]["terminalInput"]), ("RU", "отчёт"))
+                adopted = engine.call("lab-native-layout", layout="EN")
+                self.assertEqual((adopted["scene"]["layout"], adopted["scene"]["terminalInput"]), ("EN", "отчёт"))
+
+                engine.call("lab-resume")
+                virtual = chord("LSuper", "Space")
+                self.assertEqual((virtual["scene"]["layout"], virtual["scene"]["layoutIsVirtual"]), ("RU", True))
+                untouched = engine.call("lab-native-layout", layout="EN")
+                self.assertEqual((untouched["scene"]["layout"], untouched["scene"]["layoutIsVirtual"]), ("RU", True))
+                replaced = engine.call("lab-native-layout", layout="RU", takeOver=True)
+                self.assertEqual((replaced["scene"]["layout"], replaced["scene"]["layoutIsVirtual"]), ("RU", False))
+                self.assertEqual(replaced["solved"], virtual["solved"])
+            finally:
+                engine.close()
+
     def test_routes(self):
         with tempfile.TemporaryDirectory() as directory:
             original = os.environ.get("XDG_DATA_HOME")

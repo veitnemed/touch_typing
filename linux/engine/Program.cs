@@ -106,6 +106,13 @@ internal sealed class PracticeService
                 labSaveError = null;
                 FinishLabAutomatically();
                 return LabState();
+            case "lab-native-layout":
+                if (windows && lab != null && Text(message, "layout") is "EN" or "RU")
+                {
+                    layout = Text(message, "layout");
+                    lab.ApplyNativeLayout(layout, Flag(message, "takeOver"));
+                }
+                return LabState();
             case "lab-key":
                 if (lab == null) throw new InvalidOperationException("Сначала выберите учебный класс.");
                 var labAttempt = lab.Input(Text(message, "key"), Flag(message, "pressed"), Text(message, "text"));

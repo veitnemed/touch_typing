@@ -51,6 +51,12 @@ internal static class LiveUiSmoke
                 Console.WriteLine("PASS: " + count + " native WPF soft finish assertions");
                 return 0;
             }
+            if (arguments.Contains("--native-layout"))
+            {
+                CheckNativeLessonLayouts();
+                Console.WriteLine("PASS: " + count + " native WPF layout assertions");
+                return 0;
+            }
             if (referenceBrowser)
             {
                 CheckReferenceBrowser();
@@ -595,6 +601,77 @@ internal static class LiveUiSmoke
         Chord("Super+Space");
         if (!Name("LabDesktop").Contains("Раскладка EN")) Chord("Super+Space");
         Check(Name("LabDesktop").Contains("Раскладка EN"), "Virtual text input uses the displayed English layout");
+    }
+
+    private static void CheckNativeLessonLayouts()
+    {
+        uint process;
+        uint thread = GetWindowThreadProcessId(trainer, out process);
+        Check(process == app.Id && thread != 0, "Layout test targets only the owned trainer UI thread");
+        IntPtr previous = GetKeyboardLayout(thread);
+        var failures = new List<string>();
+        try
+        {
+            SetNativeLessonLayout(thread, "00000409", 0x0409);
+            Invoke("LabClass-terminal");
+            Select("LabMode", 0);
+            Select("LabDuration", 0);
+            Key("F5");
+            Until(delegate { return Exists("LabDesktop") && Name("LabPause").StartsWith("Пауза"); },
+                "active terminal lesson with real EN layout");
+            CheckNativeLessonState(thread, "EN", 0x0409, "", 0, failures);
+            Send(PhysicalText("J N X ` N Space V 2"));
+            CheckNativeLessonState(thread, "EN", 0x0409, "jnx`n v2", 8, failures);
+            Chord("LCtrl+U");
+            CheckTerminalState("", 0);
+
+            SetNativeLessonLayout(thread, "00000419", 0x0419);
+            // These are unchanged physical positions. Only the Windows HKL changes.
+            // Do not use Super+Space or make an engine layout request here.
+            Send(PhysicalText("J N X ` N"));
+            CheckNativeLessonState(thread, "RU", 0x0419, "отчёт", 5, failures);
+            Send(PhysicalText("Space"));
+            SetNativeLessonLayout(thread, "00000409", 0x0409);
+            Send(PhysicalText("V 2"));
+            CheckNativeLessonState(thread, "EN", 0x0409, "отчёт v2", 8, failures);
+            Key("Left"); Key("Delete");
+            CheckTerminalState("отчёт v", 7);
+            Chord("RCtrl+U");
+            CheckTerminalState("", 0);
+        }
+        finally { if (!app.HasExited) SendMessage(trainer, 0x50, IntPtr.Zero, previous); }
+        if (failures.Count != 0) throw new InvalidOperationException(string.Join(Environment.NewLine, failures));
+    }
+
+    private static Stroke[] PhysicalText(string keys)
+    {
+        return keys.Split(' ').SelectMany(key => Parse(key)
+            .SelectMany(stroke => new[] { stroke.Down(), stroke.Up() })).ToArray();
+    }
+
+    private static int NativeLanguage(uint thread)
+    {
+        return (int)(GetKeyboardLayout(thread).ToInt64() & 0xffff);
+    }
+
+    private static void SetNativeLessonLayout(uint thread, string layout, int expected)
+    {
+        IntPtr keyboard = LoadKeyboardLayout(layout, 0);
+        if (keyboard == IntPtr.Zero) throw new InvalidOperationException("Windows layout unavailable: " + layout);
+        SendMessage(trainer, 0x50, IntPtr.Zero, keyboard); // WM_INPUTLANGCHANGEREQUEST
+        Until(delegate { return NativeLanguage(thread) == expected; }, "actual Windows thread layout " + layout);
+        Console.WriteLine("Windows thread HKL=0x" + GetKeyboardLayout(thread).ToInt64().ToString("X", CultureInfo.InvariantCulture));
+    }
+
+    private static void CheckNativeLessonState(uint thread, string expectedLayout, int language, string text, int cursor,
+        List<string> failures)
+    {
+        CheckTerminalState(text, cursor);
+        Check(NativeLanguage(thread) == language, "Windows thread retained requested language during physical input");
+        string badge = Name("LabDesktop");
+        Console.WriteLine("Observed " + expectedLayout + " with field «" + text + "»: " + badge);
+        if (!badge.Contains("Раскладка " + expectedLayout + "."))
+            failures.Add("Displayed layout remained stale on Windows " + expectedLayout + " while field contained «" + text + "»: " + badge);
     }
 
     private static void CheckPasteLayouts()

@@ -1068,6 +1068,8 @@ namespace TouchTypingStudio
 
         private IntPtr NativeInput(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
+            if (message == 0x51 && labActive)
+                QueueLabNativeLayout(lParam);
             if (message == 0x51 && !active && (page == HomePage || page == LivePage))
                 Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(delegate
                 {

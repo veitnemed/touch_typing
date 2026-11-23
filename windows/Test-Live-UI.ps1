@@ -6,12 +6,13 @@ param(
     [switch]$ReferenceEvidence,
     [switch]$ReferenceBrowser,
     [switch]$SoftFinish,
+    [switch]$NativeLayout,
     [int]$Seed = 20261122,
     [string]$OutputDirectory = (Join-Path $PSScriptRoot ('ui-check-' + (Get-Date -Format 'yyyyMMdd-HHmmss')))
 )
 $ErrorActionPreference = 'Stop'
-$modes = @($FullSession,$WorkdaySourceNote,$ReferenceBrowser,$SoftFinish) | Where-Object { [bool]$_ }
-if (@($modes).Count -gt 1) { throw 'Choose only one of FullSession, WorkdaySourceNote, ReferenceBrowser or SoftFinish.' }
+$modes = @($FullSession,$WorkdaySourceNote,$ReferenceBrowser,$SoftFinish,$NativeLayout) | Where-Object { [bool]$_ }
+if (@($modes).Count -gt 1) { throw 'Choose only one of FullSession, WorkdaySourceNote, ReferenceBrowser, SoftFinish or NativeLayout.' }
 if ($ReferenceBrowser) { $Seed = 0 }
 if (-not $Application) {
     $Application = Join-Path $PSScriptRoot 'TouchTyping.exe'
@@ -39,14 +40,15 @@ $report = [ordered]@{
     referenceEvidence = [bool]($ReferenceEvidence -or $ReferenceBrowser)
     referenceBrowser = [bool]$ReferenceBrowser
     softFinish = [bool]$SoftFinish
+    nativeLayout = [bool]$NativeLayout
     profile = 'TouchTypingStudio-QA'
     log = 'windows-ui.log'
 }
 try {
     $env:TOUCH_TYPING_QA_SEED = $Seed.ToString([Globalization.CultureInfo]::InvariantCulture)
     $env:TOUCH_TYPING_QA_DATA_ROOT = Join-Path $OutputDirectory 'profile'
-    if (($WorkdaySourceNote -or $ReferenceBrowser -or $SoftFinish) -and (Test-Path -LiteralPath $env:TOUCH_TYPING_QA_DATA_ROOT)) {
-        throw 'Use a new output directory for the standalone Workday, Chrome or soft-finish check.'
+    if (($WorkdaySourceNote -or $ReferenceBrowser -or $SoftFinish -or $NativeLayout) -and (Test-Path -LiteralPath $env:TOUCH_TYPING_QA_DATA_ROOT)) {
+        throw 'Use a new output directory for the standalone Workday, Chrome, soft-finish or native-layout check.'
     }
     $report | ConvertTo-Json | Set-Content -LiteralPath $reportFile -Encoding UTF8
     & (Join-Path $framework 'csc.exe') /nologo /target:exe /platform:x64 /codepage:65001 "/out:$test" `
@@ -60,6 +62,7 @@ try {
     if ($ReferenceEvidence) { $arguments += '--reference-evidence' }
     if ($ReferenceBrowser) { $arguments += '--reference-browser' }
     if ($SoftFinish) { $arguments += '--soft-finish' }
+    if ($NativeLayout) { $arguments += '--native-layout' }
     # Windows PowerShell 5 wraps native stderr as errors. Do not abort the
     # pipeline on the first diagnostic line; the native exit code is the gate.
     $oldPreference = $ErrorActionPreference

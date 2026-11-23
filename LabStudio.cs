@@ -35,6 +35,8 @@ namespace TouchTypingStudio
         private Viewbox labGuide;
         private FrameworkElement pausedLabView;
         private LabKeyboardCapture labCapture;
+        private int labNativeLayoutGeneration;
+        private string labNativeLayout;
         private TextBlock labTask, labKeys, labCounter, labStatus;
         private Button labPause, labFinish, labKeyAid, labHandAid, labMistakeAid;
         private readonly Dictionary<string, Button> labClassButtons = new Dictionary<string, Button>();
@@ -200,6 +202,11 @@ namespace TouchTypingStudio
             UpdateHeader();
             center.Content = MakeReferenceLesson();
             ((FrameworkElement)center.Content).Focus();
+            labNativeLayoutGeneration++;
+            labNativeLayout = KnownNativeLessonLayout(KeyboardLayout(0));
+            // A restarted process can use a different Windows layout than
+            // the draft. Preserve a deliberate virtual layout in that case.
+            initial = SyncLabNativeLayout(labNativeLayout, false) ?? initial;
             RenderLab(initial);
             ResumeLab();
         }
@@ -221,10 +228,51 @@ namespace TouchTypingStudio
         private string LabEndKey()
         { return state.D("task").S("keys").Split('+').Contains("F10") ? "F9" : "F10"; }
 
+        private static string KnownNativeLessonLayout(IntPtr hkl)
+        {
+            switch (hkl.ToInt64() & 0x3ff)
+            {
+                case 0x09: return "EN";
+                case 0x19: return "RU";
+                default: return null;
+            }
+        }
+
+        private Data SyncLabNativeLayout(string layout, bool takeOver)
+        {
+            if (layout == null) return null;
+            var next = Request("lab-native-layout", "layout", layout, "takeOver", takeOver);
+            return next.Exists ? next : null;
+        }
+
+        private void QueueLabNativeLayout(IntPtr hkl)
+        {
+            var layout = KnownNativeLessonLayout(hkl);
+            if (layout == null) return;
+            int generation = labNativeLayoutGeneration;
+            // Keep delivery ordered with low-level scan-code callbacks, while
+            // leaving WM_INPUTLANGCHANGE itself free of engine calls.
+            Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(delegate
+            {
+                if (!labActive || labNativeLayoutGeneration != generation) return;
+                ObserveLabNativeLayout(layout);
+            }));
+        }
+
+        private void ObserveLabNativeLayout(string layout)
+        {
+            if (layout == null || layout == labNativeLayout) return;
+            var next = SyncLabNativeLayout(layout, true);
+            if (next == null) return;
+            labNativeLayout = layout;
+            if (!labSavePending && !next.B("finished")) RenderLab(next);
+        }
+
         private void ResumeLab()
         {
             if (labSavePending || state.B("limitDecisionPending")) return;
             if (!labActive || !IsActive || (!paused && labCapture != null)) return;
+            ObserveLabNativeLayout(KnownNativeLessonLayout(KeyboardLayout(0)));
             if (Keyboard.Modifiers != ModifierKeys.None)
             {
                 labStatus.Text = "Отпустите модификаторы, затем нажмите «Продолжить».";
