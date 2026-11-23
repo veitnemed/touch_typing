@@ -420,7 +420,7 @@ class MissionTest(unittest.TestCase):
                     self.assertEqual(reopened["scenarioStep"], before["scenarioStep"])
                     self.assertEqual(reopened["task"], before["task"])
                     self.assertEqual(observable(reopened["scene"]), observable(before["scene"]))
-                    self.assertEqual((reopened["solved"], reopened["errors"]), (0, 0))
+                    self.assertEqual((reopened["solved"], reopened["errors"]), (before["solved"], before["errors"]))
                     engine.call("lab-resume")
 
                 chord("LSuper", "4")
@@ -596,7 +596,7 @@ class MissionTest(unittest.TestCase):
                     files = {f["path"]: f["content"] for f in reopened["scene"]["terminal"]["files"]}
                     self.assertEqual(files[receipt["path"]], receipt["content"])
                     self.assertNotIn("/home/student/Downloads/spectrum-report.txt", files)
-                    self.assertEqual((reopened["solved"], reopened["errors"]), (0, 0))
+                    self.assertEqual((reopened["solved"], reopened["errors"]), (state["solved"], state["errors"]))
                     self.assertEqual(credit(), 1)
                     kill_engine()
             finally:
@@ -637,6 +637,137 @@ class MissionTest(unittest.TestCase):
             finally:
                 if not engine.process.stdout.closed:
                     engine.close()
+
+    def test_resume_original_budget_and_retry_one_final_session(self):
+        from pathlib import Path
+        from time import sleep
+        from unittest.mock import patch
+        import xml.etree.ElementTree as ET
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+            options = dict(app="terminal", level=1, mode="sandbox", seconds=180,
+                           actionLimit=2, guidance="guided", mission="terminal-access", seed=7)
+            profile = Path(directory) / "TouchTypingStudio-QA" / "progress.xml"
+            blocked = profile.with_suffix(".xml.writing")
+
+            def command(engine, text):
+                for char in text:
+                    key = {" ": "Space", "/": "Slash"}.get(char, char.upper())
+                    engine.call("lab-key", key=key, pressed=True, text=char)
+                    engine.call("lab-key", key=key, pressed=False, text="")
+                return engine.call("lab-key", key="Enter", pressed=True, text="")
+
+            engine = Engine(verify=True)
+            try:
+                engine.call("configure", layout="EN")
+                first = engine.call("lab-start", **options)
+                self.assertEqual((first["timeLimit"], first["actionLimit"]), (0, 2))
+                engine.call("lab-resume")
+                sleep(1.1)
+                missed = command(engine, "wrong")
+                self.assertEqual(missed["errors"], 1)
+                engine.call("lab-key", key="Enter", pressed=False, text="")
+                first = command(engine, first["task"]["text"])
+                self.assertEqual((first["solved"], first["errors"]), (1, 1))
+                early = engine.call("lab-stop")
+                self.assertTrue(early["saved"])
+                self.assertGreaterEqual(early["seconds"], first["seconds"])
+                self.assertGreaterEqual(early["seconds"], 1)
+                self.assertFalse(engine.call("lab-result")["completed"])
+                before = ET.parse(profile)
+                session = before.findtext("./LiveDrafts/LiveDraft/Progress/Session")
+                self.assertTrue(session)
+                self.assertEqual(before.findtext("./LabSessions/LabSessionRecord/Session"), session)
+                self.assertEqual(len(before.findall("./ShortcutHistory/ShortcutAttempt")), 2)
+                # Do not let normal engine shutdown supply any extra save.
+                engine.process.kill()
+                engine.process.wait(timeout=5)
+            finally:
+                engine.close()
+
+            sleep(1.1)  # Wall time while closed cannot enter the saved stopwatch.
+            engine = Engine(verify=True)
+            shadow = Engine(verify=True)
+            try:
+                engine.call("configure", layout="EN")
+                shadow.call("configure", layout="EN")
+                changed = dict(options, mode="drill", seconds=90, actionLimit=0)
+                restored = engine.call("lab-start", **changed, **{"continue": True})
+                self.assertEqual(restored["task"], early["task"])
+                self.assertEqual((restored["mode"], restored["seconds"], restored["timeLimit"], restored["actionLimit"],
+                                  restored["solved"], restored["errors"]), ("sandbox", early["seconds"], 0, 2, 1, 1))
+                competing = shadow.call("lab-start", **changed, **{"continue": True})
+                self.assertEqual(competing["solved"], 1)
+                shadow.call("lab-resume")
+                engine.call("lab-resume")
+                original_bytes = profile.read_bytes()
+                blocked.mkdir()
+                rejected = command(engine, restored["task"]["text"])
+                self.assertEqual((rejected["solved"], rejected["errors"]), (2, 1))
+                self.assertTrue(rejected["finished"])
+                self.assertFalse(rejected["saved"])
+                self.assertTrue(rejected["saveError"])
+                self.assertEqual(profile.read_bytes(), original_bytes)
+                blocked.rmdir()
+
+                self.assertIsNone(engine.call("lab-result"))
+                self.assertTrue(engine.call("lab-stop")["saved"])
+                result = engine.call("lab-result")
+                self.assertTrue(result["completed"])
+                self.assertEqual((result["solved"], result["errors"]), (2, 1))
+                self.assertEqual(len(result["series"]), 3)
+                self.assertTrue(engine.call("lab-stop")["saved"])
+                final = ET.parse(profile)
+                self.assertIsNone(final.find("./LiveDrafts/LiveDraft"))
+                records = final.findall("./LabSessions/LabSessionRecord")
+                self.assertEqual([(r.findtext("Session"), r.findtext("Completed")) for r in records], [(session, "true")])
+                credits = final.findall("./ShortcutHistory/ShortcutAttempt")
+                self.assertEqual([row.findtext("Session") for row in credits], [session] * 3)
+                committed_bytes = profile.read_bytes()
+                stale = command(shadow, competing["task"]["text"])
+                self.assertFalse(stale["saved"])
+                self.assertIn("в другом окне", stale["saveError"])
+                self.assertFalse(shadow.call("lab-stop")["saved"])
+                self.assertEqual(profile.read_bytes(), committed_bytes)
+            finally:
+                shadow.close()
+                engine.close()
+
+    def test_expired_timer_cleans_checkpoint_even_without_credited_actions(self):
+        from time import sleep
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+            options = dict(app="terminal", level=1, mode="sandbox", seconds=2,
+                           guidance="guided", mission="terminal-access", seed=7)
+            engine = Engine(verify=True)
+            try:
+                engine.call("lab-start", **options)
+                engine.call("lab-resume")
+                sleep(0.1)
+                paused = engine.call("lab-pause")
+                self.assertEqual((paused["solved"], paused["errors"]), (0, 0))
+                self.assertFalse(paused["finished"])
+                self.assertEqual(len(engine.call("lab-catalog")["drafts"]), 1)
+                engine.process.kill()
+                engine.process.wait(timeout=5)
+            finally:
+                engine.close()
+
+            engine = Engine(verify=True)
+            try:
+                restored = engine.call("lab-start", **dict(options, seconds=0), **{"continue": True})
+                self.assertTrue(restored["paused"])
+                self.assertEqual(restored["timeLimit"], 2)
+                engine.call("lab-resume")
+                sleep(2.1)
+                done = engine.call("lab-pause")
+                self.assertTrue(done["finished"])
+                self.assertTrue(done["saved"])
+                self.assertTrue(engine.call("lab-result")["completed"])
+                self.assertEqual(engine.call("lab-catalog")["drafts"], [])
+            finally:
+                engine.close()
 
     def test_failed_save_keeps_old_run_until_explicit_retry(self):
         from pathlib import Path

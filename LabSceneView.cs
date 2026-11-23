@@ -234,7 +234,7 @@ namespace TouchTypingStudio
                 bool editingFind = window.S("focus") == "find";
                 Text("⌕", w - 321, 115, 14, "#CFD7E8", 23);
                 Field(editingFind ? window.S("input") : window.S("find"), window, w - 297, 116, 211,
-                    12, "#FFFFFF", 0, editingFind && window.B("active"), scrollKey: "find:" + window.S("id"));
+                    12, "#FFFFFF", 0, editingFind && window.B("active"), scrollKey: "find:" + window.S("id"), face: regular);
                 Text("↑  ↓  ×", w - 79, 115, 13, "#CFD7E8");
             }
             if (window.S("status").Length > 0)

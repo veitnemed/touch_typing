@@ -22,7 +22,8 @@ internal sealed class LabRun
     private int variant;
     private string initialLayout, attemptLayout;
     private bool initialVirtual;
-    internal bool HasDraft => !CompletedRoute && trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent));
+    internal bool HasDraft => !CompletedRoute && !ReachedLimit &&
+        (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 || trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask;
@@ -41,7 +42,8 @@ internal sealed class LabRun
         if (!HintVisible && !ShowGuide) trace.Add(new("@hint"));
         HintVisible = true;
     }
-    private int Elapsed => (int)((activeMilliseconds + (activeSince is double since ? Math.Max(0, clock() - since) : 0)) / 1000);
+    private double ActiveMilliseconds => activeMilliseconds + (activeSince is double since ? Math.Max(0, clock() - since) : 0);
+    private int Elapsed => (int)Math.Min(ActiveMilliseconds / 1000, int.MaxValue);
     internal LabScene Scene { get; private set; }
     private LabReportArtifact verifiedReport;
     internal LabReportArtifact ReportArtifact => verifiedReport != null && verifiedReport == Scene.ReadReportArtifact() ? verifiedReport : null;
@@ -80,7 +82,11 @@ internal sealed class LabRun
     {
         if (!LabCatalog.Apps.Contains(app)) throw new ArgumentException("Выберите Ubuntu, Chrome, VS Code или Терминал.");
         if (mode is not ("drill" or "sandbox")) throw new ArgumentException("Выберите тренировку или учебный рабочий стол.");
-        App = app; Mode = mode; Level = Math.Clamp(level, 0, 2); ActionLimit = Math.Max(0, actionLimit); TimeLimit = ActionLimit > 0 ? 0 : Math.Max(seconds, 0);
+        var progress = draft?.Progress;
+        App = app; Mode = progress?.Mode is "drill" or "sandbox" ? progress.Mode : mode; Level = Math.Clamp(level, 0, 2);
+        ActionLimit = Math.Max(0, progress?.ActionLimit ?? actionLimit);
+        TimeLimit = ActionLimit > 0 ? 0 : Math.Max(progress?.TimeLimit ?? seconds, 0);
+        if (!string.IsNullOrEmpty(progress?.Session)) Session = progress.Session;
         Guidance = guidance == "independent" ? guidance : "guided";
         this.random = random ?? Random.Shared; this.clock = clock ?? (() => Environment.TickCount64);
         past = history.Where(attempt => attempt.Skill?.StartsWith("lab/" + app + "/", StringComparison.Ordinal) == true).ToArray();
@@ -109,13 +115,27 @@ internal sealed class LabRun
             if (replayLegacyUrl) trace.Add(new(ExactUrlEvent));
             if (replayLegacyReport) trace.Add(new(StrictReportEvent));
             replayLegacyUrl = replayLegacyReport = false;
-            Pause(); restoring = false; Solved = Errors = taskInBlock = 0; Block = 1; activeMilliseconds = 0;
-            points.Clear(); Attempts.Clear(); LastKey = ""; Feedback = "ready";
+            Pause();
+            // Trace describes the current mission, not the whole attempt. Its
+            // replay reconstructs the scene without generating any new credit.
+            Solved = Math.Max(0, progress?.Solved ?? 0);
+            Errors = Math.Max(0, progress?.Errors ?? 0);
+            taskInBlock = Solved % 20;
+            Block = 1 + Solved / 20;
+            activeMilliseconds = progress != null && double.IsFinite(progress.ActiveMilliseconds)
+                ? Math.Clamp(progress.ActiveMilliseconds, 0, (double)int.MaxValue * 1000) : 0;
+            points.Clear();
+            if (progress?.Series != null)
+                points.AddRange(JsonSerializer.Deserialize<LabPoint[]>(progress.Series) ?? []);
+            Attempts.Clear(); LastKey = ""; Feedback = "ready";
+            restoring = false;
         }
     }
 
     internal LiveDraft Draft() => new() { App = App, Level = Level, Mission = MissionId, Layout = initialLayout, Guidance = Guidance,
-        Dock = Scene.Dock, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, Trace = JsonSerializer.Serialize(trace) };
+        Dock = Scene.Dock, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, Trace = JsonSerializer.Serialize(trace),
+        Progress = new() { Session = Session, Mode = Mode, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Solved = Solved,
+            Errors = Errors, ActiveMilliseconds = ActiveMilliseconds, Series = JsonSerializer.Serialize(points) } };
 
     internal void Pause()
     {

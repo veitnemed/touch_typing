@@ -15,6 +15,15 @@ namespace TouchTypingStudio
         public string[] Dock;
         public int Level, Variant;
         public bool VirtualLayout;
+        // Absent in older drafts, including explicit unlimited sessions.
+        public LiveDraftProgress Progress;
+    }
+
+    public class LiveDraftProgress
+    {
+        public string Session, Mode, Series, Revision;
+        public int TimeLimit, ActionLimit, Solved, Errors;
+        public double ActiveMilliseconds;
     }
 
     public class LabSessionRecord

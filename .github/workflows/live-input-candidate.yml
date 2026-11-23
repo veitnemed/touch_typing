@@ -122,6 +122,18 @@ jobs:
           $app = Join-Path $appDir TouchTyping.exe
           $out = Join-Path $env:RUNNER_TEMP 'windows-evidence/reference-browser'
           & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -ReferenceBrowser -OutputDirectory $out
+      - name: Measure WPF Chrome full-line shaping at render scales
+        if: github.ref == 'refs/heads/feature/reference-ui'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = Join-Path $env:RUNNER_TEMP 'TouchTyping QA/TouchTyping.exe'
+          $dest = Join-Path $env:RUNNER_TEMP 'windows-evidence/chrome-shaping'
+          $env:TOUCH_TYPING_QA_DATA_ROOT = Join-Path $env:RUNNER_TEMP 'chrome-shaping-profile'
+          New-Item -Path $env:TOUCH_TYPING_QA_DATA_ROOT -ItemType Directory | Out-Null
+          $proc = Start-Process $app -ArgumentList "--qa --check-live-chrome-shaping `"$dest`"" -Wait -PassThru
+          Get-Content (Join-Path $dest 'chrome-shaping.txt')
+          if ($proc.ExitCode -ne 0) { throw 'WPF shaping diagnostic failed' }
       - name: Capture exact-size native WPF Home
         if: github.ref == 'refs/heads/feature/reference-ui'
         shell: powershell

@@ -128,7 +128,7 @@ class PracticeTest(unittest.TestCase):
         self.engine.call("lab-start", app=app, mode="sandbox", level=0, seconds=0, seed=1)
         return self.engine.call("lab-resume")
 
-    def test_independent_alternative_route_and_resume_exactly_at_limit(self):
+    def test_independent_alternative_route_completes_exactly_at_limit(self):
         config = dict(app="chrome", mode="sandbox", level=0, guidance="independent",
                       mission="chrome-reader", seconds=0, actionLimit=3, seed=3)
         self.engine.call("lab-start", **config)
@@ -155,17 +155,18 @@ class PracticeTest(unittest.TestCase):
         self.assertEqual(final["task"]["id"], "copy")
         result = self.engine.call("lab-result")
         self.assertTrue(result["completed"])
+        self.assertEqual(final["scenarioStep"], 4)
+        self.assertEqual(final["scene"]["windows"][0]["focus"], "url")
         self.engine.close()
         self.engine = Engine(verify=True)
-        resumed = self.engine.call("lab-start", **dict(config, actionLimit=0, **{"continue": True}))
-        self.assertEqual((resumed["solved"], resumed["errors"], resumed["timeLimit"]), (0, 0, 0))
-        self.assertEqual(resumed["scenarioStep"], final["scenarioStep"])
-        for field in ("input", "cursor", "anchor", "activeTab", "focus", "url"):
-            self.assertEqual(final["scene"]["windows"][0][field], resumed["scene"]["windows"][0][field])
-        self.engine.call("lab-resume")
-        copied = self.lab_chord("RCtrl", "C")
-        self.assertEqual(copied["solved"], 1)
-        self.assertFalse(copied["finished"])
+        drafts = self.engine.call("lab-catalog")["drafts"]
+        self.assertFalse(any(item["app"] == "chrome" and item["level"] == 0 and
+                             item["guidance"] == "independent" for item in drafts))
+        fresh = self.engine.call("lab-start", **dict(config, **{"continue": True}))
+        self.assertEqual((fresh["solved"], fresh["errors"], fresh["scenarioStep"]), (0, 0, 1))
+        history = self.engine.call("lab-result")["history"]
+        self.assertEqual([(item["solved"], item["errors"], item["completed"]) for item in history],
+                         [(3, 2, True)])
 
     def test_live_omnibox_cut_respects_visible_range(self):
         state = self.open_live("chrome")

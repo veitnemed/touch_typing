@@ -49,6 +49,12 @@ namespace TouchTypingStudio
                 Environment.ExitCode = LiveUiFont.Check(args[liveFont + 1]);
                 return;
             }
+            int chromeShaping = Array.IndexOf(args, "--check-live-chrome-shaping");
+            if (verify && chromeShaping >= 0 && chromeShaping + 1 < args.Length)
+            {
+                Environment.ExitCode = ChromeShapingProbe.Run(engine, args[chromeShaping + 1]);
+                return;
+            }
             int liveRender = Array.IndexOf(args, "--check-live-render");
             if (verify && liveRender >= 0 && liveRender + 1 < args.Length)
             {

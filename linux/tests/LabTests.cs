@@ -394,6 +394,61 @@ internal static class LabTests
         Check(unicode.Scene.Text("A", "ф") && unicode.Scene.Active.Body == "ф", "Scene preserves actual Unicode before virtual layout switch");
         unicode.Input("A", true, "ф"); unicode.Input("A", false, "");
         Check(unicode.Scene.Active.Body == "фф" && unicode.Errors == 0, "Ordinary Unicode editing works during a shortcut mission");
+        {
+            double budgetNow = 0;
+            LabRun OpenBudget(int seconds, int actions, LiveDraft draft = null, string mode = "sandbox") =>
+                new LabRun("terminal", mode, 1, seconds, "EN", [], new Random(7), () => budgetNow,
+                    actionLimit: actions, missionId: "terminal-access", draft: draft);
+            LiveDraft RoundTrip(LiveDraft draft)
+            {
+                var xml = new System.Xml.Serialization.XmlSerializer(typeof(LiveDraft));
+                using var bytes = new System.IO.MemoryStream();
+                xml.Serialize(bytes, draft); bytes.Position = 0;
+                return (LiveDraft)xml.Deserialize(bytes);
+            }
+            var budgetTimed = OpenBudget(180, 0);
+            budgetTimed.Resume(); budgetNow = 10500;
+            Type(budgetTimed, "bad-command"); Chord(budgetTimed, "Enter"); Complete(budgetTimed);
+            budgetTimed.Pause();
+            var checkpoint = RoundTrip(budgetTimed.Draft());
+            Check(checkpoint.Progress.ActiveMilliseconds == 10500 && budgetTimed.Solved == 1 && budgetTimed.Errors == 1,
+                "Timed draft atomically describes elapsed fractional time with both counters");
+            budgetNow = 600000;
+            var timedReopened = OpenBudget(0, 100, checkpoint, mode: "drill");
+            Check(timedReopened.Paused && timedReopened.Mode == budgetTimed.Mode && timedReopened.Solved == 1 &&
+                timedReopened.Errors == 1 && timedReopened.Seconds == 10 && timedReopened.Remaining == 170 &&
+                timedReopened.ActionLimit == 0 && timedReopened.Session == budgetTimed.Session &&
+                timedReopened.ScenarioStep == budgetTimed.ScenarioStep && timedReopened.Attempts.Count == 0,
+                "Saved timed attempt outranks current picker and replay emits no credits");
+            timedReopened.Resume(); budgetNow += 500;
+            Check(timedReopened.Seconds == 11 && timedReopened.Remaining == 169,
+                "A fractional second survives restart and only the active clock advances");
+            timedReopened.Pause(); budgetNow += 700000;
+            Check(timedReopened.Seconds == 11 && timedReopened.Remaining == 169,
+                "Time spent paused is not counted");
+            var timeline = JsonSerializer.SerializeToElement(timedReopened.Result([]), Program.Json).GetProperty("series");
+            Check(timeline.GetArrayLength() == 2 && timeline[0].GetProperty("second").GetInt32() == 10,
+                "Result timeline survives without replaying its timestamps");
+            var legacyBudget = RoundTrip(checkpoint);
+            legacyBudget.Progress = null;
+            var legacyReopened = OpenBudget(0, 20, legacyBudget);
+            Check(legacyReopened.ScenarioStep == budgetTimed.ScenarioStep && legacyReopened.Solved == 0 &&
+                legacyReopened.Seconds == 0 && legacyReopened.ActionLimit == 20 && legacyReopened.Session != budgetTimed.Session,
+                "Legacy draft keeps old semantics when duration and session are unknown");
+            var actionLimited = OpenBudget(180, 2);
+            actionLimited.Resume(); Complete(actionLimited);
+            var limitedReopened = OpenBudget(600, 0, RoundTrip(actionLimited.Draft()));
+            Check(limitedReopened.ActionLimit == 2 && limitedReopened.TimeLimit == 0 && limitedReopened.Solved == 1,
+                "Saved action limit retains precedence over the incoming time limit");
+            limitedReopened.Resume(); Complete(limitedReopened);
+            Check(limitedReopened.Finished && !limitedReopened.HasDraft && limitedReopened.SessionRecord().Completed,
+                "Only remaining actions are available and final result retires the draft");
+            var budgetUnlimited = OpenBudget(0, 0);
+            budgetUnlimited.Resume(); Complete(budgetUnlimited);
+            var unlimitedReopened = OpenBudget(180, 0, RoundTrip(budgetUnlimited.Draft()));
+            Check(unlimitedReopened.TimeLimit == 0 && unlimitedReopened.ActionLimit == 0,
+                "Stored unlimited is distinct from an unknown legacy limit");
+        }
         var oldWinner = new LabSessionRecord { Session = "old-winner", App = "chrome", Mode = "sandbox", Level = 2,
             Completed = true, Seconds = 180, Solved = 250, Errors = 2, Date = DateTime.Now.AddYears(-2) };
         var migrated = new StudioProfile(); migrated.LabSessions.Add(oldWinner);

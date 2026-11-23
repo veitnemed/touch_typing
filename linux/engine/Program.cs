@@ -43,6 +43,7 @@ internal sealed class PracticeService
     private ShortcutRun run;
     private TypingRun typing;
     private LabRun lab;
+    private LiveDraft labCheckpoint;
     private int persistedLabAttempts;
     private bool labFinishAttempted;
     private string labSaveError;
@@ -96,8 +97,10 @@ internal sealed class PracticeService
                 lab = new LabRun(Text(message, "app"), Text(message, "mode"), Number(message, "level"), Number(message, "seconds", 180), layout, profile.ShortcutHistory,
                     message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit"), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: Text(message, "mission"), draft: draft);
                 persistedLabAttempts = 0;
+                labCheckpoint = draft;
                 labFinishAttempted = false;
                 labSaveError = null;
+                FinishLabAutomatically();
                 return LabState();
             case "lab-key":
                 if (lab == null) throw new InvalidOperationException("Сначала выберите учебный класс.");
@@ -109,7 +112,8 @@ internal sealed class PracticeService
             case "lab-hint": lab?.Hint(); return LabState();
             case "lab-pause":
                 lab?.Pause();
-                if (lab?.HasDraft == true && !lab.Finished && !lab.Saved) SaveLabCheckpoint();
+                if (lab?.Finished == true) FinishLabAutomatically();
+                else if (lab?.HasDraft == true && !lab.Saved) SaveLabCheckpoint();
                 return LabState();
             case "lab-resume":
                 lab?.Resume();
@@ -189,7 +193,11 @@ internal sealed class PracticeService
         labFinishAttempted = true;
         lab.Pause();
         var record = lab.SessionRecord();
-        if (!lab.HasDraft && record.Solved + record.Errors == 0) { lab.MarkSaved(); return; }
+        bool hasOldDraft = profile.LiveDrafts.Any(item => item.App == lab.App && item.Level == lab.Level && item.Guidance == lab.Guidance);
+        // An elapsed-only timed session has no credits but its previous
+        // checkpoint must still be retired if this attempt reached its limit.
+        if (!lab.HasDraft && record.Solved + record.Errors == 0 && !(record.Completed && hasOldDraft))
+        { lab.MarkSaved(); return; }
         SaveLabCheckpoint(record);
         if (store.Error == null) lab.MarkSaved();
     }
@@ -200,17 +208,30 @@ internal sealed class PracticeService
     {
         var pending = lab.Attempts.Skip(persistedLabAttempts).ToArray();
         var draft = lab.HasDraft ? lab.Draft() : null;
+        if (draft != null) draft.Progress.Revision = Guid.NewGuid().ToString("N");
         var previousProfile = profile;
         Save(current =>
         {
-            current.LiveDrafts.RemoveAll(item => item.App == lab.App && item.Level == lab.Level && item.Guidance == lab.Guidance);
+            bool SameSlot(LiveDraft item) => item.App == lab.App && item.Level == lab.Level && item.Guidance == lab.Guidance;
+            var previousDraft = current.LiveDrafts.LastOrDefault(SameSlot);
+            // Two engines can restore the same durable attempt. Only the one
+            // whose snapshot still matches may add credits to that attempt.
+            if (labCheckpoint != null && (previousDraft == null || (labCheckpoint.Progress != null
+                ? previousDraft.Progress?.Revision != labCheckpoint.Progress.Revision || previousDraft.Progress?.Session != labCheckpoint.Progress.Session
+                : previousDraft.Progress != null || previousDraft.Mission != labCheckpoint.Mission || previousDraft.Trace != labCheckpoint.Trace)))
+                throw new IOException("Занятие уже изменилось в другом окне. Перезапустите тренажёр и продолжите из сохранённой версии.");
+            current.LiveDrafts.RemoveAll(item => SameSlot(item));
             if (draft != null) current.LiveDrafts.Add(draft);
             current.ShortcutHistory.AddRange(pending);
             TrimShortcutHistory(current);
             if (record != null && record.Solved + record.Errors > 0) LabSessionRecords.Update(current, record);
         });
         labSaveError = store.Error;
-        if (labSaveError == null) persistedLabAttempts += pending.Length;
+        if (labSaveError == null)
+        {
+            persistedLabAttempts += pending.Length;
+            labCheckpoint = draft;
+        }
         else profile = previousProfile; // a failed disk write must not expose speculative credits or drafts
     }
 

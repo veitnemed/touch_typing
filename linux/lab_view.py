@@ -1,5 +1,6 @@
 """Native snapshots of the simulated Ubuntu desktop and application windows."""
 import base64
+from functools import partial
 from pathlib import Path
 
 import gi
@@ -64,13 +65,26 @@ class DesktopView(Gtk.Widget):
         if radius:
             self.snapshot.pop()
 
-    def label(self, value, x, y, size=13, color="#eeeeef", width=None, mono=False, bold=False):
+    @property
+    def chrome_font(self):
+        # Only the reference browser shares the lesson shell's bundled font.
+        # Keep the older desktop presentation and all monospace surfaces intact.
+        if self.reference_chrome and self.presentation_app == "chrome":
+            return "Roboto,Noto Sans,sans-serif"
+        return "Noto Sans"
+
+    def text_layout(self, value, size, *, mono=False, bold=False, family="Noto Sans"):
         layout = self.create_pango_layout(str(value))
-        font = Pango.FontDescription.from_string("DejaVu Sans Mono" if mono else "Noto Sans")
+        font = Pango.FontDescription.from_string("DejaVu Sans Mono" if mono else family)
         font.set_absolute_size(size * Pango.SCALE)
         if bold:
             font.set_weight(Pango.Weight.BOLD)
         layout.set_font_description(font)
+        return layout
+
+    def label(self, value, x, y, size=13, color="#eeeeef", width=None, mono=False, bold=False,
+              *, family="Noto Sans"):
+        layout = self.text_layout(value, size, mono=mono, bold=bold, family=family)
         if width is not None:
             layout.set_width(max(1, int(width * Pango.SCALE)))
             layout.set_ellipsize(Pango.EllipsizeMode.END)
@@ -86,14 +100,11 @@ class DesktopView(Gtk.Widget):
         return len(value.encode("utf-16-le")) // 2
 
     def field(self, value, window, x, y, width, size, color, offset=0, focused=True,
-              mono=True, scroll_key=None):
+              mono=True, scroll_key=None, *, family="Noto Sans"):
         """Draw one line using the same shaped layout for its text, selection and caret."""
         if width <= 0:
             return
-        layout = self.create_pango_layout(value)
-        font = Pango.FontDescription.from_string("DejaVu Sans Mono" if mono else "Noto Sans")
-        font.set_absolute_size(size * Pango.SCALE)
-        layout.set_font_description(font)
+        layout = self.text_layout(value, size, mono=mono, family=family)
         encoded = value.encode("utf-16-le")
         def edge(position):
             length = min(len(encoded), max(0, (position - offset) * 2))
@@ -290,7 +301,8 @@ class DesktopView(Gtk.Widget):
         if purple:
             self.app_icon("chrome", x + 10, y + 5, 17)
         self.label(window.get("title", app), x + (34 if purple else 10), y + 6,
-                   12 if purple else 11, width=w - 105, bold=True)
+                   12 if purple else 11, width=w - 105, bold=True,
+                   family=self.chrome_font if purple else "Noto Sans")
         self.label("−    □", x + w - 79, y + 5, 12)
         self.fill("#e95420" if window.get("active") else "#66616c", x + w - 25, y + 5, 17, 17, 9)
         self.label("×", x + w - 21, y + 3, 15)
@@ -346,6 +358,8 @@ class DesktopView(Gtk.Widget):
 
     def chrome(self, window, x, y, w, h):
         purple = self.reference_chrome and self.presentation_app == "chrome"
+        label = partial(self.label, family=self.chrome_font)
+        field = partial(self.field, family=self.chrome_font, mono=False)
         self.fill("#201d36" if purple else "#202124", x, y, w, h)
         tabs = window.get("tabs", [])
         tab_w = min(169 if purple else 150, max(48, (w - 48) / max(1, len(tabs))))
@@ -354,27 +368,27 @@ class DesktopView(Gtk.Widget):
             self.fill(("#41375f" if active_tab else "#25213d") if purple else
                       ("#3c4043" if active_tab else "#292a2d"),
                       x + 6 + tab_w * i, y + 2, tab_w - 3, 26, 7)
-            self.label(tab["title"], x + 15 + tab_w * i, y + 8, 10, width=tab_w - 33)
-            self.label("×", x + tab_w * (i + 1) - 12, y + 7, 12)
-        self.label("+", x + min(w - 22, 12 + tab_w * len(tabs)), y + 6, 16)
+            label(tab["title"], x + 15 + tab_w * i, y + 8, 10, width=tab_w - 33)
+            label("×", x + tab_w * (i + 1) - 12, y + 7, 12)
+        label("+", x + min(w - 22, 12 + tab_w * len(tabs)), y + 6, 16)
         self.fill("#222039" if purple else "#303134", x, y + 29, w, 33)
-        self.label("‹   ›   ↻", x + 9, y + 35, 15)
+        label("‹   ›   ↻", x + 9, y + 35, 15)
         if purple:
             self.fill("#67558d", x + 89, y + 32, w - 149, 27, 14)
             self.fill("#201c36", x + 90, y + 33, w - 151, 25, 13)
-            self.label("◈", x + 99, y + 36, 12, "#cfc0f6")
-            self.label("☆", x + w - 49, y + 34, 16)
+            label("◈", x + 99, y + 36, 12, "#cfc0f6")
+            label("☆", x + w - 49, y + 34, 16)
         else:
             self.fill("#202124", x + 79, y + 32, w - 112, 27, 14)
         editing = window["focus"] == "url"
         address = window["input"] if editing else window["url"]
-        self.field(address, window, x + (118 if purple else 94), y + 36,
-                   w - (181 if purple else 144), 13, "#f6f0ff" if purple else "#e6e8ec", focused=editing, mono=False)
-        self.label("⋮", x + w - 21, y + 35, 16)
+        field(address, window, x + (118 if purple else 94), y + 36,
+                   w - (181 if purple else 144), 13, "#f6f0ff" if purple else "#e6e8ec", focused=editing)
+        label("⋮", x + w - 21, y + 35, 16)
         body_top = 62
         if window.get("bookmarks"):
             self.fill("#303134", x, y + 62, w, 23)
-            self.label("    ".join(window.get("savedBookmarks", [])), x + 15, y + 65, 10, width=w - 30)
+            label("    ".join(window.get("savedBookmarks", [])), x + 15, y + 65, 10, width=w - 30)
             body_top += 23
         self.fill("#f8f6ff" if purple else "#f8f9fb", x, y + body_top, w, max(1, h - body_top))
         body = window.get("body", "")
@@ -383,7 +397,7 @@ class DesktopView(Gtk.Widget):
         left = x + min(w * (.059 if purple else .075), 72)
         available = w - (left - x) * 2
         top = y + body_top + (15 if purple else 24)
-        self.label(tab.get("title", "Новая вкладка"), left, top, (26 if purple else 23) * scale,
+        label(tab.get("title", "Новая вкладка"), left, top, (26 if purple else 23) * scale,
                    "#211834" if purple else "#222936", width=available, bold=True)
         body_field = dict(window, cursor=window.get("bodyCursor", 0), anchor=window.get("bodyAnchor", 0))
         offset = 0
@@ -391,8 +405,8 @@ class DesktopView(Gtk.Widget):
         for line in body.splitlines():
             if top + 20 >= y + h:
                 break
-            self.field(line, body_field, left, top, available, 14 * scale, "#334154", offset=offset,
-                       focused=body_field["cursor"] != body_field["anchor"], mono=False)
+            field(line, body_field, left, top, available, 14 * scale, "#334154", offset=offset,
+                       focused=body_field["cursor"] != body_field["anchor"])
             top += 23 * scale
             offset += self.units(line) + 1
         top += 12
@@ -409,21 +423,21 @@ class DesktopView(Gtk.Widget):
             selected = i == window.get("item") and window.get("focus") == "body"
             if selected:
                 self.fill("#d8e8ff", left - 8, top - 4, min(available + 8, 440), 31, 5)
-            self.label(entry["title"], left, top, 14 * scale, "#205496", width=available)
+            label(entry["title"], left, top, 14 * scale, "#205496", width=available)
             top += 34 * scale
         if window.get("zoom", 100) != 100:
             self.fill("#303134", x + w - 160, y + body_top + 2, 150, 25, 5)
-            self.label("Масштаб  " + str(window["zoom"]) + "%", x + w - 147, y + body_top + 8, 10)
+            label("Масштаб  " + str(window["zoom"]) + "%", x + w - 147, y + body_top + 8, 10)
         if window.get("focus") == "find":
             left = x + max(10, w - 300)
             box_width = min(290, w - 20)
             self.fill("#303134", left, y + 64, box_width, 38, 5)
-            self.label("⌕", left + 9, y + 73, 14)
-            self.field(window.get("input", ""), window, left + 29, y + 74, box_width - 42,
-                       13, "#ffffff", mono=False, scroll_key=("find", window.get("id")))
+            label("⌕", left + 9, y + 73, 14)
+            field(window.get("input", ""), window, left + 29, y + 74, box_width - 42,
+                       13, "#ffffff", scroll_key=("find", window.get("id")))
         elif window.get("focus") in ("downloads", "history", "bookmarks"):
             self.fill("#303134", x + max(10, w - 300), y + 64, min(290, w - 20), 38, 5)
-            self.label({"find": "Поиск", "downloads": "Загрузки", "history": "История", "bookmarks": "Закладки"}.get(window["focus"], "")
+            label({"find": "Поиск", "downloads": "Загрузки", "history": "История", "bookmarks": "Закладки"}.get(window["focus"], "")
                        + "  " + window.get("input", ""), x + max(20, w - 290), y + 74, 11, width=min(270, w - 40))
 
     def code(self, window, x, y, w, h):
