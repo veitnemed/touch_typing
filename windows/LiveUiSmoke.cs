@@ -434,7 +434,15 @@ internal static class LiveUiSmoke
         RequestClose();
         Until(delegate { return ExitDialog() != null; }, "save and close dialog");
         InvokeDialog("LabExitSave");
-        Until(delegate { return app.HasExited; }, "soft-finish draft closes without a result");
+        Check(app.WaitForExit(6000) && app.ExitCode == 0, "Saving the capped draft closes the trainer normally");
+        var profile = Path.Combine(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT"),
+            "TouchTypingStudio-QA", "progress.xml");
+        var xml = new XmlDocument();
+        xml.XmlResolver = null;
+        xml.Load(profile);
+        Check(xml.SelectSingleNode("/StudioProfile/LiveDrafts/LiveDraft[App='terminal' and Progress/LimitDecisionPending='true']") != null &&
+            xml.SelectSingleNode("/StudioProfile/LabSessions/LabSessionRecord[App='terminal']") == null,
+            "A capped draft survives closing without a premature session result");
         app.Dispose();
         app = Process.Start(new ProcessStartInfo(path, "--qa --live") { WorkingDirectory = Path.GetDirectoryName(path) });
         Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "reopened trainer window", 12000);
@@ -469,10 +477,6 @@ internal static class LiveUiSmoke
         Key("F10");
         Until(delegate { return Visible("LabResult"); }, "explicit finish accepts one result");
 
-        var profile = Path.Combine(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT"),
-            "TouchTypingStudio-QA", "progress.xml");
-        var xml = new XmlDocument();
-        xml.XmlResolver = null;
         xml.Load(profile);
         Check(xml.SelectNodes("/StudioProfile/LabSessions/LabSessionRecord[App='terminal' and TimeLimit='7']").Count == 1,
             "One final session persisted across close, continuation, and explicit finish");
