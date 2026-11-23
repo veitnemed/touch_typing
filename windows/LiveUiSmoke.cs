@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -78,9 +79,10 @@ internal static class LiveUiSmoke
                     Invoke("LabClass-" + name);
                     Select("LabMode", mode);
                     Select("LabDuration", 4);
+                    var started = Stopwatch.StartNew();
                     Key("F5");
                     Until(delegate { return Exists("LabClock") && Name("LabPause").StartsWith("Пауза"); }, "active " + name + " lesson");
-                    Check(Name("LabClock") == "03:00" || Name("LabClock") == "02:59", "A class starts with 180 seconds");
+                    CheckFresh180sCountdown(started, name + "/" + mode);
                     Check(Visible("LabScenarioProgress") && !Visible("ResultMetric-accuracy"), "Active lesson shows scenario progress, not accuracy");
                     Check(Name("LabTask").Length > 0 && Exists("LabDesktop"), "Task and Ubuntu scene are accessible");
                     if (mode == 0) CaptureReferenceFrame("class-" + name);
@@ -89,6 +91,7 @@ internal static class LiveUiSmoke
                     Check(Name("LabPauseResult") == "Пауза", "Pause shows a Stamina-style result panel");
                     CheckThreeHeadlineMetrics("Pause");
                     Check(!Visible("LabErrorReview"), "Pause has no mistake-review statistics");
+                    CheckStored180sCheckpoint(name, mode == 0 ? "independent" : "guided");
                     if (name == "ubuntu" && mode == 0) CaptureReferenceFrame("04-pause");
                     string frozen = Name("LabClock");
                     Chord("Ctrl+F10");
@@ -116,9 +119,11 @@ internal static class LiveUiSmoke
                         Key("F8");
                         Until(delegate { return Exists("LabPauseResult"); }, "pause before keyboard restart");
                         Find("LabPauseRestart").SetFocus();
+                        var restarted = Stopwatch.StartNew();
                         Key("Enter");
-                        Until(delegate { return !Exists("LabPauseResult") && Exists("LabClock") &&
-                            (Name("LabClock") == "03:00" || Name("LabClock") == "02:59"); }, "Enter restarts through the focused pause button");
+                        Until(delegate { return !Exists("LabPauseResult") && Exists("LabClock"); },
+                            "Enter restarts through the focused pause button");
+                        CheckFresh180sCountdown(restarted, name + "/" + mode + " restart");
                     }
                     if (name == "terminal")
                     {
@@ -508,6 +513,53 @@ internal static class LiveUiSmoke
             }
         }
         finally { if (!app.HasExited) SendMessage(trainer, 0x50, IntPtr.Zero, previous); }
+    }
+
+    private static int ReadVisibleClock()
+    {
+        string label = Name("LabClock");
+        var match = Regex.Match(label, @"^([0-9]{2}):([0-5][0-9])$");
+        if (!match.Success) throw new InvalidOperationException("Expected a visible mm:ss clock, got: " + label);
+        return int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) * 60 +
+            int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+    }
+
+    private static void CheckFresh180sCountdown(Stopwatch launch, string lesson)
+    {
+        // UI Automation/runner scheduling can observe the newly launched app
+        // several seconds after the engine resumed. Bound by measured wall time
+        // since the key was sent, with one second for display quantization.
+        int remaining = ReadVisibleClock();
+        double observedSeconds = launch.Elapsed.TotalSeconds;
+        int earliestAllowed = Math.Max(1, 180 - (int)Math.Ceiling(observedSeconds) - 1);
+        Check(remaining >= earliestAllowed && remaining <= 180,
+            "180s start " + lesson + ": observed remaining " + remaining +
+            ", minimum " + earliestAllowed + ", after " +
+            observedSeconds.ToString("0.000", CultureInfo.InvariantCulture) + "s wall");
+        Check(ReadSolved() == 0, "A fresh or restarted class has no inherited credit");
+    }
+
+    private static void CheckStored180sCheckpoint(string appId, string guidance)
+    {
+        var profile = Path.Combine(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT"),
+            "TouchTypingStudio-QA", "progress.xml");
+        var xml = new XmlDocument();
+        xml.XmlResolver = null;
+        using (var stream = new FileStream(profile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            xml.Load(stream);
+        var draft = xml.SelectSingleNode("/StudioProfile/LiveDrafts/LiveDraft[App='" + appId +
+            "' and Guidance='" + guidance + "']/Progress");
+        Check(draft != null, "Pause commits an actual timing checkpoint for " + appId + "/" + guidance);
+        Check(draft.SelectSingleNode("TimeLimit").InnerText == "180" &&
+            draft.SelectSingleNode("ActionLimit").InnerText == "0" &&
+            draft.SelectSingleNode("Solved").InnerText == "0" &&
+            draft.SelectSingleNode("Errors").InnerText == "0",
+            "Persisted fresh profile confirms a 180-second budget and no inherited actions/errors");
+        double activeMs = double.Parse(draft.SelectSingleNode("ActiveMilliseconds").InnerText, CultureInfo.InvariantCulture);
+        int expected = Math.Max(0, 180 - (int)Math.Floor(activeMs / 1000));
+        int actual = ReadVisibleClock();
+        Check(actual == expected, "Paused clock equals 180 minus the actual saved active time (" +
+            actual + "s remaining, " + activeMs.ToString("0", CultureInfo.InvariantCulture) + "ms active)");
     }
 
     private static void CheckThreeHeadlineMetrics(string page)
