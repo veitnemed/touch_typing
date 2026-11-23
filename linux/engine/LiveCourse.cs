@@ -7,7 +7,7 @@ namespace TouchTypingStudio;
 
 internal sealed record LivePhase(string Title, string Route);
 internal sealed record LiveMission(string App, int Level, string Id, string Title, LivePhase[] Phases);
-internal sealed record LiveGoal(int Phase, LabTask Task, string Target, bool VerifyReport = false, string LegacyTarget = null);
+internal sealed record LiveGoal(int Phase, LabTask Task, string Target, string Layout, bool VerifyReport = false, string LegacyTarget = null);
 
 internal static partial class LiveCourse
 {
@@ -35,14 +35,15 @@ internal static partial class LiveCourse
                 if (IsCommandToken(token) && trial.Layout == "RU")
                 {
                     var change = trial.WithBinding(Actions["layout"]);
+                    string layout = trial.Layout;
                     trial.Apply("layout");
-                    goals.Add(new(phase, change with { Title = "Переключите ввод на английский для команды" }, Evidence(change, trial)));
+                    goals.Add(new(phase, change with { Title = "Переключите ввод на английский для команды" }, Evidence(change, trial), layout));
                 }
                 var task = MakeTask(token, trial);
                 bool verifyReport = mission.Id == "workday-report" && task.Id == "command/head -n 2 spectrum-report.txt";
                 string original = Evidence(task, trial, verifyReport: verifyReport);
                 var before = trial.Clone();
-                if (token.StartsWith("pick:") || token.StartsWith("quick:") || token.StartsWith("sym:"))
+                if (IsPickerToken(token))
                 {
                     int count = trial.Entries(trial.Active).Length;
                     for (int i = 0; i < count && !AtItem(trial, task.Text); i++) trial.Apply(task.Action);
@@ -56,7 +57,7 @@ internal static partial class LiveCourse
                 else if (!Demonstrate(task, trial)) throw new InvalidOperationException(mission.Id + ": недоступно " + token);
                 string proof = Evidence(task, trial, verifyReport: verifyReport);
                 if (original == proof) { trial = before; continue; }
-                goals.Add(new(phase, task, proof, verifyReport, verifyReport ? Evidence(task, trial) : null));
+                goals.Add(new(phase, task, proof, before.Layout, verifyReport, verifyReport ? Evidence(task, trial) : null));
             }
         }
         if (goals.Count < 20) throw new InvalidOperationException(mission.Id + ": меньше 20 результатов");
@@ -66,19 +67,29 @@ internal static partial class LiveCourse
     private static IEnumerable<string> RouteTokens(LivePhase phase) =>
         phase.Route.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
+    private static bool IsPickerToken(string token) => token.StartsWith("pick:", StringComparison.Ordinal) ||
+        token.StartsWith("quick:", StringComparison.Ordinal) || token.StartsWith("sym:", StringComparison.Ordinal);
     private static bool IsCommandToken(string token) => token.StartsWith("cmd:", StringComparison.Ordinal);
     private static string DecodeCommand(string token) => token[4..].Replace('~', ' ');
     private static string CommandId(string command) => "command/" + command;
 
-    internal static int CountWeakRouteTasks(LiveMission mission, HashSet<string> weak) =>
-        mission.Phases.SelectMany(RouteTokens)
-            .Count(token => weak.Contains(IsCommandToken(token) ? CommandId(DecodeCommand(token)) : token));
+    // Only a coarse prefilter: the compiled list is authoritative for layout and
+    // for picker goals that turn into different IDs depending on focus.
+    internal static bool CouldPracticeAny(LiveMission mission, HashSet<string> taskIds) =>
+        mission.Phases.SelectMany(RouteTokens).Any(token =>
+            IsCommandToken(token) ? taskIds.Contains(CommandId(DecodeCommand(token))) || taskIds.Contains("layout") :
+            IsPickerToken(token) ? taskIds.Contains("file-next") || taskIds.Contains("link-next") ||
+                taskIds.Contains("quick-next") || taskIds.Contains("symbol-next") :
+            taskIds.Contains(token));
+
+    internal static int CountWeakGoals(IEnumerable<LiveGoal> goals, HashSet<(string Task, string Layout)> weak) =>
+        goals.Count(goal => weak.Contains((goal.Task.Id, goal.Layout)));
 
     private static bool AtItem(LabScene scene, string target) => scene.Entries(scene.Active).ElementAtOrDefault(scene.Active.Focus is "quick-open" or "symbols" ? scene.Active.OptionIndex : scene.Active.Item)?.Title == target;
     private static readonly Dictionary<string, LabTask> Actions = LabCatalog.Shortcuts.ToDictionary(task => task.Id);
     private static LabTask MakeTask(string token, LabScene scene)
     {
-        if (token.StartsWith("pick:") || token.StartsWith("quick:") || token.StartsWith("sym:"))
+        if (IsPickerToken(token))
         {
             var w = scene.Active;
             string query = token[(token.IndexOf(':') + 1)..].Replace('_', ' ');

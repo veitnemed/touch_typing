@@ -295,15 +295,47 @@ internal sealed class LabRun
             var recent = past.Concat(Attempts).Where(a => a.Mission != null).Select(a => a.Mission).Reverse().Distinct().Take(2).ToHashSet();
             var fresh = available.Where(m => !recent.Contains(m.Id)).ToArray();
             if (fresh.Length > 0) available = fresh;
-            string skillPrefix = "lab/" + App + "/";
-            // The prefix identifies the class; the remainder is one ID, even when
-            // it contains command arguments with spaces or directory separators.
-            var weak = past.Concat(Attempts).TakeLast(60).Where(a => !a.Correct)
-                .Select(a => a.Skill[skillPrefix.Length..]).ToHashSet(StringComparer.Ordinal);
-            mission = string.IsNullOrEmpty(requestedMission) ? available.OrderBy(m => random.NextDouble() /
-                (1 + LiveCourse.CountWeakRouteTasks(m, weak))).First()
-                : courses.FirstOrDefault(m => m.Id == requestedMission) ?? throw new ArgumentException("Поручение недоступно для выбранного уровня.");
-            if (!restoring) variant = random.Next(3);
+            initialLayout = Scene.Layout;
+            initialVirtual = Scene.LayoutIsVirtual;
+            if (string.IsNullOrEmpty(requestedMission))
+            {
+                // Keep the original seeded order: one draw per eligible mission, then the case variant.
+                var draws = available.Select(m => (Mission: m, Draw: random.NextDouble())).ToArray();
+                if (!restoring) variant = random.Next(3);
+                var startingScene = PrepareMissionScene();
+                string skillPrefix = "lab/" + App + "/";
+                // Old unlabeled mistakes remain in the journal but cannot target an input layout.
+                var weak = past.Concat(Attempts).TakeLast(60).Where(a => !a.Correct && a.Layout is "EN" or "RU")
+                    .Select(a => (a.Skill[skillPrefix.Length..], a.Layout)).ToHashSet();
+                if (weak.Count == 0 || draws.Length == 1)
+                {
+                    mission = draws.OrderBy(item => item.Draw).First().Mission;
+                    pending = LiveCourse.Compile(mission, startingScene);
+                }
+                else
+                {
+                    // At most one isolated compile per eligible route at mission selection.
+                    // Reuse the winner's exact scene variant and goals for the actual lesson.
+                    var weakTasks = weak.Select(hit => hit.Item1).ToHashSet(StringComparer.Ordinal);
+                    var selected = draws.Select(item =>
+                    {
+                        if (!LiveCourse.CouldPracticeAny(item.Mission, weakTasks))
+                            return (item.Mission, Goals: (List<LiveGoal>)null, Score: item.Draw);
+                        var goals = LiveCourse.Compile(item.Mission, startingScene);
+                        return (item.Mission, Goals: goals, Score: item.Draw / (1 + LiveCourse.CountWeakGoals(goals, weak)));
+                    }).OrderBy(item => item.Score).First();
+                    mission = selected.Mission;
+                    pending = selected.Goals ?? LiveCourse.Compile(mission, startingScene);
+                }
+                Scene = startingScene;
+            }
+            else
+            {
+                mission = courses.FirstOrDefault(m => m.Id == requestedMission) ?? throw new ArgumentException("Поручение недоступно для выбранного уровня.");
+                if (!restoring) variant = random.Next(3);
+                Scene = PrepareMissionScene();
+                pending = LiveCourse.Compile(mission, Scene);
+            }
             requestedMission = null; used.Add(mission.Id); trace.Clear();
             verifiedReport = null;
             if (!restoring)
@@ -311,18 +343,20 @@ internal sealed class LabRun
                 trace.Add(new(ExactUrlEvent));
                 trace.Add(new(StrictReportEvent));
             }
-            initialLayout = Scene.Layout;
-            initialVirtual = Scene.LayoutIsVirtual;
             foreach (string key in held) trace.Add(new("@held/" + key, superUsed));
-            Scene = new LabScene(App == "workday" ? "ubuntu" : App, initialLayout) { LayoutKey = layoutBinding, LayoutIsVirtual = initialVirtual };
-            if (dockProfile != null) Scene.Dock = dockProfile;
-            Scene.PrepareCase(variant, App);
-            pending = LiveCourse.Compile(mission, Scene);
             missionLength = pending.Count;
             Scene.PrepareHistory(pending.Where(goal => goal.Task.Action == "command" && goal.Task.Text.Length > 12).Select(goal => goal.Task.Text));
         }
         Task = pending[0].Task;
         sinceTask = clock(); HintVisible = hadError = false;
+    }
+
+    private LabScene PrepareMissionScene()
+    {
+        var scene = new LabScene(App == "workday" ? "ubuntu" : App, initialLayout) { LayoutKey = layoutBinding, LayoutIsVirtual = initialVirtual };
+        if (dockProfile != null) scene.Dock = dockProfile;
+        scene.PrepareCase(variant, App);
+        return scene;
     }
 
     internal LabSessionRecord SessionRecord() => new() { Session = Session, App = App, Mode = Mode, Level = Level, Date = DateTime.Now,

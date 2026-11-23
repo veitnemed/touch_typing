@@ -55,7 +55,7 @@ internal static class LabTests
 
     private static void TestCommandReviewWeighting()
     {
-        static ShortcutAttempt Miss(string skill) => new() { Skill = skill, Correct = false };
+        static ShortcutAttempt Miss(string skill, string layout = "EN") => new() { Skill = skill, Correct = false, Layout = layout };
         string Pick(double[] draws, params ShortcutAttempt[] history) =>
             new LabRun("terminal", "sandbox", 0, 0, "EN", history, new MissionDraws(draws)).MissionId;
 
@@ -74,13 +74,45 @@ internal static class LabTests
         Check(Pick(pathDraws, Miss("lab/terminal/command/signals.py")) == "terminal-investigate",
             "Path suffix alone does not match a command");
 
-        var spacedPath = new LiveMission("terminal", 0, "spacing-fixture", "Spacing fixture",
-            [new LivePhase("Read report", "cmd:cat~'/home/student/Work~Notes/report.txt'")]);
-        var otherPath = new LiveMission("terminal", 0, "other-spacing-fixture", "Other spacing fixture",
-            [new LivePhase("Read report", "cmd:cat~'/home/student/Other~Notes/report.txt'")]);
-        var reviewSpaced = new HashSet<string>(StringComparer.Ordinal) { "command/cat '/home/student/Work Notes/report.txt'" };
-        Check(LiveCourse.CountWeakRouteTasks(spacedPath, reviewSpaced) == 1 &&
-              LiveCourse.CountWeakRouteTasks(otherPath, reviewSpaced) == 0,
+        var pwdRoute = LiveCourse.Missions.Single(m => m.Id == "terminal-explore");
+        var terminal = new LabScene("terminal", "RU");
+        terminal.PrepareCase(0, "terminal");
+        var goals = LiveCourse.Compile(pwdRoute, terminal);
+        Check(goals.FindIndex(g => g.Task.Id == "layout" && g.Layout == "RU") <
+              goals.FindIndex(g => g.Task.Id == "command/pwd" && g.Layout == "EN") &&
+              goals.Any(g => g.Task.Id == "layout" && g.Layout == "RU") && terminal.Layout == "RU",
+            "RU-start plan records the switch in RU and pwd in EN without changing the starting desk");
+        Check(LiveCourse.CountWeakGoals(goals, [("command/pwd", "EN")]) > 0 &&
+              LiveCourse.CountWeakGoals(goals, [("command/pwd", "RU")]) == 0 &&
+              LiveCourse.CountWeakGoals(goals, [("layout", "RU")]) == 1 &&
+              LiveCourse.CountWeakGoals(goals, [("layout", "EN")]) == 0,
+            "Only the layout of the actual goal contributes to mission weight");
+        LabRun StartRu(params ShortcutAttempt[] history) =>
+            new("terminal", "sandbox", 0, 0, "RU", history, new MissionDraws(pwdDraws));
+        Check(StartRu(pwd).MissionId == "terminal-explore" && StartRu(pwd).Scene.Layout == "RU",
+            "EN pwd misses choose the right RU-start route without running its layout switch");
+        Check(StartRu(Miss("lab/terminal/command/pwd", "RU")).MissionId == "terminal-investigate" &&
+              StartRu(Miss("lab/terminal/command/pwd", null)).MissionId == "terminal-investigate",
+            "Wrong-layout and unlabeled legacy misses cannot affect the choice");
+
+        var editor = new LabScene("code", "EN");
+        editor.PrepareCase(0, "code");
+        var editorGoals = LiveCourse.Compile(LiveCourse.Missions.Single(m => m.Id == "code-guide"), editor);
+        Check(LiveCourse.CountWeakGoals(editorGoals, [("quick-next", "EN")]) > 0 &&
+              LiveCourse.CountWeakGoals(editorGoals, [("quick:signals.py", "EN")]) == 0 &&
+              LiveCourse.CountWeakGoals(editorGoals, [("quick-next", "RU")]) == 0,
+            "Picker weighting uses the compiled task identity and layout, not the raw token");
+
+        var withSpacedPath = pwdRoute with { Phases = [..pwdRoute.Phases,
+            new("Read report", "cmd:mkdir~'/home/student/Work~Notes' cmd:echo~hello~>~'/home/student/Work~Notes/report.txt' cmd:cat~'/home/student/Work~Notes/report.txt'")] };
+        var spaced = LiveCourse.Compile(withSpacedPath, terminal);
+        Check(LiveCourse.CouldPracticeAny(withSpacedPath, ["command/cat '/home/student/Work Notes/report.txt'"]) &&
+              !LiveCourse.CouldPracticeAny(pwdRoute, ["command/cat '/home/student/Work Notes/report.txt'"]) &&
+              LiveCourse.CouldPracticeAny(pwdRoute, ["layout"]) &&
+              LiveCourse.CouldPracticeAny(LiveCourse.Missions.Single(m => m.Id == "code-guide"), ["quick-next"]),
+            "Rehearsal prefilter handles exact commands, implicit layout switches and translated picker IDs");
+        Check(LiveCourse.CountWeakGoals(spaced, [("command/cat '/home/student/Work Notes/report.txt'", "EN")]) == 1 &&
+              LiveCourse.CountWeakGoals(spaced, [("command/cat '/home/student/Other Notes/report.txt'", "EN")]) == 0,
             "A quoted path with spaces matches only the full command, not an equal basename in another directory");
 
         var recentOther = new ShortcutAttempt { Skill = "lab/terminal/command/ls", Correct = true };
