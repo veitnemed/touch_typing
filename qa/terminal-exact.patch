@@ -88,7 +88,7 @@
 +        CheckExactTerminalEdit(false, true);
 +        CheckExactTerminalEdit(true, false);
 +        CheckExactTerminalEdit(true, true);
-+        Chord("LCtrl+U");
++        Chord("LCtrl+C");
 +        CheckTerminalState("", 0);
 +    }
 +
@@ -97,7 +97,7 @@
 +        string op = backspace ? "Backspace" : "Delete";
 +        string origin = recalled ? "history" : "fresh";
 +        string label = "terminal-" + origin + "-" + op.ToLowerInvariant();
-+        Chord("LCtrl+U");
++        Chord("LCtrl+C");
 +        CheckTerminalState("", 0);
 +        TypeStockText("abcd");
 +        CheckTerminalState("abcd", 4);
