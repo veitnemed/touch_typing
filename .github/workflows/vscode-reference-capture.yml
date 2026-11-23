@@ -1,0 +1,123 @@
+name: Capture native official VS Code reference
+on:
+  push:
+    branches: [qa/vscode-reference-task-list]
+permissions:
+  contents: read
+jobs:
+  official-vscode-reference:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Prepare verified official editor, theme and isolated task-list fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -o Acquire::Retries=2
+          sudo apt-get install --no-install-recommends -y xvfb xauth xdotool xclip openbox wmctrl imagemagick fonts-dejavu-core libgtk-3-0t64 libnss3
+          work="$RUNNER_TEMP/vscode-reference"
+          report="$RUNNER_TEMP/reference-evidence"
+          mkdir -p "$work"/{editor,profile/User,extensions,task-list} "$report"
+          printf 'REFERENCE_WORK=%s\nREFERENCE_REPORT=%s\n' "$work" "$report" >> "$GITHUB_ENV"
+          curl --fail --silent --show-error --location --retry 3 --connect-timeout 20 --max-time 120 \
+            'https://vscode.download.prss.microsoft.com/dbazure/download/stable/8a14f0cc1b08d531eb83255ea3764ae22aa932b5/code-stable-x64-1794902874.tar.gz' \
+            -o "$work/vscode.tar.gz"
+          printf '%s  %s\n' '6fd8b14600f2a8ddb8b4833d8bf288f3dc4c34b2878d2c6c3fec7e16c81023bc' "$work/vscode.tar.gz" | sha256sum -c -
+          tar -xzf "$work/vscode.tar.gz" --strip-components=1 -C "$work/editor"
+          curl --fail --silent --show-error --location --compressed --retry 3 --connect-timeout 20 --max-time 60 \
+            'https://marketplace.visualstudio.com/_apis/public/gallery/publishers/GitHub/vsextensions/github-vscode-theme/6.3.5/vspackage' \
+            -o "$work/theme.download"
+          if [[ $(od -An -tx1 -N2 "$work/theme.download" | tr -d ' ') == 1f8b ]]; then
+            gzip -dc "$work/theme.download" > "$work/theme.vsix"
+          else
+            cp "$work/theme.download" "$work/theme.vsix"
+          fi
+          printf '%s  %s\n' '74e69da1804f718ae9ce6a8ea49c06fbf9cfc137c9b65b0e14353715cb5d474a' "$work/theme.vsix" | sha256sum -c -
+          "$work/editor/bin/code" --version | tee "$report/vscode-version.txt"
+          grep -Fx '1.147.0' "$report/vscode-version.txt"
+          grep -Fx '8a14f0cc1b08d531eb83255ea3764ae22aa932b5' "$report/vscode-version.txt"
+          "$work/editor/bin/code" --user-data-dir "$work/profile" --extensions-dir "$work/extensions" --install-extension "$work/theme.vsix"
+          "$work/editor/bin/code" --user-data-dir "$work/profile" --extensions-dir "$work/extensions" --list-extensions --show-versions | tee "$report/theme-version.txt"
+          grep -Fxi 'github.github-vscode-theme@6.3.5' "$report/theme-version.txt"
+          printf '%s' 'ZnJvbSB0YXNrcyBpbXBvcnQgYWRkX3Rhc2ssIGZpbmRfdGFzaywgbWFya19kb25lCmZyb20gc3RvcmFnZSBpbXBvcnQgc2F2ZV90YXNrcwoKCmRlZiBtYWluKCk6CiAgICAiIiJNYW5hZ2UgYSBzaG9ydCB0YXNrIGxpc3QuIiIiCiAgICB0YXNrcyA9IFtdCiAgICBhZGRfdGFzayh0YXNrcywgIkJ1eSB0ZWEiKSAgIyBFeGFtcGxlIHRhc2sKICAgIHRhc2sgPSBmaW5kX3Rhc2sodGFza3MsICJCdXkgdGVhIikKICAgIGlmIHRhc2s6CiAgICAgICAgcHJpb3JpdHkgPSAxCiAgICAgICAgbWFya19kb25lKHRhc2spCiAgICAgICAgcHJpbnQoZiJEb25lOiB7dGFza1sndGl0bGUnXX0gI3twcmlvcml0eX0iKQogICAgc2F2ZV90YXNrcyh0YXNrcywgInRhc2tzLmpzb24iKQoKCmlmIF9fbmFtZV9fID09ICJfX21haW5fXyI6CiAgICBtYWluKCkK' | base64 -d > "$work/task-list/app.py"
+          printf '%s  %s\n' 'f5f482eb437481c7f209fb5409715ec29f12cce8076227c8ebaddfdade536115' "$work/task-list/app.py" | sha256sum -c -
+          printf '%s' 'ZGVmIGFkZF90YXNrKHRhc2tzLCB0aXRsZSk6CiAgICB0YXNrID0geyJ0aXRsZSI6IHRpdGxlLCAiZG9uZSI6IEZhbHNlfQogICAgdGFza3MuYXBwZW5kKHRhc2spCiAgICByZXR1cm4gdGFzawoKCmRlZiBtYXJrX2RvbmUodGFzayk6CiAgICB0YXNrWyJkb25lIl0gPSBUcnVlCiAgICByZXR1cm4gdGFzawoKCmRlZiBmaW5kX3Rhc2sodGFza3MsIHRpdGxlKToKICAgIGZvciB0YXNrIGluIHRhc2tzOgogICAgICAgIGlmIHRhc2tbInRpdGxlIl0gPT0gdGl0bGU6CiAgICAgICAgICAgIHJldHVybiB0YXNrCiAgICByZXR1cm4gTm9uZQo=' | base64 -d > "$work/task-list/tasks.py"
+          printf '%s  %s\n' '570d2abddfda7dd526adb10fbbd47404a8e0608aa5dc4fca8f31bb5b3978750e' "$work/task-list/tasks.py" | sha256sum -c -
+          printf '%s' 'aW1wb3J0IGpzb24KZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgoKZGVmIHNhdmVfdGFza3ModGFza3MsIHBhdGgpOgogICAgdGV4dCA9IGpzb24uZHVtcHModGFza3MsIGluZGVudD0yKQogICAgUGF0aChwYXRoKS53cml0ZV90ZXh0KHRleHQsIGVuY29kaW5nPSJ1dGYtOCIpCg==' | base64 -d > "$work/task-list/storage.py"
+          printf '%s  %s\n' 'e34efb491a382e4abff60779969e12b1bc93b89399cff01083d76dcf5dd788c2' "$work/task-list/storage.py" | sha256sum -c -
+          printf '%s' 'aW1wb3J0IHVuaXR0ZXN0Cgpmcm9tIHRhc2tzIGltcG9ydCBhZGRfdGFzaywgZmluZF90YXNrLCBtYXJrX2RvbmUKCgpjbGFzcyBUYXNrTGlzdFRlc3QodW5pdHRlc3QuVGVzdENhc2UpOgogICAgZGVmIHRlc3RfZmluZF9ieV90aXRsZShzZWxmKToKICAgICAgICB0YXNrcyA9IFtdCiAgICAgICAgdGVhID0gYWRkX3Rhc2sodGFza3MsICJCdXkgdGVhIikKICAgICAgICBhZGRfdGFzayh0YXNrcywgIkJ1eSBjb2ZmZWUiKQogICAgICAgIHNlbGYuYXNzZXJ0SXMoZmluZF90YXNrKHRhc2tzLCAiQnV5IHRlYSIpLCB0ZWEpCiAgICAgICAgc2VsZi5hc3NlcnRJc05vbmUoZmluZF90YXNrKHRhc2tzLCAiVW5rbm93biIpKQoKICAgIGRlZiB0ZXN0X21hcmtfZG9uZShzZWxmKToKICAgICAgICB0YXNrID0gYWRkX3Rhc2soW10sICJCdXkgdGVhIikKICAgICAgICBtYXJrX2RvbmUodGFzaykKICAgICAgICBzZWxmLmFzc2VydFRydWUodGFza1siZG9uZSJdKQo=' | base64 -d > "$work/task-list/test_tasks.py"
+          printf '%s  %s\n' 'e038ee1a0b8342652f49b73aca9289b1153429f53f45e417379335af4a9582cf' "$work/task-list/test_tasks.py" | sha256sum -c -
+          (cd "$work/task-list"; sha256sum *.py) > "$report/task-list-sha256.txt"
+          cat > "$work/profile/User/settings.json" <<'SETTINGS'
+          {
+            "workbench.colorTheme": "GitHub Dark Default",
+            "workbench.startupEditor": "none",
+            "window.zoomLevel": 0,
+            "window.menuBarVisibility": "compact",
+            "editor.fontFamily": "'DejaVu Sans Mono', monospace",
+            "editor.fontSize": 14,
+            "editor.cursorBlinking": "solid",
+            "editor.minimap.enabled": true,
+            "breadcrumbs.enabled": true,
+            "telemetry.telemetryLevel": "off",
+            "update.mode": "none",
+            "extensions.autoCheckUpdates": false,
+            "extensions.autoUpdate": false,
+            "security.workspace.trust.enabled": false,
+            "chat.disableAIFeatures": true
+          }
+          SETTINGS
+          cp "$work/profile/User/settings.json" "$report/settings.json"
+      - name: Capture genuine VS Code at 1366x768, GitHub Dark Default, selection L8 C5-13
+        env:
+          LC_ALL: C.UTF-8
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$REFERENCE_WORK/capture.sh" <<'CAPTURE'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          work=$REFERENCE_WORK
+          report=$REFERENCE_REPORT
+          export XDG_CONFIG_HOME="$work/xdg-config" XDG_CACHE_HOME="$work/xdg-cache"
+          mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
+          openbox --sm-disable > "$work/openbox.log" 2>&1 &
+          wm=$!; editor=
+          trap 'for pid in "$editor" "$wm"; do [[ ! $pid ]] || kill "$pid" 2>/dev/null || true; done' EXIT
+          code=("$work/editor/bin/code" --user-data-dir "$work/profile" --extensions-dir "$work/extensions")
+          "${code[@]}" --force-device-scale-factor=1 --disable-gpu --new-window --wait "$work/task-list" > "$work/code.log" 2>&1 &
+          editor=$!
+          win=$(timeout 40 xdotool search --sync --onlyvisible --all --limit 1 --class Code --name 'task-list.*Visual Studio Code')
+          xdotool windowactivate --sync "$win"
+          # This is a native Editor command line navigation in the running window.
+          "${code[@]}" --reuse-window --goto "$work/task-list/app.py:8:5"
+          win=$(timeout 30 xdotool search --sync --onlyvisible --all --limit 1 --class Code --name 'app.py.*task-list.*Visual Studio Code')
+          xdotool windowactivate --sync "$win"
+          wmctrl -ir "$(printf '%#x' "$win")" -b add,maximized_vert,maximized_horz
+          sleep 1
+          xdotool key --clearmodifiers --repeat 8 --delay 40 shift+Right
+          xdotool key --clearmodifiers ctrl+c
+          selected=$(timeout 5 xclip -selection clipboard -out)
+          [[ "$selected" == add_task ]]
+          xdotool mousemove 1320 725
+          import -window root "$report/vscode-github-dark-default-task-list.png"
+          test "$(identify -format '%wx%h' "$report/vscode-github-dark-default-task-list.png")" = 1366x768
+          # Ensure the editor background is actually rendered, rather than a blank or modal screen.
+          editor_color=$(convert "$report/vscode-github-dark-default-task-list.png" -format '%[pixel:p{900,440}]' info:)
+          [[ "$editor_color" == 'srgb(13,17,23)' || "$editor_color" == 'srgba(13,17,23,1)' ]]
+          {
+            xdpyinfo | grep -E 'dimensions:|resolution:'
+            fc-match 'DejaVu Sans Mono' -f '%{family} %{style}\n'
+            printf '%s\n' "workspace=task-list" "file=app.py" \
+              "theme=GitHub Dark Default" "windowZoom=0" "editorFontSize=14px" \
+              "start=line 8 col 5; caret=line 8 col 13; selected text=$selected" \
+              "editor sampled color=$editor_color"
+          } > "$report/frame-state.txt"
+          CAPTURE
+          xvfb-run -a -s '-screen 0 1366x768x24 -dpi 96 -nolisten tcp' bash "$REFERENCE_WORK/capture.sh"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: official-vscode-task-list-reference
+          path: ${{ runner.temp }}/reference-evidence/
+          if-no-files-found: error
+          retention-days: 10
