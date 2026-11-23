@@ -85,7 +85,11 @@ internal static class LiveUiSmoke
                     CheckFresh180sCountdown(started, name + "/" + mode);
                     Check(Visible("LabScenarioProgress") && !Visible("ResultMetric-accuracy"), "Active lesson shows scenario progress, not accuracy");
                     Check(Name("LabTask").Length > 0 && Exists("LabDesktop"), "Task and Ubuntu scene are accessible");
-                    if (mode == 0) CaptureReferenceFrame("class-" + name);
+                    if (mode == 0)
+                    {
+                        CaptureReferenceFrame("class-" + name);
+                        RecordLessonChrome(name);
+                    }
                     Key("F8");
                     Until(delegate { return Exists("LabPauseResult"); }, "pause result overlay");
                     Check(Name("LabPauseResult") == "Пауза", "Pause shows a Stamina-style result panel");
@@ -248,6 +252,7 @@ internal static class LiveUiSmoke
         Check(Visible("LabScenarioProgress") && !Visible("ResultMetric-accuracy"),
             "Activity shows progress and no accuracy");
         CaptureReferenceFrame("07-chrome-python-docs-before-ctrl-l");
+        RecordLessonChrome("browser-reference");
         Chord("Ctrl+L");
         Until(delegate { return ReadSolved() == 1 && Find("LabTask").Current.ItemStatus == "keys:Ctrl+C"; },
             "native Ctrl+L earns exactly one credit and advances to copy");
@@ -269,6 +274,17 @@ internal static class LiveUiSmoke
         Check(summary.Contains("Выполнено 2.") && summary.Contains("Ошибки 0."),
             "The visible result records exactly two correct actions");
         CaptureReferenceFrame("10-chrome-result");
+        if (Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_LESSON_CHROME") == "compact")
+        {
+            Invoke("LabChooseClass");
+            Until(delegate { return Exists("LabStart"); }, "catalog after standalone result");
+            Invoke("LabClass-chrome");
+            Key("F5");
+            Until(delegate { return Visible("LabBack") && Name("LabPause").StartsWith("Пауза"); }, "active browser with footer Back");
+            Invoke("LabBack");
+            Until(delegate { return Exists("LabResult") && !Exists("LabClock"); }, "footer Back shows the saved result");
+            Check(true, "Footer Back retains the actual lesson exit action");
+        }
     }
 
     private static void CheckWorkdaySourceNote()
@@ -617,6 +633,48 @@ internal static class LiveUiSmoke
         var node = window.FindFirst(TreeScope.Descendants,
             new PropertyCondition(AutomationElement.AutomationIdProperty,id));
         return node != null && node.Current.ProcessId == app.Id && !node.Current.IsOffscreen;
+    }
+
+    private static void RecordLessonChrome(string fixture)
+    {
+        if (evidenceDirectory == null) return;
+        string mode = Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_LESSON_CHROME");
+        if (mode != "baseline" && mode != "compact") return;
+        CaptureRect client;
+        var origin = new CapturePoint();
+        Check(GetForegroundWindow() == trainer && GetClientRect(trainer, out client) && ClientToScreen(trainer, ref origin),
+            "Geometry comes from the owned foreground lesson window");
+        if (!GetClientRect(trainer, out client)) throw new InvalidOperationException("Missing actual client coordinates.");
+        var task = Find("LabTask").Current.BoundingRectangle;
+        var scene = Find("LabDesktop").Current.BoundingRectangle;
+        var back = Find("LabBack").Current.BoundingRectangle;
+        var pause = Find("LabPause").Current.BoundingRectangle;
+        var aids = Find("LabKeyboardAid").Current.BoundingRectangle;
+        var elements = window.FindAll(TreeScope.Descendants,
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text));
+        bool titleVisible = elements.Cast<AutomationElement>().Any(element => {
+            var value = element.Current;
+            return value.ProcessId == app.Id && !value.IsOffscreen &&
+                value.Name.StartsWith("Практика · ", StringComparison.Ordinal);
+        });
+        Func<System.Windows.Rect,string> box = rect => string.Format(CultureInfo.InvariantCulture,
+            "[{0:0.##},{1:0.##},{2:0.##},{3:0.##}]",rect.X-origin.X,rect.Y-origin.Y,rect.Width,rect.Height);
+        string data = string.Format(CultureInfo.InvariantCulture,
+            @"{{""app"":""{0}"",""capture"":""{1}"",""platform"":""WPF"",""dpi"":{2},
+            ""viewport"":[{3},{4}],""titleMapped"":{5},""task"":{6},""scene"":{7},
+            ""footer"":{8},""footerBack"":{9},""footerKeyboardAid"":{10}}}",
+            fixture,mode,GetDpiForWindow(trainer),client.Right,client.Bottom,titleVisible ? "true" : "false",
+            box(task),box(scene),box(pause),back.Top >= scene.Bottom - 1 ? "true" : "false",
+            aids.Top >= scene.Bottom - 1 ? "true" : "false");
+        File.WriteAllText(Path.Combine(evidenceDirectory, "lesson-layout-wpf-" + fixture + ".json"), data);
+        Console.WriteLine("WPF lesson geometry: " + fixture + " scene " + box(scene));
+        Check(Visible("LabTask") && Visible("LabDesktop") && Visible("LabPause") && scene.Height > 0 &&
+            task.Bottom <= scene.Top + 1 && scene.Bottom <= pause.Top + 1,
+            "The native task and footer do not overlap the work surface");
+        if (mode == "compact")
+            Check(!titleVisible && Visible("LabBack") && Visible("LabKeyboardAid") &&
+                back.Top >= scene.Bottom - 1 && aids.Top >= scene.Bottom - 1,
+                "No redundant module title; Back and keyboard controls live below the work surface");
     }
 
     private static void CaptureReferenceFrame(string name)

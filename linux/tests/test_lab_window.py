@@ -4,6 +4,7 @@ TOUCH_TYPING_QA_OUTPUT selects an existing directory for the preview images.
 --small verifies 960x600, --timed verifies an actual 180-second run and record.
 --terminal-only checks real terminal editing at 1366x768 (or 960x600 with --small).
 """
+import json
 import os
 from pathlib import Path
 import sys
@@ -306,6 +307,38 @@ class LabWindowTest(Studio):
                 assert self.result_kind=='shortcuts'
         finally:call(session,api+'.Session','Stop')
 
+    def record_lesson_chrome(self, lab, app, output):
+        mode = os.environ.get("TOUCH_TYPING_QA_LESSON_CHROME")
+        if mode not in ("baseline", "compact"):
+            return
+        def bounds(widget):
+            valid, rect = widget.compute_bounds(self.window)
+            assert valid, widget
+            return [round(getter(), 2) for getter in (rect.get_x, rect.get_y, rect.get_width, rect.get_height)]
+        def footer_controls():
+            control = lab.footer.get_first_child()
+            while control is not None:
+                yield control
+                control = control.get_next_sibling()
+        toolbar, scene, footer = [bounds(widget) for widget in (lab.toolbar, lab.stage, lab.footer)]
+        shown = self.reference_title_handle.get_mapped()
+        controls = list(footer_controls())
+        settings_in_footer = lab.settings_menu in controls
+        back_in_footer = any(widget.get_tooltip_text() == "Вернуться к каталогу" and widget.get_mapped()
+                             for widget in controls)
+        report = dict(app=app, capture=mode, platform="GTK", scale=self.window.get_scale_factor(),
+                      viewport=[self.window.get_width(),self.window.get_height()], titleMapped=shown,
+                      task=toolbar, scene=scene, footer=footer, footerSettings=settings_in_footer,
+                      footerBack=back_in_footer, ownedNativeWindow=self.window.get_mapped())
+        (output / f"lesson-layout-gtk-{app}.json").write_text(json.dumps(report, indent=2)+"\n",encoding="utf-8")
+        print("GTK lesson geometry",json.dumps(report),flush=True)
+        assert self.window.get_mapped() and lab.stage.get_mapped() and lab.footer.get_mapped()
+        assert scene[3] > 0 and toolbar[1] + toolbar[3] <= scene[1] + 1 and scene[1] + scene[3] <= footer[1] + 1
+        if mode == "compact":
+            assert not shown and settings_in_footer and back_in_footer, report
+            assert lab.settings_menu.get_sensitive() and lab.pause.get_mapped() and lab.restart.get_mapped()
+            assert lab.settings_menu.get_popover() is not None, "settings must retain the actual popover"
+
     def capture_gallery(self, chord, capture_png, output):
         lab = self.lab
         for _ in range(12):
@@ -349,6 +382,7 @@ class LabWindowTest(Studio):
             for _ in range(8):
                 yield
             capture_png(output / ("live-" + stage_name + ".png"))
+            self.record_lesson_chrome(lab, app, output)
             if app == "ubuntu":
                 yield from chord("Super+4")
                 assert active() == "files", lab.state["scene"]

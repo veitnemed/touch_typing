@@ -305,7 +305,9 @@ namespace TouchTypingStudio
             int remaining = state.I("remaining", 180);
             timerLabel.Visibility = state.I("timeLimit") > 0 || state.I("actionLimit") > 0 ? Visibility.Visible : Visibility.Collapsed;
             timerLabel.Text = state.I("actionLimit") > 0 ? state.I("solved") + "/" + state.I("actionLimit") : (remaining / 60).ToString("00") + ":" + (remaining % 60).ToString("00");
-            labCounter.Text = state.S("scenario") + "    ·    " + state.S("phase");
+            string labContext = state.S("scenario") + "    ·    " + state.S("phase");
+            labCounter.ToolTip = labContext;
+            AutomationProperties.SetName(labCounter, labContext + " · Шаг " + state.I("scenarioStep") + " из " + state.I("scenarioLength"));
             AutomationProperties.SetHelpText(labCounter, "Выполнено " + state.I("solved"));
             var task = state.D("task");
             labTask.Text = state.B("showGuide", true) ? task.S("title") : state.S("phase");

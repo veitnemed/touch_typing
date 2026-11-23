@@ -246,6 +246,7 @@ namespace TouchTypingStudio
         {
             if (active) return;
             referenceHeader.Visibility = Visibility.Visible;
+            SetReferenceLessonCaption(false);
             MinWidth = 748;
             MinHeight = 540;
             page = next;

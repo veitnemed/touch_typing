@@ -669,29 +669,9 @@ class Studio(Gtk.Application):
         self.reference_home_header = bar
         self.window.set_titlebar(handle)
 
-    def set_lesson_header(self, lab=None, app=""):
-        handle = self.reference_title_handle
-        handle.set_child(None)
-        if not lab:
-            self.window.set_size_request(960, 600)
-            handle.set_child(self.reference_home_header)
-            return
-        self.window.set_size_request(606, 455)
-        labels = {"ubuntu": "Ubuntu", "chrome": "Браузер", "code": "VS Code",
-                  "terminal": "Терминал", "workday": "Рабочий день"}
-        row_widget = row(8, "reference-lesson-chrome")
-        back = button("‹", lambda: self.navigate("lab"))
-        bind_name(back, "Вернуться к каталогу")
-        back.set_tooltip_text("Вернуться к каталогу")
-        title = text("Практика · " + labels.get(app, "Live"), "reference-lesson-name")
-        maximize = lambda: self.window.unmaximize() if self.window.is_maximized() else self.window.maximize()
-        add(row_widget, back, expand(title), lab.settings_menu)
-        for caption, name, action in (("−", "Свернуть", self.window.minimize), ("□", "Развернуть", maximize),
-                                      ("×", "Закрыть", self.window.close)):
-            control = button(caption, action)
-            bind_name(control, name)
-            row_widget.append(control)
-        handle.set_child(row_widget)
+    def set_lesson_header(self, active=False):
+        self.window.set_size_request(*((606, 455) if active else (960, 600)))
+        self.reference_title_handle.set_visible(not active)
 
     def show_layout(self):
         for name, chip in self.layout_chips.items():
@@ -2312,9 +2292,16 @@ class LabPage(Gtk.Box):
         details_scroll.set_overlay_scrolling(False)
         self.details.set_child(details_scroll)
         options = Gtk.Popover()
+        maximize = lambda: host.window.unmaximize() if host.window.is_maximized() else host.window.maximize()
+        def window_action(action):
+            options.popdown()
+            action()
+
         options_content = add(box(gap=8), aids_menu,
                               button("Открыть описание задания", lambda: self.toggle_goal_details(options)),
-                              self.diagnostic_button, self.finish)
+                              self.diagnostic_button, self.finish,
+                              button("Свернуть окно", lambda: window_action(host.window.minimize)),
+                              button("Развернуть / восстановить окно", lambda: window_action(maximize)))
         options.set_child(options_content)
         self.settings_menu = Gtk.MenuButton(icon_name="view-more-symbolic")
         self.settings_menu.set_popover(options)
@@ -2346,8 +2333,14 @@ class LabPage(Gtk.Box):
         progress.set_child(self.lesson_meter)
         progress.add_overlay(self.status)
         self.goal_progress = text("", "reference-step-footer")
-        self.footer = add(row(14, "reference-lesson-footer"), self.goal_progress, progress,
-                          self.timer, self.pause, self.restart)
+        back = button("‹", lambda: host.navigate("lab"), "reference-footer-control")
+        close = button("×", host.window.close, "reference-footer-control")
+        for control, name in ((back, "Вернуться к каталогу"), (close, "Закрыть тренажёр")):
+            bind_name(control, name)
+            control.set_tooltip_text(name)
+        self.settings_menu.add_css_class("reference-footer-settings")
+        self.footer = add(row(8, "reference-lesson-footer"), back, self.goal_progress, progress,
+                          self.timer, self.pause, self.restart, self.settings_menu, close)
         self.content.append(self.footer)
         self.guide = LessonGuide(host.library["keyboard"])
         self.guide.add_css_class("lab-guide")
@@ -2522,7 +2515,7 @@ class LabPage(Gtk.Box):
         if not self.state:
             return
         self.active = True
-        self.host.set_lesson_header(self, app)
+        self.host.set_lesson_header(True)
         self.add_css_class("reference-live")
         self.action_icon.name = app
         self.action_icon.cached_key = None

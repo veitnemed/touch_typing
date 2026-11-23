@@ -263,10 +263,6 @@ window.reference-window > .titlebar { background: #1e1734; border: 0; box-shadow
 
 /* Live practice uses the reference palette; the engine still owns every
    objective, key chord, preview field, progress value and recovery state. */
-.reference-lesson-chrome { background: #1c173a; color: #fcf8ff; min-height: 51px; padding: 0 13px 0 11px; }
-.reference-lesson-name { color: #fdfaff; font-size: 16px; font-weight: 700; }
-.reference-lesson-chrome button { background: transparent; border-color: transparent; color: #e2d7fc; padding: 0 4px; min-width: 19px; min-height: 27px; }
-.reference-lesson-chrome button:hover { background: #3b305f; color: #fff; }
 .lab-page.reference-live { background: linear-gradient(160deg,#1a1536,#16122b 62%,#22183d); padding: 4px 16px 15px; }
 .reference-live .lab-content { padding: 0; }
 .reference-live .reference-goal { background: #241c50; border: 1px solid #4b3777; border-radius: 13px; min-height: 46px; padding: 8px 10px; margin-bottom: 12px; }
@@ -282,6 +278,15 @@ window.reference-window > .titlebar { background: #1e1734; border: 0; box-shadow
 .reference-lesson-footer .reference-meter trough, .reference-lesson-footer .reference-meter progress { min-height: 12px; }
 button.reference-round-control { min-width: 32px; min-height: 35px; padding: 3px 7px; font-size: 22px; color: #fff; background: linear-gradient(#4c4176,#3b325d); border: 1px solid #65558e; border-radius: 10px; }
 button.reference-round-control:hover, button.reference-round-control:focus-visible { background: #66519b; }
+button.reference-footer-control, .reference-footer-settings > button {
+  background: transparent; border-color: transparent; color: #e2d7fc;
+  min-width: 23px; min-height: 32px; padding: 1px 4px; border-radius: 7px;
+}
+button.reference-footer-control { font-size: 18px; }
+button.reference-footer-control:hover, button.reference-footer-control:focus-visible,
+.reference-footer-settings > button:hover, .reference-footer-settings > button:focus-visible {
+  background: #493769; color: #fff;
+}
 .reference-live-feedback { background: #302545; color: #eee4ff; padding: 4px 7px; border-radius: 6px; }
 .reference-live-feedback.bad { background: #482744; color: #ffd4dd; }
 .reference-long-help { background: #211b42; color: #e6dcff; padding: 8px 11px; font-size: 13px; }
@@ -308,7 +313,7 @@ button.reference-primary:hover { background: #835af7; }
 .reference-stat-speed { color: #ffd065; }
 
 /* Bundled reference face. System fonts and fixed-position simulator text stay intact. */
-.reference-header, .reference-home, .reference-lesson-chrome, .reference-goal,
+.reference-header, .reference-home, .reference-goal,
 .reference-lesson-footer, .reference-long-help, .reference-modal-panel {
   font-family: "Roboto", "Noto Sans", sans-serif;
 }

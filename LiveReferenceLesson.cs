@@ -8,6 +8,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Shell;
 
 namespace TouchTypingStudio
 {
@@ -23,6 +24,7 @@ namespace TouchTypingStudio
         private FrameworkElement MakeReferenceLesson()
         {
             referenceHeader.Visibility = Visibility.Collapsed;
+            SetReferenceLessonCaption(true);
             MinWidth = 600;
             MinHeight = 415;
             referenceHelpOpen = referenceGuideExplicit = false;
@@ -30,11 +32,8 @@ namespace TouchTypingStudio
             referenceKeySignature = null;
 
             var root = new Grid { Focusable = true, Background = ReferenceGradient("#18132F", "#21183D", 80) };
-            for (int row = 0; row < 7; row++)
-                root.RowDefinitions.Add(new RowDefinition { Height = row == 3 ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
-
-            var nav = ReferenceLessonNav();
-            root.Children.Add(nav);
+            for (int row = 0; row < 6; row++)
+                root.RowDefinitions.Add(new RowDefinition { Height = row == 2 ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
             var prompt = new DockPanel();
             var icon = new Border { Width = 44, Height = 44, VerticalAlignment = VerticalAlignment.Center, CornerRadius = new CornerRadius(11),
                 Background = Ui.Brush("#322951"), Child = ReferenceIcon(labApp, 34), Margin = new Thickness(0, 0, 16, 0) };
@@ -52,7 +51,8 @@ namespace TouchTypingStudio
 
             var wording = Stack();
             wording.VerticalAlignment = VerticalAlignment.Center;
-            referenceTaskStep = ReferenceLabel("", 13, ReferenceMuted, false);
+            labCounter = referenceTaskStep = ReferenceLabel("", 13, ReferenceMuted, false);
+            AutomationProperties.SetAutomationId(labCounter, "LabCounter");
             wording.Children.Add(referenceTaskStep);
             labTask = ReferenceLabel("", 16, ReferenceText, true);
             labTask.Margin = new Thickness(0, 4, 0, 0);
@@ -62,8 +62,7 @@ namespace TouchTypingStudio
 
             var taskBox = ReferenceLessonPanel(prompt, new Thickness(10, 8, 10, 8), 14);
             taskBox.MinHeight = 67;
-            taskBox.Margin = new Thickness(16, 0, 16, 0);
-            Grid.SetRow(taskBox, 1);
+            taskBox.Margin = new Thickness(16, 9, 16, 0);
             root.Children.Add(taskBox);
 
             referenceHelpText = ReferenceLabel("", 13, ReferenceMuted, false);
@@ -73,14 +72,14 @@ namespace TouchTypingStudio
             referenceHintPanel.Margin = new Thickness(16, 8, 16, 0);
             referenceHintPanel.Visibility = Visibility.Collapsed;
             AutomationProperties.SetAutomationId(referenceHintPanel, "LabHelpPanel");
-            Grid.SetRow(referenceHintPanel, 2);
+            Grid.SetRow(referenceHintPanel, 1);
             root.Children.Add(referenceHintPanel);
 
             labDesktop = new LabSceneView { MinHeight = 118 };
             AutomationProperties.SetAutomationId(labDesktop, "LabDesktop");
             var sceneFrame = ReferenceLessonPanel(labDesktop, new Thickness(4), 13);
             sceneFrame.Margin = new Thickness(16, 15, 16, 0);
-            Grid.SetRow(sceneFrame, 3);
+            Grid.SetRow(sceneFrame, 2);
             root.Children.Add(sceneFrame);
 
             var footer = new DockPanel();
@@ -88,6 +87,8 @@ namespace TouchTypingStudio
             actionCluster.VerticalAlignment = VerticalAlignment.Center;
             labPause = ReferenceLessonButton("Ⅱ", "Пауза", ToggleLabPause, "LabPause", 48);
             var restart = ReferenceLessonButton("⟳", "Начать сначала", RestartLab, "LabRestart", 48);
+            KeyboardNavigation.SetTabIndex(labPause, 4);
+            KeyboardNavigation.SetTabIndex(restart, 5);
             actionCluster.Children.Add(labPause);
             actionCluster.Children.Add(restart);
             DockPanel.SetDock(actionCluster, Dock.Right);
@@ -113,23 +114,30 @@ namespace TouchTypingStudio
             var footerFrame = ReferenceLessonPanel(footer, new Thickness(13, 6, 6, 6), 13);
             footerFrame.Margin = new Thickness(16, 10, 16, 0);
             footerFrame.MinHeight = 61;
-            Grid.SetRow(footerFrame, 4);
+            Grid.SetRow(footerFrame, 3);
             root.Children.Add(footerFrame);
 
             var feedbackStrip = new DockPanel { Margin = new Thickness(17, 4, 17, 6), MinHeight = 32 };
             var aids = Stack(true);
             aids.VerticalAlignment = VerticalAlignment.Center;
+            var back = ReferenceLessonButton("‹", "Назад к результату", FinishLab, "LabBack", 24);
+            back.Background = Brushes.Transparent;
+            KeyboardNavigation.SetTabIndex(back, 0);
+            aids.Children.Add(back);
             labHint = ReferenceLessonButton("?", "Подсказка · F1", OpenReferenceLessonHelp, "LabHint", 26);
             labKeyAid = ReferenceLessonButton("⌨", "Показать или скрыть клавиатуру", delegate { ToggleLabAid(true); }, "LabKeyboardAid", 28);
             labHandAid = ReferenceLessonButton("👐", "Показать или скрыть руки", delegate { ToggleLabAid(false); }, "LabHandAid", 28);
             labMistakeAid = ReferenceLessonButton("✕", "Подсветка ошибочной клавиши", ToggleLabMistake, "LabMistakeHighlight", 26);
             labFinish = ReferenceLessonButton("■", "Результат", FinishLab, "LabFinish", 26);
+            int tabIndex = 6;
             foreach (var button in new[] { labHint, labKeyAid, labHandAid, labMistakeAid, labFinish })
             {
                 button.Height = 27;
                 button.Margin = new Thickness(3, 0, 0, 0);
+                KeyboardNavigation.SetTabIndex(button, tabIndex++);
                 aids.Children.Add(button);
             }
+            AddReferenceLessonWindowActions(aids);
             DockPanel.SetDock(aids, Dock.Right);
             feedbackStrip.Children.Add(aids);
             feedback = labStatus = ReferenceLabel("", 12, ReferenceMuted, false);
@@ -137,13 +145,13 @@ namespace TouchTypingStudio
             AutomationProperties.SetLiveSetting(labStatus, AutomationLiveSetting.Polite);
             labStatus.VerticalAlignment = VerticalAlignment.Center;
             feedbackStrip.Children.Add(labStatus);
-            Grid.SetRow(feedbackStrip, 5);
+            Grid.SetRow(feedbackStrip, 4);
             root.Children.Add(feedbackStrip);
 
             keyboard = new LiveKeyboard { IsHitTestVisible = false, Width = 1050 };
             labGuide = new Viewbox { Child = keyboard, Stretch = Stretch.Uniform,
                 StretchDirection = StretchDirection.DownOnly, MaxHeight = 142, Margin = new Thickness(16, 0, 16, 5) };
-            Grid.SetRow(labGuide, 6);
+            Grid.SetRow(labGuide, 5);
             root.Children.Add(labGuide);
             root.SizeChanged += delegate
             {
@@ -153,35 +161,31 @@ namespace TouchTypingStudio
             return root;
         }
 
-        private FrameworkElement ReferenceLessonNav()
+        private void SetReferenceLessonCaption(bool compact)
         {
-            var nav = new DockPanel { Height = 53, Margin = new Thickness(13, 0, 13, 0) };
-            var back = ReferenceLessonButton("‹", "Назад к результату", FinishLab, "LabBack", 36);
-            back.Background = Brushes.Transparent;
-            DockPanel.SetDock(back, Dock.Left);
-            nav.Children.Add(back);
-            if (customLiveChrome)
+            if (!customLiveChrome) return;
+            var chrome = WindowChrome.GetWindowChrome(this);
+            if (chrome != null) chrome.CaptionHeight = compact ? 25 : 71;
+        }
+
+        private void AddReferenceLessonWindowActions(Panel controls)
+        {
+            if (!customLiveChrome) return;
+            var minimize = ReferenceHeaderButton("Свернуть", "minimize", delegate { SystemCommands.MinimizeWindow(this); });
+            var maximize = ReferenceHeaderButton("Развернуть или восстановить", "maximize", delegate
             {
-                var caption = Stack(true);
-                caption.Children.Add(ReferenceHeaderButton("Свернуть", "minimize", delegate { SystemCommands.MinimizeWindow(this); }));
-                caption.Children.Add(ReferenceHeaderButton("Развернуть или восстановить", "maximize", delegate
-                {
-                    if (WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(this);
-                    else SystemCommands.MaximizeWindow(this);
-                }));
-                caption.Children.Add(ReferenceHeaderButton("Закрыть", "close", delegate { SystemCommands.CloseWindow(this); }));
-                caption.VerticalAlignment = VerticalAlignment.Center;
-                DockPanel.SetDock(caption, Dock.Right);
-                nav.Children.Add(caption);
+                if (WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(this);
+                else SystemCommands.MaximizeWindow(this);
+            });
+            var close = ReferenceHeaderButton("Закрыть", "close", delegate { SystemCommands.CloseWindow(this); });
+            int tabIndex = 1;
+            foreach (var button in new[] { minimize, maximize, close })
+            {
+                button.Width = 23;
+                button.Height = 27;
+                KeyboardNavigation.SetTabIndex(button, tabIndex++);
+                controls.Children.Add(button);
             }
-            var title = Stack();
-            title.VerticalAlignment = VerticalAlignment.Center;
-            title.Children.Add(ReferenceLabel("Практика · " + ReferenceAppTitle(), 17, ReferenceText, true));
-            labCounter = ReferenceLabel("", 11, ReferenceMuted, false);
-            AutomationProperties.SetAutomationId(labCounter, "LabCounter");
-            title.Children.Add(labCounter);
-            nav.Children.Add(title);
-            return nav;
         }
 
         private string ReferenceAppTitle()
