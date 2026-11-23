@@ -1,0 +1,45 @@
+name: Verify final Linux archive on Ubuntu Wayland (no publish)
+on:
+  push:
+    branches: [qa/stable18-final-linux-wayland]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  linux-window:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: touchtyping-180-candidate-archives
+          path: ${{ runner.temp }}/archive
+          github-token: ${{ github.token }}
+          run-id: 45213146057
+      - name: Install GNOME test session dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnome-shell gsettings-desktop-schemas gir1.2-gtk-4.0 python3-gi python3-gi-cairo python3-cairo dbus-x11 fonts-dejavu-core libgl1-mesa-dri
+      - name: Send keys through isolated GNOME Wayland to the packaged GTK window
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/archive"
+          sha256sum -c SHA256SUMS.txt
+          echo "e27aef28026bb52c869812fb8c157a4835dee69179b6fe50be60f9b36e929855  touch-typing-v1.8.0-linux-x64.tar.gz" | sha256sum -c
+          tar -xzf touch-typing-v1.8.0-linux-x64.tar.gz
+          cd touch-typing-linux-x64
+          patch --batch --fuzz=0 -p1 < "$GITHUB_WORKSPACE/qa/python-search-wayland.patch"
+          /usr/bin/python3 qa_runner.py --python-search-only --output "$RUNNER_TEMP/linux-evidence" || {
+            tail -n 80 -- "$RUNNER_TEMP/linux-evidence/"*.log
+            exit 1
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: final-linux-python-search-evidence
+          path: ${{ runner.temp }}/linux-evidence/

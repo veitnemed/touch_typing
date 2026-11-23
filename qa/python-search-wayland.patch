@@ -1,0 +1,143 @@
+--- a/qa_runner.py
++++ b/qa_runner.py
+@@ -30,6 +30,7 @@
+     parser.add_argument("--daily-use", action="store_true", help="Пройти сценарии VS Code и GNOME и сохранить реальные кадры")
+     parser.add_argument("--gnome-profile", action="store_true", help="Проверить учебные рабочие столы, окна и клавиши профиля GNOME")
+     parser.add_argument("--debug-day", action="store_true", help="Пройти обе миссии отладки с реальным снимком учебного терминала")
++    parser.add_argument("--python-search-only", action="store_true", help="Проверить второй результат поиска Python на GNOME")
+     parser.add_argument("--seed", type=int, default=7)
+     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
+     args = parser.parse_args()
+@@ -71,6 +72,7 @@
+             if args.gnome_profile: command.append("--gnome-profile")
+             if args.debug_day: command.append("--debug-day")
+             if args.full: command.append("--full")
++            if args.python_search_only: command.append("--python-search-only")
+             return subprocess.run(command, env=environment).returncode
+     return run_checks(args)
+ 
+@@ -128,7 +130,7 @@
+                 raise RuntimeError("Полная проверка требует исходники и SDK .NET 10.")
+             for name in projects:
+                 check(name, [dotnet, "run", "--project", str(tests / (name + ".csproj"))], timeout=300)
+-        if not args.terminal_only:
++        if not args.terminal_only and not args.python_search_only:
+             check("missions", [sys.executable, str(tests / "test_live_missions.py")], timeout=300)
+             check("protocol", [sys.executable, str(tests / "test_practice.py")])
+         subprocess.run(["gsettings", "set", "org.gnome.desktop.input-sources", "sources",
+@@ -144,6 +146,12 @@
+                 raise RuntimeError("Тестовый GNOME не запустился. См. compositor.log.")
+             time.sleep(.1)
+         time.sleep(1)
++        if args.python_search_only:
++            report["coverage"] = ["Exact packaged GTK Python search, second-only edit, save, definition and Back"]
++            ok = check("native-python-search", [sys.executable, str(tests / "test_lab_window.py"),
++                                                "--python-search-only"], timeout=360)
++            report["status"] = "passed" if ok else "failed"
++            return 0 if ok else 1
+         if args.reference_home:
+             report["coverage"].append("GTK 1006x863 home reference capture")
+             with tempfile.TemporaryDirectory(prefix="typing-reference-home-") as folder:
+--- a/qa/test_lab_window.py
++++ b/qa/test_lab_window.py
+@@ -141,6 +141,10 @@
+                 self.window.present()
+                 yield
+             self.navigate('lab')
++            if '--python-search-only' in sys.argv:
++                from qa_python_search import exercise
++                yield from exercise(self, chord, capture_png, Path(os.environ['TOUCH_TYPING_QA_OUTPUT']))
++                return
+             if '--gnome-profile' in sys.argv or '--gnome-profile-custom' in sys.argv:
+                 yield from self.exercise_gnome_profile(chord, event, capture_png, Path(os.environ["TOUCH_TYPING_QA_OUTPUT"]))
+                 return
+--- a/qa/qa_python_search.py
++++ b/qa/qa_python_search.py
+@@ -0,0 +1,87 @@
++"""Regression exercised by isolated GNOME Wayland, not standalone product logic."""
++import hashlib, json, os, re
++from pathlib import Path
++
++def exercise(self, chord, capture, output):
++    import touch_typing
++    expected_pkg = Path(__file__).resolve().parent.parent
++    assert Path(touch_typing.__file__).resolve().parent == expected_pkg
++    assert os.environ.get('WAYLAND_DISPLAY') == 'training-qa'
++    assert self.window.get_display().__gtype__.name == 'GdkWaylandDisplay'
++    lab = self.lab
++    lab.picker.set_selected(next(i for i, c in enumerate(lab.classes) if c['id'] == 'code'))
++    lab.level.set_selected(0)
++    lab.limit.set_selected(0)
++    lab.time_limit.set_selected(0)
++    lab.mission_picker.set_selected(next(i for i, (key, _) in enumerate(lab.choices) if key == 'code-find-exact-edit'))
++    yield
++    lab.start()
++    yield from self.await_lesson_capture(chord)
++    assert self.layout == 'EN', self.layout
++
++    root = '/home/student/project/task-list/'
++    def active():
++        return next(w for w in lab.state['scene']['windows'] if w['active'] and w['app'] == 'code')
++    def disk():
++        return {f['path'][len(root):]: f['content'] for f in lab.state['scene']['terminal']['files'] if f['path'].startswith(root)}
++    def read(step, phase, file, anchor, caret):
++        w = active()
++        seen = lab.state['solved'], w['focus'], w['projectRelative'], w['bodyAnchor'], w['bodyCursor']
++        assert seen == (step, phase, file, anchor, caret), (seen, lab.state['status'])
++        print('PASS', seen, w['status'], flush=True)
++    def typed(s):
++        for ch in s: yield from chord(ch.upper())
++
++    baseline = disk()
++    assert set(baseline) == {'app.py','tasks.py','storage.py','test_tasks.py'}
++    original = baseline['app.py']
++    hits = [m.start() for m in re.finditer('draft', original)]
++    assert len(hits) == 3
++    read(0, 'body', 'tasks.py', 0, 0)
++    yield from chord('Ctrl+P')
++    read(1, 'quick-open', 'tasks.py', 0, 0)
++    yield from typed('ap')
++    yield from chord('Enter')
++    read(2, 'body', 'app.py', 0, 0)
++    capture(output/'01-file-open.png'); yield
++    yield from chord('Ctrl+F')
++    read(3, 'find', 'app.py', 0, 0)
++    yield from typed('absent')
++    yield from chord('Enter')
++    read(3, 'find', 'app.py', 0, 0)
++    assert active()['status'] == 'Совпадений нет' and disk() == baseline
++    for _ in 'absent': yield from chord('Backspace')
++    yield from typed('draft')
++    yield from chord('Enter')
++    read(4, 'find', 'app.py', hits[0], hits[0]+5)
++    for j, selected in enumerate([1, 2, 0, 2, 1]):
++        yield from chord('F3' if j < 3 else 'Shift+F3')
++        read(5+j, 'find', 'app.py', hits[selected], hits[selected]+5)
++    capture(output/'02-second-match.png'); yield
++    yield from chord('Esc')
++    read(10,'body','app.py',hits[1],hits[1]+5)
++    yield from typed('ready')
++    fixed = {**baseline, 'app.py': original[:hits[1]] + 'ready' + original[hits[1]+5:]}
++    assert active()['body'] == fixed['app.py'] and disk() == baseline
++    yield from chord('Ctrl+S')
++    read(11,'body','app.py',hits[1]+5,hits[1]+5)
++    assert disk() == fixed
++    assert fixed['app.py'].count('draft') == 2 and fixed['app.py'].count('ready') == 1
++    capture(output/'03-saved-only-report.png'); yield
++    yield from chord('Home')
++    call = fixed['app.py'].rfind('\n', 0, hits[1])+1
++    read(12,'body','app.py',call,call)
++    yield from chord('F12')
++    definition = baseline['tasks.py'].index('add_task(')
++    read(13,'body','tasks.py',definition,definition)
++    capture(output/'04-definition.png'); yield
++    yield from chord('Ctrl+Alt+-')
++    read(14,'body','app.py',call,call)
++    assert disk() == fixed and lab.state['finished'] and lab.state['saved'] and lab.result
++    capture(output/'05-result.png'); yield
++    digest = lambda s: hashlib.sha256(s.encode()).hexdigest()
++    evidence = {name: {'before': digest(content), 'after': digest(fixed[name])} for name, content in baseline.items()}
++    (output/'proof.json').write_text(json.dumps({'sha':'444892cf','surface':'exact unmodified package GTK4/GNOME Wayland; Mutter RemoteDesktop virtual keyboard; actual GDK inhibition',
++        'credit': lab.state['solved'],'restored_file':'app.py','restored_anchor':call,'restored_caret':call,
++        'definition_file':'tasks.py','definition_offset':definition,'files':evidence},indent=2))
++    print('PASS exact 14/14, all four backing files and restored caret', evidence, flush=True)
