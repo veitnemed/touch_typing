@@ -1,0 +1,90 @@
+name: Publish TouchTyping Windows x64 beta
+on:
+  push:
+    branches: [release/v1.8.0-preview.7-windows-beta]
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: touchtyping-windows-beta-preview-7
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE_SHA: '444892cfcc750af678e6c88835f05cfc758bc7f8'
+      RUN: '45159030990'
+      STOCK_RUN: '45202893039'
+      STOCK_SHA: '5fe082d8e42b3f628ad68ea07ebaa04aff91bc7f'
+      WINDOWS_SHA256: '5c99ecca7d5a279c6593dd83abe6aa12f1b6ba35c2149c3f1532c5aab01ad8a0'
+      REPO: 'veitnemed/touch_typing'
+      TAG: 'v1.8.0-preview.7-windows-beta'
+    steps:
+      - name: Publish only the exact verified Windows ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/actions/runs/$RUN" | jq -e --arg sha "$CANDIDATE_SHA" '
+            .head_sha == $sha and .head_branch == "feature/github-dark-python"
+            and .conclusion == "success" and .path == ".github/workflows/python-editor-native-proof.yml"' >/dev/null
+          gh api "repos/$REPO/actions/runs/$RUN/jobs?per_page=50" | jq -e '
+            any(.jobs[]; .name == "package" and .conclusion == "success") and
+            any(.jobs[]; .name == "native-wpf" and .conclusion == "success" and
+              (.steps as $steps | [
+                "Verify exact package and exercise the real WPF editor",
+                "Practice both Python missions and neutral-project navigation in native WPF"
+              ] | all(. as $expected | any($steps[]; .name == $expected and .conclusion == "success"))))' >/dev/null
+          gh api "repos/$REPO/actions/runs/$STOCK_RUN" | jq -e --arg sha "$STOCK_SHA" '
+            .head_sha == $sha and .head_branch == "qa/stock-launch-444892c"
+            and .status == "completed"
+            and .path == ".github/workflows/stock-launch-444.yml"' >/dev/null
+          gh api "repos/$REPO/actions/runs/$STOCK_RUN/jobs?per_page=50" | jq -e '
+            any(.jobs[]; .name == "Stock launch (windows-2025)" and .conclusion == "success" and
+              any(.steps[]; .name == "Verify exact ZIP and exercise unchanged Start-Live.cmd" and .conclusion == "success"))' >/dev/null
+          mkdir -p "$RUNNER_TEMP/windows-beta"
+          cd "$RUNNER_TEMP/windows-beta"
+          gh run download "$STOCK_RUN" --repo "$REPO" --name windows-2025-444892c-normal-profile-evidence --dir stock-proof
+          # Windows PowerShell writes logs as UTF-16; tolerate UTF-8 without lossy conversion.
+          python3 - <<'PYPROOF'
+          import pathlib, re
+          raw = pathlib.Path("stock-proof/windows-normal-launch.log").read_bytes()
+          log = raw.decode("utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig")
+          if not re.search(r"(?m)^PASS: [1-9][0-9]* normal-launch assertions on a fresh hosted Windows profile\s*$", log):
+              raise SystemExit("Stock launcher evidence is missing the positive assertion")
+          PYPROOF
+          gh run download "$RUN" --repo "$REPO" --name python-editor-windows-candidate --dir .
+          sha256sum -c SHA256SUMS.txt
+          echo "$WINDOWS_SHA256  touchtyping-python-editor.zip" | sha256sum -c
+          unzip -tq touchtyping-python-editor.zip
+          unzip -Z1 touchtyping-python-editor.zip > files.txt
+          grep -Fx 'Start-Live.cmd' files.txt
+          grep -Fx 'TouchTyping.exe' files.txt
+          for asset in Roboto-Regular.ttf Roboto-Medium.ttf Roboto-Bold.ttf OFL.txt ROBOTO-SOURCE.txt; do
+            grep -Fx "fonts/$asset" files.txt
+          done
+          if grep -E '(^|/)progress\.xml$' files.txt; then echo 'Unexpected user profile'; exit 1; fi
+          if grep -Ei '(^|/)(\.env(\.|$)|\.git(/|$)|progress\.xml($|[.~])|.*\.(pem|pfx|p12|key)$|profiles?/|secrets?/|credentials($|\.))' files.txt; then
+            echo 'Potential private profile/secret found in archive'; exit 1
+          fi
+          mv touchtyping-python-editor.zip "touch-typing-$TAG-x64.zip"
+          sha256sum "touch-typing-$TAG-x64.zip" > SHA256SUMS.txt
+          cat > notes.md <<'NOTES'
+          Отдельная переносимая бета Windows x64. Распакуйте ZIP целиком и запустите `Start-Live.cmd`. Нужен .NET Framework 4.8 или совместимая более новая версия.
+          
+          В этом выпуске учебный VS Code получил тему GitHub Dark и нейтральный Python-проект. В настоящем окне WPF проверены оба сценария редактирования и навигация по проекту. Тот же ZIP отдельно прошёл запуск через штатный `Start-Live.cmd` на новом профиле в Windows Server 2025 x64.
+          
+          Это предварительный выпуск. Клиентская Windows 10/11 x64, миграция пользовательского профиля, физическая клавиатура и Windows on Arm в требования приёмки не входили и не заявлены как проверенные.
+          
+          [Сборка и тесты редактора](https://github.com/veitnemed/touch_typing/actions/runs/45159030990) · [Проверка штатного запуска](https://github.com/veitnemed/touch_typing/actions/runs/45202893039) · исходный commit `444892cfcc750af678e6c88835f05cfc758bc7f8`.
+          NOTES
+          if git ls-remote --exit-code "https://github.com/$REPO.git" "refs/tags/$TAG" >/dev/null; then
+            echo "Tag already exists; will not modify it"; exit 1
+          else
+            code=$?
+            [ "$code" -eq 2 ] || exit "$code"
+          fi
+          gh release create "$TAG" --repo "$REPO" --target "$CANDIDATE_SHA" --prerelease --latest=false \
+            --title "TouchTyping v1.8.0-preview.7 — Windows x64 beta" --notes-file notes.md \
+            "touch-typing-$TAG-x64.zip" SHA256SUMS.txt
