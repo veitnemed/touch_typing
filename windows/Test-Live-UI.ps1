@@ -4,11 +4,14 @@ param(
     [switch]$FullSession,
     [switch]$WorkdaySourceNote,
     [switch]$ReferenceEvidence,
+    [switch]$ReferenceBrowser,
     [int]$Seed = 20261122,
     [string]$OutputDirectory = (Join-Path $PSScriptRoot ('ui-check-' + (Get-Date -Format 'yyyyMMdd-HHmmss')))
 )
 $ErrorActionPreference = 'Stop'
-if ($FullSession -and $WorkdaySourceNote) { throw 'Choose either FullSession or WorkdaySourceNote.' }
+$modes = @($FullSession,$WorkdaySourceNote,$ReferenceBrowser) | Where-Object { [bool]$_ }
+if (@($modes).Count -gt 1) { throw 'Choose only one of FullSession, WorkdaySourceNote or ReferenceBrowser.' }
+if ($ReferenceBrowser) { $Seed = 0 }
 if (-not $Application) {
     $Application = Join-Path $PSScriptRoot 'TouchTyping.exe'
     if (-not (Test-Path -LiteralPath $Application)) {
@@ -32,15 +35,16 @@ $report = [ordered]@{
     application = $Application
     fullSession = [bool]$FullSession
     workdaySourceNote = [bool]$WorkdaySourceNote
-    referenceEvidence = [bool]$ReferenceEvidence
+    referenceEvidence = [bool]($ReferenceEvidence -or $ReferenceBrowser)
+    referenceBrowser = [bool]$ReferenceBrowser
     profile = 'TouchTypingStudio-QA'
     log = 'windows-ui.log'
 }
 try {
     $env:TOUCH_TYPING_QA_SEED = $Seed.ToString([Globalization.CultureInfo]::InvariantCulture)
     $env:TOUCH_TYPING_QA_DATA_ROOT = Join-Path $OutputDirectory 'profile'
-    if ($WorkdaySourceNote -and (Test-Path -LiteralPath $env:TOUCH_TYPING_QA_DATA_ROOT)) {
-        throw 'Use a new output directory for the standalone Workday check.'
+    if (($WorkdaySourceNote -or $ReferenceBrowser) -and (Test-Path -LiteralPath $env:TOUCH_TYPING_QA_DATA_ROOT)) {
+        throw 'Use a new output directory for the standalone Workday or Chrome check.'
     }
     $report | ConvertTo-Json | Set-Content -LiteralPath $reportFile -Encoding UTF8
     & (Join-Path $framework 'csc.exe') /nologo /target:exe /platform:x64 /codepage:65001 "/out:$test" `
@@ -52,6 +56,7 @@ try {
     if ($FullSession) { $arguments += '--full-session' }
     if ($WorkdaySourceNote) { $arguments += '--workday-source-note' }
     if ($ReferenceEvidence) { $arguments += '--reference-evidence' }
+    if ($ReferenceBrowser) { $arguments += '--reference-browser' }
     # Windows PowerShell 5 wraps native stderr as errors. Do not abort the
     # pipeline on the first diagnostic line; the native exit code is the gate.
     $oldPreference = $ErrorActionPreference

@@ -27,10 +27,12 @@ internal static class LiveUiSmoke
         if (arguments.Length == 0) { Console.Error.WriteLine("Pass the full path to TouchTyping.exe."); return 2; }
         try
         {
-            if (arguments.Contains("--reference-evidence") && SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
+            bool referenceBrowser = arguments.Contains("--reference-browser");
+            bool referenceEvidence = referenceBrowser || arguments.Contains("--reference-evidence");
+            if (referenceEvidence && SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
                 throw new InvalidOperationException("Per-monitor-aware evidence capture cannot be enabled.");
             string path = Path.GetFullPath(arguments[0]);
-            if (arguments.Contains("--reference-evidence"))
+            if (referenceEvidence)
                 evidenceDirectory = Directory.CreateDirectory(Path.Combine(
                     Directory.GetParent(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT")).FullName,
                     "native-reference-evidence")).FullName;
@@ -40,6 +42,12 @@ internal static class LiveUiSmoke
             window = AutomationElement.FromHandle(trainer);
             Check(window.Current.ProcessId == app.Id, "The automation root belongs to the new QA process");
             Focus();
+            if (referenceBrowser)
+            {
+                CheckReferenceBrowser();
+                Console.WriteLine("PASS: " + count + " native WPF reference browser assertions");
+                return 0;
+            }
             if (arguments.Contains("--workday-source-note"))
             {
                 CheckWorkdaySourceNote();
@@ -75,6 +83,7 @@ internal static class LiveUiSmoke
                     Check(Name("LabClock") == "03:00" || Name("LabClock") == "02:59", "A class starts with 180 seconds");
                     Check(Visible("LabScenarioProgress") && !Visible("ResultMetric-accuracy"), "Active lesson shows scenario progress, not accuracy");
                     Check(Name("LabTask").Length > 0 && Exists("LabDesktop"), "Task and Ubuntu scene are accessible");
+                    if (mode == 0) CaptureReferenceFrame("class-" + name);
                     Key("F8");
                     Until(delegate { return Exists("LabPauseResult"); }, "pause result overlay");
                     Check(Name("LabPauseResult") == "Пауза", "Pause shows a Stamina-style result panel");
@@ -213,6 +222,49 @@ internal static class LiveUiSmoke
         }
     }
 
+    private static void CheckReferenceBrowser()
+    {
+        Check(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED") == "0",
+            "Use the pinned Python documentation fixture (seed 0)");
+        Invoke("LabClass-chrome");
+        Select("LabMode", 1);
+        Select("LabLevel", 0);
+        Select("LabDuration", 0);
+        SelectMissionByName("Подготовить справочник к чтению");
+        Key("F5");
+        Until(delegate { return Exists("LabTask") && Exists("LabDesktop") && Name("LabPause").StartsWith("Пауза"); },
+            "active Chrome reading mission");
+        Check(Name("LabCounter").Contains("Подготовить справочник к чтению") &&
+            Name("LabDesktop").StartsWith("Учебный Chrome") && Name("LabDesktop").Contains("Chrome."),
+            "The actual training window is the selected Chrome mission");
+        Check(Find("LabTask").Current.ItemStatus == "keys:Ctrl+L" && ReadSolved() == 0,
+            "The initial visible task is Ctrl+L with no credit yet");
+        Check(Visible("LabScenarioProgress") && !Visible("ResultMetric-accuracy"),
+            "Activity shows progress and no accuracy");
+        CaptureReferenceFrame("07-chrome-python-docs-before-ctrl-l");
+        Chord("Ctrl+L");
+        Until(delegate { return ReadSolved() == 1 && Find("LabTask").Current.ItemStatus == "keys:Ctrl+C"; },
+            "native Ctrl+L earns exactly one credit and advances to copy");
+        CaptureReferenceFrame("08-chrome-python-docs-address-selected");
+        Chord("Ctrl+C");
+        Until(delegate { return ReadSolved() == 2 && Find("LabTask").Current.ItemStatus == "keys:Ctrl+T"; },
+            "native Ctrl+C earns one additional credit and advances to new tab");
+        Check(true, "Native address selection and clipboard sequence advanced in order");
+        Key("F8");
+        Until(delegate { return Exists("LabPauseResult"); }, "native Chrome pause");
+        CheckThreeHeadlineMetrics("Chrome pause");
+        CaptureReferenceFrame("09-chrome-pause");
+        Key("Space");
+        Until(delegate { return !Exists("LabPauseResult"); }, "native Chrome resume");
+        Key("F10");
+        Until(delegate { return Exists("LabResult"); }, "native Chrome result");
+        CheckThreeHeadlineMetrics("Chrome result");
+        string summary = Find("LabResult").Current.HelpText;
+        Check(summary.Contains("Выполнено 2.") && summary.Contains("Ошибки 0."),
+            "The visible result records exactly two correct actions");
+        CaptureReferenceFrame("10-chrome-result");
+    }
+
     private static void CheckWorkdaySourceNote()
     {
         string qaRoot = Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT");
@@ -247,6 +299,8 @@ internal static class LiveUiSmoke
                 Check(activeBefore.Contains("Chrome."), "The simulated browser is active before opening the source");
 
             int before = step - 1;
+            if (title == "Откройте «notes.txt»" && activeBefore.Contains("Файлы."))
+                CaptureReferenceFrame("workday-03-file-manager-before-open");
             if (instruction.StartsWith("keys:", StringComparison.Ordinal) && instruction.Length > 5)
             {
                 string gesture = instruction.Substring(5);
@@ -265,11 +319,13 @@ internal static class LiveUiSmoke
                 {
                     Check(foundSource && activeBefore.Contains("Chrome."), "Ctrl+C copies from the opened browser document");
                     copied = true;
+                    CaptureReferenceFrame("workday-01-source-in-browser");
                 }
                 if (gesture == "Ctrl+V")
                 {
                     Check(copied && activeBefore.Contains("Visual Studio Code."), "Ctrl+V pastes from the browser into the editor");
                     pasted = true;
+                    CaptureReferenceFrame("workday-02-editor-after-paste");
                 }
                 if (gesture == "Ctrl+S")
                 {
@@ -291,6 +347,7 @@ internal static class LiveUiSmoke
                 if (step == total)
                 {
                     Check(reopened && command == "cat notes.txt", "The final native Enter submits cat notes.txt after save and reopen");
+                    CaptureReferenceFrame("workday-04-terminal-before-readback");
                     Key("Enter");
                     Until(delegate { return Exists("LabResult"); }, "completed Workday result");
                     submitted = true;
@@ -486,6 +543,8 @@ internal static class LiveUiSmoke
         Key("Backspace");
         CheckTerminalState("ade", 1);
         CaptureReferenceFrame("03-terminal-after-backspace");
+        // Terminal Ctrl+U removes the portion to the left of the caret only.
+        Key("End");
         Chord("Ctrl+U");
         CheckTerminalState("", 0);
     }

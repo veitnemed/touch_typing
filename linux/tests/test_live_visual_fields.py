@@ -53,6 +53,8 @@ class LiveVisualFields(unittest.TestCase):
         view = load_view()
         self.view = object.__new__(view)
         self.view.scene = {}
+        self.view.reference_chrome = False
+        self.view.presentation_app = "ubuntu"
         self.view.field_scroll = {}
         self.view.create_pango_layout = Layout
         self.view.rect = lambda *values: values
@@ -80,10 +82,16 @@ class LiveVisualFields(unittest.TestCase):
         assert self.view.field_scroll[key] == 0
 
     def test_chrome_find_draws_editable_selection(self):
-        self.view.chrome({"focus": "find", "url": "about:blank", "input": "abc",
-                          "cursor": 2, "anchor": 0}, 0, 0, 520, 360)
-        assert any(p[0] == "#35629b" and p[4] > 0 for p in self.paints)
-        assert any(p[0] == "#ffffff" and p[3] == 1.5 for p in self.paints)
+        for reference, background in ((False, "#202124"), (True, "#201d36")):
+            with self.subTest(reference=reference):
+                self.view.reference_chrome = reference
+                self.view.presentation_app = "chrome"
+                self.paints.clear()
+                self.view.chrome({"focus": "find", "url": "about:blank", "input": "abc",
+                                  "cursor": 2, "anchor": 0}, 0, 0, 520, 360)
+                assert self.paints[0][0] == background
+                assert any(p[0] == "#35629b" and p[4] > 0 for p in self.paints)
+                assert any(p[0] == "#ffffff" and p[3] == 1.5 for p in self.paints)
 
     def test_overflowing_code_tabs_show_active_tab_not_just_its_body_name(self):
         tabs = [{"title": "file" + str(i)} for i in range(12)]

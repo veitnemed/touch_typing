@@ -104,7 +104,18 @@ jobs:
           $appDir = Join-Path $env:RUNNER_TEMP 'TouchTyping QA'
           $app = Join-Path $appDir TouchTyping.exe
           $out = Join-Path $env:RUNNER_TEMP windows-evidence
-          & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -WorkdaySourceNote -Seed 0 -OutputDirectory (Join-Path $out 'workday-source-note')
+          $visualOptions = @{}
+          if ($env:GITHUB_REF -eq 'refs/heads/feature/reference-ui') { $visualOptions.ReferenceEvidence = $true }
+          & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -WorkdaySourceNote -Seed 0 -OutputDirectory (Join-Path $out 'workday-source-note') @visualOptions
+      - name: Verify Python-document lesson in native WPF Chrome
+        if: github.ref == 'refs/heads/feature/reference-ui'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $appDir = Join-Path $env:RUNNER_TEMP 'TouchTyping QA'
+          $app = Join-Path $appDir TouchTyping.exe
+          $out = Join-Path $env:RUNNER_TEMP 'windows-evidence/reference-browser'
+          & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -ReferenceBrowser -OutputDirectory $out
       - name: Capture exact-size native WPF Home
         if: github.ref == 'refs/heads/feature/reference-ui'
         shell: powershell
