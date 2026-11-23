@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [switch]$LiveUx,
+    [switch]$LiveUxSmall,
     [string]$Application,
     [switch]$FullSession,
     [switch]$WorkdaySourceNote,
@@ -67,7 +68,7 @@ try {
         "/reference:$framework\System.Drawing.dll" "/reference:$framework\System.Windows.Forms.dll" $source 2>&1 | Tee-Object -FilePath $log
     if ($LASTEXITCODE -ne 0) { throw 'UI smoke runner compilation failed.' }
     $arguments = @($Application)
-    if ($LiveUx) { $arguments += '--live-ux' }
+    if ($LiveUxSmall) { $arguments += '--live-ux-small' } elseif ($LiveUx) { $arguments += '--live-ux' }
     if ($FullSession) { $arguments += '--full-session' }
     if ($WorkdaySourceNote) { $arguments += '--workday-source-note' }
     if ($ReferenceEvidence) { $arguments += '--reference-evidence' }

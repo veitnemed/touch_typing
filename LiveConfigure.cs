@@ -108,6 +108,7 @@ namespace TouchTypingStudio
 
             var scroll = new ScrollViewer { Content = stack, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Background = ReferenceHomeSurface(), Focusable = false };
+            ApplyLiveScrollStyle(scroll);
             AutomationProperties.SetAutomationId(scroll, "LiveConfigurePanel");
             Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, new Action(delegate
             { if (ReferenceEquals(center.Content, scroll)) back.Focus(); }));

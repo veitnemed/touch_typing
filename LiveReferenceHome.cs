@@ -234,7 +234,8 @@ namespace TouchTypingStudio
             var hero = Stack();
             hero.Margin = new Thickness(18, 0, 0, 0);
             hero.MinHeight = 157;
-            hero.Children.Add(ReferenceLabel("Практика без мыши", 40, ReferenceText, true));
+            var headline = ReferenceLabel("Практика без мыши", 40, ReferenceText, true);
+            hero.Children.Add(headline);
             var lead = ReferenceLabel("Управляйте системой, приложениями и рабочими задачами\nтолько с клавиатуры.", 18, ReferenceMuted, false);
             lead.Margin = new Thickness(0, 8, 0, 0);
             lead.MaxWidth = 600;
@@ -249,13 +250,16 @@ namespace TouchTypingStudio
             pageContent.Children.Add(grid);
             liveCatalogButtons.Clear();
             var cards = new List<FrameworkElement>();
+            var density = new List<Action<bool>>();
             foreach (var item in classes)
             {
                 string app = item.S("id");
                 string[] shortcuts = item.Items("shortcuts").Select(x => x.S("id")).Where(x => x.Length > 0).Distinct().ToArray();
                 int completed = shortcuts.Count(id => distinctConfirmed.Contains("lab/" + app + "/" + id));
                 int percent = shortcuts.Length > 0 ? (int)Math.Round(completed * 100.0 / shortcuts.Length) : 0;
-                var card = BuildReferenceCard(app, item.S("title"), percent, completed, shortcuts.Length, app == labApp);
+                Action<bool> applyDensity;
+                var card = BuildReferenceCard(app, item.S("title"), percent, completed, shortcuts.Length, app == labApp, out applyDensity);
+                density.Add(applyDensity);
                 liveCatalogButtons[app] = card;
                 var tile = Stack();
                 tile.Children.Add(card);
@@ -283,12 +287,18 @@ namespace TouchTypingStudio
                     actions.Children.Add(resume);
                 }
                 tile.Children.Add(actions);
+                density.Add(delegate(bool compact)
+                {
+                    actions.Margin = new Thickness(0, compact ? 4 : 7, 0, 0);
+                    foreach (Button action in actions.Children)
+                        action.Padding = new Thickness(11, compact ? 4 : 7, 11, compact ? 4 : 7);
+                });
                 cards.Add(tile);
             }
 
             if (cards.Count > 0)
             {
-                Action<int> arrange = delegate(int columns)
+                Action<int, bool> arrange = delegate(int columns, bool compact)
                 {
                     foreach (var card in cards)
                     {
@@ -298,7 +308,7 @@ namespace TouchTypingStudio
                     grid.Children.Clear();
                     grid.ColumnDefinitions.Clear();
                     grid.RowDefinitions.Clear();
-                    if (columns == 3 && cards.Count == 5)
+                    if (columns == 3 && cards.Count == 5 && !compact)
                     {
                         var upper = ReferenceCardRow(new[] { 314, 20, 296, 20, 294 });
                         var lower = ReferenceCardRow(new[] { 9, 344, 24, 356, 211 });
@@ -329,31 +339,55 @@ namespace TouchTypingStudio
                         {
                             var card = cards[i];
                             int col = i % columns, row = i / columns;
-                            card.MinHeight = 232;
-                            card.Margin = new Thickness(0, 0, col == columns - 1 ? 0 : 18, 18);
+                            card.MinHeight = compact ? 0 : 232;
+                            card.Margin = new Thickness(0, 0, col == columns - 1 ? 0 : compact ? 12 : 18, compact ? 10 : 18);
                             Grid.SetColumn(card, col);
                             Grid.SetRow(card, row);
                             grid.Children.Add(card);
                         }
                     }
                 };
-                int currentColumns = 3;
-                arrange(currentColumns);
-                grid.SizeChanged += delegate
+                int currentColumns = 0;
+                bool wasCompact = false;
+                Action reflow = delegate
                 {
-                    int requested = grid.ActualWidth >= 800 ? 3 : grid.ActualWidth >= 490 ? 2 : 1;
-                    if (requested == currentColumns) return;
+                    if (main.ActualWidth <= 0 || main.ActualHeight <= 0) return;
+                    bool compact = main.ActualHeight <= 705;
+                    int requested = main.ActualWidth >= (compact ? 850 : 875) ? 3 : main.ActualWidth >= 535 ? 2 : 1;
+                    if (requested == currentColumns && compact == wasCompact) return;
                     currentColumns = requested;
-                    arrange(currentColumns);
+                    wasCompact = compact;
+                    var focused = Keyboard.FocusedElement as FrameworkElement;
+                    bool cardHadFocus = focused != null && cards.Any(tile => tile.IsAncestorOf(focused));
+                    pageContent.Margin = compact ? new Thickness(20, 15, 20, 12) : new Thickness(35, 47, 27, 33);
+                    hero.Margin = compact ? new Thickness(2, 0, 0, 7) : new Thickness(18, 0, 0, 0);
+                    hero.MinHeight = compact ? 0 : 157;
+                    headline.FontSize = compact ? 28 : 40;
+                    headline.LineHeight = headline.FontSize * 1.26;
+                    lead.FontSize = compact ? 14 : 18;
+                    lead.LineHeight = lead.FontSize * 1.26;
+                    lead.Margin = new Thickness(0, compact ? 3 : 8, 0, 0);
+                    lead.MaxWidth = compact ? 820 : 600;
+                    lead.Text = compact ? "Управляйте системой, приложениями и рабочими задачами только с клавиатуры." :
+                        "Управляйте системой, приложениями и рабочими задачами\nтолько с клавиатуры.";
+                    profile.Margin = compact ? new Thickness(2, 0, 0, 7) : new Thickness(18, 0, 0, 14);
+                    ConfigureDesktopDensity(profile, compact);
+                    foreach (var set in density) set(compact);
+                    arrange(requested, compact);
+                    if (cardHadFocus) focused.Focus();
                 };
+                arrange(3, false);
+                main.SizeChanged += delegate { reflow(); };
+                main.Loaded += delegate { reflow(); };
             }
             else
             {
-                pageContent.Children.Add(ReferenceLabel("Каталог недоступен. Откройте «Практика», чтобы повторить загрузку.", 17, ReferenceMuted, false));
+                pageContent.Children.Add(ReferenceLabel("Каталог недоступен. Откройте Live, чтобы повторить загрузку.", 17, ReferenceMuted, false));
             }
 
             var scroll = new ScrollViewer { Content = pageContent, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Focusable = false };
+            ApplyLiveScrollStyle(scroll);
             main.Children.Add(scroll);
             AutomationProperties.SetAutomationId(scroll, "HomeDashboard");
             AutomationProperties.SetName(scroll, "Практика без мыши");
@@ -370,7 +404,7 @@ namespace TouchTypingStudio
             return row;
         }
 
-        private Button BuildReferenceCard(string app, string title, int percent, int completed, int total, bool selected)
+        private Button BuildReferenceCard(string app, string title, int percent, int completed, int total, bool selected, out Action<bool> applyDensity)
         {
             bool compactCard = app == "terminal" || app == "workday";
             var body = Stack();
@@ -382,10 +416,13 @@ namespace TouchTypingStudio
                     app == "workday" ? Ui.Brush("#23423D") : app == "terminal" ? Ui.Brush("#3C375E") : Ui.Brush("#303057"),
                 Child = ReferenceIcon(app, 46)
             };
-            body.Children.Add(emblem);
+            var identity = new DockPanel();
+            DockPanel.SetDock(emblem, Dock.Top);
+            identity.Children.Add(emblem);
             var primary = ReferenceLabel(title, 27, ReferenceText, true);
             primary.Margin = new Thickness(0, 8, 0, 0);
-            body.Children.Add(primary);
+            identity.Children.Add(primary);
+            body.Children.Add(identity);
             string summary = app == "ubuntu" ? "Работа в Linux: окна, файлы, приложения, система." :
                 app == "windows" ? "Работа в Windows 10: Пуск, окна, задачи и рабочие столы." :
                 app == "chrome" ? "Эффективная работа в браузере без мыши." :
@@ -406,6 +443,33 @@ namespace TouchTypingStudio
             body.Children.Add(meter);
 
             var button = ReferenceButton(delegate { LaunchLiveCard(app, false); }, 19);
+            applyDensity = delegate(bool compact)
+            {
+                DockPanel.SetDock(emblem, compact ? Dock.Left : Dock.Top);
+                emblem.Margin = compact ? new Thickness(0, 0, 8, 0) : new Thickness(0);
+                emblem.Width = emblem.Height = compact ? 35 : compactCard ? 62 : 70;
+                emblem.CornerRadius = new CornerRadius(compact ? 9 : 17);
+                var drawing = emblem.Child as FrameworkElement;
+                if (drawing != null) drawing.Width = drawing.Height = compact ? 24 : 46;
+                primary.FontSize = compact ? 19 : 27;
+                primary.LineHeight = primary.FontSize * 1.26;
+                primary.VerticalAlignment = compact ? VerticalAlignment.Center : VerticalAlignment.Top;
+                primary.Margin = new Thickness(0, compact ? 0 : 8, 0, 0);
+                secondary.FontSize = compact ? 13 : 17;
+                secondary.LineHeight = secondary.FontSize * 1.26;
+                secondary.MinHeight = compact ? 35 : compactCard ? 44 : 49;
+                secondary.Margin = new Thickness(0, compact ? 4 : 6, 0, 0);
+                row.Margin = new Thickness(0, compact ? 3 : 13, 0, compact ? 4 : 9);
+                ((FrameworkElement)row.Children[0]).Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+                foreach (var label in row.Children.OfType<TextBlock>())
+                {
+                    label.FontSize = compact ? 13 : 17;
+                    label.LineHeight = label.FontSize * 1.24;
+                }
+                meter.Height = compact ? 6 : 12;
+                button.Padding = compact ? new Thickness(12, 9, 12, 9) :
+                    new Thickness(30, 18, 26, compactCard ? 16 : 19);
+            };
             button.Content = body;
             button.Cursor = Cursors.Hand;
             button.HorizontalContentAlignment = HorizontalAlignment.Stretch;

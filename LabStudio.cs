@@ -48,7 +48,7 @@ namespace TouchTypingStudio
         {
             var group = Stack();
             group.Margin = new Thickness(0, 0, 0, 14);
-            var title = Label("Система для практики", 17, Ink, true);
+            var title = ReferenceLabel("Система для практики", 17, ReferenceText, true);
             AutomationProperties.SetAutomationId(title, "LabDesktopProfileHeading");
             group.Children.Add(title);
             var row = new WrapPanel { Margin = new Thickness(0, 5, 0, 1) };
@@ -57,7 +57,10 @@ namespace TouchTypingStudio
             row.Children.Add(labDesktopUbuntuChoice);
             row.Children.Add(labDesktopWindowsChoice);
             group.Children.Add(row);
-            var hint = Label("Выбор системы меняет сочетания и задания, но не настройки компьютера.", 13, Dim);
+            const string detail = "Выбор системы меняет сочетания и задания, но не настройки компьютера.";
+            var hint = ReferenceLabel(detail, 13, ReferenceMuted, false);
+            group.ToolTip = detail;
+            AutomationProperties.SetHelpText(title, detail);
             hint.TextWrapping = TextWrapping.Wrap;
             group.Children.Add(hint);
             return group;
@@ -67,7 +70,7 @@ namespace TouchTypingStudio
         {
             bool selected = labDesktopProfile == id;
             Button button = null;
-            button = ActionButton(label, delegate
+            button = ReferenceButton(delegate
             {
                 if (labDesktopProfile == id) return;
                 var updated = Request("settings", "desktopProfile", id);
@@ -83,13 +86,36 @@ namespace TouchTypingStudio
                 redraw();
                 var next = id == "windows" ? labDesktopWindowsChoice : labDesktopUbuntuChoice;
                 if (next != null) next.Focus();
-            }, selected);
+            }, 8);
+            button.Content = label;
+            button.Foreground = ReferenceText;
+            button.Background = selected ? ReferenceGradient("#8C72FA", "#693FE6", 90) : Ui.Brush("#30254D");
+            button.BorderBrush = Ui.Brush(selected ? "#B69AFF" : "#514171");
+            button.BorderThickness = new Thickness(1);
+            button.Padding = new Thickness(12, 6, 12, 6);
             button.Margin = new Thickness(0, 0, 10, 5);
             button.MinWidth = 130;
             AutomationProperties.SetAutomationId(button, "LabDesktopProfile-" + id);
             AutomationProperties.SetName(button, label + (selected ? ", выбрано" : ", выбрать для практики"));
             button.ToolTip = "Тренировать сочетания и рабочий стол " + label + " в симуляции";
             return button;
+        }
+
+        private static void ConfigureDesktopDensity(FrameworkElement element, bool compact)
+        {
+            var group = (StackPanel)element;
+            var title = (TextBlock)group.Children[0];
+            var row = (WrapPanel)group.Children[1];
+            title.FontSize = compact ? 13 : 17;
+            title.LineHeight = title.FontSize * 1.26;
+            row.Margin = new Thickness(0, compact ? 3 : 5, 0, compact ? 0 : 1);
+            foreach (Button button in row.Children)
+            {
+                button.MinWidth = compact ? 105 : 130;
+                button.Margin = new Thickness(0, 0, 8, compact ? 0 : 5);
+                button.Padding = new Thickness(12, compact ? 4 : 6, 12, compact ? 4 : 6);
+            }
+            group.Children[2].Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
         }
 
         private bool UsesSelectedDesktop(Data item)

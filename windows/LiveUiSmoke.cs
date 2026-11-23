@@ -29,7 +29,8 @@ internal static class LiveUiSmoke
         if (arguments.Length == 0) { Console.Error.WriteLine("Pass the full path to TouchTyping.exe."); return 2; }
         try
         {
-            bool liveUx = arguments.Contains("--live-ux");
+            bool liveUxSmall = arguments.Contains("--live-ux-small");
+            bool liveUx = liveUxSmall || arguments.Contains("--live-ux");
             bool referenceBrowser = arguments.Contains("--reference-browser");
             bool dailyUse = arguments.Contains("--daily-use");
             bool gnomeProfile = arguments.Contains("--gnome-profile");
@@ -57,7 +58,8 @@ internal static class LiveUiSmoke
             Focus();
             if (liveUx)
             {
-                CheckLiveUx(path);
+                if (liveUxSmall) ResizeOwnedEditorClient(1024, 600);
+                CheckLiveUx(path, liveUxSmall);
                 Console.WriteLine("PASS: " + count + " WPF Live direct-catalog and Configure assertions");
                 return 0;
             }
@@ -292,13 +294,14 @@ internal static class LiveUiSmoke
         }
     }
 
-    private static void CheckLiveUx(string executable)
+    private static void CheckLiveUx(string executable, bool small)
     {
         Until(delegate { return Visible("HomeDashboard") && Visible("HomeClass-chrome"); }, "single Live catalog opens on startup");
         Check(Visible("ReferenceNav-practice") && Visible("ReferenceNav-learn") &&
             !Exists("ReferenceNav-home") && !Exists("ReferenceNav-progress"), "Only Live and typing are top-level sections");
         Check(!Exists("LabStart") && !Exists("LabMission"), "No duplicate chooser or permanent Start controls");
         CaptureLiveUxFrame("live-ux-01-catalog");
+        if (small) CheckCompactLiveCatalog();
         Invoke("LiveConfigure-chrome");
         Until(delegate { return Visible("LiveConfigurePanel") && Visible("LabMission") && Exists("LabStart"); }, "separate Chrome Configure opens");
         Check(!Exists("HomeClass-chrome") && Name("LiveConfigureHeading").Contains("Chrome"), "Configure has no embedded second catalog");
@@ -310,6 +313,21 @@ internal static class LiveUiSmoke
         CaptureLiveUxFrame("live-ux-02-configure-open-popup");
         Key("Esc");
         Check(expander.Current.ExpandCollapseState == ExpandCollapseState.Collapsed, "Escape closes the option list");
+        if (small)
+        {
+            foreach (string id in new[] { "LabMission", "LabMode", "LabDuration", "LabTimer" })
+            {
+                var picker = Find(id);
+                picker.SetFocus();
+                Until(delegate { return IsWithinLiveClient(id); }, id + " keyboard focus scrolls the control into view");
+                Chord("Alt+Down");
+                var options = (ExpandCollapsePattern)picker.GetCurrentPattern(ExpandCollapsePattern.Pattern);
+                Check(options.Current.ExpandCollapseState == ExpandCollapseState.Expanded, id + " opens with the same native dark popup template");
+                CaptureLiveUxFrame("live-ux-small-dropdown-" + id);
+                Key("Esc");
+                Check(options.Current.ExpandCollapseState == ExpandCollapseState.Collapsed, id + " closes with Escape");
+            }
+        }
         Invoke("LiveConfigureBack");
         Until(delegate { return FocusedLiveCard("chrome"); }, "Configure returns focus to Chrome");
         Key("Enter");
@@ -343,6 +361,7 @@ internal static class LiveUiSmoke
         Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "trainer restarts", 12000);
         window = AutomationElement.FromHandle(trainer);
         Focus();
+        if (small) ResizeOwnedEditorClient(1024, 600);
         Invoke("LiveResume-chrome");
         Until(delegate { return Visible("LabDesktop") && ReadSolved() == 1; }, "explicit Continue resumes the saved first credit");
         Check(Visible("LiveAidPanel") && Find("LiveAidPanel").Current.ItemStatus == "keyboard;no-hands",
@@ -352,6 +371,42 @@ internal static class LiveUiSmoke
         CaptureLiveUxFrame("live-ux-04-result");
         Invoke("LabChooseClass");
         Until(delegate { return FocusedLiveCard("chrome"); }, "result exits to focused source card");
+    }
+
+    private static void CheckCompactLiveCatalog()
+    {
+        var wanted = new[] { "ubuntu", "chrome", "code", "terminal", "workday" };
+        Console.WriteLine("1024x600 first-paint full-card count=" + wanted.Count(id => IsWithinLiveClient("HomeClass-" + id)));
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        Find("HomeClass-ubuntu").SetFocus();
+        for (int i = 0; i < 32 && visited.Count != wanted.Length; i++)
+        {
+            var current = AutomationElement.FocusedElement;
+            if (current != null && current.Current.ProcessId == app.Id)
+            {
+                var id = current.Current.AutomationId;
+                if (wanted.Any(name => id == "HomeClass-" + name) && !visited.Contains(id))
+                {
+                    Until(delegate { return IsWithinLiveClient(id); }, id + " scrolls fully into view by real Tab focus");
+                    visited.Add(id);
+                    Check(true, id + " is keyboard reachable and entirely in the actual small client");
+                }
+            }
+            if (visited.Count != wanted.Length) Key("Tab");
+        }
+        Check(visited.Count == wanted.Length, "All five Live cards are reachable at actual 1024x600");
+        Find("HomeClass-chrome").SetFocus();
+    }
+
+    private static bool IsWithinLiveClient(string id)
+    {
+        if (!Visible(id)) return false;
+        var origin = new CapturePoint();
+        CaptureRect client;
+        if (!GetClientRect(trainer, out client) || !ClientToScreen(trainer, ref origin)) return false;
+        var area = new System.Windows.Rect(origin.X, origin.Y, client.Right - client.Left, client.Bottom - client.Top);
+        var bounds = Find(id).Current.BoundingRectangle;
+        return !bounds.IsEmpty && bounds.Width > 0 && bounds.Height > 0 && area.Contains(bounds);
     }
 
     private static void CaptureLiveUxFrame(string label)
