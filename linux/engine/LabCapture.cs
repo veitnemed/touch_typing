@@ -8,8 +8,9 @@ namespace TouchTypingStudio;
 internal sealed partial class LabScene
 {
     private string captureImage;
-    internal string ClipboardImage => Clipboard.StartsWith("Снимок-", StringComparison.Ordinal) && Clipboard.EndsWith(".png", StringComparison.Ordinal)
-        ? Terminal.ReadFile("~/Pictures/Screenshots/" + Clipboard) : null;
+    internal string ClipboardImage => DebugCaptureImage ??
+        (Clipboard.StartsWith("Снимок-", StringComparison.Ordinal) && Clipboard.EndsWith(".png", StringComparison.Ordinal)
+        ? Terminal.ReadFile("~/Pictures/Screenshots/" + Clipboard) : null);
 
     internal void StartCapture(string png)
     {

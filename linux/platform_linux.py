@@ -105,7 +105,9 @@ class InputSources:
                      "super": "Super", "alt": "Alt", "meta": "Super"}
         tokens = [modifiers.get(name.lower(), "") for name in re.findall(r"<([^>]+)>", binding)]
         key = re.sub(r"<[^>]+>", "", binding).strip()
-        names = {"space": "Space", "iso_left_tab": "Tab", "esc": "Esc", "escape": "Esc"}
+        names = {"space": "Space", "iso_left_tab": "Tab", "esc": "Esc", "escape": "Esc",
+                 "page_up": "PageUp", "page_down": "PageDown", "prior": "PageUp", "next": "PageDown",
+                 "above_tab": "`", "grave": "`", "return": "Enter", "minus": "-", "equal": "="}
         key = names.get(key.lower(), key)
         if not key or key.startswith("XF86") or not all(tokens):
             return ""
@@ -118,6 +120,41 @@ class InputSources:
         def first(key):
             return next((chord for raw in wm.get_strv(key) if (chord := self.as_chord(raw))), "")
         return first("switch-input-source"), first("switch-input-source-backward")
+
+    def desktop_bindings(self):
+        wm = self.settings.get(self.wm)
+        if wm is None:
+            return {}
+        # Only read the current profile; missing/unsupported bindings are
+        # left out so the simulator can use its documented defaults.
+        available = set(wm.list_keys())
+        keys = {
+            "workspace-next": ("switch-to-workspace-right",),
+            "workspace-prev": ("switch-to-workspace-left",),
+            "move-next": ("move-to-workspace-right",),
+            "move-prev": ("move-to-workspace-left",),
+            "switch-next": ("switch-windows", "switch-applications"),
+            "switch-prev": ("switch-windows-backward", "switch-applications-backward"),
+            "switch-group-next": ("switch-group",),
+            "switch-group-prev": ("switch-group-backward",),
+        }
+        supported = re.compile(r"(?:[A-Z0-9]|F(?:1[0-2]|[1-9])|Page(?:Up|Down)|Up|Down|Left|Right|"
+                               r"Home|End|Insert|Delete|Esc|Tab|Space|Enter|Backspace|[`=\-])", re.I)
+        result = {}
+        for action, schemas in keys.items():
+            for key in schemas:
+                if key not in available:
+                    continue
+                for raw in wm.get_strv(key):
+                    chord = self.as_chord(raw)
+                    modifiers, sep, trigger = chord.rpartition("+")
+                    if (sep and supported.fullmatch(trigger)
+                            and any(mod in modifiers.split("+") for mod in ("Ctrl", "Alt", "Super"))):
+                        result[action] = chord
+                        break
+                if action in result:
+                    break
+        return result
 
     def dock(self):
         shell = self.settings.get("org.gnome.shell")

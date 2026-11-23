@@ -570,8 +570,9 @@ class Studio(Gtk.Application):
         self.engine = Engine(bool(self.smoke))
         self.sources = InputSources(Gio)
         self.layout = self.sources.guess()
-        self.library = self.engine.call("configure", layout=self.layout, forward=self.sources.bindings()[0],
-                                        backward=self.sources.bindings()[1], dock=self.sources.dock())
+        forward, backward = self.sources.bindings()
+        self.library = self.engine.call("configure", layout=self.layout, forward=forward, backward=backward,
+                                        dock=self.sources.dock(), desktopBindings=self.sources.desktop_bindings())
         provider = Gtk.CssProvider()
         provider.load_from_path(str(ROOT / "style.css"))
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
@@ -797,7 +798,8 @@ class Studio(Gtk.Application):
 
     def refresh(self):
         forward, backward = self.sources.bindings()
-        result = self.call("configure", layout=self.layout, forward=forward, backward=backward, dock=self.sources.dock())
+        result = self.call("configure", layout=self.layout, forward=forward, backward=backward,
+                           dock=self.sources.dock(), desktopBindings=self.sources.desktop_bindings())
         if result:
             self.library = result
 
@@ -2735,7 +2737,8 @@ class LabPage(Gtk.Box):
     def bindings(self):
         task = (self.state or {}).get("task") or {}
         tokens = task.get("keys", "").replace(" → ", "+").split("+")
-        return ("F6" if "F8" in tokens else "F8", "F9" if "F10" in tokens else "F10")
+        reserve_f8 = (self.state or {}).get("scene", {}).get("diagnosticWorkspace")
+        return ("F6" if reserve_f8 or "F8" in tokens else "F8", "F9" if "F10" in tokens else "F10")
 
     def key_down(self, key, character, modifiers=Gdk.ModifierType(0), keycode=None):
         has_modifiers = bool(modifiers & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK |
@@ -2799,7 +2802,9 @@ class LabPage(Gtk.Box):
             return True
         self.pressed.add(key)
         if key == "Print":
-            character = self.desktop.capture_png()
+            active_only = (self.state.get("scene", {}).get("debugDay") and
+                           bool(self.pressed & {"LAlt", "RAlt"}))
+            character = self.desktop.capture_png(active_only=active_only)
         state = self.host.call("lab-key", key=key, pressed=True, text=character)
         if state:
             self.render(state)
@@ -2891,8 +2896,9 @@ class LabPage(Gtk.Box):
         self.pause.set_tooltip_text(("Продолжить · Пробел" if state["paused"] else
                                      "Пауза · " + physical_key_hint(pause_key, self.host.library)))
         self.finish.set_tooltip_text("Результат · " + physical_key_hint(finish_key, self.host.library))
-        self.pause.set_label("▶" if state["paused"] else "Ⅱ")
-        bind_name(self.pause, "Продолжить" if state["paused"] else "Пауза")
+        show_alt_pause = not state["paused"] and state["scene"].get("diagnosticWorkspace")
+        self.pause.set_label("▶" if state["paused"] else "Ⅱ F6" if show_alt_pause else "Ⅱ")
+        bind_name(self.pause, "Продолжить" if state["paused"] else "Пауза · F6" if show_alt_pause else "Пауза")
         self.desktop.presentation_app = state["app"]
         self.desktop.update(state["scene"])
         self.update_diagnostic()

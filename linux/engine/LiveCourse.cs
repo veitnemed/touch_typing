@@ -18,9 +18,12 @@ internal static partial class LiveCourse
         var result = new List<LiveMission>();
         BrowserMissions(result);
         EditorMissions(result);
+        EditorProjectSearchMissions(result);
         LineEditMissions(result);
+        EditorDiagnosticMissions(result);
         TerminalMissions(result);
         DesktopMissions(result);
+        WorkdayDebugMissions(result);
         return result;
     }
 
@@ -34,7 +37,9 @@ internal static partial class LiveCourse
         {
             foreach (string token in RouteTokens(mission.Phases[phase]))
             {
-                if ((IsCommandToken(token) || token == "code-rename-confirm") && trial.Layout == "RU")
+                if ((IsCommandToken(token) || IsProjectSearchQuery(token) ||
+                    token is "code-rename-confirm" or "debug-unit" or "debug-report-check"
+                    or "debug-project-query" or "debug-doc-submit" or "debug-rewrite") && trial.Layout == "RU")
                 {
                     var change = trial.WithBinding(Actions["layout"]);
                     string layout = trial.Layout;
@@ -45,6 +50,7 @@ internal static partial class LiveCourse
                 bool verifyReport = mission.Id == "workday-report" && task.Id == "command/head -n 2 spectrum-report.txt";
                 string artifactPath = mission.Id == "workday-source-note" && task.Id == "command/cat notes.txt"
                     ? "/home/student/project/notes.txt" : null;
+                if (trial.DebugDay && token == "debug-report-check") artifactPath = trial.DebugReportArtifact(trial.DebugReportName);
                 string original = Evidence(task, trial, verifyReport: verifyReport, artifactPath: artifactPath);
                 var before = trial.Clone();
                 if (IsPickerToken(token))
@@ -74,6 +80,7 @@ internal static partial class LiveCourse
 
     private static bool IsPickerToken(string token) => token.StartsWith("pick:", StringComparison.Ordinal) ||
         token.StartsWith("quick:", StringComparison.Ordinal) || token.StartsWith("sym:", StringComparison.Ordinal);
+    private static bool IsProjectSearchQuery(string token) => token == "project-search-submit" || token.StartsWith("search-query:", StringComparison.Ordinal);
     private static bool IsCommandToken(string token) => token.StartsWith("cmd:", StringComparison.Ordinal);
     private static string DecodeCommand(string token) => token[4..].Replace('~', ' ');
     private static string CommandId(string command) => "command/" + command;
@@ -94,6 +101,16 @@ internal static partial class LiveCourse
     private static readonly Dictionary<string, LabTask> Actions = LabCatalog.Shortcuts.ToDictionary(task => task.Id);
     private static LabTask MakeTask(string token, LabScene scene)
     {
+        if (scene.DebugDay)
+        {
+            if (token == "debug-project-query") token = "search-query:" + scene.DebugCallQuery;
+            else if (token == "debug-unit") token = "cmd:" + scene.DebugTestCommand.Replace(' ', '~');
+            else if (token == "debug-report-check") token = "cmd:cat~" + scene.DebugReportName;
+            else if (token == "debug-doc-submit") return new LabTask(token, "Найдите коэффициент в справке", "",
+                "Наберите «" + scene.DebugDocumentation + "» в Chrome и нажмите Enter.", scene.DebugDocumentation, token);
+            else if (token == "debug-rewrite") return new LabTask(token, "Исправьте формулу", "",
+                "Замените выбранную строку по справке. Сохраните отступы и нажмите Enter.", scene.DebugRewrite, token);
+        }
         if (IsPickerToken(token))
         {
             var w = scene.Active;
@@ -111,7 +128,16 @@ internal static partial class LiveCourse
         if (token == "gnome-write")
             return new(token, "Дописать комментарий: «" + LabScene.GnomeNoteText + "»", "",
                 "Наберите слово в активной строке app.py и нажмите Enter.", LabScene.GnomeNoteText, token);
+        if (IsProjectSearchQuery(token))
+        {
+            string query = token == "project-search-submit" ? LabScene.SearchNeedle : token[13..].Replace('~', ' ');
+            return Actions["project-search-submit"] with { Text = query, Title = "Введите «" + query + "» и нажмите Enter" };
+        }
         var task = scene.WithBinding(Actions[token]);
+        if (scene.GnomePractice == "matebook" && token == "layout")
+            return task with { Title = "Переключите учебный ввод на " + (scene.Layout == "RU" ? "EN" : "RU") };
+        if (scene.GnomePractice == "same-app" && token.StartsWith("switch-group-", StringComparison.Ordinal))
+            return task with { Title = scene.Active?.Url == "app.py" ? "Выберите окно с README.md" : "Выберите окно с app.py" };
         if (task.Action == "code-rename-confirm") return task with { Text = LabScene.RenameTarget };
         if (scene.GnomeWindows && (token == "tile-left" && scene.Active?.State == "left" ||
             token == "tile-right" && scene.Active?.State == "right"))
@@ -138,6 +164,15 @@ internal static partial class LiveCourse
             trial.TerminalInput = task.Text;
             return trial.Text("Enter", "") && trial.Terminal.LastSuccess;
         }
+        if (task.Action == "project-search-submit") trial.Active.Input = task.Text;
+        if (task.Action == "project-search-repair") trial.DemonstrateProjectRepair();
+        if (task.Action == "debug-window-shot") trial.PrepareCompilerDebugCapture();
+        if (task.Action is "debug-doc-submit" or "debug-rewrite")
+        {
+            foreach (char ch in task.Text)
+                if (!trial.Text(ch.ToString().ToUpperInvariant(), ch.ToString())) return false;
+            return trial.Text("Enter", "");
+        }
         if (task.Action == "code-rename-confirm") trial.Active.Input = LabScene.RenameTarget;
         if (!LabCatalog.Available(task, trial) || !trial.Apply(task.Action)) return false;
         if (trial.Switcher) trial.CommitSwitch();
@@ -148,6 +183,10 @@ internal static partial class LiveCourse
     {
         var w = scene.Active;
         string app = w?.App ?? "", action = task.Action;
+        if (scene.GnomePractice is "workspaces" or "same-app")
+            return JsonSerializer.Serialize(scene.GnomeScopeEvidence(task, equivalentCommand));
+        if (scene.GnomePractice == "matebook")
+            return JsonSerializer.Serialize(new { scene.Overview, scene.Layout, scene.LayoutIsVirtual });
         if (scene.GnomeWindows)
             return JsonSerializer.Serialize(new
             {
@@ -163,8 +202,10 @@ internal static partial class LiveCourse
                     saved = v.App == "code" ? v.Tab?.SavedBody : null
                 }).ToArray()
             });
-        object value = action switch
+        object value = scene.DebugEvidence(action) ?? (action switch
         {
+            _ when action.StartsWith("project-search-", StringComparison.Ordinal) => scene.ProjectSearchEvidence(action),
+            _ when action == "code-problem-next" || action.StartsWith("code-fix-", StringComparison.Ordinal) => scene.DiagnosticEvidence(),
             _ when action.StartsWith("code-", StringComparison.Ordinal) => scene.SymbolEvidence(action),
             "command" or "terminal-submit" => new { command = equivalentCommand ?? scene.Terminal.LastCommand, scene.Terminal.LastSuccess, scene.Terminal.Cwd, scene.Terminal.LastOutput, input = scene.TerminalInput, report = verifyReport ? scene.ReadReportArtifact() : null },
             "terminal-history-up" or "terminal-history-down" or "terminal-erase" or "terminal-kill" or "terminal-yank" or "word-left" or "word-right" or "terminal-home" or "terminal-end" or "terminal-cancel" => new { scene.TerminalInput, w?.Cursor },
@@ -197,9 +238,11 @@ internal static partial class LiveCourse
             "panel" or "terminal-toggle" => new { w?.Panel, w?.Focus }, "sidebar" => w?.Sidebar, "split" or "focus-editor" or "focus-second" => new { w?.Split, w?.Group, w?.Url, w?.Focus },
             "save" => new { w?.Url, w?.Tab?.SavedBody },
             _ => new { app, w?.Focus, w?.OptionIndex, w?.Url, w?.Cursor, w?.View, w?.Find, scene.Overview, scene.ScreenshotReady }
-        };
+        });
         // A matching terminal display can omit trailing newlines. The artifact
         // still has to be the exact saved bytes expected for this exercise.
-        return JsonSerializer.Serialize(artifactPath == null ? value : new { state = value, file = scene.Terminal.ReadFile(artifactPath) });
+        return JsonSerializer.Serialize(artifactPath == null ? value :
+            scene.DebugDay ? new { state = value, file = scene.Terminal.ReadFile(artifactPath), proof = scene.DebugReportValid } :
+            new { state = value, file = scene.Terminal.ReadFile(artifactPath) });
     }
 }

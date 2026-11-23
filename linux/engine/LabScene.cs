@@ -44,7 +44,7 @@ internal sealed class LabWindow(string app, int number, int workspace)
     internal int SearchIndex, UntitledCount, Group, Activation;
     internal string ShellInput = "";
     internal string OtherTab, ImagePreview;
-    internal string View = "explorer", Query = "";
+    internal string View = "explorer", Query = "", ProjectSearchQuery = "";
     internal string Folder = "/home/student";
     internal int Item = -1;
     internal readonly Stack<EditorJump> SymbolBack = [];
@@ -102,13 +102,13 @@ internal sealed class LabWindow(string app, int number, int workspace)
     internal LabTab Tab => Tabs.Count == 0 ? null : Tabs[Math.Clamp(ActiveTab, 0, Tabs.Count - 1)];
     internal string Body { get => Tab?.Body ?? ""; set { if (Tab != null) Tab.Body = value; } }
     internal string Url => Tab?.Url ?? "";
-    internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults) => new { projectFiles, changedFiles, searchResults, Id, App, Title, Workspace, State, NormalSlot, restoreState = MinimizedFrom, active, Folder, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
+    internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults) => new { projectFiles, changedFiles, searchResults, ProjectSearchQuery, Id, App, Title, Workspace, State, NormalSlot, restoreState = MinimizedFrom, active, Folder, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
         tabs = Tabs.Select(tab => tab.Snapshot()), ActiveTab, Url, Body, Focus, Input, Find, Sidebar, Split, Status, Zoom, Selected, Cursor, Anchor, Panel, bodyCursor = Tab?.Position.Caret ?? 0, bodyAnchor = Tab?.Position.Anchor ?? 0, OptionIndex, Bookmarks, savedBookmarks = SavedBookmarks.ToArray() };
     internal LabWindow Clone()
     {
         var copy = new LabWindow(App, int.Parse(Id[7..]), Workspace)
         {
-            Activation = Activation, ShellInput = ShellInput, UntitledCount = UntitledCount, ImagePreview = ImagePreview, OtherTab = OtherTab, Group = Group, Folder = Folder, Item = Item, View = View, Query = Query, SearchIndex = SearchIndex, Title = Title, State = State, Focus = Focus, Input = Input, Find = Find, Status = Status,
+            Activation = Activation, ShellInput = ShellInput, UntitledCount = UntitledCount, ImagePreview = ImagePreview, OtherTab = OtherTab, Group = Group, Folder = Folder, Item = Item, View = View, Query = Query, ProjectSearchQuery = ProjectSearchQuery, SearchIndex = SearchIndex, Title = Title, State = State, Focus = Focus, Input = Input, Find = Find, Status = Status,
             Sidebar = Sidebar, Split = Split, Panel = Panel, Bookmarks = Bookmarks,
             MinimizedFrom = MinimizedFrom, UntileTo = UntileTo,
             ActiveTab = ActiveTab, Zoom = Zoom, OptionIndex = OptionIndex
@@ -176,7 +176,9 @@ internal sealed partial class LabScene
     private LabScene(LabScene source)
     {
         Terminal = source.Terminal.Clone(); captureImage = source.captureImage;
+        CloneDebugDay(source);
         symbolWorkspace = source.symbolWorkspace;
+        SearchProjectRoot = source.SearchProjectRoot;
         foreach (var file in source.originalFiles) originalFiles[file.Key] = file.Value;
         Dock = [.. source.Dock]; LayoutKey = source.LayoutKey; SwitchTarget = source.SwitchTarget;
         Workspace = source.Workspace; WorkspaceCount = source.WorkspaceCount; Version = source.Version;
@@ -186,7 +188,7 @@ internal sealed partial class LabScene
         ScreenshotCopied = source.ScreenshotCopied; ShowDesktop = source.ShowDesktop;
         UseWindowsBindings = source.UseWindowsBindings;
         LayoutIsVirtual = source.LayoutIsVirtual; ReplayLegacyNavigation = source.ReplayLegacyNavigation; Search = source.Search;
-        GnomeWindows = source.GnomeWindows;
+        GnomeWindows = source.GnomeWindows; GnomePractice = source.GnomePractice; DesktopProfile = [.. source.DesktopProfile]; SwitchChoices = [.. source.SwitchChoices];
         ReplayLegacyLineEditing = source.ReplayLegacyLineEditing;
         windowNumber = source.windowNumber;
         historyDraft = source.historyDraft; killedText = source.killedText;
@@ -243,12 +245,16 @@ internal sealed partial class LabScene
     private bool ApplyCore(string action)
     {
         var window = Active;
+        if (ApplyDebugDayAction(action, window) is bool debug) return debug;
         bool changed = true;
         switch (action)
         {
             case "overview": Overview = !Overview; Search = ""; break;
             case "switch-next": Switch(1); break;
             case "switch-prev": Switch(-1); break;
+            case "switch-group-next": Switch(1, sameApp: true); break;
+            case "switch-group-prev": Switch(-1, sameApp: true); break;
+            case "gnome-left-super": if (GnomePractice != "matebook") return false; Overview = !Overview; Search = ""; break;
             case "open-chrome": Ensure("chrome"); break;
             case "open-code": Ensure("code"); break;
             case "open-terminal": Ensure("terminal"); break;
@@ -268,6 +274,10 @@ internal sealed partial class LabScene
                 window.State = "minimized"; ActiveWindow = null;
                 Activate(Windows.Where(item => item.Workspace == Workspace && item.State != "minimized").MaxBy(item => item.Activation)); break;
             case "desktop": ShowDesktop = !ShowDesktop; break;
+            case "workspace-next" when GnomePractice == "workspaces": return GoGnomeWorkspace(1);
+            case "workspace-prev" when GnomePractice == "workspaces": return GoGnomeWorkspace(-1);
+            case "move-next" when GnomePractice == "workspaces": return window != null && GoGnomeWorkspace(1, window);
+            case "move-prev" when GnomePractice == "workspaces": return window != null && GoGnomeWorkspace(-1, window);
             case "workspace-next": Workspace = (Workspace + 1) % WorkspaceCount; ActiveWindow = null; Activate(Windows.LastOrDefault(item => item.Workspace == Workspace)); break;
             case "workspace-prev": Workspace = (Workspace + WorkspaceCount - 1) % WorkspaceCount; ActiveWindow = null; Activate(Windows.LastOrDefault(item => item.Workspace == Workspace)); break;
             case "move-next": if (window == null) return false; window.Workspace = (Workspace + 1) % WorkspaceCount; Workspace = window.Workspace; break;
@@ -293,7 +303,7 @@ internal sealed partial class LabScene
             case "terminal-submit":
                 if (window == null || window.App != "terminal" && window.Focus != "terminal" || string.IsNullOrWhiteSpace(TerminalInput)) return false;
                 return Text("Enter", "") && Terminal.LastSuccess;
-            default: changed = ApplySymbols(action, window) ?? ApplyWorkspace(action, window) ?? ApplyWindow(action, window); break;
+            default: changed = ApplyProjectSearch(action, window) ?? ApplyDiagnostics(action, window) ?? ApplySymbols(action, window) ?? ApplyWorkspace(action, window) ?? ApplyWindow(action, window); break;
         }
         if (changed) Version++;
         return changed;
@@ -314,24 +324,28 @@ internal sealed partial class LabScene
         return true;
     }
 
-    private void Switch(int direction)
+    private void Switch(int direction, bool sameApp = false)
     {
-        var visible = Windows.Where(item => item.Workspace == Workspace).OrderByDescending(item => item.Activation).ToArray();
+        string app = Active?.App;
+        var visible = Windows.Where(item => item.Workspace == Workspace && (!sameApp || item.App == app))
+            .OrderByDescending(item => item.Activation).ToArray();
         if (visible.Length == 0) return;
         int index = Array.FindIndex(visible, item => item.Id == (Switcher ? SwitchTarget : ActiveWindow));
         SwitchTarget = visible[(index + direction + visible.Length) % visible.Length].Id; Switcher = true;
+        SwitchChoices = visible.Select(item => item.Id).ToArray();
     }
 
     internal void CommitSwitch()
     {
         if (Switcher) Activate(Windows.Find(item => item.Id == SwitchTarget));
-        SwitchTarget = null; Switcher = false;
+        SwitchTarget = null; Switcher = false; SwitchChoices = [];
     }
 
     internal LabTask WithBinding(LabTask task)
     {
         if (task.Id == "code-back" && UseWindowsBindings) return task with { Keys = "Alt+Left" };
         if (task.Id == "layout") return task with { Keys = LayoutKey };
+        task = GnomeProfileBinding(task);
         if (task.Id is "open-chrome" or "open-code" or "open-files")
         {
             string app = task.Id[5..]; int slot = Array.IndexOf(Dock, app);
@@ -413,7 +427,7 @@ internal sealed partial class LabScene
                 window.Focus = "body"; window.Input = ""; break;
             case "goto-line": if (!code) return false; window.Focus = "goto-line"; window.Input = ""; window.Cursor = 0; break;
             case "explorer": if (!code) return false; window.View = "explorer"; window.Sidebar = true; window.Focus = "explorer"; break;
-            case "project-search": if (!code) return false; window.View = "project-search"; window.Sidebar = true; window.Focus = "project-search"; window.Input = ""; break;
+            case "project-search": if (!code) return false; window.View = "project-search"; window.Sidebar = true; window.Focus = "project-search"; window.Input = ""; window.Cursor = 0; window.OptionIndex = 0; break;
             case "panel":
                 window.Panel = !window.Panel;
                 if (!window.Panel && window.Focus == "terminal") window.Focus = "body";
@@ -842,7 +856,7 @@ internal sealed partial class LabScene
         tab.Position = new();
     }
 
-    internal object Snapshot() => new { Workspace, WorkspaceCount, Overview, Switcher, SwitchTarget, Dock, Layout, ActiveWindow, GnomeWindows,
+    internal object Snapshot() => new { Workspace, WorkspaceCount, Overview, Switcher, SwitchTarget, switchChoices = GnomePractice == "same-app" ? SwitchChoices : [], Dock, Layout, ActiveWindow, GnomeWindows, GnomePractice, DebugDay,
         windows = Windows.Select(WindowSnapshot), terminal = Terminal.Snapshot(), terminalInput = TerminalInput,
-        Clipboard, clipboardMime = ClipboardImage == null ? "text/plain" : "image/png", Screenshot, ScreenshotReady, ScreenshotCopied, Screenshots, ShowDesktop, Search, LayoutIsVirtual, Version };
+        Clipboard, clipboardMime = ClipboardImage == null ? "text/plain" : "image/png", Screenshot, ScreenshotReady, ScreenshotCopied, Screenshots, ShowDesktop, Search, LayoutIsVirtual, Version, DiagnosticWorkspace, DiagnosticProblemCount };
 }

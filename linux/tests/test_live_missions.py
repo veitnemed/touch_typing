@@ -331,6 +331,180 @@ class MissionTest(unittest.TestCase):
                 finally:
                     engine.close()
 
+    def test_gnome_profile_reader_prefers_supported_bindings_without_writing(self):
+        from platform_linux import InputSources
+
+        class ReadOnlySettings:
+            values = {
+                "switch-to-workspace-right": ["<Hyper>F5", "<Super>Page_Down"],
+                "switch-to-workspace-left": ["<Super>Page_Up"],
+                "move-to-workspace-right": ["<Control><Alt><Shift>Right"],
+                "move-to-workspace-left": ["<Shift>Left"],
+                "switch-windows": [],
+                "switch-applications": ["<Super>Tab"],
+                "switch-group": ["<Super>Above_Tab"],
+                "switch-group-backward": ["<Shift><Super>Above_Tab"],
+            }
+            def list_keys(self):
+                return list(self.values)
+            def get_strv(self, key):
+                return self.values[key]
+
+        source = InputSources.__new__(InputSources)
+        source.wm = "gnome-test"
+        source.settings = {source.wm: ReadOnlySettings()}
+        self.assertEqual(source.desktop_bindings(), {
+            "workspace-next": "Super+PageDown", "workspace-prev": "Super+PageUp",
+            "move-next": "Ctrl+Alt+Shift+Right", "switch-next": "Super+Tab",
+            "switch-group-next": "Super+`", "switch-group-prev": "Shift+Super+`",
+        })
+        source.settings = {}
+        self.assertEqual(source.desktop_bindings(), {})
+
+    def test_gnome_profile_missions_use_exact_bindings_and_keep_scope(self):
+        from unittest.mock import patch
+
+        def options(mission):
+            return dict(app="ubuntu", level=1, mode="sandbox", seconds=0,
+                        guidance="guided", mission=mission, seed=0)
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+            engine = Engine(verify=True)
+            def event(key, down, text=""):
+                return engine.call("lab-key", key=key, pressed=down, text=text)
+            def chord(*keys, text=""):
+                for key in keys:
+                    event(key, True, text if key == keys[-1] else "")
+                for key in reversed(keys):
+                    state = event(key, False)
+                return state
+            def type_text(value):
+                for key in value:
+                    chord(key.upper(), text=key)
+                return chord("Enter")
+            def windows(state):
+                return {w["app"]: w for w in state["scene"]["windows"]}
+            def solved(state, n):
+                self.assertEqual(state["solved"], n, state["task"])
+
+            try:
+                bindings = {"move-next": "Shift+Ctrl+Alt+Right", "workspace-prev": "Ctrl+Alt+Left",
+                            "workspace-next": "Ctrl+Alt+Right → A", "switch-group-next": "Super+`",
+                            "switch-group-prev": "Shift+Super+`", "unknown": "Ctrl+X"}
+                engine.call("configure", platform="linux", layout="EN", desktopBindings=bindings)
+                mission_ids = {m["id"] for m in engine.call("lab-catalog")["missions"]}
+                self.assertTrue({"ubuntu-gnome-workspaces", "ubuntu-gnome-same-app", "ubuntu-matebook-layout"} <= mission_ids)
+                workspace = options("ubuntu-gnome-workspaces")
+                state = engine.call("lab-start", **workspace)
+                self.assertEqual(state["task"]["keys"], "Ctrl+Alt+Shift+Right")
+                self.assertEqual(state["scene"]["workspaceCount"], 2)
+                original = windows(state)["code"]
+                self.assertEqual((original["workspace"], original["url"], original["bodyCursor"]), (0, "app.py", 2))
+                engine.call("lab-resume")
+                state = chord("LSuper", "LShift", "PageDown")
+                solved(state, 0)
+                self.assertEqual(state["scene"]["workspace"], 0)
+                state = chord("LAlt", "LCtrl", "LShift", "Right")
+                solved(state, 1)
+                self.assertEqual((windows(state)["code"]["workspace"], windows(state)["terminal"]["workspace"]), (0, 1))
+                self.assertEqual(state["scene"]["workspace"], 1)
+                solved(type_text("ls"), 1)
+                state = type_text("pwd")
+                solved(state, 2)
+                self.assertEqual(state["scene"]["terminal"]["output"][-1], "/home/student")
+                self.assertEqual(state["task"]["keys"], "Ctrl+Alt+Left")
+
+                # Active settings can change between boots without rewriting the
+                # keyboard events that already earned this draft's credits.
+                engine.call("lab-stop")
+                engine.close()
+                engine = Engine(verify=True)
+                engine.call("configure", platform="linux", layout="EN",
+                            desktopBindings={**bindings, "workspace-prev": "Super+PageUp"})
+                state = engine.call("lab-start", **workspace, **{"continue": True})
+                solved(state, 2)
+                self.assertEqual(state["task"]["keys"], "Ctrl+Alt+Left")
+                engine.call("lab-resume")
+                state = chord("LCtrl", "LAlt", "Left")
+                solved(state, 3)
+                editor = windows(state)["code"]
+                self.assertEqual((editor["id"], editor["url"], editor["bodyCursor"], editor["body"]),
+                                 (original["id"], original["url"], original["bodyCursor"], original["body"]))
+                solved(type_text("gnome"), 4)
+                state = chord("LCtrl", "S")
+                solved(state, 5)
+                self.assertEqual(state["task"]["keys"], "Super+PageDown")  # unsupported sequence falls back
+                solved(chord("LSuper", "PageDown"), 6)
+                state = chord("LCtrl", "LAlt", "Left")
+                solved(state, 7)
+                self.assertTrue(state["finished"])
+
+                state = engine.call("lab-start", **options("ubuntu-gnome-same-app"))
+                self.assertEqual(state["task"]["keys"], "Super+`")
+                original_id = state["scene"]["activeWindow"]
+                engine.call("lab-resume")
+                state = chord("LAlt", "Tab")
+                solved(state, 0)
+                self.assertTrue(windows(state)["chrome"]["active"])
+                solved(chord("LAlt", "Tab"), 0)
+                event("LSuper", True); state = event("`", True)
+                solved(state, 0)
+                self.assertTrue(state["scene"]["switcher"])
+                expected = {w["id"] for w in state["scene"]["windows"] if w["app"] == "code"}
+                self.assertEqual(set(state["scene"]["switchChoices"]), expected)
+                self.assertNotEqual(state["scene"]["switchTarget"], original_id)
+                event("`", False); state = event("LSuper", False)
+                solved(state, 1)
+                self.assertEqual(next(w["url"] for w in state["scene"]["windows"] if w["active"]), "app.py")
+                state = chord("LSuper", "LShift", "`")
+                solved(state, 2)
+                self.assertEqual(state["scene"]["activeWindow"], original_id)
+                self.assertEqual(next(w["url"] for w in state["scene"]["windows"] if w["active"]), "README.md")
+                self.assertTrue(state["finished"])
+            finally:
+                engine.close()
+
+    def test_matebook_left_super_is_side_specific_and_teaches_both_layouts(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+            engine = Engine(verify=True)
+            try:
+                engine.call("configure", platform="linux", layout="EN", forward="Ctrl+Alt+Space")
+                state = engine.call("lab-start", app="ubuntu", level=1, mode="sandbox",
+                                    seconds=0, guidance="guided", mission="ubuntu-matebook-layout", seed=0)
+                self.assertEqual(state["task"]["keys"], "LSuper")
+                engine.call("lab-resume")
+                def chord(*keys):
+                    for key in keys:
+                        engine.call("lab-key", key=key, pressed=True)
+                    for key in reversed(keys):
+                        state = engine.call("lab-key", key=key, pressed=False)
+                    return state
+                for key, hint in [("RSuper", "правый Super"), ("LAlt", "Это Alt"), ("Z", "Это клавиша Z")]:
+                    state = chord(key)
+                    self.assertEqual(state["solved"], 0)
+                    self.assertFalse(state["scene"]["overview"])
+                    self.assertIn(hint, state["status"])
+                state = chord("LSuper")
+                self.assertEqual(state["solved"], 1)
+                self.assertTrue(state["scene"]["overview"])
+                state = chord("Esc")
+                self.assertEqual(state["solved"], 2)
+                self.assertEqual(state["task"]["keys"], "Ctrl+Alt+Space")
+                self.assertIn("RU", state["task"]["title"])
+                state = chord("LCtrl", "LAlt", "Space")
+                self.assertEqual(state["solved"], 3)
+                self.assertEqual(state["scene"]["layout"], "RU")
+                self.assertTrue(state["scene"]["layoutIsVirtual"])
+                self.assertIn("EN", state["task"]["title"])
+                state = chord("LCtrl", "LAlt", "Space")
+                self.assertEqual(state["solved"], 4)
+                self.assertEqual(state["scene"]["layout"], "EN")
+                self.assertTrue(state["finished"])
+                self.assertEqual(state["errors"], 3)
+            finally:
+                engine.close()
+
     def test_routes(self):
         with tempfile.TemporaryDirectory() as directory:
             original = os.environ.get("XDG_DATA_HOME")
@@ -1280,6 +1454,95 @@ class MissionTest(unittest.TestCase):
             finally:
                 engine.close()
 
+    def test_debug_project_search_requires_real_hit_and_correct_saved_file(self):
+        from unittest.mock import patch
+
+        for platform in ("linux", "windows"):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory, \
+                    patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+                engine = Engine(verify=True)
+                def chord(*keys, text=""):
+                    for key in keys:
+                        engine.call("lab-key", key=key, pressed=True, text=text if key == keys[-1] else "")
+                    for key in reversed(keys):
+                        result = engine.call("lab-key", key=key, pressed=False)
+                    return result
+                def active(state):
+                    return next(w for w in state["scene"]["windows"] if w["active"])
+                def files(state):
+                    return {f["path"].split("/")[-1]: f["content"] for f in state["scene"]["terminal"]["files"]
+                            if "/search-lab/src/" in f["path"]}
+                def query(text):
+                    chord("LCtrl", "LShift", "F")
+                    for char in text:
+                        chord("LShift", "-" if char == "_" else char.upper(), text=char)
+                    return chord("Enter")
+                try:
+                    engine.call("configure", platform=platform, layout="EN")
+                    missions = engine.call("lab-catalog")["missions"]
+                    self.assertTrue(any(m["id"] == "code-search-error" and m["curated"] for m in missions))
+                    engine.call("lab-start", app="code", mode="sandbox", level=0, mission="code-search-error",
+                                seconds=0, seed=0, guidance="guided")
+                    state = engine.call("lab-resume")
+                    self.assertEqual(active(state)["app"], "terminal")
+                    self.assertIn('  File "src/config.py", line 2, in <module>', state["scene"]["terminal"]["output"])
+                    self.assertIn("ValueError: DEFAULT_TIMEOUT must be >= 1 (got 0)", state["scene"]["terminal"]["output"])
+                    baseline = files(state)
+                    self.assertEqual(set(baseline), {"archive.py", "config.py", "notes.py"})
+                    state = chord("LAlt", "Tab")
+                    self.assertEqual((active(state)["app"], state["solved"]), ("code", 1))
+                    state = chord("LCtrl", "LShift", "F")
+                    self.assertEqual((active(state)["focus"], state["solved"]), ("project-search", 2))
+                    state = chord("Esc")
+                    self.assertFalse(state["finished"])
+                    self.assertEqual((state["solved"], files(state), state["task"]["id"]),
+                                     (2, baseline, "project-search-submit"))
+                    wrong = query("TIMEOUT")
+                    self.assertEqual(len(active(wrong)["entries"]), 3)
+                    self.assertEqual(wrong["solved"], 2)  # same count is not a verified query
+                    state = query("DEFAULT_TIMEOUT")
+                    self.assertEqual((active(state)["focus"], state["solved"]), ("project-results", 3))
+                    hits = active(state)["entries"]
+                    self.assertEqual([h["title"].split(" · ")[0] for h in hits],
+                                     ["archive.py:2:1", "config.py:2:1", "notes.py:1:9"])
+                    chord("Down")
+                    chord("Up")
+                    state = chord("Enter")  # actually opens the decoy; must not meet the goal
+                    self.assertTrue(active(state)["url"].endswith("archive.py"))
+                    self.assertEqual((state["solved"], state["task"]["id"]), (4, "project-search-open"))
+                    chord("End")
+                    chord("Backspace")
+                    chord("5", text="5")
+                    state = chord("LCtrl", "S")
+                    self.assertNotEqual(files(state)["archive.py"], baseline["archive.py"])
+                    self.assertEqual(state["solved"], 4)
+                    self.assertFalse(state["finished"])
+                    chord("LCtrl", "Z")
+                    chord("LCtrl", "Z")
+                    self.assertEqual(files(chord("LCtrl", "S")), baseline)
+                    query("DEFAULT_TIMEOUT")
+                    chord("Down")
+                    state = chord("Enter")
+                    window = active(state)
+                    self.assertTrue(window["url"].endswith("/src/config.py"))
+                    self.assertEqual(window["bodyCursor"], baseline["config.py"].index("DEFAULT_TIMEOUT"))
+                    self.assertEqual(state["solved"], 5)
+                    chord("End")
+                    chord("Backspace")
+                    chord("4", text="4")
+                    state = chord("LCtrl", "S")
+                    self.assertEqual((state["solved"], state["finished"]), (5, False))
+                    self.assertIn("DEFAULT_TIMEOUT = 4", files(state)["config.py"])
+                    chord("Backspace")
+                    state = chord("5", text="5")
+                    self.assertEqual((state["solved"], state["finished"]), (5, False))  # no Ctrl+S yet
+                    state = chord("LCtrl", "S")
+                    repaired = dict(baseline)
+                    repaired["config.py"] = repaired["config.py"].replace("DEFAULT_TIMEOUT = 0", "DEFAULT_TIMEOUT = 5")
+                    self.assertEqual((state["solved"], state["finished"], files(state)), (6, True, repaired))
+                finally:
+                    engine.close()
+
     def walk(self, engine, mission):
         state = engine.call("lab-start", app=mission["app"], level=mission["level"], mode="sandbox",
                             seconds=0, guidance="guided", mission=mission["id"], seed=0)
@@ -1298,10 +1561,18 @@ class MissionTest(unittest.TestCase):
             task = state["task"]
             for attempt in range(24):
                 if task["keys"]:
-                    if task["id"] == "code-rename-confirm" and attempt == 0:
+                    if task["id"] in {"code-rename-confirm", "project-search-submit"} and attempt == 0:
                         for char in task["text"]:
-                            chord(["LShift", "-"] if char == "_" else [char.upper()], char)
-                    state = chord([sides.get(k, k) for k in task["keys"].split("+")])
+                            chord(["LShift", "-"] if char == "_" else ["LShift", char] if char.isupper() else ["Space" if char == " " else char.upper()], char)
+                    if task["id"] == "project-search-repair" and attempt == 0:
+                        chord(["End"])
+                        chord(["Backspace"])
+                        chord(["5"], "5")
+                    if task["id"] == "debug-window-shot":
+                        from test_debug_day import png_fixture
+                        state = chord([sides.get(k, k) for k in task["keys"].split("+")], png_fixture())
+                    else:
+                        state = chord([sides.get(k, k) for k in task["keys"].split("+")])
                 else:
                     for char in task["text"]:
                         chord(["Space" if char == " " else char.upper()], char)

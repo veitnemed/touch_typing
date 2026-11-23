@@ -33,7 +33,14 @@ namespace TouchTypingStudio
                 ". Раскладка " + scene.S("layout") + ". " +
                 string.Join(". ", scene.Items("windows").Where(w => w.B("active")).Select(w => w.S("title") + ". " + w.S("status"))) +
                 (scene.B("gnomeWindows") ? ". Окна: " + string.Join("; ", scene.Items("windows").Select(w =>
-                    w.S("app") + "=" + w.S("state") + (w.B("active") ? "*" : ""))) : ""));
+                    w.S("app") + "=" + w.S("state") + (w.B("active") ? "*" : ""))) : "") +
+                (scene.S("gnomePractice") == "workspaces" ? ". Рабочий стол " + (scene.I("workspace") + 1) +
+                    " из " + scene.I("workspaceCount") + ". Размещение: " + string.Join("; ", scene.Items("windows").Select(w =>
+                        w.S("app") + "@" + (w.I("workspace") + 1))) : "") +
+                (scene.S("gnomePractice") == "same-app" && scene.B("switcher") ? ". Переключатель: " +
+                    string.Join("; ", scene.Items("switchChoices").Select(item =>
+                        scene.Items("windows").FirstOrDefault(w => w.S("id") == item.Value())).Where(w => w != null)
+                        .Select(w => w.S("url").Split('/').Last())) : ""));
             System.Windows.Automation.AutomationProperties.SetHelpText(this, scene.S("terminalInput"));
             var terminal = scene.Items("windows").FirstOrDefault(w => w.B("active") &&
                 (w.S("app") == "terminal" || w.S("focus") == "terminal"));
@@ -44,8 +51,13 @@ namespace TouchTypingStudio
             if (terminal == null && editor != null)
             {
                 string focus = editor.S("focus");
-                string description = focus == "symbol-references" ?
+                string description = focus == "code-problems" || focus == "code-quick-fix" ?
+                    (focus == "code-problems" ? "Проблемы: " : "Быстрые исправления: ") +
+                    string.Join("; ", editor.Items("entries").Select(item => item.S("title"))) : focus == "symbol-references" ?
                     "Использования: " + string.Join("; ", editor.Items("entries").Select(item => item.S("title"))) :
+                    focus == "project-search" ? "Поиск по проекту: " + editor.S("input") :
+                    focus == "project-results" ? "Поиск «" + editor.S("projectSearchQuery") + "»: " +
+                    string.Join("; ", editor.Items("entries").Select(item => item.S("title"))) :
                     focus == "symbol-rename" ? "Переименовать символ: " + editor.S("input") :
                     editor.Items("tabs").Skip(Math.Max(0, editor.I("activeTab"))).Select(item => item.S("title")).FirstOrDefault();
                 System.Windows.Automation.AutomationProperties.SetHelpText(this, description ?? "");
@@ -74,7 +86,9 @@ namespace TouchTypingStudio
             dc.DrawGeometry(Ui.Brush("#4A2340"), null, Geometry.Parse("M1200,50 L580,520 L1200,520Z"));
             Rectangle(0, 0, 1200, 28, "#151519");
             Text("●  Обзор", 15, 6, 11, "#EEEEF0");
-            Text("Ubuntu  ·  учебный рабочий стол", 469, 6, 11, "#CCCCD4");
+            Text(scene.S("gnomePractice") == "workspaces" ? "Ubuntu  ·  рабочий стол " +
+                (scene.I("workspace") + 1) + " из " + scene.I("workspaceCount") : "Ubuntu  ·  учебный рабочий стол",
+                469, 6, 11, "#CCCCD4");
             Text(scene.S("layout", "EN").ToLowerInvariant() + "    ◉    ◖)    ▰", 1080, 6, 11, "#E5E5E8");
             var windows = scene.Items("windows").Where(w => w.S("state") != "closed" && w.S("state") != "minimized" &&
                 w.I("workspace") == scene.I("workspace")).OrderBy(w => w.B("active") ? 1 : 0).ToArray();
@@ -284,7 +298,8 @@ namespace TouchTypingStudio
                 Rectangle(44, 29, x - 44, h - 50, "#252526");
                 string view = window.S("view");
                 string heading = view == "changes" ? "ИЗМЕНЕНИЯ" : view == "project-search" ? "ПОИСК" :
-                    view == "extensions" ? "РАСШИРЕНИЯ" : symbolProject ? "SYMBOL-LAB" : "PILING-MAIN";
+                    view == "extensions" ? "РАСШИРЕНИЯ" : scene.B("diagnosticWorkspace") ? "DIAGNOSTICS-LAB" :
+                    symbolProject ? "SYMBOL-LAB" : "PILING-MAIN";
                 Text(heading, 58, 44, 11, "#B4BAC4");
                 var names = view == "extensions" ? new[] { "Python", "Pylance" } :
                     window.Items(view == "changes" ? "changedFiles" : view == "project-search" ? "searchResults" : "projectFiles").Select(item => item.Value()).ToArray();
@@ -333,10 +348,21 @@ namespace TouchTypingStudio
             {
                 double terminalY = Math.Max(155, h * .55);
                 Rectangle(x, terminalY, w - x, h - terminalY - 21, "#181818");
-                Text("TERMINAL      OUTPUT      PROBLEMS", x + 15, terminalY + 8, 10, "#AAB0BD");
-                string output = string.Join("\n", scene.D("terminal").Items("output").Select(line => line.Value()).Reverse().Take(4).Reverse());
-                Text(output, x + 15, terminalY + 30, 11, "#B7C5D4", w - x - 30, 4, true);
-                TerminalField(window, x + 15, h - 47, w - x - 30);
+                if (scene.B("diagnosticWorkspace") && window.S("focus") != "terminal")
+                {
+                    Text("ПРОБЛЕМЫ · F8", x + 15, terminalY + 8, 10, "#F3CC73");
+                    if (window.S("focus") != "code-quick-fix")
+                        Text(window.Items("entries").Where(item => item.S("kind") == "problem")
+                            .Select(item => item.S("title")).FirstOrDefault() ?? "Нет диагностик",
+                            x + 15, terminalY + 30, 12, "#D1DCEB", w - x - 30);
+                }
+                else
+                {
+                    Text("TERMINAL      OUTPUT      PROBLEMS", x + 15, terminalY + 8, 10, "#AAB0BD");
+                    string output = string.Join("\n", scene.D("terminal").Items("output").Select(line => line.Value()).Reverse().Take(4).Reverse());
+                    Text(output, x + 15, terminalY + 30, 11, "#B7C5D4", w - x - 30, 4, true);
+                    TerminalField(window, x + 15, h - 47, w - x - 30);
+                }
             }
             if (window.B("split"))
             {
@@ -347,12 +373,28 @@ namespace TouchTypingStudio
                 Text(other.S("body"), secondary + 18, 94, 12, "#C7D9E7", editorWidth - 32, visible, true);
             }
             Rectangle(0, h - 21, w, 21, "#0879B9");
-            Text("⑂ main    ◉ 0   ⚠ 0      " + window.S("status", "Готово"), 13, h - 17, 10, "#FFFFFF", w - 205);
+            Text("⑂ main    ◉ 0   ⚠ " + scene.I("diagnosticProblemCount") + "      " + window.S("status", "Готово"),
+                13, h - 17, 10, "#FFFFFF", w - 205);
             Text("UTF-8    Python    ◉", w - 164, h - 17, 10, "#FFFFFF");
             string focus = window.S("focus");
-            if (focus == "symbol-references" || focus == "symbol-rename")
+            if (focus == "code-quick-fix")
             {
-                bool references = focus == "symbol-references";
+                var options = window.Items("entries").Select(item => item.S("title")).ToArray();
+                double pw = Math.Min(500, w - 24), px = (w - pw) / 2, py = 66;
+                Rounded(px, py, pw, 110, "#292B30", 7);
+                Text("Быстрые исправления", px + 12, py + 8, 14, "#EEF1F8", pw - 24);
+                for (int i = 0; i < options.Length; i++)
+                {
+                    double row = py + 32 + i * 23;
+                    if (i == window.I("optionIndex")) Rounded(px + 5, row - 2, pw - 10, 22, "#234D72", 4);
+                    Text(options[i], px + 12, row, 12, "#EEF1F8", pw - 24);
+                }
+                Text("↑↓ — выбрать   Enter — применить   Esc — закрыть", px + 12, py + 84, 10, "#B4BFCD", pw - 24);
+            }
+            else if (focus == "symbol-references" || focus == "symbol-rename" || focus == "project-results")
+            {
+                bool searchResults = focus == "project-results";
+                bool references = focus == "symbol-references" || searchResults;
                 var choices = references ? window.Items("entries").Select(item => item.S("title")).ToArray() : new string[0];
                 int index = Math.Min(Math.Max(0, window.I("optionIndex")), Math.Max(0, choices.Length - 1));
                 int shown = Math.Min(6, Math.Min(choices.Length, Math.Max(1, (int)((h - 135) / 25))));
@@ -360,11 +402,12 @@ namespace TouchTypingStudio
                 double pw = Math.Min(650, w - 25), px = (w - pw) / 2, py = 66;
                 Rounded(px - 1, py + 2, pw + 2, 80 + shown * 25, "#121419", 8);
                 Rounded(px, py, pw, 80 + shown * 25, "#292B30", 8);
-                Text(references ? "Использования · " + choices.Length : "Переименовать символ",
+                Text(searchResults ? "Поиск «" + window.S("projectSearchQuery") + "» · " + choices.Length :
+                    references ? "Использования · " + choices.Length : "Переименовать символ",
                     px + 13, py + 8, 14, "#EEF1F8", pw - 26);
                 if (references)
                 {
-                    if (choices.Length == 0) Text("Использования не найдены", px + 13, py + 34, 12, "#B4BFCD", pw - 26);
+                    if (choices.Length == 0) Text(searchResults ? "Совпадений нет" : "Использования не найдены", px + 13, py + 34, 12, "#B4BFCD", pw - 26);
                     for (int i = start; i < Math.Min(start + shown, choices.Length); i++)
                     {
                         double row = py + 35 + (i - start) * 25;
@@ -414,13 +457,39 @@ namespace TouchTypingStudio
             if (window.S("status").Length > 0) Text(window.S("status"), 16, h - 25, 11, "#C9B3C5", w - 35);
         }
 
-        internal string CapturePng()
+        internal string CapturePng(bool activeOnly = false)
         {
             if (ActualWidth < 1 || ActualHeight < 1) return "";
+            if (activeOnly)
+            {
+                var terminal = scene.Items("windows").FirstOrDefault(w => w.B("active") && w.S("app") == "terminal" &&
+                    w.S("state") != "minimized");
+                if (terminal == null) return "";
+                Rect bounds = Bounds(terminal, 1);
+                double scaleWindow = Math.Min(1, 500 / bounds.Width);
+                var drawing = new DrawingVisual();
+                using (var dc = drawing.RenderOpen())
+                {
+                    dc.PushTransform(new ScaleTransform(scaleWindow, scaleWindow));
+                    var original = context;
+                    try { context = dc; DrawWindow(terminal, new Rect(0, 0, bounds.Width, bounds.Height)); }
+                    finally { context = original; }
+                    dc.Pop();
+                }
+                var windowImage = new RenderTargetBitmap((int)Math.Ceiling(bounds.Width * scaleWindow),
+                    (int)Math.Ceiling(bounds.Height * scaleWindow), 96, 96, PixelFormats.Pbgra32);
+                windowImage.Render(drawing);
+                return EncodePng(windowImage);
+            }
             double scale = Math.Min(1, 500 / ActualWidth);
             var bitmap = new RenderTargetBitmap((int)Math.Ceiling(ActualWidth * scale), (int)Math.Ceiling(ActualHeight * scale),
                 96 * scale, 96 * scale, PixelFormats.Pbgra32);
             bitmap.Render(this);
+            return EncodePng(bitmap);
+        }
+
+        private static string EncodePng(BitmapSource bitmap)
+        {
             var encoder = new PngBitmapEncoder();
             encoder.Frames.Add(BitmapFrame.Create(bitmap));
             using (var stream = new MemoryStream())
@@ -496,13 +565,19 @@ namespace TouchTypingStudio
         private void DrawSwitcher()
         {
             Rounded(338, 185, 524, 143, "#F4181B23", 15);
-            var windows = scene.Items("windows").Where(w => w.I("workspace") == scene.I("workspace")).Take(4).ToArray();
+            var candidates = scene.Items("windows").Where(w => w.I("workspace") == scene.I("workspace")).ToArray();
+            var ids = scene.Items("switchChoices").Select(item => item.Value()).ToArray();
+            var windows = ids.Length == 0 ? candidates.Take(4).ToArray() :
+                ids.Select(id => candidates.FirstOrDefault(window => window.S("id") == id))
+                    .Where(window => window != null).Take(4).ToArray();
             for (int i = 0; i < windows.Length; i++)
             {
                 double x = 354 + i * 124;
                 if (windows[i].S("id") == scene.S("switchTarget")) Rounded(x, 200, 111, 111, "#4F485E", 9);
                 Icon(windows[i].S("app"), x + 35, 216, 41);
-                Text(AppTitle(windows[i].S("app")), x + 9, 280, 11, "#EAE5F0", 101);
+                string label = ids.Length > 0 && scene.S("gnomePractice") == "same-app"
+                    ? windows[i].S("url", AppTitle(windows[i].S("app"))).Split('/').Last() : AppTitle(windows[i].S("app"));
+                Text(label, x + 9, 280, 11, "#EAE5F0", 101);
             }
         }
 

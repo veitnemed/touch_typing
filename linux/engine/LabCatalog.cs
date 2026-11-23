@@ -37,6 +37,9 @@ internal static class LabCatalog
         T("move-prev", "Переместите окно на предыдущий рабочий стол", "Super+Shift+PageUp", "move-prev", 2),
         T("layout", "Переключите учебную раскладку", "Super+Space", "layout"),
         T("screenshot", "Откройте панель снимка экрана", "Print", "screenshot"),
+        T("debug-window-shot", "Скопируйте снимок активного терминала", "Alt+Print", "debug-window-shot"),
+        T("debug-next-line", "Перейдите на строку с формулой", "Down", "debug-next-line"),
+        T("debug-report-end", "Перейдите в конец учебного отчёта", "Ctrl+End", "debug-report-end"),
         T("screenshot-confirm", "Подтвердите снимок экрана", "Enter", "screenshot-confirm"),
         T("copy-shot", "Скопируйте учебный снимок", "Ctrl+C", "copy-shot"),
         T("code-definition", "Перейдите к определению функции", "F12", "code-definition"),
@@ -119,6 +122,14 @@ internal static class LabCatalog
         T("sidebar", "Переключите боковую панель", "Ctrl+B", "sidebar"),
         T("split", "Разделите редактор", "Ctrl+\\", "split", 1),
         T("terminal-toggle", "Переключите встроенный терминал", "Ctrl+`", "terminal-toggle", 1),
+        T("project-search-submit", "Подтвердите поисковый запрос", "Enter", "project-search-submit",
+            hint: "Введите фрагмент ошибки латиницей. Подтвердите запрос клавишей Enter."),
+        T("project-search-next", "Выберите следующую строку", "Down", "project-search-next",
+            hint: "Сверьте файл с путём в ошибке. Пример в archive.py менять не нужно."),
+        T("project-search-prev", "Выберите предыдущую строку", "Up", "project-search-prev"),
+        T("project-search-open", "Откройте выбранную строку", "Enter", "project-search-open"),
+        T("project-search-repair", "Исправьте значение и сохраните конфигурацию", "Ctrl+S", "project-search-repair",
+            hint: "Нажмите End, затем Backspace, введите 5 и сохраните Ctrl+S. В других файлах ничего не меняйте."),
         T("save", "Сохраните текущий файл", "Ctrl+S", "save"),
         T("select-all", "Выделите текст", "Ctrl+A", "select-all"),
         T("copy", "Скопируйте текст", "Ctrl+C", "copy"),
@@ -140,14 +151,31 @@ internal static class LabCatalog
         T("terminal-history-up", "Восстановите предыдущую команду", "Up", "terminal-history-up"),
         T("terminal-history-down", "Перейдите вперёд по истории команд", "Down", "terminal-history-down", 1),
         T("terminal-submit", "Выполните введённую команду", "Enter", "terminal-submit"),
+        T("code-problem-next", "Перейдите к диагностике из панели проблем", "F8", "code-problem-next", 1),
+        T("code-fix-open", "Откройте быстрые исправления в строке диагностики", "Ctrl+.", "code-fix-open", 1),
+        T("code-fix-next", "Выберите исправление, сохраняющее дробную часть", "Down", "code-fix-next", 1),
+        T("code-fix-prev", "Выберите предыдущее исправление", "Up", "code-fix-prev", 1),
+        T("code-fix-apply", "Примените выбранное исправление", "Enter", "code-fix-apply", 1),
+        T("code-fix-cancel", "Закройте быстрые исправления", "Esc", "code-fix-cancel", 1),
+        T("switch-group-next", "Выберите другое окно того же приложения", "Alt+`", "switch-group-next", 1,
+            "Удерживайте переключатель, выберите нужный файл по подписи и отпустите модификатор."),
+        T("switch-group-prev", "Вернитесь к предыдущему окну приложения", "Alt+Shift+`", "switch-group-prev", 1),
+        T("gnome-left-super", "Нажмите и отпустите левый Super (⊞)", "LSuper", "gnome-left-super", 1,
+            "На MateBook клавиша ⊞ слева от Alt. Буква Z (Я) находится выше."),
     ];
-    private static readonly HashSet<string> UbuntuIds = new(Shortcuts.Where(task => !task.Id.StartsWith("code-", StringComparison.Ordinal)).Take(23).Select(task => task.Id));
+    private static readonly HashSet<string> UbuntuIds = new([
+        "overview", "switch-next", "switch-prev", "open-terminal", "open-chrome", "open-code", "open-files",
+        "close-window", "maximize", "restore", "tile-left", "tile-right", "minimize", "desktop",
+        "workspace-next", "workspace-prev", "move-next", "move-prev", "layout",
+        "screenshot", "screenshot-confirm", "copy-shot", "escape",
+        "switch-group-next", "switch-group-prev", "gnome-left-super"
+    ]);
     private static readonly HashSet<string> FilesIds = new(Shortcuts.Where(task => task.Id.StartsWith("file-") || task.Id is "trash" or "restore-trash").Select(task => task.Id));
     private static readonly HashSet<string> ChromeIds = new(["history", "downloads", "bookmark-manager", "link-next", "link-prev", "link-open", "new-tab", "close-tab", "restore-tab", "next-tab", "prev-tab", "first-tab", "last-tab", "url", "navigate-pasted", "find", "find-next", "refresh", "back", "forward", "fullscreen", "zoom-in", "zoom-out", "zoom-reset", "bookmark", "bookmarks", "select-all", "copy", "cut", "paste", "escape", "layout"]);
     private static readonly HashSet<string> CodeIds = new(["document-start", "move-line-up", "move-line-down", "occurrence", "replace", "replace-field", "replace-one", "symbols", "symbol-next", "symbol-open", "changes", "focus-editor", "focus-second", "panel", "extensions", "select-line", "new-file", "close-tab", "next-tab", "prev-tab", "quick-open", "quick-next", "quick-choose", "palette", "palette-next", "palette-choose", "goto-line", "explorer", "project-search", "sidebar", "split", "terminal-toggle", "save", "select-all", "copy", "cut", "paste", "undo", "redo", "comment", "delete-line", "find", "escape", "layout"]);
     static LabCatalog()
     {
-        CodeIds.UnionWith(Shortcuts.Where(task => task.Id.StartsWith("code-", StringComparison.Ordinal)).Select(task => task.Id));
+        CodeIds.UnionWith(Shortcuts.Where(task => task.Id.StartsWith("code-", StringComparison.Ordinal) || task.Id.StartsWith("project-search-", StringComparison.Ordinal)).Select(task => task.Id));
     }
     private static readonly HashSet<string> TerminalIds = new(Shortcuts.Where(task => task.Id.StartsWith("terminal-")).Select(task => task.Id).Concat(["layout", "escape"]));
     internal static object Catalog(IEnumerable<LiveDraft> drafts, IEnumerable<ShortcutAttempt> history, string layout) => new { recommendations = LiveStartingLevel.Recommend(history, layout), drafts = (drafts ?? []).Select(d => new { d.App, d.Level, d.Mission, d.Guidance }), classes = Apps.Select(app => new { id = app, title = Title(app), description = app switch
@@ -161,7 +189,12 @@ internal static class LabCatalog
         bool terminal = window != null && (window.App == "terminal" || window.Focus == "terminal");
         return task.Id switch
         {
+            "code-problem-next" or "code-fix-open" or "code-fix-next" or "code-fix-prev" or
+            "code-fix-apply" or "code-fix-cancel" => scene.DiagnosticActionAvailable(task.Action),
             "document-start" or "move-line-up" or "move-line-down" or "occurrence" => window?.App == "code" && window.Focus == "body",
+            "project-search-submit" => window?.Focus == "project-search" && !string.IsNullOrWhiteSpace(window.Input),
+            "project-search-next" or "project-search-prev" or "project-search-open" => window?.Focus == "project-results",
+            "project-search-repair" => scene.SearchRepairExercise && window?.App == "code" && window.Focus == "body" && window.Tab?.SavedBody != window.Body,
             "code-definition" or "code-references" or "code-rename" => window?.App == "code" && window.Focus == "body",
             "code-back" => window?.App == "code" && window.Focus == "body" && window.SymbolBack.Count > 0,
             "code-reference-prev" or "code-reference-next" or "code-reference-open" => window?.Focus == "symbol-references",
@@ -174,6 +207,11 @@ internal static class LabCatalog
             "link-next" or "link-prev" => window?.App == "chrome" && window.Focus == "body",
             "switch-next" or "switch-prev" => scene.Windows.Count(item => item.Workspace == scene.Workspace)
                 >= (scene.GnomeWindows && window == null ? 1 : 2),
+            "switch-group-next" or "switch-group-prev" => scene.GnomePractice == "same-app" && scene.GnomeGroupSize >= 2,
+            "workspace-next" when scene.GnomePractice == "workspaces" => scene.Workspace + 1 < scene.WorkspaceCount,
+            "workspace-prev" when scene.GnomePractice == "workspaces" => scene.Workspace > 0,
+            "move-next" when scene.GnomePractice == "workspaces" => window != null && scene.Workspace + 1 < scene.WorkspaceCount,
+            "move-prev" when scene.GnomePractice == "workspaces" => window != null && scene.Workspace > 0,
             "close-window" => window != null,
             "open-chrome" => window?.App != "chrome",
             "open-code" => window?.App != "code",
@@ -188,6 +226,8 @@ internal static class LabCatalog
             "move-next" or "move-prev" => window != null,
             "copy-shot" => scene.ScreenshotReady && !scene.ScreenshotCopied,
             "screenshot-confirm" => scene.Screenshot,
+            "debug-window-shot" => scene.DebugDay && window?.App == "terminal" && scene.DebugTestCurrent,
+            "debug-next-line" or "debug-report-end" => scene.DebugDay && window?.App == "code" && window.Focus == "body",
             "escape" => scene.Overview || scene.Screenshot || scene.ScreenshotReady || window?.Focus is not (null or "body"),
             "new-tab" => window?.App == "chrome" && window.Tabs.Count < 6,
             "url" => window?.App == "chrome" && !scene.Overview && !scene.Switcher && !scene.Screenshot,
@@ -236,8 +276,12 @@ internal static class LabCatalog
         { "chrome" => ChromeIds, "code" => CodeIds, "files" => FilesIds, _ => UbuntuIds };
         int Priority(LabTask task)
         {
+            if (task.Id.StartsWith("code-fix-", StringComparison.Ordinal) && scene.DiagnosticActionAvailable(task.Action))
+                return 2;
             if (task.Id == "copy-shot" && scene.ScreenshotReady && !scene.ScreenshotCopied) return 2;
             if (task.Id == "screenshot-confirm" && scene.Screenshot) return 2;
+            if (scene.GnomePractice is "workspaces" or "same-app" && LabScene.GnomeProfileActions.Contains(task.Id) &&
+                scene.DesktopProfile.Any(entry => entry.StartsWith(task.Id + "=", StringComparison.Ordinal))) return 3;
             return context.Contains(task.Id) ? 1 : 0;
         }
         if (app == "chrome")
@@ -259,7 +303,8 @@ internal static class LabCatalog
             var chord = Gesture.Parse(task.Keys).Chords[0];
             bool trigger = chord.Trigger == null ? KeyChord.IsModifier(key) : chord.Trigger == key;
             if (!trigger || !chord.FitsModifiers(held) || !Available(task, scene)) return false;
-            if (UbuntuIds.Contains(task.Id)) return true;
+            if (scene.DebugDay && task.Id.StartsWith("debug-", StringComparison.Ordinal)) return true;
+            if (UbuntuIds.Contains(task.Id) || task.Id is "switch-group-next" or "switch-group-prev") return true;
             return context.Contains(task.Id) || terminal && app == "code" && task.Id is "terminal-toggle" or "panel" or "escape";
         });
     }

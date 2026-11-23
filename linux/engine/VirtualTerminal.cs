@@ -17,6 +17,7 @@ internal sealed class VirtualTerminal
     private readonly Dictionary<string, string> modes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> owners = new(StringComparer.Ordinal);
     private readonly List<string> history = [];
+    private readonly Dictionary<string, Func<VirtualTerminal, string>> lessonUnitTests = new(StringComparer.Ordinal);
     private readonly HashSet<string> packages = new(StringComparer.Ordinal) { "bash", "coreutils" };
     private readonly Dictionary<int, string> processes = new() { [1] = "systemd", [120] = "bash", [245] = "python3 worker.py" };
     private static readonly Dictionary<string, string> AvailablePackages = new(StringComparer.Ordinal)
@@ -56,6 +57,10 @@ internal sealed class VirtualTerminal
     internal void CreateFolder(string path) => MakeDirectories(["-p", path]);
     internal string ReadFile(string path) => files.GetValueOrDefault(Resolve(path));
     internal bool Exists(string path) => files.ContainsKey(Resolve(path)) || directories.Contains(Resolve(path));
+    // A closed, in-memory exercise fixture. No learner-supplied source or
+    // shell command is executed by the host Python or operating system.
+    internal void InstallUnitTest(string selector, Func<VirtualTerminal, string> run) => lessonUnitTests.Add(selector, run);
+    internal bool HasUnitTest(string selector) => lessonUnitTests.ContainsKey(selector);
     internal bool DirectoryExists(string path) => directories.Contains(Resolve(path));
     internal object Snapshot() => new
     {
@@ -191,6 +196,7 @@ internal sealed class VirtualTerminal
         copy.commits.Clear(); copy.commits.AddRange(commits);
         copy.branches.Clear(); foreach (var pair in branches) copy.branches[pair.Key] = new(pair.Value);
         foreach (var pair in branchLogs) copy.branchLogs[pair.Key] = new(pair.Value);
+        foreach (var pair in lessonUnitTests) copy.lessonUnitTests[pair.Key] = pair.Value;
         copy.history.Clear(); copy.history.AddRange(history);
         return copy;
     }
@@ -279,6 +285,11 @@ internal sealed class VirtualTerminal
         string[] args = words[1..];
         switch (command)
         {
+            case "python" or "python3" when lessonUnitTests.Count > 0:
+                if (args.Length == 3 && args[0] == "-m" && args[1] == "unittest" &&
+                    lessonUnitTests.TryGetValue(args[2], out var lessonTest))
+                    return lessonTest(this);
+                throw Error(command, "доступны только тесты текущего учебного проекта через -m unittest");
             case "sudo":
                 if (args.Length == 0) throw Error("sudo", "укажите команду");
                 return Run(args, input, true);

@@ -64,6 +64,21 @@ internal static partial class LiveCourse
             new("Управлять одним оставшимся окном и сохранить правку", "switch-next tile-left tile-left close-window minimize switch-next restore tile-right save")
         ], FinishAfterRoute: true, Curated: true, Prepare: scene => scene.PrepareGnomeWindowMission()));
         Add("ubuntu",1,"workspaces","Разнести рабочие инструменты по столам","workspaces","source","switch","file");
+        list.Add(new("ubuntu", 1, "ubuntu-gnome-workspaces", "GNOME: терминал на втором рабочем столе",
+        [
+            new("Перенести только терминал и проверить каталог", "move-next cmd:pwd"),
+            new("Вернуться к коду и сохранить пометку", "workspace-prev gnome-write save"),
+            new("Проверить оба стола, не меняя размещения окон", "workspace-next workspace-prev")
+        ], FinishAfterRoute: true, Curated: true, Prepare: scene => scene.PrepareGnomeWorkspaces()));
+        list.Add(new("ubuntu", 1, "ubuntu-gnome-same-app", "GNOME: два окна VS Code",
+        [
+            new("Переключаться только между окнами VS Code", "switch-group-next switch-group-prev")
+        ], FinishAfterRoute: true, Curated: true, Prepare: scene => scene.PrepareGnomeSameApp()));
+        list.Add(new("ubuntu", 1, "ubuntu-matebook-layout", "MateBook: левый Super и переключение RU/EN",
+        [
+            new("Открыть обзор левой клавишей ⊞ и вернуться", "gnome-left-super escape"),
+            new("Переключить учебный ввод в обе стороны", "layout layout")
+        ], FinishAfterRoute: true, Curated: true, Prepare: scene => scene.PrepareMateBook()));
         Add("ubuntu",1,"languages","Подготовить двуязычную рабочую среду","sources","launch","file","recover");
         Add("ubuntu",2,"briefing","Перенести показ на отдельный стол","desk","present","verify","capture");
         Add("ubuntu",2,"review","Подготовить окна для ревью проекта","source","workspaces","switch","capture","file");

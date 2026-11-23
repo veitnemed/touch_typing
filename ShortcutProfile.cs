@@ -12,7 +12,7 @@ namespace TouchTypingStudio
     public class LiveDraft
     {
         public string App, Mission, Layout, Guidance, Trace, LayoutKey;
-        public string[] Dock;
+        public string[] Dock, DesktopProfile;
         public int Level, Variant;
         public bool VirtualLayout;
         // Absent in older drafts, including explicit unlimited sessions.

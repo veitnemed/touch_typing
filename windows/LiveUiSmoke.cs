@@ -30,7 +30,9 @@ internal static class LiveUiSmoke
         {
             bool referenceBrowser = arguments.Contains("--reference-browser");
             bool dailyUse = arguments.Contains("--daily-use");
-            bool referenceEvidence = referenceBrowser || dailyUse || arguments.Contains("--reference-evidence");
+            bool gnomeProfile = arguments.Contains("--gnome-profile");
+            bool debugDay = arguments.Contains("--debug-day");
+            bool referenceEvidence = referenceBrowser || dailyUse || gnomeProfile || debugDay || arguments.Contains("--reference-evidence");
             if (referenceEvidence && SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
                 throw new InvalidOperationException("Per-monitor-aware evidence capture cannot be enabled.");
             string path = Path.GetFullPath(arguments[0]);
@@ -46,6 +48,18 @@ internal static class LiveUiSmoke
             window = AutomationElement.FromHandle(trainer);
             Check(window.Current.ProcessId == app.Id, "The automation root belongs to the new QA process");
             Focus();
+            if (gnomeProfile)
+            {
+                CheckGnomeProfilePractice();
+                Console.WriteLine("PASS: " + count + " native WPF GNOME profile assertions (simulated desktop)");
+                return 0;
+            }
+            if (debugDay)
+            {
+                CheckDebugDay();
+                Console.WriteLine("PASS: " + count + " native WPF debug-day assertions");
+                return 0;
+            }
             if (dailyUse)
             {
                 CheckDailyUse();
@@ -506,6 +520,58 @@ internal static class LiveUiSmoke
             "No resumable parallel attempt after explicit finish");
     }
 
+    private static void CheckDebugDay()
+    {
+        for (int mode = 0; mode < 2; mode++)
+        {
+            bool guided = mode == 0;
+            string mark = guided ? "guided" : "independent";
+            string caller = guided ? "billing.py" : "clock_app.py";
+            string module = guided ? "factors.py" : "duration.py";
+            string report = guided ? "billing-report.md" : "clock-report.md";
+            string test = guided ? "test_billing.PriceTests.test_price_in_cents" : "test_clock.DurationTests.test_to_seconds";
+            if (Visible("LabChooseClass"))
+            {
+                Invoke("LabChooseClass");
+                Until(delegate { return Exists("LabStart"); }, "debug-day chooser");
+            }
+            Invoke("LabClass-workday"); Select("LabMode", 0); Select("LabLevel", 1);
+            Select("LabDuration", 0); Select("LabTimer", 0);
+            SelectMissionByName("Разобрать ошибку без мыши · " + (guided ? "с подсказками" : "самостоятельно"));
+            Key("F5");
+            Until(delegate { return Visible("LabDesktop") && Name("LabPause").StartsWith("Пауза"); }, mark + " native debug-day lesson");
+            VirtualEnglish();
+
+            Chord("Super+2"); Chord("Ctrl+Shift+F");
+            foreach (char c in guided ? "price_in_cents(45)" : "to_seconds(4200)") Send(Character(c));
+            Key("Enter"); Key("Enter");
+            Until(delegate { return Find("LabDesktop").Current.HelpText.EndsWith(caller); }, "opened correct call site");
+            Key("F12");
+            Until(delegate { return Find("LabDesktop").Current.HelpText.EndsWith(module); }, "opened imported definition");
+            Chord("Super+1"); Chord("Ctrl+F");
+            foreach (char c in guided ? "100 cents" : "1000 milliseconds") Send(Character(c));
+            Key("Enter"); Key("Esc"); Chord("Super+2");
+            Until(delegate { return Find("LabDesktop").Current.HelpText.EndsWith(module); }, "return to exact module");
+            Key("Down"); Chord("Ctrl+L");
+            foreach (char c in guided ? "    return value * 100" : "    return value / 1000") Send(Character(c));
+            Key("Enter"); Chord("Ctrl+S"); Chord("Ctrl+Alt+T");
+            foreach (char c in "python3 -m unittest " + test) Send(Character(c));
+            Key("Enter");
+            CaptureReferenceFrame("debug-" + mark + "-terminal-test");
+            Chord("Alt+Print");
+            Until(delegate { return Name("LabDesktop").Contains("Снимок активного терминала скопирован"); },
+                "trainer received Alt+Print and produced the virtual terminal PNG");
+            Chord("Super+2"); Chord("Ctrl+P"); Key("Enter"); Chord("Ctrl+End"); Chord("Ctrl+V");
+            Until(delegate { return Find("LabDesktop").Current.HelpText.EndsWith(report) &&
+                Name("LabDesktop").Contains("В отчёт вставлен снимок терминала"); }, "screenshot pasted into report");
+            CaptureReferenceFrame("debug-" + mark + "-report-with-image");
+            Chord("Ctrl+S"); Chord("Ctrl+Alt+T");
+            foreach (char c in "cat " + report) Send(Character(c));
+            Key("Enter");
+            Until(delegate { return Visible("LabResult"); }, "engine accepted saved report and actual PNG");
+        }
+    }
+
     private static void CheckDailyUse()
     {
         Action<string, int, string> start = (area, level, mission) =>
@@ -567,6 +633,33 @@ internal static class LiveUiSmoke
         Until(delegate { return Visible("LabResult"); }, "renamed call resolves to renamed definition");
         frame("symbols-09-result");
 
+        start("code", 0, "Найти ошибку по сообщению");
+        Until(delegate { return editor().ItemStatus.StartsWith("cursor:"); }, "starts in the virtual terminal");
+        frame("search-01-traceback");
+        Chord("Alt+Tab"); Chord("Ctrl+Shift+F"); Key("Esc");
+        Until(delegate { return !Visible("LabResult") && editor().HelpText.EndsWith("archive.py"); }, "opening and leaving search cannot complete repair");
+        Chord("Ctrl+Shift+F");
+        foreach (char c in "DEFAULT_TIMEOUT") Send(Character(c));
+        Until(delegate { return editor().HelpText == "Поиск по проекту: DEFAULT_TIMEOUT"; }, "exact search query");
+        Key("Enter");
+        Until(delegate {
+            var result = editor();
+            return result.ItemStatus.StartsWith("editor:project-results:") &&
+                result.HelpText.StartsWith("Поиск «DEFAULT_TIMEOUT»: ") &&
+                result.HelpText.Split(new[] { "; " }, StringSplitOptions.None).Length == 3 &&
+                result.HelpText.Contains("archive.py:2:1") && result.HelpText.Contains("config.py:2:1") &&
+                result.HelpText.Contains("notes.py:1:9");
+        }, "exactly three search results");
+        frame("search-02-results");
+        Key("Down"); Key("Enter");
+        Until(delegate { return editor().HelpText.EndsWith("config.py") && editor().ItemStatus == "editor:body:19"; }, "runtime config at matching token");
+        frame("search-03-config");
+        Key("End"); Key("Backspace"); Send(Character('5'));
+        Until(delegate { return !Visible("LabResult") && editor().ItemStatus == "editor:body:38"; }, "modified buffer is not yet saved");
+        Chord("Ctrl+S");
+        Until(delegate { return Visible("LabResult"); }, "saved runtime config validates");
+        frame("search-04-saved");
+
         start("code", 0, "Правка выделенной строки");
         Until(delegate { return editor().HelpText.EndsWith("line-edit.py") && editor().ItemStatus == "editor:body:19"; }, "initial middle line");
         Chord("Ctrl+L");
@@ -581,6 +674,28 @@ internal static class LiveUiSmoke
         frame("line-02-delete");
         Chord("Ctrl+Z");
         Until(delegate { return Visible("LabResult") || editor().ItemStatus == "editor:body:41"; }, "undo deletion");
+
+        start("code", 1, "Исправить диагностику и запустить один тест");
+        Until(delegate { return editor().ItemStatus.StartsWith("editor:code-problems:") &&
+            editor().HelpText.Contains("Неверный знак") && Name("LabPause").Contains("F6"); }, "Problems panel and alternate pause key F6");
+        Key("F6");
+        Until(delegate { return Visible("LabPauseResult"); }, "F6 actually pauses rather than invoking a diagnostic");
+        Key("Space");
+        Until(delegate { return !Visible("LabPauseResult") && editor().ItemStatus.StartsWith("editor:code-problems:"); }, "resume to unchanged Problems panel");
+        Key("F8");
+        Until(delegate { return !Visible("LabPauseResult") && editor().HelpText.EndsWith("units.py") &&
+            editor().ItemStatus == "editor:body:42"; }, "F8 opens exact diagnostic position without pausing");
+        Check(Name("LabPause").Contains("F6"), "Alternate pause key stays available after diagnosis navigation");
+        Chord("Ctrl+.");
+        Until(delegate { return editor().ItemStatus.StartsWith("editor:code-quick-fix:") &&
+            editor().HelpText.Contains("округлить") && editor().HelpText.Contains("дробную часть"); }, "two choices in the Quick Fix menu");
+        frame("code-diagnostics-choices");
+        Key("Down"); Key("Enter"); Chord("Ctrl+S"); Chord("Ctrl+`");
+        const string diagnosticTest = "python -m unittest test_units.UnitsTests.test_kelvin_to_celsius";
+        foreach (char c in diagnosticTest) Send(Character(c));
+        Until(delegate { return editor().HelpText == diagnosticTest; }, "only one precise Python test selected in the simulated embedded terminal");
+        Key("Enter");
+        Until(delegate { return Visible("LabResult"); }, "tested editor fix completed");
 
         start("ubuntu", 1, "GNOME: документация и код рядом");
         Chord("Super+Left");
@@ -623,6 +738,87 @@ internal static class LiveUiSmoke
         Chord("Super+Down"); Chord("Super+Right"); Chord("Ctrl+S");
         Until(delegate { return Visible("LabResult"); }, "GNOME result");
         frame("gnome-07-result");
+    }
+
+    private static void CheckGnomeProfilePractice()
+    {
+        Action<string> start = mission =>
+        {
+            if (Visible("LabPause") && !Visible("LabResult"))
+            {
+                Key("F10");
+                Until(delegate { return Visible("LabResult"); }, "GNOME lesson stopped");
+            }
+            if (Visible("LabChooseClass"))
+            {
+                Invoke("LabChooseClass");
+                Until(delegate { return Exists("LabStart"); }, "GNOME chooser");
+            }
+            Invoke("LabClass-ubuntu");
+            Select("LabMode", 0);
+            Select("LabLevel", 1);
+            Select("LabDuration", 0);
+            Select("LabTimer", 0);
+            SelectMissionByName(mission);
+            Key("F5");
+            Until(delegate { return Visible("LabDesktop") && Name("LabPause").StartsWith("Пауза"); }, "native lesson " + mission);
+        };
+        Func<AutomationElement.AutomationElementInformation> scene = () => Find("LabDesktop").Current;
+        start("GNOME: терминал на втором рабочем столе");
+        VirtualEnglish();
+        Check(scene().Name.Contains("Рабочий стол 1 из 2") && scene().Name.Contains("terminal@1"), "Both windows begin on desk 1");
+        Chord("Super+Shift+PageDown");
+        Until(delegate { return scene().Name.Contains("Рабочий стол 2 из 2") && scene().Name.Contains("code@1") &&
+            scene().Name.Contains("terminal@2"); }, "only terminal moves; current desk follows");
+        foreach (char c in "pwd") Send(Character(c));
+        Key("Enter");
+        Until(delegate { return Name("LabTask").Contains("рабочий стол"); }, "exact pwd advances to desktop return");
+        CaptureReferenceFrame("gnome-workspace-2-terminal");
+        Chord("Super+PageUp");
+        Until(delegate { return scene().Name.Contains("Рабочий стол 1 из 2") && scene().HelpText.EndsWith("app.py") &&
+            scene().ItemStatus == "editor:body:2"; }, "original file and exact caret");
+        CaptureReferenceFrame("gnome-workspace-1-editor");
+        foreach (char c in "gnome") Send(Character(c));
+        Until(delegate { return scene().ItemStatus == "editor:body:7"; }, "continued typing in the same file");
+        Key("Enter"); Chord("Ctrl+S"); Chord("Super+PageDown"); Chord("Super+PageUp");
+        Until(delegate { return Visible("LabResult"); }, "return trips and final result");
+
+        start("GNOME: два окна VS Code");
+        Check(scene().HelpText.EndsWith("README.md"), "The first active window has README.md");
+        Chord("Alt+Tab");
+        Until(delegate { return scene().Name.Contains("chrome=normal*"); }, "general switcher sees a different application");
+        Check(ReadSolved() == 0, "A general application switch is not same-app selection credit");
+        Chord("Alt+Tab");
+        Until(delegate { return scene().HelpText.EndsWith("README.md"); }, "return to the same-app lesson starting window");
+        var alt = Parse("Alt").Single();
+        var grave = Parse("`").Single();
+        Send(new[] { alt.Down(), grave.Down(), grave.Up() });
+        Until(delegate { return scene().Name.Contains("Переключатель: README.md; app.py"); }, "same-app switcher lists only its two file identities");
+        Check(ReadSolved() == 0, "Selection is not credited before releasing Alt");
+        CaptureReferenceFrame("gnome-same-app-switcher");
+        Send(new[] { alt.Up() });
+        Until(delegate { return scene().HelpText.EndsWith("app.py") && ReadSolved() == 1; }, "selected app.py in its own window");
+        Chord("Alt+Shift+`");
+        Until(delegate { return Visible("LabResult"); }, "same application reverse cycle");
+
+        start("MateBook: левый Super и переключение RU/EN");
+        var initial = scene().Name.Contains(". Раскладка RU.") ? "RU" : "EN";
+        foreach (var attempt in new[] { new[] { "RSuper", "правый Super" }, new[] { "LAlt", "Это Alt" }, new[] { "Z", "Это клавиша Z" } })
+        {
+            Key(attempt[0]);
+            Until(delegate { return Name("LabStatus").Contains(attempt[1]); }, "distinct feedback for " + attempt[0]);
+            Check(ReadSolved() == 0, "Wrong physical key does not open the lesson overview");
+        }
+        CaptureReferenceFrame("gnome-matebook-mistake");
+        Key("LSuper");
+        Until(delegate { return ReadSolved() == 1; }, "only left Super opens and credits GNOME overview");
+        Key("Esc");
+        Until(delegate { return ReadSolved() == 2; }, "escape goes back to desktop");
+        Chord("Super+Space");
+        Until(delegate { return ReadSolved() == 3 && scene().Name.Contains(". Раскладка " + (initial == "RU" ? "EN" : "RU") + "."); },
+            "virtual layout changes independently of the host");
+        Chord("Super+Space");
+        Until(delegate { return Visible("LabResult"); }, "return to original virtual layout");
     }
 
     private static void SelectMissionByName(string title)

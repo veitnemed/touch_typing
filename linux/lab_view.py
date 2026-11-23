@@ -46,8 +46,10 @@ class DesktopView(Gtk.Widget):
             self.scene = scene
             self.queue_draw()
             active = next((w for w in scene.get("windows", []) if w.get("active")), {})
+            choices = (" " + "; ".join(e.get("title", "") for e in active.get("entries", ()))
+                       if active.get("focus") in ("code-problems", "code-quick-fix") else "")
             self.update_property([Gtk.AccessibleProperty.LABEL], [
-                "Учебная сцена. " + active.get("title", "Рабочий стол") + ". " + active.get("body", "")[:300]])
+                "Учебная сцена. " + active.get("title", "Рабочий стол") + ". " + active.get("body", "")[:300] + choices])
 
     @staticmethod
     def rect(x, y, width, height):
@@ -188,7 +190,35 @@ class DesktopView(Gtk.Widget):
             self.label({"code": "‹›", "terminal": ">_", "ubuntu": "●"}.get(app, "□"),
                        x + 4, y + size * .13, size * .55, bold=True)
 
-    def capture_png(self):
+    def capture_png(self, active_only=False):
+        if active_only:
+            active = next((w for w in self.scene.get("windows", []) if w.get("active") and
+                           w.get("app") == "terminal" and w.get("state") != "minimized"), None)
+            if not active:
+                return ""
+            width, height = self.get_width(), self.get_height()
+            windows = [w for w in self.scene.get("windows", []) if w.get("workspace", 0) == self.scene.get("workspace", 0)
+                       and w.get("state") != "minimized"]
+            # A normal active terminal is the topmost of at most two visible
+            # windows. Render the actual terminal content only, at its size.
+            _, _, w, h = self.window_bounds(active, min(1, len(windows) - 1), width, height)
+            if w < 90 or h < 50:
+                return ""
+            scale = min(1, 500 / w)
+            snap = Gtk.Snapshot()
+            snap.scale(scale, scale)
+            old = self.snapshot
+            try:
+                self.snapshot = snap
+                self.draw_window(active, 0, 0, w, h)
+            finally:
+                self.snapshot = old
+            node = snap.to_node()
+            renderer = self.get_native().get_renderer()
+            if node is None or renderer is None:
+                return ""
+            texture = renderer.render_texture(node, self.rect(0, 0, w * scale, h * scale))
+            return base64.b64encode(texture.save_to_png_bytes().get_data()).decode("ascii")
         paintable = Gtk.WidgetPaintable.new(self)
         snap = Gtk.Snapshot()
         scale = min(1, 500 / max(1, self.get_width()))
@@ -268,11 +298,20 @@ class DesktopView(Gtk.Widget):
             self.fill("#292833", width * .25, height * .35, width * .5, 90, 12)
             self.label("Переключение окон", width * .28, height * .35 + 8, 12)
             choices = [v for v in self.scene.get("windows", []) if v.get("workspace") == workspace]
+            ids = self.scene.get("switchChoices")
+            if ids:
+                by_id = {entry["id"]: entry for entry in choices}
+                choices = [by_id[identity] for identity in ids if identity in by_id]
+            same_app = bool(ids) and self.scene.get("gnomePractice") == "same-app"
             for i, candidate in enumerate(choices):
                 left = width / 2 + (i - len(choices) / 2) * 75 + 15
                 if candidate["id"] == self.scene.get("switchTarget"):
                     self.fill("#818498", left - 6, height * .35 + 29, 47, 47, 8)
                 self.app_icon(candidate["app"], left, height * .35 + 35, 35)
+                if same_app:
+                    # Same icons are not sufficient to choose the intended window.
+                    caption = candidate.get("url") or candidate.get("title", "")
+                    self.label(caption.rsplit("/", 1)[-1], left - 12, height * .35 + 68, 10, width=74)
         self.draw_capture_feedback(width, height)
         self.snapshot = None
 
@@ -476,7 +515,8 @@ class DesktopView(Gtk.Widget):
                 shown = window.get("searchResults", [])
             else:
                 shown = window.get("projectFiles", [])
-            project = "SYMBOL-LAB" if any("/symbol-lab/" in tab.get("url", "") for tab in tabs) else "PILING-MAIN"
+            project = ("DIAGNOSTICS-LAB" if self.scene.get("diagnosticWorkspace") else
+                       "SYMBOL-LAB" if any("/symbol-lab/" in tab.get("url", "") for tab in tabs) else "PILING-MAIN")
             self.label(project if view == "explorer" else "", x + 46, y + 36, 10, "#aeb1b8")
             for i, name in enumerate(shown):
                 self.label(name, x + 47, y + 60 + 23 * i, 12, "#c6ccd4", width=sidebar - 15)
@@ -538,11 +578,30 @@ class DesktopView(Gtk.Widget):
             self.fill("#464646", editor_x + pane, y + 29, 1, max(1, (h * .54 if window.get("panel") else h - 19) - 29))
         if window.get("panel"):
             self.fill("#181818", editor_x, y + h * .54, editor_w, h * .46 - 19)
-            self.label("ТЕРМИНАЛ     ВЫВОД     ПРОБЛЕМЫ", editor_x + 10, y + h * .54 + 6, 9)
-            self.terminal(window, editor_x, y + h * .54 + 27, editor_w, h * .46 - 46, embedded=True)
+            if self.scene.get("diagnosticWorkspace") and window.get("focus") != "terminal":
+                self.label("ПРОБЛЕМЫ · F8", editor_x + 10, y + h * .54 + 6, 10, "#f3cc73", bold=True)
+                problems = [item["title"] for item in window.get("entries", ()) if item.get("kind") == "problem"]
+                if window.get("focus") != "code-quick-fix":
+                    self.label(problems[0] if problems else "Нет диагностик", editor_x + 10, y + h * .54 + 26, 11, "#d1dceb", width=editor_w-20)
+            else:
+                self.label("ТЕРМИНАЛ     ВЫВОД     ПРОБЛЕМЫ", editor_x + 10, y + h * .54 + 6, 9)
+                self.terminal(window, editor_x, y + h * .54 + 27, editor_w, h * .46 - 46, embedded=True)
         focus = window.get("focus", "editor")
-        if focus in ("symbol-references", "symbol-rename"):
-            references = focus == "symbol-references"
+        if focus == "code-quick-fix":
+            choices = [item.get("title", "") for item in window.get("entries", ())]
+            pw = min(w - 24, 480)
+            px, py = x + (w - pw) / 2, y + 37
+            self.fill("#292b30", px, py, pw, 110, 7)
+            self.label("Быстрые исправления", px + 10, py + 8, 13, "#eef1f8", width=pw - 20, bold=True)
+            for index, title in enumerate(choices):
+                row = py + 32 + 23 * index
+                if index == window.get("optionIndex"):
+                    self.fill("#234d72", px + 5, row - 2, pw - 10, 22, 4)
+                self.label(title, px + 10, row, 12, "#eef1f8", width=pw - 20)
+            self.label("↑↓ — выбрать   Enter — применить   Esc — закрыть", px + 10, py + 84, 10, "#b4bfcd", width=pw-20)
+        elif focus in ("symbol-references", "symbol-rename", "project-results"):
+            search_results = focus == "project-results"
+            references = focus == "symbol-references" or search_results
             choices = [item.get("title", "") for item in window.get("entries", [])] if references else []
             selected = min(max(0, window.get("optionIndex", 0)), max(0, len(choices) - 1))
             visible = min(6, len(choices), max(1, int((h - 100) / 25)))
@@ -552,7 +611,8 @@ class DesktopView(Gtk.Widget):
             py = y + 34
             self.fill("#121419", px - 1, py + 2, pw + 2, 76 + visible * 25, 8)
             self.fill("#292b30", px, py, pw, 76 + visible * 25, 8)
-            title = f"Использования · {len(choices)}" if references else "Переименовать символ"
+            title = (f"Поиск «{window.get('projectSearchQuery', '')}» · {len(choices)}" if search_results else
+                     f"Использования · {len(choices)}" if references else "Переименовать символ")
             self.label(title, px + 12, py + 8, 13, "#eef1f8", width=pw - 24, bold=True)
             if references:
                 for row, index in enumerate(range(first, min(len(choices), first + visible))):
@@ -561,7 +621,7 @@ class DesktopView(Gtk.Widget):
                         self.fill("#234d72", px + 6, iy - 2, pw - 12, 23, 4)
                     self.label(choices[index], px + 13, iy, 12, "#eef1f8", width=pw - 26)
                 if not choices:
-                    self.label("Использования не найдены", px + 12, py + 32, 11, "#b4bfcd", width=pw - 24)
+                    self.label("Совпадений нет" if search_results else "Использования не найдены", px + 12, py + 32, 11, "#b4bfcd", width=pw - 24)
                 tip = "↑↓ — выбрать   Enter — открыть   Esc — закрыть"
             else:
                 self.fill("#1a1d23", px + 7, py + 28, pw - 14, 22, 4)
@@ -589,7 +649,7 @@ class DesktopView(Gtk.Widget):
                     self.fill("#234d72", px + 5, iy - 2, pw - 10, 24, 4)
                 self.label(choices[index], px + 14, iy, 13, width=pw - 28)
         self.fill("#007acc", x, y + h - 19, w, 19)
-        self.label("⑂ main    ✓ 0   ⚠ 0", x + 9, y + h - 16, 9)
+        self.label("⑂ main    ✓ 0   ⚠ " + str(self.scene.get("diagnosticProblemCount", 0)), x + 9, y + h - 16, 9)
         self.label("UTF-8    Python    " + self.scene.get("layout", "EN"), x + max(170, w - 170), y + h - 16, 9)
 
     def terminal(self, window, x, y, w, h, embedded=False):

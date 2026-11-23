@@ -224,7 +224,7 @@ namespace TouchTypingStudio
         }
 
         private string LabPauseKey()
-        { return state.D("task").S("keys").Split('+').Contains("F8") ? "F6" : "F8"; }
+        { return state.D("scene").B("diagnosticWorkspace") || state.D("task").S("keys").Split('+').Contains("F8") ? "F6" : "F8"; }
         private string LabEndKey()
         { return state.D("task").S("keys").Split('+').Contains("F10") ? "F9" : "F10"; }
 
@@ -391,7 +391,8 @@ namespace TouchTypingStudio
                 if (key == "F4" && !state.D("task").S("keys").Split('+').Contains("F4")) { ToggleLabAid(true); return; }
                 if (key == "F7" && !state.D("task").S("keys").Split('+').Contains("F7")) { ToggleLabAid(false); return; }
             }
-            var next = Request("lab-key", "key", key, "pressed", down, "text", key == "Print" && down ? labDesktop.CapturePng() : value ?? "");
+            var next = Request("lab-key", "key", key, "pressed", down, "text", key == "Print" && down
+                ? labDesktop.CapturePng(state.D("scene").B("debugDay") && (pressed.Contains("LAlt") || pressed.Contains("RAlt"))) : value ?? "");
             if (next.Exists) RenderLab(next);
         }
 
@@ -440,6 +441,13 @@ namespace TouchTypingStudio
             labStatus.Foreground = state.S("feedback") == "error" ? Error : state.S("feedback") == "good" ? Ui.Brush("#A6D8B0") : Dim;
             UpdateReferenceLesson(task);
             SetReferenceLessonAction(labPause, paused ? "Продолжить · пробел" : "Пауза · " + DisplayLabGesture(LabPauseKey()));
+            var pauseGlyph = labPause.Content as TextBlock;
+            if (pauseGlyph != null)
+            {
+                bool showAlternate = !paused && state.D("scene").B("diagnosticWorkspace");
+                pauseGlyph.Text = paused ? "▶" : showAlternate ? "Ⅱ F6" : "Ⅱ";
+                pauseGlyph.FontSize = showAlternate ? 15 : 25;
+            }
             SetReferenceLessonAction(labFinish, "Результат · " + DisplayLabGesture(LabEndKey()));
             labKeyAid.ToolTip = "Показать или скрыть клавиатуру · " + DisplayLabGesture("F4");
             labHandAid.ToolTip = "Показать или скрыть руки · " + DisplayLabGesture("F7");

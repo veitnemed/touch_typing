@@ -58,9 +58,9 @@ internal sealed class LabRun
     private LiveMission mission;
     private List<LiveGoal> pending;
     private List<(LiveGoal Goal, string Before)> watching;
-    private string requestedMission, switchEvidenceId;
+    private string requestedMission, switchEvidenceId, switchReleaseKey;
     private readonly bool windowsBindings;
-    private readonly string[] dockProfile;
+    private readonly string[] dockProfile, desktopProfile;
     private readonly string layoutBinding;
     internal string MissionId => mission?.Id;
     internal string PhaseTitle => mission == null || pending.Count == 0 ? "" : mission.Phases[pending[0].Phase].Title;
@@ -96,7 +96,7 @@ internal sealed class LabRun
     internal string[] Held => held.ToArray();
 
     internal LabRun(string app, string mode, int level, int seconds, string layout, IEnumerable<ShortcutAttempt> history,
-        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null, bool softFinish = false, bool combinedLimits = false, bool windowsBindings = false)
+        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null, bool softFinish = false, bool combinedLimits = false, bool windowsBindings = false, string[] desktopProfile = null)
     {
         if (!LabCatalog.Apps.Contains(app)) throw new ArgumentException("Выберите Ubuntu, Chrome, VS Code или Терминал.");
         if (mode is not ("drill" or "sandbox")) throw new ArgumentException("Выберите тренировку или учебный рабочий стол.");
@@ -109,7 +109,12 @@ internal sealed class LabRun
         // has already been normalized by the client that started the attempt.
         TimeLimit = Math.Max(0, progress?.TimeLimit ?? (ActionLimit > 0 && !combinedLimits ? 0 : seconds));
         if (!string.IsNullOrEmpty(progress?.Session)) Session = progress.Session;
-        Guidance = guidance == "independent" ? guidance : "guided";
+        Guidance = (draft?.Mission ?? missionId) switch
+        {
+            "workday-debug-guided" => "guided",
+            "workday-debug-independent" => "independent",
+            _ => guidance == "independent" ? guidance : "guided"
+        };
         this.random = random ?? Random.Shared; this.clock = clock ?? (() => Environment.TickCount64);
         past = history.Where(attempt => attempt.Skill?.StartsWith("lab/" + app + "/", StringComparison.Ordinal) == true).ToArray();
         requestedMission = draft?.Mission ?? missionId;
@@ -117,6 +122,7 @@ internal sealed class LabRun
         // Timed and action-limit sessions continue to honor the chosen length.
         finishSingleRoute = !string.IsNullOrEmpty(requestedMission) && TimeLimit == 0 && ActionLimit == 0;
         dockProfile = draft?.Dock ?? dock; layoutBinding = draft?.LayoutKey ?? layoutKey;
+        this.desktopProfile = draft?.DesktopProfile ?? desktopProfile ?? [];
         variant = draft?.Variant ?? -1; restoring = replayLegacyNavigation = draft != null;
         var savedEvents = draft == null ? Array.Empty<LiveEvent>() : JsonSerializer.Deserialize<LiveEvent[]>(draft.Trace) ?? [];
         // New traces begin with format markers. Old ones acquire the line
@@ -183,7 +189,7 @@ internal sealed class LabRun
     }
 
     internal LiveDraft Draft() => new() { App = App, Level = Level, Mission = MissionId, Layout = initialLayout, Guidance = Guidance,
-        Dock = Scene.Dock, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, Trace = JsonSerializer.Serialize(trace),
+        Dock = Scene.Dock, DesktopProfile = Scene.GnomePractice.Length == 0 ? null : Scene.DesktopProfile, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, Trace = JsonSerializer.Serialize(trace),
         Progress = new() { Session = Session, Mode = Mode, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Solved = Solved,
             Errors = Errors, ActiveMilliseconds = ActiveMilliseconds, Series = JsonSerializer.Serialize(points),
             LimitDecisionPending = PendingLimitChoice, LimitReached = LimitReached,
@@ -193,7 +199,7 @@ internal sealed class LabRun
     {
         if (activeSince is double since) activeMilliseconds += Math.Max(0, clock() - since);
         if (!Paused && held.Count > 0) trace.Add(new("@release"));
-        Scene.Switcher = false; Scene.SwitchTarget = null;
+        Scene.Switcher = false; Scene.SwitchTarget = null; Scene.SwitchChoices = []; switchReleaseKey = switchEvidenceId = null;
         activeSince = null; Paused = true; held.Clear(); superUsed = false;
     }
     internal void Resume()
@@ -273,11 +279,22 @@ internal sealed class LabRun
         if (!pressed)
         {
             if (!held.Remove(key)) return null;
-            if (KeyChord.Family(key) == "Alt" && Scene.Switcher)
+            if (Scene.Switcher && (key == switchReleaseKey || switchReleaseKey == null && KeyChord.Family(key) == "Alt"))
             {
                 Watch(); Scene.CommitSwitch();
-                var credited = switchEvidenceId; switchEvidenceId = null;
+                var credited = switchEvidenceId; switchEvidenceId = switchReleaseKey = null;
                 return Observe(key, actualTaskId: credited);
+            }
+            if (Task.Id == "gnome-left-super" && held.Count == 0)
+            {
+                if (key == "LSuper" && !superUsed)
+                {
+                    Watch();
+                    return Perform(LabCatalog.Shortcuts.First(task => task.Id == "gnome-left-super"), key);
+                }
+                if (KeyChord.Family(key) is "Alt" or "Super")
+                    return Miss(key, key == "RSuper" ? "Это правый Super. Найдите левую клавишу ⊞ рядом с пробелом."
+                        : "Это Alt. Сдвиньтесь на одну клавишу левее к кнопке ⊞.");
             }
             if (KeyChord.Family(key) == "Super" && !superUsed && held.Count == 0)
                 { Watch(); return Perform(LabCatalog.Shortcuts.First(task => task.Id == "overview"), key); }
@@ -291,6 +308,8 @@ internal sealed class LabRun
         }
         if (held.Any(item => KeyChord.Family(item) == "Super")) superUsed = true;
         bool commandModifiers = held.Any(item => KeyChord.Family(item) is "Ctrl" or "Alt" or "Super");
+        if (Task.Id == "gnome-left-super" && key == "Z")
+            return Miss(key, "Это клавиша Z (Я). Левый Super ⊞ находится ниже, левее Alt.");
         Watch();
         var actual = Scene.Overview && !commandModifiers && key != "Esc" ? null : LabCatalog.Resolve(key, held, Scene);
         string before = Scene.Overview ? Scene.Search : Scene.Active?.App == "terminal" || Scene.Active?.Focus is "terminal" or "reverse-search" ? Scene.TerminalInput : Scene.Active?.Input ?? "";
@@ -298,7 +317,7 @@ internal sealed class LabRun
         bool matches = submitting && Scene.Terminal.MatchesCommand(before, Task.Text);
         if (actual != null && !submitting)
         {
-            if (actual.Id == "screenshot") Scene.StartCapture(text);
+            if (actual.Id is "screenshot" or "debug-window-shot") Scene.StartCapture(text);
             return Perform(actual, key);
         }
         bool shift = held.Any(item => KeyChord.Family(item) == "Shift");
@@ -346,8 +365,13 @@ internal sealed class LabRun
         bool changed = eligible && Scene.Apply(actual.Action);
         if (changed && mission != null)
         {
-            if (Scene.Switcher && (actual.Id is "switch-next" or "switch-prev"))
+            if (Scene.Switcher && (actual.Id is "switch-next" or "switch-prev" or "switch-group-next" or "switch-group-prev"))
+            {
                 switchEvidenceId = actual.Id;
+                switchReleaseKey = new[] { "Super", "Alt", "Ctrl" }
+                    .Select(family => held.FirstOrDefault(keyName => KeyChord.Family(keyName) == family))
+                    .FirstOrDefault(keyName => keyName != null);
+            }
             // Alt+D mirrors the browser behavior but does not demonstrate
             // the requested physical Ctrl+L shortcut.
             if (!replayLegacyUrl && actual.Id == "url" && actual.Keys == "Alt+D")
@@ -515,6 +539,7 @@ internal sealed class LabRun
         { LayoutKey = layoutBinding, LayoutIsVirtual = initialVirtual, ReplayLegacyNavigation = replayLegacyNavigation,
             ReplayLegacyLineEditing = replayLegacyLineEditing, UseWindowsBindings = windowsBindings };
         if (dockProfile != null) scene.Dock = dockProfile;
+        scene.DesktopProfile = desktopProfile;
         scene.PrepareCase(variant, App);
         return scene;
     }

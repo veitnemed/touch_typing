@@ -28,6 +28,8 @@ def main():
     parser.add_argument("--soft-limit", action="store_true", help="Проверить выбор при достижении лимита в окне GTK")
     parser.add_argument("--selection-render", action="store_true", help="Проверить отображение выбранного переноса строки в GTK")
     parser.add_argument("--daily-use", action="store_true", help="Пройти сценарии VS Code и GNOME и сохранить реальные кадры")
+    parser.add_argument("--gnome-profile", action="store_true", help="Проверить учебные рабочие столы, окна и клавиши профиля GNOME")
+    parser.add_argument("--debug-day", action="store_true", help="Пройти обе миссии отладки с реальным снимком учебного терминала")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -66,6 +68,8 @@ def main():
             if args.soft_limit: command.append("--soft-limit")
             if args.selection_render: command.append("--selection-render")
             if args.daily_use: command.append("--daily-use")
+            if args.gnome_profile: command.append("--gnome-profile")
+            if args.debug_day: command.append("--debug-day")
             if args.full: command.append("--full")
             return subprocess.run(command, env=environment).returncode
     return run_checks(args)
@@ -186,6 +190,27 @@ def run_checks(args):
                 environment["XDG_DATA_HOME"] = folder
                 try:
                     check("native-daily-use", [sys.executable, str(tests / "test_lab_window.py"), "--daily-use"])
+                finally:
+                    environment["XDG_DATA_HOME"] = previous
+        if args.gnome_profile:
+            report["coverage"].append("GTK GNOME workspaces, same-app selection, MateBook feedback; default and memory-only custom profile")
+            for mode in ("gnome-profile", "gnome-profile-custom"):
+                with tempfile.TemporaryDirectory(prefix="typing-" + mode + "-") as folder:
+                    previous = (environment["XDG_DATA_HOME"], environment["GSETTINGS_BACKEND"])
+                    environment["XDG_DATA_HOME"] = folder
+                    if mode.endswith("-custom"):
+                        environment["GSETTINGS_BACKEND"] = "memory"
+                    try:
+                        check("native-" + mode, [sys.executable, str(tests / "test_lab_window.py"), "--" + mode])
+                    finally:
+                        environment["XDG_DATA_HOME"], environment["GSETTINGS_BACKEND"] = previous
+        if args.debug_day:
+            report["coverage"].append("two native debug missions with scoped terminal screenshot and verified report")
+            with tempfile.TemporaryDirectory(prefix="typing-debug-day-") as folder:
+                previous = environment["XDG_DATA_HOME"]
+                environment["XDG_DATA_HOME"] = folder
+                try:
+                    check("native-debug-day", [sys.executable, str(tests / "test_lab_window.py"), "--debug-day"], timeout=360)
                 finally:
                     environment["XDG_DATA_HOME"] = previous
         if args.selection_render:

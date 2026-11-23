@@ -141,6 +141,15 @@ class LabWindowTest(Studio):
                 self.window.present()
                 yield
             self.navigate('lab')
+            if '--gnome-profile' in sys.argv or '--gnome-profile-custom' in sys.argv:
+                yield from self.exercise_gnome_profile(chord, event, capture_png, Path(os.environ["TOUCH_TYPING_QA_OUTPUT"]))
+                return
+            if '--debug-day' in sys.argv:
+                from test_debug_day import exercise_native
+                output = Path(os.environ['TOUCH_TYPING_QA_OUTPUT'])
+                for mode in ('guided', 'independent'):
+                    yield from exercise_native(self, mode, chord, capture_png, output)
+                return
             if '--daily-use' in sys.argv:
                 def switch_preview(frame):
                     event('LAlt', True); yield
@@ -332,6 +341,123 @@ class LabWindowTest(Studio):
                 assert self.result_kind=='shortcuts'
         finally:call(session,api+'.Session','Stop')
 
+    def exercise_gnome_profile(self, chord, event, capture, output):
+        custom = '--gnome-profile-custom' in sys.argv
+        if custom:
+            # An in-process memory-only settings backend for this GTK child;
+            # the separate isolated compositor keeps its own QA configuration.
+            assert os.environ.get("GSETTINGS_BACKEND") == "memory"
+            settings = self.sources.settings[self.sources.wm]
+            assert settings.set_strv("move-to-workspace-right", ["<Control><Alt><Shift>Right"])
+            assert settings.set_strv("switch-to-workspace-left", ["<Control><Alt>Left"])
+            assert settings.set_strv("switch-group", ["<Super>Above_Tab"])
+            assert settings.set_strv("switch-group-backward", ["<Shift><Super>Above_Tab"])
+            assert self.sources.desktop_bindings()["move-next"] == "Ctrl+Alt+Shift+Right"
+
+        def start(mission):
+            if self.lab.active:
+                assert self.lab.stop(), self.lab.status.get_label()
+            self.navigate("lab")
+            lab = self.lab
+            lab.picker.set_selected(next(i for i, entry in enumerate(lab.classes) if entry["id"] == "ubuntu"))
+            lab.level.set_selected(1)
+            lab.limit.set_selected(0)
+            lab.time_limit.set_selected(0)
+            lab.mission_picker.set_selected(next(i for i, (key, _) in enumerate(lab.choices) if key == mission))
+            lab.start()
+            for _ in range(70):
+                if not lab.state["paused"]:
+                    break
+                yield
+            assert lab.active and not lab.state["paused"], lab.status.get_label()
+
+        def state():
+            return self.lab.state
+        def active():
+            return next(w for w in state()["scene"]["windows"] if w["active"])
+        def frame(name):
+            for _ in range(4):
+                yield
+            assert self.window.is_active() and self.window.get_mapped(), name
+            capture(output / (("custom-" if custom else "default-") + name + ".png"))
+        def current(action):
+            assert state()["task"]["id"] == action, state()["task"]
+            yield from chord(state()["task"]["keys"])
+
+        yield from start("ubuntu-gnome-workspaces")
+        code = next(w for w in state()["scene"]["windows"] if w["app"] == "code")
+        original = (code["id"], code["url"], code["activeTab"], code["bodyCursor"])
+        if custom:
+            assert state()["task"]["keys"] == "Ctrl+Alt+Shift+Right"
+        yield from current("move-next")
+        assert state()["scene"]["workspace"] == 1 and active()["app"] == "terminal"
+        assert {w["app"]: w["workspace"] for w in state()["scene"]["windows"]} == {"code": 0, "terminal": 1}
+        if state()["task"]["id"] == "layout":
+            yield from current("layout")
+        assert state()["task"]["id"] == "command/pwd"
+        for key in ("P", "W", "D", "Enter"):
+            yield from chord(key)
+        assert state()["scene"]["terminal"]["output"][-1] == "/home/student"
+        yield from frame("workspace-2-terminal")
+        if custom:
+            assert state()["task"]["keys"] == "Ctrl+Alt+Left"
+        yield from current("workspace-prev")
+        code = active()
+        assert state()["scene"]["workspace"] == 0
+        assert (code["id"], code["url"], code["activeTab"], code["bodyCursor"]) == original
+        yield from frame("workspace-1-editor")
+        for key in ("G", "N", "O", "M", "E", "Enter"):
+            yield from chord(key)
+        assert "# gnome" in active()["body"]
+        yield from current("save")
+        yield from current("workspace-next")
+        assert active()["app"] == "terminal"
+        yield from current("workspace-prev")
+        assert state()["finished"]
+
+        yield from start("ubuntu-gnome-same-app")
+        assert active()["url"] == "README.md"
+        # Take the screenshot before releasing the switcher modifier, with
+        # the two window identities asserted independently of the rendering.
+        keys = state()["task"]["keys"].split("+")
+        if custom:
+            assert keys == ["Super", "`"]
+        sides = {"Ctrl": "LCtrl", "Shift": "LShift", "Alt": "LAlt", "Super": "LSuper"}
+        physical = [sides.get(key, key) for key in keys]
+        try:
+            for key in physical:
+                event(key, True); yield
+            for _ in range(50):
+                if state()["scene"]["switcher"]: break
+                yield
+            assert state()["scene"]["switcher"]
+            choices = set(state()["scene"]["switchChoices"])
+            assert {w["url"] for w in state()["scene"]["windows"] if w["id"] in choices} == {"app.py", "README.md"}
+            assert state()["solved"] == 0 and active()["url"] == "README.md"
+            yield from frame("same-app-switcher")
+        finally:
+            for key in reversed(physical):
+                event(key, False)
+                yield
+        assert state()["solved"] == 1 and active()["url"] == "app.py"
+        yield from current("switch-group-prev")
+        assert state()["finished"] and active()["url"] == "README.md"
+
+        yield from start("ubuntu-matebook-layout")
+        initial = state()["scene"]["layout"]
+        for key, label in (("RSuper", "правый Super"), ("LAlt", "Это Alt"), ("Z", "Это клавиша Z")):
+            yield from chord(key)
+            assert state()["solved"] == 0 and label in state()["status"] and not state()["scene"]["overview"]
+        yield from frame("left-super-mistake")
+        yield from current("gnome-left-super")
+        assert state()["scene"]["overview"]
+        yield from current("escape")
+        yield from current("layout")
+        assert state()["scene"]["layout"] != initial and state()["scene"]["layoutIsVirtual"]
+        yield from current("layout")
+        assert state()["scene"]["layout"] == initial and state()["finished"] and state()["errors"] == 3
+        print("PASS native GTK GNOME profile", "custom" if custom else "default", "workspaces, same-app, MateBook", flush=True)
+
     def exercise_daily_use(self, chord, capture, output, recording_boundary=lambda _name: None, switch_preview=None):
         """Run the catalog slices with compositor-delivered keys and real GTK frames."""
         for _ in range(4):
@@ -422,6 +548,37 @@ class LabWindowTest(Studio):
         yield from frame('symbols-09-result')
         recording_boundary(None)
 
+        yield from start('code', 0, 'code-search-error')
+        assert window('terminal')['active']
+        assert 'ValueError: DEFAULT_TIMEOUT must be >= 1 (got 0)' in self.lab.state['scene']['terminal']['output']
+        yield from frame('search-01-traceback')
+        yield from chord('Alt+Tab')
+        yield from chord('Ctrl+Shift+F')
+        yield from chord('Esc')
+        assert not self.lab.state['finished'] and self.lab.state['task']['id'] == 'project-search-submit'
+        yield from chord('Ctrl+Shift+F')
+        for char in 'DEFAULT_TIMEOUT':
+            yield from chord('Shift+-' if char == '_' else 'Shift+' + char)
+        assert window('code')['input'] == 'DEFAULT_TIMEOUT'
+        yield from chord('Enter')
+        result = window('code')
+        assert result['focus'] == 'project-results' and result['projectSearchQuery'] == 'DEFAULT_TIMEOUT'
+        assert [entry['title'].split(' · ')[0] for entry in result['entries']] == [
+            'archive.py:2:1', 'config.py:2:1', 'notes.py:1:9'], result
+        yield from chord('Down')
+        assert window('code')['optionIndex'] == 1
+        yield from frame('search-02-results')
+        yield from chord('Enter')
+        view = window('code')
+        assert view['url'].endswith('/src/config.py') and view['bodyCursor'] == view['body'].index('DEFAULT_TIMEOUT')
+        yield from frame('search-03-config')
+        for key in ('End', 'Backspace', '5'):
+            yield from chord(key)
+        assert 'DEFAULT_TIMEOUT = 5' in window('code')['body'] and not self.lab.state['finished']
+        yield from chord('Ctrl+S')
+        assert self.lab.state['finished'] and self.lab.state['solved'] == 6
+        yield from frame('search-04-saved')
+
         yield from start('code', 0, 'code-line-edit')
         original = "import numpy as np\ndef ifft(x): return x\nprint('next')"
         commented = "import numpy as np\n# def ifft(x): return x\nprint('next')"
@@ -437,6 +594,38 @@ class LabWindowTest(Studio):
         ):
             yield from chord(gesture)
             check_line(body, anchor, caret)
+
+        yield from start('code', 1, 'code-diagnostic-test')
+        assert self.lab.pause.get_label() == 'Ⅱ F6', self.lab.pause.get_label()
+        assert self.lab.state['task']['keys'] == 'F8'
+        assert window('code')['focus'] == 'code-problems'
+        yield from chord('F6')
+        assert self.lab.state['paused'] and self.lab.state['solved'] == 0
+        yield from chord('Space')
+        assert not self.lab.state['paused'], self.lab.status.get_label()
+        yield from chord('F8')
+        assert not self.lab.state['paused'] and self.lab.state['solved'] == 1
+        assert position() == ('units.py', 42), position()
+        assert self.lab.pause.get_label() == 'Ⅱ F6'
+        yield from chord('Ctrl+.')
+        assert window('code')['focus'] == 'code-quick-fix'
+        assert [entry['path'] for entry in window('code')['entries']] == ['round', 'decimal']
+        yield from frame('code-diagnostics-choices')
+        yield from chord('Down')
+        yield from chord('Enter')
+        assert 'return kelvin - 273.15' in window('code')['body']
+        yield from chord('Ctrl+S')
+        yield from chord('Ctrl+`')
+        command = 'python -m unittest test_units.UnitsTests.test_kelvin_to_celsius'
+        for char in command:
+            press = ('Space' if char == ' ' else 'Shift+-' if char == '_' else
+                     'Shift+' + char if char.isupper() else char.upper())
+            yield from chord(press)
+        assert self.lab.state['scene']['terminalInput'] == command
+        yield from chord('Enter')
+        assert self.lab.state['finished'] and self.lab.state['solved'] == 7
+        assert 'Ran 1 test' in self.lab.state['scene']['terminal']['output']
+        print('PASS real GTK F6 pause / F8 diagnosis, chooser, save and single simulated test', flush=True)
 
         yield from start('ubuntu', 1, 'ubuntu-gnome-windows')
         recording_boundary('gnome')

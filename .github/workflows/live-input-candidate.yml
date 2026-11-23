@@ -33,6 +33,7 @@ jobs:
           export TOUCH_TYPING_ENGINE="$RUNNER_TEMP/touch-typing-linux-x64/engine/TouchTyping.Engine"
           /usr/bin/python3 linux/tests/test_practice.py
           PYTHONPATH="$RUNNER_TEMP/touch-typing-linux-x64" /usr/bin/python3 "$RUNNER_TEMP/touch-typing-linux-x64/qa/test_live_missions.py"
+          PYTHONPATH="$RUNNER_TEMP/touch-typing-linux-x64" /usr/bin/python3 "$RUNNER_TEMP/touch-typing-linux-x64/qa/test_debug_day.py"
           /usr/bin/python3 linux/tests/test_live_visual_fields.py
           node tests/workday-editor-state.js
           tar -czf "$RUNNER_TEMP/touch-typing-linux-x64.tar.gz" -C "$RUNNER_TEMP" touch-typing-linux-x64
@@ -65,7 +66,7 @@ jobs:
   windows-window:
     needs: windows-package
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         if: github.ref == 'refs/heads/feature/reference-ui'
@@ -149,6 +150,26 @@ jobs:
           $dest = Join-Path $env:RUNNER_TEMP 'windows-evidence/daily-use'
           $env:TOUCH_TYPING_QA_LESSON_CHROME = 'compact'
           & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -DailyUse -OutputDirectory $dest
+      - name: Verify GNOME profile workspace and layout practice in WPF
+        if: github.ref == 'refs/heads/feature/reference-ui'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $appDir = Join-Path $env:RUNNER_TEMP 'TouchTyping QA'
+          $app = Join-Path $appDir TouchTyping.exe
+          $dest = Join-Path $env:RUNNER_TEMP 'windows-evidence/gnome-profile'
+          $env:TOUCH_TYPING_QA_LESSON_CHROME = 'compact'
+          & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -GnomeProfilePractice -OutputDirectory $dest
+      - name: Verify both native WPF debug missions and scoped screenshot
+        if: github.ref == 'refs/heads/feature/reference-ui'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $appDir = Join-Path $env:RUNNER_TEMP 'TouchTyping QA'
+          $app = Join-Path $appDir TouchTyping.exe
+          $dest = Join-Path $env:RUNNER_TEMP 'windows-evidence/debug-day'
+          $env:TOUCH_TYPING_QA_LESSON_CHROME = 'compact'
+          & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -DebugDay -OutputDirectory $dest
       - name: Measure WPF Chrome full-line shaping at render scales
         if: github.ref == 'refs/heads/feature/reference-ui'
         shell: powershell
@@ -205,7 +226,7 @@ jobs:
           tar -xzf "$RUNNER_TEMP/candidate/touch-typing-linux-x64.tar.gz" -C "$RUNNER_TEMP/candidate"
           extra=()
           if [[ "$GITHUB_REF" == 'refs/heads/feature/reference-ui' ]]; then
-            extra+=(--reference-home --reference-terminal --soft-limit --selection-render --daily-use)
+            extra+=(--reference-home --reference-terminal --soft-limit --selection-render --daily-use --gnome-profile --debug-day)
             export TOUCH_TYPING_QA_LESSON_CHROME=compact
           fi
           bash "$RUNNER_TEMP/candidate/touch-typing-linux-x64/check.sh" --terminal-only --save-retry --gallery --source-note "${extra[@]}" --output "$RUNNER_TEMP/linux-evidence" || {

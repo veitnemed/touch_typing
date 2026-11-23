@@ -227,6 +227,71 @@ class PracticeTest(unittest.TestCase):
                 self.assertEqual(edit(control, "Z"), (full, *before))
                 self.engine.call("lab-stop")
 
+    def test_code_diagnostic_test_checks_actual_saved_fixture(self):
+        config = dict(app="code", mode="sandbox", level=1, mission="code-diagnostic-test",
+                      seed=1, seconds=0, guidance="guided")
+        self.assertEqual([m["id"] for m in self.engine.call("lab-catalog")["missions"]
+                          if m["id"] == config["mission"]], [config["mission"]])
+        self.engine.call("lab-start", **config)
+        state = self.engine.call("lab-resume")
+        def view(result):
+            return next(w for w in result["scene"]["windows"] if w["active"])
+        self.assertTrue(state["scene"]["diagnosticWorkspace"])
+        self.assertEqual(view(state)["projectFiles"], ["test_units.py", "units.py"])
+        self.assertEqual(state["scene"]["diagnosticProblemCount"], 1)
+        self.assertEqual((view(state)["focus"], state["task"]["keys"]), ("code-problems", "F8"))
+        self.assertIn("Неверный знак", view(state)["entries"][0]["title"])
+        state = self.lab_chord("F8")
+        self.assertEqual((state["solved"], view(state)["focus"], view(state)["bodyCursor"]),
+                         (1, "body", len("def kelvin_to_celsius(kelvin):\n    return ")))
+        self.assertFalse(state["paused"])
+        self.assertTrue(view(state)["url"].endswith("/units.py"))
+        state = self.lab_chord("RCtrl", ".")
+        self.assertEqual((state["solved"], view(state)["focus"]), (2, "code-quick-fix"))
+        self.assertEqual([e["path"] for e in view(state)["entries"]], ["round", "decimal"])
+        state = self.lab_chord("Down")
+        self.assertEqual(state["solved"], 3)
+        self.lab_chord("Up")
+        state = self.lab_chord("Enter")
+        self.assertEqual(state["solved"], 3)
+        self.assertIn("return round(kelvin - 273.15)", view(state)["body"])
+        self.lab_chord("LCtrl", "S")
+        self.lab_chord("LCtrl", "`")
+        command = "python -m unittest test_units.UnitsTests.test_kelvin_to_celsius"
+        def run(text):
+            for c in text:
+                self.lab_chord("Space" if c == " " else c.upper(), text=c)
+            return self.lab_chord("Enter")
+        wrong = run(command)
+        self.assertFalse(wrong["scene"]["terminal"]["lastSuccess"])
+        self.assertIn("ожидалось 27.5 °C", "\n".join(wrong["scene"]["terminal"]["output"]))
+        self.assertIn("FAILED (failures=2)", "\n".join(wrong["scene"]["terminal"]["output"]))
+        self.assertEqual(wrong["solved"], 3)
+        self.lab_chord("LCtrl", "`")
+        self.lab_chord("LCtrl", "Z")
+        self.lab_chord("F8")
+        self.lab_chord("LCtrl", ".")
+        self.lab_chord("Down")
+        state = self.lab_chord("Enter")
+        self.assertEqual(state["solved"], 4)
+        self.assertIn("return kelvin - 273.15", view(state)["body"])
+        self.assertEqual(state["scene"]["diagnosticProblemCount"], 0)
+        # Fix exists only in editor buffer. Real test still sees previous saved source.
+        self.lab_chord("LCtrl", "`")
+        unsaved = run(command)
+        self.assertFalse(unsaved["scene"]["terminal"]["lastSuccess"])
+        self.assertEqual(unsaved["solved"], 4)
+        self.lab_chord("LCtrl", "`")
+        self.assertEqual(self.lab_chord("RCtrl", "S")["solved"], 5)
+        self.assertEqual(self.lab_chord("RCtrl", "`")["solved"], 6)
+        rejected = run("python -c print")
+        self.assertFalse(rejected["scene"]["terminal"]["lastSuccess"])
+        self.assertEqual(rejected["solved"], 6)
+        result = run(command)
+        self.assertEqual((result["solved"], result["finished"]), (7, True))
+        self.assertTrue(result["scene"]["terminal"]["lastSuccess"])
+        self.assertIn("Ran 1 test", result["scene"]["terminal"]["output"])
+
     def test_code_line_exercise_uses_direct_catalog_and_exact_result(self):
         matches = [m for m in self.engine.call("lab-catalog")["missions"] if m["id"] == "code-line-edit"]
         self.assertEqual(len(matches), 1)

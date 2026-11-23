@@ -25,7 +25,7 @@ internal static partial class LiveCourse
             "move-line-down save changes focus-editor undo save"),
         ["review"] = new("Сверить изменённый код с сохранённой версией",
             "select-line cut undo comment changes focus-editor save"),
-        ["search"] = new("Найти строку в исходнике и вернуться к проекту",
+        ["search"] = new("Открыть панель поиска и вернуться к проекту",
             "select-line find escape project-search focus-editor explorer focus-editor"),
         ["tools"] = new("Проверить инструменты и освободить место для кода",
             "extensions explorer sidebar focus-editor panel terminal-toggle terminal-toggle"),

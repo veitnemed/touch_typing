@@ -39,6 +39,10 @@ internal sealed partial class LabScene
             "chrome://bookmarks" => w.SavedBookmarks.Order().Select(PageEntry).ToArray(),
             _ => Links
         };
+        if (w.Focus == "project-results") return ProjectMatchEntries(w);
+        if (w.App == "code" && DiagnosticWorkspace &&
+            (w.Focus is "code-problems" or "code-quick-fix" || w.Panel && w.Focus == "body"))
+            return DiagnosticEntries(w);
         if (w.Focus == "symbol-references") return ReferenceEntries(w);
         if (w.Focus == "symbols")
         {
@@ -58,16 +62,18 @@ internal sealed partial class LabScene
     }
 
     private readonly Dictionary<string, string> originalFiles = [];
-    private IEnumerable<string> ProjectDocuments() => symbolWorkspace
-        ? Terminal.Entries(SymbolProject + "/src").Where(path => !Terminal.DirectoryExists(path))
-        : Terminal.Entries(Project).Concat(Terminal.Entries(Project + "/src")).Where(path => !Terminal.DirectoryExists(path));
+    private string EditorProjectRoot => DiagnosticWorkspace ? DiagnosticRoot : SearchProjectRoot ?? (symbolWorkspace ? SymbolProject : Project);
+    private IEnumerable<string> ProjectDocuments() => DebugDay ? DebugProjectDocuments() :
+        DiagnosticWorkspace ? Terminal.Entries(DiagnosticRoot).Where(path => !Terminal.DirectoryExists(path)) :
+        Terminal.Entries(EditorProjectRoot)
+        .Concat(Terminal.Entries(EditorProjectRoot + "/src"))
+        .Where(path => !Terminal.DirectoryExists(path));
     private object WindowSnapshot(LabWindow w)
     {
         var paths = w.App == "code" ? ProjectDocuments().ToArray() : [];
-        string Relative(string path) => path[((symbolWorkspace ? SymbolProject : Project).Length + 1)..];
+        string Relative(string path) => DebugDay ? DebugRelative(path) : path[(EditorProjectRoot.Length + 1)..];
         var changes = paths.Where(path => !originalFiles.TryGetValue(path, out var original) || original != Terminal.ReadFile(path)).Select(Relative);
-        var results = w.View == "project-search" && w.Input.Length > 0
-            ? paths.Where(path => Terminal.ReadFile(path).Contains(w.Input, StringComparison.OrdinalIgnoreCase)).Select(Relative) : [];
+        var results = w.App == "code" && w.View == "project-search" ? ProjectSearchSidebar(w) : [];
         return w.Snapshot(w.Id == ActiveWindow, Entries(w), paths.Select(Relative), changes, results);
     }
 
