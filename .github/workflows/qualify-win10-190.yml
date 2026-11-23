@@ -1,0 +1,90 @@
+name: Qualify TouchTyping 1.9.0 Linux and cross-build Windows (no publish)
+on:
+  push:
+    branches: [qa/win10-190-archives]
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 48b108c40cc90a968e99111809772bc0ca18bd64
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Run full Linux-host regressions and cross-build Windows without executing it
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 48b108c40cc90a968e99111809772bc0ca18bd64
+          export PYTHONPATH="$PWD/linux"
+          p="$RUNNER_TEMP/packages"
+          mkdir -p "$p"
+          bash linux/build-release.sh "$p/touch-typing-linux-x64"
+          export TOUCH_TYPING_ENGINE="$p/touch-typing-linux-x64/engine/TouchTyping.Engine"
+          for suite in SharedRegression LabRegression LabStressTests TerminalRegression; do
+            dotnet run --project "linux/tests/$suite.csproj" -c Release
+          done
+          for suite in test_python_editor test_neutral_project test_practice test_live_missions test_debug_day test_live_visual_fields; do
+            /usr/bin/python3 "linux/tests/$suite.py"
+          done
+          /usr/bin/python3 linux/tests/test_win10_protocol.py "$TOUCH_TYPING_ENGINE"
+          node tests/workday-editor-state.js
+          bash windows/build-release.sh "$p/touch-typing-windows-x64"
+          tar -czf "$p/touch-typing-v1.9.0-linux-x64.tar.gz" -C "$p" touch-typing-linux-x64
+          (cd "$p/touch-typing-windows-x64" && zip -qr "$p/touch-typing-v1.9.0-windows-x64.zip" .)
+          tar -tzf "$p/touch-typing-v1.9.0-linux-x64.tar.gz" > "$p/linux-paths.txt"
+          unzip -tq "$p/touch-typing-v1.9.0-windows-x64.zip"
+          unzip -Z1 "$p/touch-typing-v1.9.0-windows-x64.zip" > "$p/windows-paths.txt"
+          if grep -Ei '(^|/)(\.env(\.|$)|\.git(/|$)|progress\.xml($|[.~])|.*\.(pem|pfx|p12|key)$|profiles?/|secrets?/|credentials($|\.))' "$p/"*-paths.txt; then exit 1; fi
+          if grep -Ei '\.exe$' "$p/linux-paths.txt"; then exit 1; fi
+          (cd "$p" && sha256sum touch-typing-v1.9.0-* | tee SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: touchtyping-190-verified-candidate
+          path: |
+            ${{ runner.temp }}/packages/touch-typing-v1.9.0-linux-x64.tar.gz
+            ${{ runner.temp }}/packages/touch-typing-v1.9.0-windows-x64.zip
+            ${{ runner.temp }}/packages/SHA256SUMS.txt
+          if-no-files-found: error
+  ubuntu-window:
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: touchtyping-190-verified-candidate
+          path: ${{ runner.temp }}/archive
+      - name: Install GNOME and GTK test-session dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnome-shell gsettings-desktop-schemas gir1.2-gtk-4.0 python3-gi python3-gi-cairo python3-cairo dbus-x11 fonts-dejavu-core libgl1-mesa-dri
+      - name: Drive both desktop profiles using native GTK Wayland keyboard input
+        shell: bash
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/archive"
+          sha256sum -c SHA256SUMS.txt
+          tar -xzf touch-typing-v1.9.0-linux-x64.tar.gz
+          cd touch-typing-linux-x64
+          patch --batch --fuzz=0 -p1 < "$GITHUB_WORKSPACE/qa/win10-wayland.patch"
+          bash check.sh --win10-desktop-only --output "$RUNNER_TEMP/win10-wayland-evidence" || {
+            tail -n 120 "$RUNNER_TEMP/win10-wayland-evidence/"*.log
+            exit 1
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: touchtyping-190-ubuntu-wayland
+          path: ${{ runner.temp }}/win10-wayland-evidence/
