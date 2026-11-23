@@ -1,0 +1,279 @@
+name: Complete TouchTyping 1.9.0 Wayland qualification (no publish)
+on:
+  push:
+    branches: [qa/win10-190-wayland-mirror]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  ubuntu-window:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: touchtyping-190-verified-candidate
+          path: ${{ runner.temp }}/archive
+          github-token: ${{ github.token }}
+          run-id: 45218762089
+      - name: Install GNOME and GTK test-session dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sources="$RUNNER_TEMP/win10-noble-sources.list"
+          cat > "$sources" <<'APT'
+          deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://archive.ubuntu.com/ubuntu/ noble main universe
+          deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://archive.ubuntu.com/ubuntu/ noble-updates main universe
+          deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://security.ubuntu.com/ubuntu/ noble-security main universe
+          APT
+          options=(
+            -o "Dir::Etc::sourcelist=$sources" -o Dir::Etc::sourceparts=-
+            -o Acquire::Retries=2 -o Acquire::https::Timeout=25 -o Acquire::http::Timeout=25 )
+          pkgs=(gnome-shell gsettings-desktop-schemas gir1.2-gtk-4.0 python3-gi
+                python3-gi-cairo python3-cairo dbus-x11 fonts-dejavu-core libgl1-mesa-dri)
+          sudo timeout --kill-after=15s 180s apt-get "${options[@]}" -o APT::Update::Error-Mode=any update
+          sudo timeout --kill-after=15s 540s apt-get "${options[@]}" -y --download-only --no-install-recommends install "${pkgs[@]}"
+          sudo timeout --kill-after=15s 300s apt-get "${options[@]}" -y --no-download --no-install-recommends install "${pkgs[@]}"
+          gnome-shell --version
+          /usr/bin/python3 -c 'import gi; gi.require_version("Gtk","4.0"); from gi.repository import Gtk; print("GTK", Gtk.get_major_version(), Gtk.get_minor_version())'
+      - name: Drive both desktop profiles using native GTK Wayland keyboard input
+        shell: bash
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/archive"
+          sha256sum -c SHA256SUMS.txt
+          echo 'f4bae44d6c2e57d6f9184e5edcd41ae74e7da29774a9cfa7925bc4f8a2a68f51  touch-typing-v1.9.0-linux-x64.tar.gz' | sha256sum -c
+          tar -xzf touch-typing-v1.9.0-linux-x64.tar.gz
+          cd touch-typing-linux-x64
+          base64 -d > "$RUNNER_TEMP/win10-wayland.patch" <<'QA_PATCH'
+          ZGlmZiAtcnVOICctLWV4Y2x1ZGU9X19weWNhY2hlX18nIGJhc2UvcWEvcWFfd2luMTBfd2F5bGFu
+          ZC5weSBwYXRjaGVkLXYyL3FhL3FhX3dpbjEwX3dheWxhbmQucHkKLS0tIGEvcWEvcWFfd2luMTBf
+          d2F5bGFuZC5weQorKysgYi9xYS9xYV93aW4xMF93YXlsYW5kLnB5CkBAIC0wLDAgKzEsMTc4IEBA
+          CisiIiJIb3N0ZWQgaXNvbGF0ZWQgR05PTUUgV2F5bGFuZCBwcm9iZSwgdXNpbmcgdGhlIGFwcGxp
+          Y2F0aW9uJ3MgYWN0dWFsIGtleSBjYXB0dXJlLiIiIgorZnJvbSBwYXRobGliIGltcG9ydCBQYXRo
+          CitpbXBvcnQganNvbgoraW1wb3J0IG9zCisKK2Zyb20gZ2kucmVwb3NpdG9yeSBpbXBvcnQgR2Rr
+          UGl4YnVmCisKKworZGVmIGV4ZXJjaXNlKGFwcCwgY2hvcmQsIGNhcHR1cmUsIG91dHB1dCk6Cisg
+          ICAgaW1wb3J0IHRvdWNoX3R5cGluZworICAgIGV4cGVjdGVkX3BrZyA9IFBhdGgoX19maWxlX18p
+          LnJlc29sdmUoKS5wYXJlbnRzWzFdCisgICAgYXNzZXJ0IFBhdGgodG91Y2hfdHlwaW5nLl9fZmls
+          ZV9fKS5yZXNvbHZlKCkucGFyZW50ID09IGV4cGVjdGVkX3BrZworICAgIGFzc2VydCBvcy5lbnZp
+          cm9uLmdldCgiV0FZTEFORF9ESVNQTEFZIikgPT0gInRyYWluaW5nLXFhIgorICAgIGFzc2VydCBh
+          cHAud2luZG93LmdldF9kaXNwbGF5KCkuX19ndHlwZV9fLm5hbWUgPT0gIkdka1dheWxhbmREaXNw
+          bGF5IgorICAgIGFzc2VydCBhcHAud2luZG93LmlzX2FjdGl2ZSgpCisgICAgY2hlY2tzID0gW10K
+          KworICAgIGRlZiBzbmFwc2hvdChuYW1lLCB3aWRnZXQ9Tm9uZSk6CisgICAgICAgIHBhdGggPSBv
+          dXRwdXQgLyAobmFtZSArICIucG5nIikKKyAgICAgICAgY2FwdHVyZShwYXRoLCB3aWRnZXQpCisg
+          ICAgICAgIGFzc2VydCBwYXRoLmlzX2ZpbGUoKSBhbmQgcGF0aC5zdGF0KCkuc3Rfc2l6ZSA+IDEw
+          MjQKKyAgICAgICAgcmV0dXJuIHBhdGgKKworICAgIGRlZiBjaG9vc2UodGFyZ2V0KToKKyAgICAg
+          ICAgbGFiID0gYXBwLmxhYgorICAgICAgICBjdXJyZW50ID0gbGFiLm9zX3NlbGVjdG9yLmdldF9z
+          ZWxlY3RlZCgpCisgICAgICAgIGRlc2lyZWQgPSAoInVidW50dSIsICJ3aW5kb3dzIikuaW5kZXgo
+          dGFyZ2V0KQorICAgICAgICBpZiBjdXJyZW50ICE9IGRlc2lyZWQ6CisgICAgICAgICAgICBhc3Nl
+          cnQgbGFiLm9zX3NlbGVjdG9yLmdyYWJfZm9jdXMoKQorICAgICAgICAgICAgeWllbGQgZnJvbSBj
+          aG9yZCgiU3BhY2UiKQorICAgICAgICAgICAgeWllbGQgZnJvbSBjaG9yZCgiRG93biIgaWYgZGVz
+          aXJlZCBlbHNlICJVcCIpCisgICAgICAgICAgICB5aWVsZCBmcm9tIGNob3JkKCJFbnRlciIpCisg
+          ICAgICAgIGFzc2VydCBsYWIuZGVza3RvcF9wcm9maWxlID09IHRhcmdldCBhbmQgbGFiLm9zX3Nl
+          bGVjdG9yLmdldF9zZWxlY3RlZCgpID09IGRlc2lyZWQKKyAgICAgICAgYXNzZXJ0IG5vdCBsYWIu
+          YWN0aXZlCisgICAgICAgIHJvdXRlcyA9IHttWyJpZCJdIGZvciBtIGluIGxhYi5taXNzaW9ucyBp
+          ZiBtWyJhcHAiXSA9PSAid29ya2RheSJ9CisgICAgICAgIGFzc2VydCAoIndvcmtkYXktd2luZG93
+          cy0wIiBpbiByb3V0ZXMpID09ICh0YXJnZXQgPT0gIndpbmRvd3MiKQorICAgICAgICBhc3NlcnQg
+          KCJ3b3JrZGF5LXNvdXJjZS1ub3RlIiBpbiByb3V0ZXMpID09ICh0YXJnZXQgPT0gInVidW50dSIp
+          CisgICAgICAgIHJldHVybiBsYWIKKworICAgIGRlZiBzdGFydChsYWIsIGNsYXNzX2lkLCBsZXZl
+          bCwgbWlzc2lvbik6CisgICAgICAgICMgQXJyYW5nZSBhIGRldGVybWluaXN0aWMgbGVzc29uOyBw
+          aHlzaWNhbCBPUyBzZWxlY3Rpb24gYW5kIGtleQorICAgICAgICAjIGdlc3R1cmVzIGJlbG93IGFy
+          ZSBub3QgcmVwbGFjZWQgd2l0aCBkaXJlY3QgY29tbWFuZHMuCisgICAgICAgIGxhYi5waWNrZXIu
+          c2V0X3NlbGVjdGVkKG5leHQoaSBmb3IgaSwgYyBpbiBlbnVtZXJhdGUobGFiLmNsYXNzZXMpIGlm
+          IGNbImlkIl0gPT0gY2xhc3NfaWQpKQorICAgICAgICBsYWIubGV2ZWwuc2V0X3NlbGVjdGVkKGxl
+          dmVsKQorICAgICAgICBsYWIubGltaXQuc2V0X3NlbGVjdGVkKDApCisgICAgICAgIGxhYi50aW1l
+          X2xpbWl0LnNldF9zZWxlY3RlZCgwKQorICAgICAgICBsYWIubWlzc2lvbl9waWNrZXIuc2V0X3Nl
+          bGVjdGVkKG5leHQoaSBmb3IgaSwgKGssIF8pIGluIGVudW1lcmF0ZShsYWIuY2hvaWNlcykgaWYg
+          ayA9PSBtaXNzaW9uKSkKKyAgICAgICAgeWllbGQKKyAgICAgICAgIyBSb3V0ZSBzZXR1cCBpcyBu
+          b3QgYSBrZXlib2FyZCBzaG9ydGN1dCB1bmRlciB0ZXN0LiBUaGUgcmVidWlsdAorICAgICAgICAj
+          IGNob29zZXIgY2FuIGJyaWVmbHkgaG9sZCBjb21wb3NpdG9yIGZvY3VzIGFmdGVyIHRoZSByZXN1
+          bHQsIHNvCisgICAgICAgICMgZG9uJ3Qgc2VuZCBGNSBpbnRvIHRoYXQgdHJhbnNpdGlvbi4gS2Vl
+          cCBldmVyeSBsZXNzb24ga2V5IHBoeXNpY2FsLgorICAgICAgICBhc3NlcnQgYXBwLmxhYiBpcyBs
+          YWIgYW5kIGxhYi5iZWdpbi5nZXRfbWFwcGVkKCkKKyAgICAgICAgbGFiLnN0YXJ0KCkKKyAgICAg
+          ICAgYXNzZXJ0IGxhYi5zdGF0ZSBpcyBub3QgTm9uZSBhbmQgbGFiLmFjdGl2ZSBhbmQgbm90IGxh
+          Yi5zdGF0ZS5nZXQoInN0YXJ0QmxvY2tlZCIpLCAoCisgICAgICAgICAgICAibWlzc2lvbiBzdGFy
+          dCBkaWQgbm90IGluaXRpYWxpemUiLCBtaXNzaW9uLCBhcHAuYmFubmVyLmdldF9sYWJlbCgpKQor
+          ICAgICAgICBhc3NlcnQgbGFiLnN0YXRlWyJtaXNzaW9uIl0gPT0gbWlzc2lvbiwgKCJ1bmV4cGVj
+          dGVkIG1pc3Npb24iLCBsYWIuc3RhdGVbIm1pc3Npb24iXSwgbWlzc2lvbikKKyAgICAgICAgeWll
+          bGQgZnJvbSBhcHAuYXdhaXRfbGVzc29uX2NhcHR1cmUoY2hvcmQpCisgICAgICAgIGFzc2VydCBs
+          YWIuc3VyZmFjZS5nZXRfcHJvcGVydHkoInNob3J0Y3V0cy1pbmhpYml0ZWQiKSBhbmQgYXBwLndp
+          bmRvdy5pc19hY3RpdmUoKQorCisgICAgZGVmIGFjdChsYWIsIHRhc2ssIGtleSk6CisgICAgICAg
+          IGJlZm9yZSA9IGxhYi5zdGF0ZQorICAgICAgICBhc3NlcnQgYmVmb3JlWyJ0YXNrIl1bImlkIl0g
+          PT0gdGFzaywgKHRhc2ssIGJlZm9yZVsidGFzayJdLCBiZWZvcmVbInN0YXR1cyJdKQorICAgICAg
+          ICBhc3NlcnQgbGFiLnN1cmZhY2UuZ2V0X3Byb3BlcnR5KCJzaG9ydGN1dHMtaW5oaWJpdGVkIiks
+          ICgiY2FwdHVyZSBsb3N0IiwgdGFzaykKKyAgICAgICAgeWllbGQgZnJvbSBjaG9yZChrZXkpCisg
+          ICAgICAgIHN0YXRlID0gbGFiLnN0YXRlCisgICAgICAgIGFzc2VydCBzdGF0ZVsic29sdmVkIl0g
+          PT0gYmVmb3JlWyJzb2x2ZWQiXSArIDEsICh0YXNrLCBzdGF0ZVsic3RhdHVzIl0sIHN0YXRlWyJ0
+          YXNrIl0pCisgICAgICAgIGFzc2VydCBzdGF0ZVsiZXJyb3JzIl0gPT0gYmVmb3JlWyJlcnJvcnMi
+          XSwgKHRhc2ssIHN0YXRlWyJzdGF0dXMiXSkKKyAgICAgICAgaWYgbm90IHN0YXRlWyJmaW5pc2hl
+          ZCJdOgorICAgICAgICAgICAgYXNzZXJ0IGFwcC53aW5kb3cuaXNfYWN0aXZlKCkgYW5kIG5vdCBz
+          dGF0ZVsicGF1c2VkIl0KKyAgICAgICAgICAgIGFzc2VydCBsYWIuc3VyZmFjZS5nZXRfcHJvcGVy
+          dHkoInNob3J0Y3V0cy1pbmhpYml0ZWQiKSwgKCJjYXB0dXJlIGxvc3QgYWZ0ZXIiLCB0YXNrKQor
+          ICAgICAgICBjaGVja3MuYXBwZW5kKHRhc2spCisgICAgICAgIHJldHVybiBzdGF0ZVsic2NlbmUi
+          XQorCisgICAgZGVmIHJvd3Moc2NlbmUpOgorICAgICAgICByZXR1cm4ge3dbImlkIl06ICh3WyJh
+          cHAiXSwgd1sic3RhdGUiXSwgd1sid29ya3NwYWNlIl0pIGZvciB3IGluIHNjZW5lWyJ3aW5kb3dz
+          Il19CisKKyAgICBkZWYgYWN0aXZlKHNjZW5lKToKKyAgICAgICAgcmV0dXJuIHJvd3Moc2NlbmUp
+          W3NjZW5lWyJhY3RpdmVXaW5kb3ciXV0KKworICAgIGRlZiB3aW5kb3dzX3JvdXRlKGxhYiwgZnJh
+          bWVzKToKKyAgICAgICAgc2NlbmUgPSB5aWVsZCBmcm9tIGFjdChsYWIsICJ3aW4tc3RhcnQiLCAi
+          U3VwZXIiKQorICAgICAgICBhc3NlcnQgc2NlbmVbImRlc2t0b3BTdHlsZSJdID09ICJ3aW4xMCIg
+          YW5kIHNjZW5lWyJkZXNrdG9wT3ZlcmxheSJdID09ICJzdGFydCIKKyAgICAgICAgaWYgZnJhbWVz
+          OgorICAgICAgICAgICAgc25hcHNob3QoIjAzLXdpbmRvd3Mtc3RhcnQiKQorICAgICAgICAgICAg
+          eWllbGQKKyAgICAgICAgc2NlbmUgPSB5aWVsZCBmcm9tIGFjdChsYWIsICJ3aW4tb3ZlcmxheS1v
+          cGVuIiwgIkVudGVyIikKKyAgICAgICAgY2hyb21lX2lkID0gc2NlbmVbImFjdGl2ZVdpbmRvdyJd
+          CisgICAgICAgIGFzc2VydCBhY3RpdmUoc2NlbmUpWzBdID09ICJjaHJvbWUiIGFuZCBub3Qgc2Nl
+          bmVbImRlc2t0b3BPdmVybGF5Il0KKyAgICAgICAgc2NlbmUgPSB5aWVsZCBmcm9tIGFjdChsYWIs
+          ICJ3aW4tZXhwbG9yZXIiLCAiU3VwZXIrRSIpCisgICAgICAgIGFzc2VydCBhY3RpdmUoc2NlbmUp
+          WzBdID09ICJmaWxlcyIgYW5kIG5vdCBzY2VuZVsiZGVza3RvcE92ZXJsYXkiXQorICAgICAgICBp
+          ZHMgPSBzZXQocm93cyhzY2VuZSkpCisgICAgICAgIGlmIGZyYW1lczoKKyAgICAgICAgICAgIHNu
+          YXBzaG90KCIwNC13aW5kb3dzLWV4cGxvcmVyIikKKyAgICAgICAgICAgIHlpZWxkCisgICAgICAg
+          IHNjZW5lID0geWllbGQgZnJvbSBhY3QobGFiLCAid2luLWxlZnQiLCAiU3VwZXIrTGVmdCIpCisg
+          ICAgICAgIGFzc2VydCBhY3RpdmUoc2NlbmUpWzFdID09ICJzbmFwcGVkLWxlZnQiIGFuZCBzY2Vu
+          ZVsiZGVza3RvcE92ZXJsYXkiXSA9PSAic25hcCIKKyAgICAgICAgYXNzZXJ0IHNjZW5lWyJkZXNr
+          dG9wT3ZlcmxheVdpbmRvd3MiXSA9PSBbY2hyb21lX2lkXQorICAgICAgICBpZiBmcmFtZXM6Cisg
+          ICAgICAgICAgICBzbmFwc2hvdCgiMDUtd2luZG93cy1zbmFwLWFzc2lzdCIpCisgICAgICAgICAg
+          ICB5aWVsZAorICAgICAgICBzY2VuZSA9IHlpZWxkIGZyb20gYWN0KGxhYiwgIndpbi1vdmVybGF5
+          LW9wZW4iLCAiRW50ZXIiKQorICAgICAgICBhc3NlcnQgc2V0KHJvd3Moc2NlbmUpKSA9PSBpZHMg
+          YW5kIHtzIGZvciBfLCBzLCBfIGluIHJvd3Moc2NlbmUpLnZhbHVlcygpfSA9PSB7CisgICAgICAg
+          ICAgICAic25hcHBlZC1sZWZ0IiwgInNuYXBwZWQtcmlnaHQiCisgICAgICAgIH0KKyAgICAgICAg
+          aWYgZnJhbWVzOgorICAgICAgICAgICAgc25hcHNob3QoIjA2LXdpbmRvd3Mtc25hcC1wYWlyIikK
+          KyAgICAgICAgICAgIHlpZWxkCisgICAgICAgIHNjZW5lID0geWllbGQgZnJvbSBhY3QobGFiLCAi
+          d2luLW1heGltaXplIiwgIlN1cGVyK1VwIikKKyAgICAgICAgYXNzZXJ0IGFjdGl2ZShzY2VuZSlb
+          MV0gPT0gIm1heGltaXplZCIKKyAgICAgICAgc2NlbmUgPSB5aWVsZCBmcm9tIGFjdChsYWIsICJ3
+          aW4tZG93biIsICJTdXBlcitEb3duIikKKyAgICAgICAgYXNzZXJ0IGFjdGl2ZShzY2VuZSlbMV0g
+          PT0gIm5vcm1hbCIKKyAgICAgICAgc2NlbmUgPSB5aWVsZCBmcm9tIGFjdChsYWIsICJ3aW4tc3dp
+          dGNoIiwgIkFsdCtUYWIiKQorICAgICAgICBhc3NlcnQgYWN0aXZlKHNjZW5lKVswXSA9PSAiZmls
+          ZXMiCisgICAgICAgIHVuY2hhbmdlZCA9IHJvd3Moc2NlbmUpCisgICAgICAgIHNjZW5lID0geWll
+          bGQgZnJvbSBhY3QobGFiLCAid2luLWRlc2t0b3AiLCAiU3VwZXIrRCIpCisgICAgICAgIGFzc2Vy
+          dCBzY2VuZVsic2hvd0Rlc2t0b3AiXSBhbmQgcm93cyhzY2VuZSkgPT0gdW5jaGFuZ2VkCisgICAg
+          ICAgIHNjZW5lID0geWllbGQgZnJvbSBhY3QobGFiLCAid2luLWRlc2t0b3AiLCAiU3VwZXIrRCIp
+          CisgICAgICAgIGFzc2VydCBub3Qgc2NlbmVbInNob3dEZXNrdG9wIl0gYW5kIHJvd3Moc2NlbmUp
+          ID09IHVuY2hhbmdlZAorCisgICAgbGFiID0gYXBwLmxhYgorICAgIGFzc2VydCBsYWIuZGVza3Rv
+          cF9wcm9maWxlID09ICJ1YnVudHUiCisgICAgc25hcHNob3QoIjAxLW1lbnUtdWJ1bnR1IikKKyAg
+          ICB5aWVsZAorICAgIGxhYiA9IHlpZWxkIGZyb20gY2hvb3NlKCJ3aW5kb3dzIikKKyAgICBzbmFw
+          c2hvdCgiMDItbWVudS13aW5kb3dzIikKKyAgICB5aWVsZAorICAgIHlpZWxkIGZyb20gc3RhcnQo
+          bGFiLCAid2luZG93cyIsIDAsICJ3aW5kb3dzLWRlc2t0b3AtMCIpCisgICAgeWllbGQgZnJvbSB3
+          aW5kb3dzX3JvdXRlKGxhYiwgVHJ1ZSkKKyAgICBhc3NlcnQgbGFiLnN0YXRlWyJmaW5pc2hlZCJd
+          IGFuZCBsYWIuc3RhdGVbInNhdmVkIl0gYW5kIGxhYi5yZXN1bHQKKyAgICByZXBvcnQgPSBhcHAu
+          Y2FsbCgibGFiLXJlc3VsdCIpCisgICAgYXNzZXJ0IHJlcG9ydFsiY29tcGxldGVkIl0gYW5kIHJl
+          cG9ydFsic29sdmVkIl0gPT0gbGFiLnN0YXRlWyJzb2x2ZWQiXSA9PSAxMAorICAgIHNuYXBzaG90
+          KCIwNy13aW5kb3dzLXNhdmVkLXJlc3VsdCIpCisgICAgeWllbGQKKworICAgIGFwcC5uYXZpZ2F0
+          ZSgibGFiIikKKyAgICBsYWIgPSBhcHAubGFiCisgICAgYXNzZXJ0IGxhYi5kZXNrdG9wX3Byb2Zp
+          bGUgPT0gIndpbmRvd3MiCisgICAgeWllbGQgZnJvbSBzdGFydChsYWIsICJ3aW5kb3dzIiwgMSwg
+          IndpbmRvd3MtZGVza3RvcC0xIikKKyAgICB5aWVsZCBmcm9tIHdpbmRvd3Nfcm91dGUobGFiLCBG
+          YWxzZSkKKyAgICBzY2VuZSA9IHlpZWxkIGZyb20gYWN0KGxhYiwgIndpbi10YXNrLXZpZXciLCAi
+          U3VwZXIrVGFiIikKKyAgICBhc3NlcnQgc2NlbmVbImRlc2t0b3BPdmVybGF5Il0gPT0gInRhc2st
+          dmlldyIKKyAgICBzbmFwc2hvdCgiMDgtd2luZG93cy10YXNrLXZpZXciKQorICAgIHlpZWxkCisg
+          ICAgc2NlbmUgPSB5aWVsZCBmcm9tIGFjdChsYWIsICJ3aW4tbmV3LWRlc2t0b3AiLCAiU3VwZXIr
+          Q3RybCtEIikKKyAgICBhc3NlcnQgc2NlbmVbIndvcmtzcGFjZSJdID09IDEgYW5kIHNjZW5lWyJ3
+          b3Jrc3BhY2VDb3VudCJdID09IDIKKyAgICBhc3NlcnQgYWxsKHZbMl0gPT0gMCBmb3IgdiBpbiBy
+          b3dzKHNjZW5lKS52YWx1ZXMoKSkKKyAgICBzY2VuZSA9IHlpZWxkIGZyb20gYWN0KGxhYiwgIndp
+          bi1leHBsb3JlciIsICJTdXBlcitFIikKKyAgICBhc3NlcnQgYWN0aXZlKHNjZW5lKVswXSA9PSAi
+          ZmlsZXMiIGFuZCBhY3RpdmUoc2NlbmUpWzJdID09IDEKKyAgICBzbmFwc2hvdCgiMDktd2luZG93
+          cy1zZWNvbmQtZGVza3RvcCIpCisgICAgeWllbGQKKyAgICBhc3NlcnQgbGFiLnN0b3Aoc2hvdz1G
+          YWxzZSkgYW5kIGxhYi5zdGF0ZVsic2F2ZWQiXQorCisgICAgYXBwLm5hdmlnYXRlKCJsYWIiKQor
+          ICAgIGxhYiA9IHlpZWxkIGZyb20gY2hvb3NlKCJ1YnVudHUiKQorICAgIHlpZWxkIGZyb20gc3Rh
+          cnQobGFiLCAidWJ1bnR1IiwgMSwgInVidW50dS1nbm9tZS13aW5kb3dzIikKKyAgICBzY2VuZSA9
+          IGxhYi5zdGF0ZVsic2NlbmUiXQorICAgIGFzc2VydCBzY2VuZVsiZGVza3RvcFN0eWxlIl0gPT0g
+          InVidW50dSIgYW5kIHNjZW5lWyJnbm9tZVdpbmRvd3MiXQorICAgIGFzc2VydCBub3Qgc2NlbmVb
+          ImRlc2t0b3BPdmVybGF5Il0KKyAgICBwYXRoID0gc25hcHNob3QoIjEwLXVidW50dS1ncmF5LWRl
+          c2t0b3AiLCBsYWIuZGVza3RvcCkKKyAgICBwaXggPSBHZGtQaXhidWYuUGl4YnVmLm5ld19mcm9t
+          X2ZpbGUoc3RyKHBhdGgpKQorICAgIHdpZHRoLCBoZWlnaHQgPSBwaXguZ2V0X3dpZHRoKCksIHBp
+          eC5nZXRfaGVpZ2h0KCkKKyAgICBhc3NlcnQgd2lkdGggPj0gNTAwIGFuZCBoZWlnaHQgPj0gMjAw
+          CisgICAgZGF0YSwgc3RyaWRlLCBjaGFubmVscyA9IHBpeC5nZXRfcGl4ZWxzKCksIHBpeC5nZXRf
+          cm93c3RyaWRlKCksIHBpeC5nZXRfbl9jaGFubmVscygpCisgICAgcmdiID0gW3R1cGxlKGRhdGFb
+          eSpzdHJpZGUreCpjaGFubmVsczp5KnN0cmlkZSt4KmNoYW5uZWxzKzNdKQorICAgICAgICAgICBm
+          b3IgeSBpbiByYW5nZShoZWlnaHQvLzQsIDMqaGVpZ2h0Ly80LCA4KSBmb3IgeCBpbiByYW5nZSg2
+          NSwgMTEwLCA0KV0KKyAgICBuZWFyX2dyYXkgPSBzdW0oMjggPD0gbWluKHYpIDw9IDEwNSBhbmQg
+          bWF4KHYpLW1pbih2KSA8PSAxOCBmb3IgdiBpbiByZ2IpCisgICAgYXNzZXJ0IG5lYXJfZ3JheSA+
+          PSBsZW4ocmdiKSouNiwgKG5lYXJfZ3JheSwgbGVuKHJnYikpCisgICAgeWllbGQKKyAgICBzY2Vu
+          ZSA9IHlpZWxkIGZyb20gYWN0KGxhYiwgInRpbGUtbGVmdCIsICJTdXBlcitMZWZ0IikKKyAgICBh
+          c3NlcnQgYWN0aXZlKHNjZW5lKVs6Ml0gPT0gKCJjaHJvbWUiLCAibGVmdCIpCisgICAgYXNzZXJ0
+          IGxhYi5zdG9wKHNob3c9RmFsc2UpIGFuZCBsYWIuc3RhdGVbInNhdmVkIl0KKworICAgIHByb29m
+          ID0geyJzdXJmYWNlIjogInBhY2thZ2VkIEdUSzQgb24gaXNvbGF0ZWQgR05PTUUgV2F5bGFuZDsg
+          TXV0dGVyIFJlbW90ZURlc2t0b3Aga2V5Y29kZXMiLAorICAgICAgICAgICAgICJjYXB0dXJlIjog
+          InJlYWwgR0RLIGNvbXBvc2l0b3IgaW5oaWJpdGlvbjsgbm8gc3Vic3RpdHV0ZSIsICJ3aW5kb3dz
+          TWlzc2lvbkNyZWRpdHMiOiAxMCwKKyAgICAgICAgICAgICAidmlydHVhbERlc2t0b3BzIjogMiwg
+          InVidW50dUdyYXlTYW1wbGVzIjogW25lYXJfZ3JheSwgbGVuKHJnYildLAorICAgICAgICAgICAg
+          ICJwcm9maWxlQ2hvaWNlUGh5c2ljYWwiOiBUcnVlLCAiY3JlZGl0cyI6IGxlbihjaGVja3MpfQor
+          ICAgIChvdXRwdXQvInByb29mLmpzb24iKS53cml0ZV90ZXh0KGpzb24uZHVtcHMocHJvb2YsIGlu
+          ZGVudD0yKSkKKyAgICBwcmludChqc29uLmR1bXBzKHByb29mKSwgZmx1c2g9VHJ1ZSkKZGlmZiAt
+          cnVOICctLWV4Y2x1ZGU9X19weWNhY2hlX18nIGJhc2UvcWEvdGVzdF9sYWJfd2luZG93LnB5IHBh
+          dGNoZWQtdjIvcWEvdGVzdF9sYWJfd2luZG93LnB5Ci0tLSBhL3FhL3Rlc3RfbGFiX3dpbmRvdy5w
+          eQorKysgYi9xYS90ZXN0X2xhYl93aW5kb3cucHkKQEAgLTE0MSw2ICsxNDEsMTAgQEAKICAgICAg
+          ICAgICAgICAgICBzZWxmLndpbmRvdy5wcmVzZW50KCkKICAgICAgICAgICAgICAgICB5aWVsZAog
+          ICAgICAgICAgICAgc2VsZi5uYXZpZ2F0ZSgnbGFiJykKKyAgICAgICAgICAgIGlmICctLXdpbjEw
+          LWRlc2t0b3Atb25seScgaW4gc3lzLmFyZ3Y6CisgICAgICAgICAgICAgICAgZnJvbSBxYV93aW4x
+          MF93YXlsYW5kIGltcG9ydCBleGVyY2lzZQorICAgICAgICAgICAgICAgIHlpZWxkIGZyb20gZXhl
+          cmNpc2Uoc2VsZiwgY2hvcmQsIGNhcHR1cmVfcG5nLCBQYXRoKG9zLmVudmlyb25bJ1RPVUNIX1RZ
+          UElOR19RQV9PVVRQVVQnXSkpCisgICAgICAgICAgICAgICAgcmV0dXJuCiAgICAgICAgICAgICBp
+          ZiAnLS1nbm9tZS1wcm9maWxlJyBpbiBzeXMuYXJndiBvciAnLS1nbm9tZS1wcm9maWxlLWN1c3Rv
+          bScgaW4gc3lzLmFyZ3Y6CiAgICAgICAgICAgICAgICAgeWllbGQgZnJvbSBzZWxmLmV4ZXJjaXNl
+          X2dub21lX3Byb2ZpbGUoY2hvcmQsIGV2ZW50LCBjYXB0dXJlX3BuZywgUGF0aChvcy5lbnZpcm9u
+          WyJUT1VDSF9UWVBJTkdfUUFfT1VUUFVUIl0pKQogICAgICAgICAgICAgICAgIHJldHVybgpkaWZm
+          IC1ydU4gJy0tZXhjbHVkZT1fX3B5Y2FjaGVfXycgYmFzZS9xYV9ydW5uZXIucHkgcGF0Y2hlZC12
+          Mi9xYV9ydW5uZXIucHkKLS0tIGEvcWFfcnVubmVyLnB5CisrKyBiL3FhX3J1bm5lci5weQpAQCAt
+          MzAsNiArMzAsNyBAQAogICAgIHBhcnNlci5hZGRfYXJndW1lbnQoIi0tZGFpbHktdXNlIiwgYWN0
+          aW9uPSJzdG9yZV90cnVlIiwgaGVscD0i0J/RgNC+0LnRgtC4INGB0YbQtdC90LDRgNC40LggVlMg
+          Q29kZSDQuCBHTk9NRSDQuCDRgdC+0YXRgNCw0L3QuNGC0Ywg0YDQtdCw0LvRjNC90YvQtSDQutCw
+          0LTRgNGLIikKICAgICBwYXJzZXIuYWRkX2FyZ3VtZW50KCItLWdub21lLXByb2ZpbGUiLCBhY3Rp
+          b249InN0b3JlX3RydWUiLCBoZWxwPSLQn9GA0L7QstC10YDQuNGC0Ywg0YPRh9C10LHQvdGL0LUg
+          0YDQsNCx0L7Rh9C40LUg0YHRgtC+0LvRiywg0L7QutC90LAg0Lgg0LrQu9Cw0LLQuNGI0Lgg0L/R
+          gNC+0YTQuNC70Y8gR05PTUUiKQogICAgIHBhcnNlci5hZGRfYXJndW1lbnQoIi0tZGVidWctZGF5
+          IiwgYWN0aW9uPSJzdG9yZV90cnVlIiwgaGVscD0i0J/RgNC+0LnRgtC4INC+0LHQtSDQvNC40YHR
+          gdC40Lgg0L7RgtC70LDQtNC60Lgg0YEg0YDQtdCw0LvRjNC90YvQvCDRgdC90LjQvNC60L7QvCDR
+          g9GH0LXQsdC90L7Qs9C+INGC0LXRgNC80LjQvdCw0LvQsCIpCisgICAgcGFyc2VyLmFkZF9hcmd1
+          bWVudCgiLS13aW4xMC1kZXNrdG9wLW9ubHkiLCBhY3Rpb249InN0b3JlX3RydWUiLCBoZWxwPSJD
+          aGVjayBXaW4xMCBzaW11bGF0aW9uIG9uIHJlYWwgR05PTUUgV2F5bGFuZCIpCiAgICAgcGFyc2Vy
+          LmFkZF9hcmd1bWVudCgiLS1zZWVkIiwgdHlwZT1pbnQsIGRlZmF1bHQ9NykKICAgICBwYXJzZXIu
+          YWRkX2FyZ3VtZW50KCItLWluc2lkZSIsIGFjdGlvbj0ic3RvcmVfdHJ1ZSIsIGhlbHA9YXJncGFy
+          c2UuU1VQUFJFU1MpCiAgICAgYXJncyA9IHBhcnNlci5wYXJzZV9hcmdzKCkKQEAgLTcxLDYgKzcy
+          LDcgQEAKICAgICAgICAgICAgIGlmIGFyZ3MuZ25vbWVfcHJvZmlsZTogY29tbWFuZC5hcHBlbmQo
+          Ii0tZ25vbWUtcHJvZmlsZSIpCiAgICAgICAgICAgICBpZiBhcmdzLmRlYnVnX2RheTogY29tbWFu
+          ZC5hcHBlbmQoIi0tZGVidWctZGF5IikKICAgICAgICAgICAgIGlmIGFyZ3MuZnVsbDogY29tbWFu
+          ZC5hcHBlbmQoIi0tZnVsbCIpCisgICAgICAgICAgICBpZiBhcmdzLndpbjEwX2Rlc2t0b3Bfb25s
+          eTogY29tbWFuZC5hcHBlbmQoIi0td2luMTAtZGVza3RvcC1vbmx5IikKICAgICAgICAgICAgIHJl
+          dHVybiBzdWJwcm9jZXNzLnJ1bihjb21tYW5kLCBlbnY9ZW52aXJvbm1lbnQpLnJldHVybmNvZGUK
+          ICAgICByZXR1cm4gcnVuX2NoZWNrcyhhcmdzKQogCkBAIC0xMjgsNyArMTMwLDcgQEAKICAgICAg
+          ICAgICAgICAgICByYWlzZSBSdW50aW1lRXJyb3IoItCf0L7Qu9C90LDRjyDQv9GA0L7QstC10YDQ
+          utCwINGC0YDQtdCx0YPQtdGCINC40YHRhdC+0LTQvdC40LrQuCDQuCBTREsgLk5FVCAxMC4iKQog
+          ICAgICAgICAgICAgZm9yIG5hbWUgaW4gcHJvamVjdHM6CiAgICAgICAgICAgICAgICAgY2hlY2so
+          bmFtZSwgW2RvdG5ldCwgInJ1biIsICItLXByb2plY3QiLCBzdHIodGVzdHMgLyAobmFtZSArICIu
+          Y3Nwcm9qIikpXSwgdGltZW91dD0zMDApCi0gICAgICAgIGlmIG5vdCBhcmdzLnRlcm1pbmFsX29u
+          bHk6CisgICAgICAgIGlmIG5vdCBhcmdzLnRlcm1pbmFsX29ubHkgYW5kIG5vdCBhcmdzLndpbjEw
+          X2Rlc2t0b3Bfb25seToKICAgICAgICAgICAgIGNoZWNrKCJtaXNzaW9ucyIsIFtzeXMuZXhlY3V0
+          YWJsZSwgc3RyKHRlc3RzIC8gInRlc3RfbGl2ZV9taXNzaW9ucy5weSIpXSwgdGltZW91dD0zMDAp
+          CiAgICAgICAgICAgICBjaGVjaygicHJvdG9jb2wiLCBbc3lzLmV4ZWN1dGFibGUsIHN0cih0ZXN0
+          cyAvICJ0ZXN0X3ByYWN0aWNlLnB5IildKQogICAgICAgICBzdWJwcm9jZXNzLnJ1bihbImdzZXR0
+          aW5ncyIsICJzZXQiLCAib3JnLmdub21lLmRlc2t0b3AuaW5wdXQtc291cmNlcyIsICJzb3VyY2Vz
+          IiwKQEAgLTE0NCw2ICsxNDYsMTIgQEAKICAgICAgICAgICAgICAgICByYWlzZSBSdW50aW1lRXJy
+          b3IoItCi0LXRgdGC0L7QstGL0LkgR05PTUUg0L3QtSDQt9Cw0L/Rg9GB0YLQuNC70YHRjy4g0KHQ
+          vC4gY29tcG9zaXRvci5sb2cuIikKICAgICAgICAgICAgIHRpbWUuc2xlZXAoLjEpCiAgICAgICAg
+          IHRpbWUuc2xlZXAoMSkKKyAgICAgICAgaWYgYXJncy53aW4xMF9kZXNrdG9wX29ubHk6CisgICAg
+          ICAgICAgICByZXBvcnRbImNvdmVyYWdlIl0gPSBbIkdOT01FIFdheWxhbmQgR1RLIFdpbmRvd3Mg
+          MTAgc2ltdWxhdGlvbiArIHNlcGFyYXRlIFVidW50dSBncmF5IHJvdXRlIl0KKyAgICAgICAgICAg
+          IG9rID0gY2hlY2soIm5hdGl2ZS13aW4xMC1kZXNrdG9wIiwgW3N5cy5leGVjdXRhYmxlLCBzdHIo
+          dGVzdHMgLyAidGVzdF9sYWJfd2luZG93LnB5IiksCisgICAgICAgICAgICAgICAgICAgICAgICAg
+          ICAgICAgICAgICAgICAgICAgICAiLS13aW4xMC1kZXNrdG9wLW9ubHkiXSwgdGltZW91dD0zMDAp
+          CisgICAgICAgICAgICByZXBvcnRbInN0YXR1cyJdID0gInBhc3NlZCIgaWYgb2sgZWxzZSAiZmFp
+          bGVkIgorICAgICAgICAgICAgcmV0dXJuIDAgaWYgb2sgZWxzZSAxCiAgICAgICAgIGlmIGFyZ3Mu
+          cmVmZXJlbmNlX2hvbWU6CiAgICAgICAgICAgICByZXBvcnRbImNvdmVyYWdlIl0uYXBwZW5kKCJH
+          VEsgMTAwNng4NjMgaG9tZSByZWZlcmVuY2UgY2FwdHVyZSIpCiAgICAgICAgICAgICB3aXRoIHRl
+          bXBmaWxlLlRlbXBvcmFyeURpcmVjdG9yeShwcmVmaXg9InR5cGluZy1yZWZlcmVuY2UtaG9tZS0i
+          KSBhcyBmb2xkZXI6Cg==
+          QA_PATCH
+          echo '968fd7caefe41039e07aea24bb0fcd050c109bf93039ac72b1ced38d8affa73d  '"$RUNNER_TEMP/win10-wayland.patch" | sha256sum -c
+          patch --batch --fuzz=0 -p1 < "$RUNNER_TEMP/win10-wayland.patch"
+          bash check.sh --win10-desktop-only --output "$RUNNER_TEMP/win10-wayland-evidence" || {
+            tail -n 120 "$RUNNER_TEMP/win10-wayland-evidence/"*.log
+            exit 1
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: touchtyping-190-ubuntu-wayland
+          path: ${{ runner.temp }}/win10-wayland-evidence/
