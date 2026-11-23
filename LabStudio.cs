@@ -17,12 +17,10 @@ namespace TouchTypingStudio
     internal sealed partial class LiveStudio
     {
         private bool legacyLive, labActive;
-        private ComboBox labLimitSelect, labTimerSelect, labMissionSelect;
         private static readonly int[] LabActionLimits = { 0, 20, 40, 60, 100 };
         private static readonly int[] LabTimeLimits = { 0, 180, 600 };
         private int lastLabLimit, lastLabTimer;
         private string lastLabMission = "";
-        private string[] labMissionIds = new string[0];
         private Button labHint;
         private Button labLimitContinue, labLimitFinish, labLimitArmedButton;
         private Key labLimitArmedKey;
@@ -99,7 +97,6 @@ namespace TouchTypingStudio
             string target = item.S("desktopProfile");
             return target.Length == 0 || target == labDesktopProfile;
         }
-        private ComboBox labModeSelect, labLevelSelect;
         private LabSceneView labDesktop;
         private Viewbox labGuide;
         private FrameworkElement pausedLabView;
@@ -109,161 +106,64 @@ namespace TouchTypingStudio
         private string labNativeLayout;
         private TextBlock labTask, labKeys, labCounter, labStatus;
         private Button labPause, labFinish, labKeyAid, labHandAid, labMistakeAid;
-        private readonly Dictionary<string, Button> labClassButtons = new Dictionary<string, Button>();
 
-        private FrameworkElement BuildLabHome()
+        private readonly Dictionary<string, Button> liveCatalogButtons = new Dictionary<string, Button>();
+        private string liveReturnApp;
+
+        private bool HasCompatibleLiveDraft(Data catalog, string app)
         {
-            var root = PagePanel("Live", "Практикум работы с клавиатурой");
-            root.Children.Add(BuildDesktopProfileChoice(delegate { center.Content = BuildLabHome(); }));
-            var catalog = Request("lab-catalog", "desktopProfile", labDesktopProfile);
-            var classes = catalog.Items("classes").Where(UsesSelectedDesktop).ToArray();
-            var layout = new UniformGrid { Columns = 2, Margin = new Thickness(0, 0, 0, 15) };
-            labClassButtons.Clear();
-            var shortcuts = Label("", 13, Dim);
-            shortcuts.MaxWidth = 1000;
-            var selected = Label("", 18, Ink, true);
-            var levels = new[] { "Базовый", "Средний", "Сложный" };
-            labMissionSelect = new ComboBox { MinWidth = 270, MaxWidth = 600, HorizontalAlignment = HorizontalAlignment.Left };
-            Action describe = delegate
+            string environment = app == "windows" || app == "workday" ? labDesktopProfile : "ubuntu";
+            string guidance = labMode == "drill" ? "independent" : "guided";
+            return catalog.Items("drafts").Any(draft => draft.S("app") == app && draft.I("level") == labLevel &&
+                draft.S("guidance") == guidance && draft.S("desktopProfile", "ubuntu") == environment);
+        }
+
+        private void LaunchLiveCard(string app, bool resume)
+        {
+            if (active) return;
+            labApp = liveReturnApp = app;
+            string mission = "";
+            if (!resume)
             {
-                var item = classes.FirstOrDefault(c => c.S("id") == labApp);
-                selected.Text = item == null ? "Выберите класс" : item.S("title");
-                shortcuts.Text = item == null ? "" : item.S("description");
-                var advice = catalog.Items("recommendations").FirstOrDefault(r => r.S("app") == labApp);
-                if (advice != null && !string.IsNullOrWhiteSpace(advice.S("reason")))
-                {
-                    int suggested = advice.I("level", -1);
-                    string title = suggested >= 0 && suggested < levels.Length ? "Рекомендуемый уровень: " + levels[suggested] + ". " : "";
-                    shortcuts.Text += "\n" + title + advice.S("reason");
-                }
-                int level = labLevelSelect == null ? 0 : Math.Max(0, labLevelSelect.SelectedIndex);
-                var ids = new List<string> { "" }; var titles = new List<string> { "Подобрать поручение" };
-                string guidance = labModeSelect != null && labModeSelect.SelectedIndex == 0 ? "independent" : "guided";
-                if (catalog.Items("drafts").Any(d => d.S("desktopProfile", "ubuntu") == LessonDesktopProfile && d.S("app") == labApp && d.I("level") == level && d.S("guidance") == guidance))
-                { ids.Add("@resume"); titles.Add("Продолжить с сохранённого места"); }
-                foreach (var m in catalog.Items("missions").Where(m => UsesSelectedDesktop(m) && m.S("app") == labApp && m.I("level") == level))
-                { ids.Add(m.S("id")); titles.Add(m.S("title")); }
-                labMissionIds = ids.ToArray(); labMissionSelect.ItemsSource = titles; labMissionSelect.SelectedIndex = 0;
-                foreach (var entry in labClassButtons)
-                {
-                    entry.Value.Background = entry.Key == labApp ? Ui.Brush("#404A5E") : Card;
-                    entry.Value.BorderBrush = entry.Key == labApp ? Accent : Edge;
-                }
-            };
-            foreach (var item in classes)
-            {
-                string app = item.S("id");
-                var content = Stack();
-                content.Children.Add(Label(item.S("title"), 21, Ink, true));
-                var description = Label(item.S("description"), 13, Dim);
-                description.Margin = new Thickness(0, 7, 0, 0);
-                content.Children.Add(description);
-                var choose = ActionButton("", delegate { labApp = app; describe(); });
-                choose.Content = content;
-                choose.HorizontalContentAlignment = HorizontalAlignment.Left;
-                choose.Padding = new Thickness(20, 17, 20, 17);
-                choose.Margin = new Thickness(0, 0, 12, 12);
-                choose.MinHeight = 101;
-                AutomationProperties.SetName(choose, item.S("title") + ". " + item.S("description"));
-                AutomationProperties.SetAutomationId(choose, "LabClass-" + app);
-                labClassButtons[app] = choose;
-                layout.Children.Add(choose);
+                var catalog = Request("lab-catalog", "desktopProfile", labDesktopProfile);
+                if (!catalog.Exists) return;
+                var visible = catalog.Items("missions").Where(item => UsesSelectedDesktop(item) &&
+                    item.S("app") == app && item.I("level") == labLevel).ToArray();
+                if (visible.Length > 0) mission = visible[0].S("id");
             }
-            root.Children.Add(layout);
-            root.Children.Add(selected);
-            shortcuts.Margin = new Thickness(0, 6, 0, 16);
-            root.Children.Add(shortcuts);
-            var choices = Stack(true);
-            labModeSelect = Select("Режим", new[] { "Самостоятельно", "По шагам" }, labMode == "sandbox" ? 1 : 0, 315);
-            AutomationProperties.SetAutomationId(labModeSelect, "LabMode");
-            labLevelSelect = Select("Сложность", levels, labLevel, 150);
-            choices.Children.Add(labModeSelect);
-            choices.Children.Add(labLevelSelect);
-            AutomationProperties.SetAutomationId(labLevelSelect, "LabLevel");
-            root.Children.Add(choices);
-            var budgets = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
-            labLimitSelect = Select("Лимит действий", new[] { "Без лимита действий", "20 действий", "40 действий", "60 действий", "100 действий" }, lastLabLimit, 200);
-            AutomationProperties.SetAutomationId(labLimitSelect, "LabDuration");
-            budgets.Children.Add(labLimitSelect);
-            labTimerSelect = Select("Таймер", new[] { "Без таймера", "3 минуты", "10 минут" }, lastLabTimer, 145);
-            AutomationProperties.SetAutomationId(labTimerSelect, "LabTimer");
-            budgets.Children.Add(labTimerSelect);
-            beginControl = ActionButton("Начать · F5", StartLab, true);
-            AutomationProperties.SetAutomationId(beginControl, "LabStart");
-            beginControl.IsEnabled = classes.Length > 0;
-            budgets.Children.Add(beginControl);
-            root.Children.Add(budgets);
-            root.Children.Add(labMissionSelect);
-            AutomationProperties.SetAutomationId(labMissionSelect, "LabMission");
-            var budgetNote = Label("Действие — зачтённый шаг. Можно включить оба ограничения.", 12, Dim);
-            root.Children.Add(budgetNote);
-            labMissionSelect.SelectionChanged += delegate
-            {
-                int index = labMissionSelect.SelectedIndex;
-                bool resume = index >= 0 && index < labMissionIds.Length && labMissionIds[index] == "@resume";
-                labLimitSelect.IsEnabled = labTimerSelect.IsEnabled = !resume;
-                budgetNote.Text = resume ? "Используются ограничения сохранённой попытки." :
-                    "Действие — зачтённый шаг. Можно включить оба ограничения.";
-            };
-            labModeSelect.SelectionChanged += delegate { describe(); };
-            labLevelSelect.SelectionChanged += delegate { describe(); };
-            var hardware = new Expander { Header = "Клавиатура и Fn", Foreground = Dim,
-                Margin = new Thickness(0, 12, 0, 3), IsExpanded = false };
-            var hardwareControls = Stack(true);
-            var keyboardProfileSelect = Select("Клавиатура", new[] { "MateBook D16", "Стандартная" },
-                library.S("keyboardProfile", "matebook-d16") == "standard" ? 1 : 0, 185);
-            var fnModeSelect = Select("Режим Fn", new[] { "Мультимедиа без Fn", "F1–F12 без Fn" },
-                library.S("fnMode", "hotkeys") == "functions" ? 1 : 0, 188);
-            keyboardProfileSelect.SelectionChanged += delegate
-            {
-                var updated = Request("settings", "keyboardProfile", keyboardProfileSelect.SelectedIndex == 1 ? "standard" : "matebook-d16");
-                if (updated.Exists) library = updated;
-            };
-            fnModeSelect.SelectionChanged += delegate
-            {
-                var updated = Request("settings", "fnMode", fnModeSelect.SelectedIndex == 1 ? "functions" : "hotkeys");
-                if (updated.Exists) library = updated;
-            };
-            hardwareControls.Children.Add(keyboardProfileSelect);
-            hardwareControls.Children.Add(fnModeSelect);
-            hardware.Content = hardwareControls;
-            root.Children.Add(hardware);
-            var notes = Label("Сочетания работают в EN и RU", 13, Dim);
-            notes.Margin = new Thickness(0, 12, 0, 17);
-            root.Children.Add(notes);
-            root.Children.Add(ActionButton("Отдельное сочетание", delegate { legacyLive = true; ShowPage(LivePage); }));
-            describe();
-            return Scroll(root);
+            StartLabAttempt(mission, resume);
+        }
+
+        private void ReturnToLiveCatalog()
+        {
+            legacyLive = false;
+            ShowPage(LivePage);
+            Button card;
+            if (liveReturnApp != null && liveCatalogButtons.TryGetValue(liveReturnApp, out card))
+                Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(delegate { card.BringIntoView(); card.Focus(); }));
         }
 
         private bool labSavePending, labSaveClosePending, labSaveBackPending, labExplicitFinishPending;
 
-        private void StartLab()
+        private void StartLabAttempt(string mission, bool resume)
         {
             if (active) return;
             if (Keyboard.Modifiers != ModifierKeys.None)
             {
-                SetNotice("Отпустите модификаторы, затем нажмите «Начать» или F5.");
+                SetNotice("Отпустите модификаторы, затем запустите упражнение.");
                 return;
             }
-            labMode = labModeSelect.SelectedIndex == 1 ? "sandbox" : "drill";
-            labLevel = Math.Max(0, labLevelSelect.SelectedIndex);
-            lastLabLimit = Math.Max(0, labLimitSelect.SelectedIndex);
-            lastLabTimer = Math.Max(0, labTimerSelect.SelectedIndex);
+            page = LivePage;
             int actions = LabActionLimits[lastLabLimit];
             int seconds = LabTimeLimits[lastLabTimer];
-            // Opt-in native smoke test exercises the real expiry transition without waiting 3 minutes.
             int testSeconds;
             if (verifyMode && seconds > 0 && int.TryParse(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SOFT_FINISH_SECONDS"), out testSeconds))
                 seconds = Math.Max(1, Math.Min(seconds, testSeconds));
             string guidance = labMode == "drill" ? "independent" : "guided";
-            string mission = labMissionIds[Math.Max(0, labMissionSelect.SelectedIndex)];
-            bool resume = mission == "@resume";
-            if (resume) mission = "";
             int seed;
             var initial = verifyMode && int.TryParse(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"), out seed)
-                ? Request("lab-start", "desktopProfile", labDesktopProfile, "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "softFinish", true, "combinedLimits", true, "seed", seed)
-                : Request("lab-start", "desktopProfile", labDesktopProfile, "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "softFinish", true, "combinedLimits", true);
+                ? Request("lab-start", "desktopProfile", labDesktopProfile, "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "preserveDraft", !resume, "softFinish", true, "combinedLimits", true, "seed", seed)
+                : Request("lab-start", "desktopProfile", labDesktopProfile, "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "preserveDraft", !resume, "softFinish", true, "combinedLimits", true);
             if (!initial.Exists || initial.B("startBlocked")) return;
             labSavePending = labSaveClosePending = labSaveBackPending = labExplicitFinishPending = false;
             lastLabMission = initial.S("mission");
@@ -284,8 +184,12 @@ namespace TouchTypingStudio
 
         private void ToggleLabAid(bool keys)
         {
-            var next = Request("settings", keys ? "keys" : "hands", !library.B(keys ? "showKeys" : "showHands", true));
-            if (next.Exists) { library = next; referenceGuideExplicit = next.B("showKeys", true) || next.B("showHands", true); RenderLab(state); }
+            var next = Request("settings", keys ? "liveKeys" : "liveHands", !library.B(keys ? "liveShowKeys" : "liveShowHands"));
+            if (next.Exists && string.IsNullOrWhiteSpace(engine.Notice))
+            {
+                library = next;
+                RenderLab(state);
+            }
         }
 
         private void ToggleLabMistake()
@@ -537,10 +441,10 @@ namespace TouchTypingStudio
             keyboard.Update(library.Items("keyboard"), state.D("scene").S("layout", CurrentLayout()),
                 guide == null ? Enumerable.Empty<Data>() : guide.Items(), state.Items("held").Select(key => key.Value()),
                 library.B("showMistakeKey", true) && state.S("feedback") == "error" ? state.S("lastKey") : "",
-                library.B("showKeys", true), library.B("showHands", true), true,
+                library.B("liveShowKeys"), library.B("liveShowHands"), true,
                 library.S("keyboardProfile", "matebook-d16"), library.S("fnMode", "hotkeys"));
-            labKeyAid.Opacity = library.B("showKeys", true) ? 1 : .5;
-            labHandAid.Opacity = library.B("showHands", true) ? 1 : .5;
+            labKeyAid.Opacity = library.B("liveShowKeys") ? 1 : .5;
+            labHandAid.Opacity = library.B("liveShowHands") ? 1 : .5;
             labMistakeAid.Opacity = library.B("showMistakeKey", true) ? 1 : .5;
             UpdateReferenceGuideVisibility();
             if (state.B("limitDecisionPending")) ShowLabLimitOverlay(false);
@@ -717,28 +621,25 @@ namespace TouchTypingStudio
             RestorePausedLabView();
             var backdrop = center.Content as FrameworkElement;
             center.Content = null;
-            center.Content = result.Exists ? BuildLabResult(result, backdrop) : BuildLabHome();
+            if (result.Exists) center.Content = BuildLabResult(result, backdrop);
+            else ReturnToLiveCatalog();
         }
 
         private void BackFromLab()
         {
-            if (!state.B("limitDecisionPending") && !state.B("finishingMission")) { FinishLab(); return; }
             labSaveBackPending = true;
             if (!TrySaveLab()) return;
             labSaveBackPending = false;
             labActive = active = paused = false;
             RestorePausedLabView();
-            ShowPage(LivePage);
+            ReturnToLiveCatalog();
         }
 
         private void RestartLab()
         {
             if (labActive) FinishLab();
             if (labActive) return; // Retain the paused lesson until its save succeeds.
-            center.Content = BuildLabHome();
-            int choice = Array.IndexOf(labMissionIds, lastLabMission);
-            if (choice >= 0) labMissionSelect.SelectedIndex = choice;
-            StartLab();
+            StartLabAttempt(lastLabMission, false);
         }
 
         private FrameworkElement BuildLabResult(Data result, FrameworkElement backdrop, bool preview = false)

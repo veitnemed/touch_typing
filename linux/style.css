@@ -318,3 +318,56 @@ button.reference-primary:hover { background: #835af7; }
   font-family: "Roboto", "Noto Sans", sans-serif;
 }
 .reference-mark { font-family: "DejaVu Sans Mono", monospace; font-weight: 800; }
+
+/* A single Live catalog and the lesson controls share the reference palette. */
+.reference-catalog-head { margin-right: 2px; }
+button.reference-quiet, .reference-config-button > button, .reference-resume > button {
+  color: #f6efff; background: #33264f; border: 1px solid #725598;
+  border-radius: 10px; min-height: 30px; padding: 4px 11px;
+}
+button.reference-quiet:hover, .reference-config-button > button:hover,
+.reference-resume > button:hover { background: #59417c; }
+button.reference-quiet:focus-visible, .reference-config-button > button:focus-visible,
+.reference-resume > button:focus-visible { outline: 2px solid #e1caff; outline-offset: -3px; }
+.reference-config-popover > contents, .reference-config-popover > arrow,
+.reference-config-dropdown popover > contents, .reference-config-dropdown popover > arrow {
+  color: #fbf4ff; background: #291d47; border-color: #705398;
+}
+.reference-config-content { padding: 8px 10px; color: #efe5ff; min-width: 204px; }
+.reference-config-title { color: #fff5ff; font-size: 17px; font-weight: 700; }
+.reference-config-caption { color: #d9caed; font-size: 12px; }
+.reference-config-dropdown > button, .reference-config-dropdown row,
+.reference-config-popover checkbutton, .reference-config-dropdown popover listview {
+  background: #332650; color: #fbf4ff; border-color: #644984;
+}
+.reference-config-dropdown row:selected, .reference-config-dropdown row:hover {
+  color: #fff; background: #62468c;
+}
+.reference-config-popover checkbutton { background: transparent; padding: 4px; }
+.lab-page.reference-live .reference-goal { padding: 7px 12px; margin-bottom: 7px; }
+.reference-live .reference-goal-title { font-size: 21px; }
+.reference-live .reference-gesture { padding: 0; background: transparent; }
+.reference-live .reference-keycap {
+  color: #f8edff; background: #513482; border: 1px solid #a57de2;
+  min-height: 26px; padding: 0 10px; font-size: 16px;
+}
+.reference-live .reference-footer-settings > button { font-size: 13px; padding: 1px 7px; }
+.lab-page.compact-height .reference-goal-title { font-size: 18px; }
+.lab-page.compact-height .reference-keycap { min-height: 22px; font-size: 15px; }
+.reference-config-group { color: #cdb8fc; font-size: 12px; font-weight: 700; margin-top: 3px; }
+.reference-config-content button.reference-primary { min-height: 31px; }
+.reference-home.compact-catalog .reference-board { padding: 14px 21px 10px 25px; }
+.reference-home.compact-catalog .reference-hero { margin: 0 0 3px 9px; }
+.reference-home.compact-catalog .reference-hero-title { font-size: 33px; min-height: 38px; }
+.reference-home.compact-catalog .reference-hero-subtitle { font-size: 15px; min-height: 31px; }
+.reference-home.compact-catalog button.reference-card {
+  min-height: 120px; padding: 8px 16px 10px; border-radius: 13px;
+}
+.reference-home.compact-catalog .reference-app-icon { padding: 4px; border-radius: 8px; }
+.reference-home.compact-catalog .reference-card-title { font-size: 20px; margin: 1px 0 1px; }
+.reference-home.compact-catalog .reference-card-description { font-size: 13px; margin: 0; }
+.reference-home.compact-catalog .reference-progress-label { font-size: 13px; }
+.reference-home.compact-catalog .reference-config-button > button,
+.reference-home.compact-catalog .reference-resume > button { min-height: 23px; padding: 2px 8px; }
+.reference-card-controls { margin-top: 11px; margin-right: 12px; }
+.reference-home.compact-catalog .reference-card-controls { margin-top: 6px; margin-right: 7px; }

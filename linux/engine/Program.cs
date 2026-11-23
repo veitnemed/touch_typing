@@ -44,6 +44,7 @@ internal sealed class PracticeService
     private TypingRun typing;
     private LabRun lab;
     private LiveDraft labCheckpoint;
+    private bool preservePreviousLabDraft;
     private bool labLimitCheckpointAttempted;
     private int persistedLabAttempts;
     private bool labFinishAttempted;
@@ -123,6 +124,7 @@ internal sealed class PracticeService
                     message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit"), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: Text(message, "mission"), draft: draft, softFinish: Flag(message, "softFinish"), combinedLimits: combinedLimits, windowsBindings: windows, desktopProfile: windows ? null : desktopProfile, neutralProject: neutralProject, environment: chosenEnvironment);
                 persistedLabAttempts = 0;
                 labCheckpoint = draft;
+                preservePreviousLabDraft = !continuing && Flag(message, "preserveDraft");
                 labLimitCheckpointAttempted = draft?.Progress?.LimitDecisionPending == true;
                 labFinishAttempted = false;
                 labSaveError = null;
@@ -277,6 +279,7 @@ internal sealed class PracticeService
         var draft = lab.HasDraft ? lab.Draft() : null;
         if (draft != null) draft.Progress.Revision = Guid.NewGuid().ToString("N");
         var previousProfile = profile;
+        bool leftPreviousDraft = false;
         Save(current =>
         {
             bool SameSlot(LiveDraft item) => item.App == lab.App && item.Level == lab.Level && item.Guidance == lab.Guidance && LabScene.DesktopEnvironment(item.DesktopEnvironment) == lab.EnvironmentProfile;
@@ -287,8 +290,15 @@ internal sealed class PracticeService
                 ? previousDraft.Progress?.Revision != labCheckpoint.Progress.Revision || previousDraft.Progress?.Session != labCheckpoint.Progress.Session
                 : previousDraft.Progress != null || previousDraft.Mission != labCheckpoint.Mission || previousDraft.Trace != labCheckpoint.Trace)))
                 throw new IOException("Занятие уже изменилось в другом окне. Перезапустите тренажёр и продолжите из сохранённой версии.");
-            current.LiveDrafts.RemoveAll(item => SameSlot(item));
-            if (draft != null) current.LiveDrafts.Add(draft);
+            // A fresh card launch is separate from resuming an existing attempt.
+            // If that slot is already occupied, keep its saved lesson but still
+            // persist new attempts and results. Do not claim a new checkpoint.
+            leftPreviousDraft = preservePreviousLabDraft && labCheckpoint == null && previousDraft != null;
+            if (!leftPreviousDraft)
+            {
+                current.LiveDrafts.RemoveAll(item => SameSlot(item));
+                if (draft != null) current.LiveDrafts.Add(draft);
+            }
             current.ShortcutHistory.AddRange(pending);
             TrimShortcutHistory(current);
             if (record != null && (record.Solved + record.Errors > 0 || lab.LimitAccepted)) LabSessionRecords.Update(current, record);
@@ -297,7 +307,7 @@ internal sealed class PracticeService
         if (labSaveError == null)
         {
             persistedLabAttempts += pending.Length;
-            labCheckpoint = draft;
+            labCheckpoint = leftPreviousDraft ? null : draft;
         }
         else profile = previousProfile; // a failed disk write must not expose speculative credits or drafts
     }
@@ -333,7 +343,8 @@ internal sealed class PracticeService
             {
                 item.Lesson, item.Date, item.Speed, item.Accuracy, item.Count, item.Errors, item.Seconds
             }),
-            profile.ShowKeys, profile.ShowHands, profile.ShowMistakeKey, profile.RightHandChord,
+            profile.ShowKeys, profile.ShowHands, profile.LiveShowKeys, profile.LiveShowHands,
+            profile.ShowMistakeKey, profile.RightHandChord,
             profile.KeyboardProfile, profile.FnMode, desktopProfile = LabScene.DesktopEnvironment(profile.LabDesktopEnvironment)
         };
     }
@@ -386,6 +397,8 @@ internal sealed class PracticeService
         {
             if (message.TryGetProperty("keys", out var keys)) current.ShowKeys = keys.GetBoolean();
             if (message.TryGetProperty("hands", out var hands)) current.ShowHands = hands.GetBoolean();
+            if (message.TryGetProperty("liveKeys", out var liveKeys)) current.LiveShowKeys = liveKeys.GetBoolean();
+            if (message.TryGetProperty("liveHands", out var liveHands)) current.LiveShowHands = liveHands.GetBoolean();
             if (message.TryGetProperty("mistakeKeys", out var mistakeKeys)) current.ShowMistakeKey = mistakeKeys.GetBoolean();
             if (message.TryGetProperty("keyboardProfile", out var keyboardProfile))
             {

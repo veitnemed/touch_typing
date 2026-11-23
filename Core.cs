@@ -16,6 +16,8 @@ namespace TouchTypingStudio
         public bool F2Seen;
         public bool ShowKeys = true;
         public bool ShowHands = true;
+        public bool LiveShowKeys;
+        public bool LiveShowHands;
         public bool ShowMistakeKey = true;
         public string KeyboardProfile = "matebook-d16";
         public string FnMode = "hotkeys";

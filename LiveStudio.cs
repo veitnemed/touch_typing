@@ -21,6 +21,7 @@ namespace TouchTypingStudio
     {
         private const string HomePage = "Главная";
         private const string LivePage = "Live";
+        private const string ConfigurePage = "Настроить Live";
         private const string TypingPage = "Печать";
         private const string EditorPage = "Редактор";
         private const string ProgressPage = "Прогресс";
@@ -253,13 +254,13 @@ namespace TouchTypingStudio
             SetReferenceLessonCaption(false);
             MinWidth = 748;
             MinHeight = 540;
-            page = next;
+            page = next == HomePage ? LivePage : next;
             var updated = Request("configure", "platform", "windows", "layout", CurrentLayout());
             if (updated.Exists) { library = updated; HydrateDesktopProfile(updated); }
             UpdateHeader();
             switch (page)
             {
-                case HomePage: beginControl = null; center.Content = BuildReferenceHome(); break;
+                case ConfigurePage: beginControl = null; center.Content = BuildLiveConfigure(); break;
                 case TypingPage: center.Content = BuildTyping(); break;
                 case EditorPage: center.Content = BuildEditor(); break;
                 case ProgressPage: center.Content = BuildProgress(); break;
@@ -287,7 +288,7 @@ namespace TouchTypingStudio
 
         private FrameworkElement BuildLive()
         {
-            if (!legacyLive) return BuildLabHome();
+            if (!legacyLive) { beginControl = null; return BuildReferenceHome(); }
             var root = PagePanel("Live", "Сочетания для работы без мыши");
             root.Children.Add(ActionButton("Классы и рабочий стол", delegate { legacyLive = false; ShowPage(LivePage); }));
             var choices = Stack(true);
@@ -383,7 +384,7 @@ namespace TouchTypingStudio
 
         private void StartLive()
         {
-            if (!legacyLive) { StartLab(); return; }
+            if (!legacyLive) return;
             selectedGroup = Get(groupSelect);
             selectedSkill = Get(taskSelect);
             selectedLiveKind = Math.Max(0, kindSelect.SelectedIndex);
@@ -920,6 +921,17 @@ namespace TouchTypingStudio
             Key input = e.Key == Key.System ? e.SystemKey : e.Key;
             if (!active)
             {
+                if (page == ConfigurePage && Keyboard.Modifiers == ModifierKeys.None && input == Key.F5 &&
+                    beginControl != null && beginControl.IsEnabled)
+                {
+                    var picker = Keyboard.FocusedElement as ComboBox;
+                    if (picker == null || !picker.IsDropDownOpen)
+                    {
+                        beginControl.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                        e.Handled = true;
+                    }
+                    return;
+                }
                 if (HandleReferenceResultKey(input)) { e.Handled = true; return; }
                 if ((Keyboard.Modifiers & ModifierKeys.Alt) != 0 && input >= Key.D1 && input <= Key.D4)
                 {

@@ -29,13 +29,14 @@ internal static class LiveUiSmoke
         if (arguments.Length == 0) { Console.Error.WriteLine("Pass the full path to TouchTyping.exe."); return 2; }
         try
         {
+            bool liveUx = arguments.Contains("--live-ux");
             bool referenceBrowser = arguments.Contains("--reference-browser");
             bool dailyUse = arguments.Contains("--daily-use");
             bool gnomeProfile = arguments.Contains("--gnome-profile");
             bool debugDay = arguments.Contains("--debug-day");
             bool codeTheme = arguments.Contains("--code-theme");
             bool pythonEditor = arguments.Contains("--python-editor");
-            bool referenceEvidence = referenceBrowser || dailyUse || gnomeProfile || debugDay || codeTheme || pythonEditor || arguments.Contains("--reference-evidence");
+            bool referenceEvidence = liveUx || referenceBrowser || dailyUse || gnomeProfile || debugDay || codeTheme || pythonEditor || arguments.Contains("--reference-evidence");
             if (referenceEvidence && SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
                 throw new InvalidOperationException("Per-monitor-aware evidence capture cannot be enabled.");
             string path = Path.GetFullPath(arguments[0]);
@@ -54,6 +55,12 @@ internal static class LiveUiSmoke
             window = AutomationElement.FromHandle(trainer);
             Check(window.Current.ProcessId == app.Id, "The automation root belongs to the new QA process");
             Focus();
+            if (liveUx)
+            {
+                CheckLiveUx(path);
+                Console.WriteLine("PASS: " + count + " WPF Live direct-catalog and Configure assertions");
+                return 0;
+            }
             if (pythonEditor)
             {
                 CheckPythonEditingMissions();
@@ -109,9 +116,9 @@ internal static class LiveUiSmoke
                 return 0;
             }
             Chord("Ctrl+F5");
-            Check(Exists("LabStart") && !Exists("LabClock"), "Modified F5 keeps the class chooser open");
+            Check(Exists("HomeDashboard") && !Exists("LabClock"), "Modified F5 keeps the Live catalog open");
             // Keep key/cursor evidence independent of later window-close assertions.
-            Invoke("LabClass-terminal");
+            OpenLiveConfiguration("terminal");
             Select("LabMode", 0);
             Select("LabTimer", 1);
             Key("F5");
@@ -122,14 +129,14 @@ internal static class LiveUiSmoke
             Key("F10");
             Until(delegate { return Exists("LabResult"); }, "focused terminal result");
             Invoke("LabChooseClass");
-            Until(delegate { return Exists("LabStart"); }, "class chooser after focused terminal lesson");
+            Until(delegate { return Exists("HomeDashboard"); }, "class chooser after focused terminal lesson");
             Console.WriteLine("PASS: focused terminal native input assertions");
 
             string[] apps = { "ubuntu", "chrome", "code", "terminal", "workday" };
             foreach (string name in apps)
                 foreach (int mode in new[] { 0, 1 })
                 {
-                    Invoke("LabClass-" + name);
+                    OpenLiveConfiguration(name);
                     Select("LabMode", mode);
                     Select("LabTimer", 1);
                     var started = Stopwatch.StartNew();
@@ -211,11 +218,11 @@ internal static class LiveUiSmoke
                         Until(delegate { return Exists("LabResult"); }, "result after Space replay");
                     }
                     Invoke("LabChooseClass");
-                    Until(delegate { return Exists("LabStart"); }, "class chooser after result");
+                    Until(delegate { return Exists("HomeDashboard"); }, "class chooser after result");
                 }
             if (arguments.Contains("--full-session"))
             {
-                Invoke("LabClass-terminal");
+                OpenLiveConfiguration("terminal");
                 Select("LabMode", 1);
                 Select("LabTimer", 1);
                 Key("F5");
@@ -229,7 +236,7 @@ internal static class LiveUiSmoke
                 Check(match.Success && int.Parse(match.Groups[1].Value) > 0, "A completed class has a positive record");
             }
             if (Exists("LabResult")) Invoke("LabChooseClass");
-            Invoke("LabClass-terminal");
+            OpenLiveConfiguration("terminal");
             Select("LabTimer", 1);
             Key("F5");
             Until(delegate { return Exists("LabClock"); }, "lesson before stop storage failure");
@@ -246,8 +253,8 @@ internal static class LiveUiSmoke
             Invoke("LabRetrySave");
             Until(delegate { return Exists("LabResult") && !Exists("LabSaveError"); }, "explicit stop retry saves");
             Invoke("LabChooseClass");
-            Until(delegate { return Exists("LabStart"); }, "chooser after retried stop");
-            Invoke("LabClass-ubuntu");
+            Until(delegate { return Exists("HomeDashboard"); }, "chooser after retried stop");
+            OpenLiveConfiguration("ubuntu");
             Select("LabTimer", 1);
             Key("F5");
             Until(delegate { return Exists("LabClock"); }, "lesson before save-and-close");
@@ -285,11 +292,120 @@ internal static class LiveUiSmoke
         }
     }
 
+    private static void CheckLiveUx(string executable)
+    {
+        Until(delegate { return Visible("HomeDashboard") && Visible("HomeClass-chrome"); }, "single Live catalog opens on startup");
+        Check(Visible("ReferenceNav-practice") && Visible("ReferenceNav-learn") &&
+            !Exists("ReferenceNav-home") && !Exists("ReferenceNav-progress"), "Only Live and typing are top-level sections");
+        Check(!Exists("LabStart") && !Exists("LabMission"), "No duplicate chooser or permanent Start controls");
+        CaptureLiveUxFrame("live-ux-01-catalog");
+        Invoke("LiveConfigure-chrome");
+        Until(delegate { return Visible("LiveConfigurePanel") && Visible("LabMission") && Exists("LabStart"); }, "separate Chrome Configure opens");
+        Check(!Exists("HomeClass-chrome") && Name("LiveConfigureHeading").Contains("Chrome"), "Configure has no embedded second catalog");
+        var level = Find("LabLevel");
+        level.SetFocus();
+        Chord("Alt+Down");
+        var expander = (ExpandCollapsePattern)level.GetCurrentPattern(ExpandCollapsePattern.Pattern);
+        Check(expander.Current.ExpandCollapseState == ExpandCollapseState.Expanded, "Physical Alt+Down opens dark custom choices");
+        CaptureLiveUxFrame("live-ux-02-configure-open-popup");
+        Key("Esc");
+        Check(expander.Current.ExpandCollapseState == ExpandCollapseState.Collapsed, "Escape closes the option list");
+        Invoke("LiveConfigureBack");
+        Until(delegate { return FocusedLiveCard("chrome"); }, "Configure returns focus to Chrome");
+        Key("Enter");
+        Until(delegate { return Visible("LabDesktop") && Exists("LabTask") && ReadSolved() == 0; },
+            "Enter on one card loads a real first task");
+        Check(!Exists("LabMission") && !Visible("LiveAidPanel"), "First task has no chooser or default keyboard or hands");
+        var task = Find("LabTask").Current.BoundingRectangle;
+        var keys = Find("LabKeys").Current.BoundingRectangle;
+        Check(task.Width > 0 && keys.Width > 0 && Math.Abs((task.Left + task.Width / 2) - (keys.Left + keys.Width / 2)) < 6,
+            "Guided instruction and keycaps share a centerline");
+        CaptureLiveUxFrame("live-ux-03-active-lesson");
+        Key("F4");
+        Until(delegate { return Visible("LiveAidPanel") && Find("LiveAidPanel").Current.ItemStatus == "keyboard;no-hands"; },
+            "Keyboard appears independently without enabling hands");
+        if (Find("LabTask").Current.ItemStatus == "keys:Ctrl+L") Chord("Ctrl+L");
+        else
+        {
+            string input = Find("LabTask").Current.ItemStatus;
+            Check(input.StartsWith("keys:"), "Supported QA step reports an actual shortcut");
+            Chord(input.Substring(5));
+        }
+        Until(delegate { return ReadSolved() == 1; }, "Actual first step is credited");
+        Invoke("LabBack");
+        Until(delegate { return FocusedLiveCard("chrome") && Visible("LiveResume-chrome"); }, "Back saves draft and focuses source card");
+        RequestClose();
+        UntilExit();
+        app.Dispose();
+        app = Process.Start(new ProcessStartInfo(executable, "--qa --live") { WorkingDirectory = Path.GetDirectoryName(executable) });
+        Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "trainer restarts", 12000);
+        window = AutomationElement.FromHandle(trainer);
+        Focus();
+        Invoke("LiveResume-chrome");
+        Until(delegate { return Visible("LabDesktop") && ReadSolved() == 1; }, "explicit Continue resumes the saved first credit");
+        Check(Visible("LiveAidPanel") && Find("LiveAidPanel").Current.ItemStatus == "keyboard;no-hands",
+            "Only explicitly enabled Live keyboard persisted through restart");
+        Key("F10");
+        Until(delegate { return Visible("LabResult"); }, "native lesson result");
+        CaptureLiveUxFrame("live-ux-04-result");
+        Invoke("LabChooseClass");
+        Until(delegate { return FocusedLiveCard("chrome"); }, "result exits to focused source card");
+    }
+
+    private static void CaptureLiveUxFrame(string label)
+    {
+        CaptureRect client;
+        var origin = new CapturePoint();
+        if (app.HasExited || GetForegroundWindow() != trainer || !GetClientRect(trainer, out client) ||
+            !ClientToScreen(trainer, ref origin))
+            throw new InvalidOperationException("Refusing capture outside the exact foreground Live window.");
+        var native = new Rectangle(origin.X, origin.Y, client.Right - client.Left, client.Bottom - client.Top);
+        var monitor = System.Windows.Forms.Screen.FromHandle(trainer).Bounds;
+        var clipped = Rectangle.Intersect(native, monitor);
+        if (clipped.Width <= 0 || clipped.Height <= 0)
+            throw new InvalidOperationException("No visible Live client pixels.");
+        using (var image = new Bitmap(clipped.Width, clipped.Height))
+        using (var graphics = Graphics.FromImage(image))
+        {
+            graphics.CopyFromScreen(clipped.X, clipped.Y, 0, 0, clipped.Size);
+            Check(GetForegroundWindow() == trainer, "Live evidence source remains the same window");
+            image.Save(Path.Combine(evidenceDirectory, label + ".png"), ImageFormat.Png);
+        }
+        Console.WriteLine("CAPTURE " + label + " at 1:1, client=" + native + " monitor=" + monitor +
+            " captured=" + clipped + " DPI=" + GetDpiForWindow(trainer));
+    }
+
+    private static void OpenLiveConfiguration(string appId)
+    {
+        if (Visible("LiveConfigureBack"))
+        {
+            Invoke("LiveConfigureBack");
+            Until(delegate { return Visible("HomeDashboard"); }, "return from previous configuration");
+        }
+        Invoke("LiveConfigure-" + appId);
+        Until(delegate { return Visible("LiveConfigurePanel") && Exists("LabStart") && Exists("LabMission"); },
+            "configured lesson form for " + appId);
+    }
+
+    private static bool FocusedLiveCard(string appId)
+    {
+        var focus = AutomationElement.FocusedElement;
+        return focus != null && focus.Current.ProcessId == app.Id &&
+            focus.Current.AutomationId == "HomeClass-" + appId;
+    }
+
+    private static void UntilExit()
+    {
+        var timer = Stopwatch.StartNew();
+        while (!app.HasExited && timer.ElapsedMilliseconds < 9000) { Wait(90); app.Refresh(); }
+        Check(app.HasExited && app.ExitCode == 0, "catalog close exits normally");
+    }
+
     private static void CheckReferenceBrowser()
     {
         Check(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED") == "0",
             "Use the pinned Python documentation fixture (seed 0)");
-        Invoke("LabClass-chrome");
+        OpenLiveConfiguration("chrome");
         Select("LabMode", 1);
         Select("LabLevel", 0);
         Select("LabDuration", 0);
@@ -331,12 +447,15 @@ internal static class LiveUiSmoke
         if (Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_LESSON_CHROME") == "compact")
         {
             Invoke("LabChooseClass");
-            Until(delegate { return Exists("LabStart"); }, "catalog after standalone result");
-            Invoke("LabClass-chrome");
+            Until(delegate { return Exists("HomeDashboard"); }, "catalog after standalone result");
+            OpenLiveConfiguration("chrome");
             Key("F5");
             Until(delegate { return Visible("LabBack") && Name("LabPause").StartsWith("Пауза"); }, "active browser with footer Back");
+            Chord("Ctrl+L");
+            Until(delegate { return ReadSolved() == 1; }, "first browser action before Back");
             Invoke("LabBack");
-            Until(delegate { return Exists("LabResult") && !Exists("LabClock"); }, "footer Back shows the saved result");
+            Until(delegate { return FocusedLiveCard("chrome") && Visible("LiveResume-chrome") && !Exists("LabClock"); },
+                "footer Back saves the draft and returns focus to its Live catalog card");
             Check(true, "Footer Back retains the actual lesson exit action");
         }
     }
@@ -348,7 +467,7 @@ internal static class LiveUiSmoke
         string profile = Path.Combine(qaRoot, "TouchTypingStudio-QA", "progress.xml");
         Check(!File.Exists(profile), "The Workday project starts with a fresh profile");
 
-        Invoke("LabClass-workday");
+        OpenLiveConfiguration("workday");
         Select("LabMode", 1);
         Select("LabLevel", 0);
         Select("LabDuration", 0);
@@ -459,7 +578,7 @@ internal static class LiveUiSmoke
 
     private static void CheckSoftFinish(string path)
     {
-        Invoke("LabClass-terminal");
+        OpenLiveConfiguration("terminal");
         Select("LabMode", 0);
         Check(Exists("LabDuration") && Exists("LabTimer"), "Action limit and timer are independent controls");
         Select("LabDuration", 4); // 100 actions, alongside the timer.
@@ -498,7 +617,7 @@ internal static class LiveUiSmoke
         Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "reopened trainer window", 12000);
         window = AutomationElement.FromHandle(trainer);
         Focus();
-        Invoke("LabClass-terminal");
+        OpenLiveConfiguration("terminal");
         Select("LabMode", 0);
         SelectMissionByName("Продолжить с сохранённого места");
         Check(!Find("LabDuration").Current.IsEnabled && !Find("LabTimer").Current.IsEnabled,
@@ -548,9 +667,9 @@ internal static class LiveUiSmoke
         if (Visible("LabChooseClass"))
         {
             Invoke("LabChooseClass");
-            Until(delegate { return Exists("LabStart"); }, "Python lesson catalog");
+            Until(delegate { return Exists("HomeDashboard"); }, "Python lesson catalog");
         }
-        Invoke("LabClass-code"); Select("LabMode", 0); Select("LabLevel", level);
+        OpenLiveConfiguration("code"); Select("LabMode", 0); Select("LabLevel", level);
         Select("LabDuration", 0); Select("LabTimer", 0);
         SelectMissionByName(mission);
         Key("F5");
@@ -760,9 +879,9 @@ internal static class LiveUiSmoke
         if (Visible("LabChooseClass"))
         {
             Invoke("LabChooseClass");
-            Until(delegate { return Exists("LabStart"); }, "editor chooser");
+            Until(delegate { return Exists("HomeDashboard"); }, "editor chooser");
         }
-        Invoke("LabClass-code"); Select("LabMode", 0); Select("LabLevel", 0);
+        OpenLiveConfiguration("code"); Select("LabMode", 0); Select("LabLevel", 0);
         Select("LabDuration", 0); Select("LabTimer", 0);
         SelectMissionByName("Составить заметку по проекту");
         Key("F5");
@@ -872,9 +991,9 @@ internal static class LiveUiSmoke
             if (Visible("LabChooseClass"))
             {
                 Invoke("LabChooseClass");
-                Until(delegate { return Exists("LabStart"); }, "debug-day chooser");
+                Until(delegate { return Exists("HomeDashboard"); }, "debug-day chooser");
             }
-            Invoke("LabClass-workday"); Select("LabMode", 0); Select("LabLevel", 1);
+            OpenLiveConfiguration("workday"); Select("LabMode", 0); Select("LabLevel", 1);
             Select("LabDuration", 0); Select("LabTimer", 0);
             SelectMissionByName("Разобрать ошибку без мыши · " + (guided ? "с подсказками" : "самостоятельно"));
             Key("F5");
@@ -923,9 +1042,9 @@ internal static class LiveUiSmoke
             if (Visible("LabChooseClass"))
             {
                 Invoke("LabChooseClass");
-                Until(delegate { return Exists("LabStart"); }, "daily-use chooser");
+                Until(delegate { return Exists("HomeDashboard"); }, "daily-use chooser");
             }
-            Invoke("LabClass-" + area);
+            OpenLiveConfiguration(area);
             Select("LabMode", 0);
             Select("LabLevel", level);
             Select("LabDuration", 0);
@@ -1091,9 +1210,9 @@ internal static class LiveUiSmoke
             if (Visible("LabChooseClass"))
             {
                 Invoke("LabChooseClass");
-                Until(delegate { return Exists("LabStart"); }, "GNOME chooser");
+                Until(delegate { return Exists("HomeDashboard"); }, "GNOME chooser");
             }
-            Invoke("LabClass-ubuntu");
+            OpenLiveConfiguration("ubuntu");
             Select("LabMode", 0);
             Select("LabLevel", 1);
             Select("LabDuration", 0);
@@ -1303,7 +1422,7 @@ internal static class LiveUiSmoke
         try
         {
             SetNativeLessonLayout(thread, "00000409", 0x0409);
-            Invoke("LabClass-terminal");
+            OpenLiveConfiguration("terminal");
             Select("LabMode", 0);
             Select("LabDuration", 0);
             Key("F5");

@@ -55,7 +55,7 @@ namespace TouchTypingStudio
             brandText.VerticalAlignment = VerticalAlignment.Center;
             brandText.Margin = new Thickness(13, 0, 0, 0);
             brand.Children.Add(brandText);
-            var brandButton = ReferenceButton(delegate { NavigateReference(HomePage, true); }, 10);
+            var brandButton = ReferenceButton(delegate { NavigateReference(LivePage, true); }, 10);
             brandButton.Content = brand;
             brandButton.BorderThickness = new Thickness(0);
             brandButton.Background = Brushes.Transparent;
@@ -86,24 +86,6 @@ namespace TouchTypingStudio
             });
             AutomationProperties.SetAutomationId(referenceTheme, "HomeAppearance");
             trailing.Children.Add(referenceTheme);
-
-            var more = ReferenceHeaderButton("Другие упражнения", "more", null);
-            var menu = new ContextMenu();
-            var editor = new MenuItem { Header = "Редактор упражнений" };
-            editor.Click += delegate { NavigateReference(EditorPage, false); };
-            var shortcuts = new MenuItem { Header = "Отдельные сочетания" };
-            shortcuts.Click += delegate
-            {
-                if (active) FinishSession();
-                if (active) return;
-                legacyLive = true;
-                ShowPage(LivePage);
-            };
-            menu.Items.Add(editor);
-            menu.Items.Add(shortcuts);
-            more.ContextMenu = menu;
-            more.Click += delegate { menu.PlacementTarget = more; menu.Placement = PlacementMode.Bottom; menu.IsOpen = true; };
-            trailing.Children.Add(more);
 
             if (customLiveChrome)
             {
@@ -153,9 +135,9 @@ namespace TouchTypingStudio
         private void UpdateReferenceHeader()
         {
             top.Children.Clear();
-            string[] keys = { HomePage, LivePage, TypingPage, ProgressPage };
-            string[] titles = { "Главная", "Практика", "Обучение", "Прогресс" };
-            string[] icons = { "home", "practice", "learn", "progress" };
+            string[] keys = { LivePage, TypingPage };
+            string[] titles = { "Live", "Печать" };
+            string[] icons = { "practice", "learn" };
             for (int index = 0; index < keys.Length; index++)
             {
                 string target = keys[index];
@@ -172,8 +154,9 @@ namespace TouchTypingStudio
                 button.Padding = new Thickness(11, 0, 11, 0);
                 button.Margin = new Thickness(0, 0, 2, 0);
                 button.BorderThickness = new Thickness(0);
-                button.Background = target == page ? ReferenceGradient("#8C72FA", "#693FE6", 90) : Brushes.Transparent;
-                if (target == page && !quietLiveAppearance)
+                bool selected = target == page || target == LivePage && page == ConfigurePage;
+                button.Background = selected ? ReferenceGradient("#8C72FA", "#693FE6", 90) : Brushes.Transparent;
+                if (selected && !quietLiveAppearance)
                     button.Effect = new DropShadowEffect { Color = (Color)ColorConverter.ConvertFromString("#8050FD"), BlurRadius = 16,
                         ShadowDepth = 0, Opacity = .35 };
                 if (referenceHeader != null && referenceHeader.ActualWidth > 0 && referenceHeader.ActualWidth < 970)
@@ -259,12 +242,13 @@ namespace TouchTypingStudio
             hero.Children.Add(lead);
             pageContent.Children.Add(hero);
             var profile = BuildDesktopProfileChoice(delegate { center.Content = BuildReferenceHome(); });
-            profile.Margin = new Thickness(18, 0, 0, 16);
+            profile.Margin = new Thickness(18, 0, 0, 14);
             pageContent.Children.Add(profile);
 
             var grid = new Grid();
             pageContent.Children.Add(grid);
-            var cards = new List<Button>();
+            liveCatalogButtons.Clear();
+            var cards = new List<FrameworkElement>();
             foreach (var item in classes)
             {
                 string app = item.S("id");
@@ -272,7 +256,34 @@ namespace TouchTypingStudio
                 int completed = shortcuts.Count(id => distinctConfirmed.Contains("lab/" + app + "/" + id));
                 int percent = shortcuts.Length > 0 ? (int)Math.Round(completed * 100.0 / shortcuts.Length) : 0;
                 var card = BuildReferenceCard(app, item.S("title"), percent, completed, shortcuts.Length, app == labApp);
-                cards.Add(card);
+                liveCatalogButtons[app] = card;
+                var tile = Stack();
+                tile.Children.Add(card);
+                var actions = new WrapPanel { Margin = new Thickness(0, 7, 0, 0) };
+                var configure = ReferenceButton(delegate { OpenLiveConfigure(app); }, 8);
+                configure.Content = "Настроить";
+                configure.Padding = new Thickness(12, 7, 12, 7);
+                configure.Margin = new Thickness(0, 0, 7, 0);
+                configure.Foreground = ReferenceText;
+                configure.Background = Ui.Brush("#30254D");
+                AutomationProperties.SetName(configure, "Настроить: " + item.S("title"));
+                AutomationProperties.SetAutomationId(configure, "LiveConfigure-" + app);
+                actions.Children.Add(configure);
+                if (HasCompatibleLiveDraft(catalog, app))
+                {
+                    var resume = ReferenceButton(delegate { LaunchLiveCard(app, true); }, 8);
+                    resume.Content = "Продолжить";
+                    resume.Margin = new Thickness(0);
+                    resume.Padding = new Thickness(12, 7, 12, 7);
+                    resume.HorizontalAlignment = HorizontalAlignment.Left;
+                    resume.Background = Ui.Brush("#382A62");
+                    resume.Foreground = ReferenceText;
+                    AutomationProperties.SetName(resume, "Продолжить: " + item.S("title"));
+                    AutomationProperties.SetAutomationId(resume, "LiveResume-" + app);
+                    actions.Children.Add(resume);
+                }
+                tile.Children.Add(actions);
+                cards.Add(tile);
             }
 
             if (cards.Count > 0)
@@ -394,17 +405,7 @@ namespace TouchTypingStudio
             var meter = ReferenceProgress(percent);
             body.Children.Add(meter);
 
-            var button = ReferenceButton(delegate
-            {
-                labApp = app;
-                lastLabMission = "";
-                NavigateReference(LivePage, true);
-                if (labMissionSelect != null)
-                {
-                    labMissionSelect.BringIntoView();
-                    labMissionSelect.Focus();
-                }
-            }, 19);
+            var button = ReferenceButton(delegate { LaunchLiveCard(app, false); }, 19);
             button.Content = body;
             button.Cursor = Cursors.Hand;
             button.HorizontalContentAlignment = HorizontalAlignment.Stretch;
@@ -417,7 +418,7 @@ namespace TouchTypingStudio
             AutomationProperties.SetName(button, title + ". " + summary + " Прогресс: " + percent + "%.");
             AutomationProperties.SetAutomationId(button, "HomeClass-" + app);
             button.ToolTip = "Подтверждено сочетаний в текущей раскладке: " + completed + " из " + total +
-                ". Открыть список поручений.";
+                ". Начать тренировку сразу.";
             return button;
         }
 
@@ -546,6 +547,7 @@ namespace TouchTypingStudio
                 case "practice": stroke("M 38,17 A 17,17 0 1 1 29,7 M 32,20 A 9,9 0 1 1 25,15 M 24,24 L 40,8 M 39,8 L 40,2 M 40,8 L 46,9", white, 3.7); break;
                 case "learn": stroke("M 24,13 Q 16,5 5,9 V 38 Q 17,34 24,42 Q 31,34 43,38 V 9 Q 32,5 24,13 Z M 24,13 V 42", white, 3.8); break;
                 case "progress": stroke("M 10,40 V 29 M 22,40 V 19 M 34,40 V 7", white, 5.9); break;
+                case "gear": stroke("M24,5 V11 M24,37 V43 M5,24 H11 M37,24 H43 M11,11 L15,15 M33,33 L37,37 M11,37 L15,33 M33,15 L37,11", white, 3.2); circle(24,24,11,Ui.Brush("#9271E8")); circle(24,24,5,Ui.Brush("#342758")); break;
                 case "moon": fill("M 33,37 A 19,19 0 1 1 16,7 A 15,15 0 0 0 33,37 Z", Ui.Brush("#C4AEF7")); break;
                 case "minimize": stroke("M 8,26 H 39", white, 3.3); break;
                 case "maximize": stroke("M 11,11 H 37 V 37 H 11 Z", white, 3.3); break;
