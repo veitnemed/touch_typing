@@ -75,7 +75,7 @@ namespace TouchTypingStudio
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             Background = new LinearGradientBrush(Color.FromRgb(28,34,45), Color.FromRgb(44,49,61), 0);
             WindowState = captureHome ? WindowState.Normal : WindowState.Maximized;
-            FontFamily = new FontFamily("Segoe UI");
+            FontFamily = LiveUiFont.Sans;
             customLiveChrome = !verify || captureHome;
             if (customLiveChrome) ConfigureLiveChrome();
             Foreground = Ink;
@@ -874,7 +874,8 @@ namespace TouchTypingStudio
             button.Background = Ui.Brush(color);
             button.BorderThickness = new Thickness(0);
             button.Foreground = Brushes.White;
-            button.FontWeight = FontWeights.SemiBold;
+            button.FontWeight = FontWeights.Medium;
+            button.FontFamily = LiveUiFont.ForWeight(FontWeights.Medium);
             return button;
         }
 
@@ -1173,8 +1174,8 @@ namespace TouchTypingStudio
 
         private static TextBlock Label(string text, double size = 14, Brush color = null, bool bold = false)
         {
-            return new TextBlock { Text = text, FontSize = size, Foreground = color ?? Ink,
-                FontWeight = bold ? FontWeights.SemiBold : FontWeights.Normal, TextWrapping = TextWrapping.Wrap, LineHeight = size * 1.28 };
+            return new TextBlock { Text = text, FontSize = size, FontFamily = bold ? LiveUiFont.ForWeight(FontWeights.Medium) : LiveUiFont.Sans, Foreground = color ?? Ink,
+                FontWeight = bold ? FontWeights.Medium : FontWeights.Normal, TextWrapping = TextWrapping.Wrap, LineHeight = size * 1.28 };
         }
 
         private static Button ActionButton(string text, Action handler, bool primary = false)
@@ -1185,6 +1186,8 @@ namespace TouchTypingStudio
             button.BorderBrush = primary ? Accent : Edge;
             button.MinHeight = 32;
             button.FontSize = 13;
+            button.FontWeight = FontWeights.Medium;
+            button.FontFamily = LiveUiFont.ForWeight(FontWeights.Medium);
             button.Padding = new Thickness(9, 4, 9, 4);
             button.Margin = new Thickness(0, 0, 6, 0);
             return button;

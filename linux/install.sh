@@ -19,7 +19,7 @@ desktop=${desktop:-"$HOME/Desktop"}
 mkdir -p -- "$releases" "$applications" "$desktop"
 destination=$(mktemp -d "$releases/linux.XXXXXXXX")
 cp -a -- "$bundle/engine" "$bundle/touch_typing.py" "$bundle/platform_linux.py" "$bundle/visuals.py" "$bundle/lab_view.py" "$bundle/style.css" "$bundle/icon.png" "$bundle/hands.png" "$bundle/README.md" "$bundle/check.sh" "$bundle/qa_runner.py" "$bundle/qa" "$destination/"
-cp -a -- "$bundle"/result-*.png "$destination/"
+cp -a -- "$bundle"/result-*.png "$bundle/fonts" "$destination/"
 chmod u+x -- "$destination/touch_typing.py" "$destination/engine/TouchTyping.Engine"
 if ! printf '%s\n' '{"command":"ping"}' | "$destination/engine/TouchTyping.Engine" | /usr/bin/python3 -c \
     'import json, sys; assert json.load(sys.stdin)["value"] == "ok"'; then

@@ -51,7 +51,11 @@ class ControlsTest(LabWindowTest):
         assert not self.signal_errors, (self.signal_errors, self.trace)
 
     def finish_live(self):
-        # Completion remains available under real compact lesson controls.
+        if self.lab.state["paused"] and self.lab.modal_layer.get_visible():
+            # A paused learner cannot reach the toolbar behind the modal.
+            yield from self.click("Завершить")
+            return
+        # Running lessons expose Finish in the compact settings popover.
         self.lab.settings_menu.popup()
         for _ in range(8):
             yield

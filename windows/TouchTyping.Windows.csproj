@@ -17,6 +17,11 @@
     <EmbeddedResource Include="../linux/result-count.png" LogicalName="TouchTyping.Result.count.png" />
     <EmbeddedResource Include="../linux/result-speed.png" LogicalName="TouchTyping.Result.speed.png" />
     <EmbeddedResource Include="../linux/result-accuracy.png" LogicalName="TouchTyping.Result.accuracy.png" />
+    <Content Include="../assets/fonts/Roboto-Regular.ttf;../assets/fonts/Roboto-Medium.ttf;../assets/fonts/Roboto-Bold.ttf;../assets/fonts/OFL.txt;../assets/fonts/ROBOTO-SOURCE.txt">
+      <Link>fonts/%(Filename)%(Extension)</Link>
+      <TargetPath>fonts/%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Compile Include="../*.cs" Link="%(Filename)%(Extension)" />
     <Reference Include="PresentationCore;PresentationFramework;WindowsBase;UIAutomationClient;UIAutomationTypes;System.Xaml;System.IO.Compression;System.Web.Extensions;Microsoft.CSharp" />
   </ItemGroup>

@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 import traceback
 from gi.repository import GLib, Gtk
-from touch_typing import Studio
+from touch_typing import Pango, PangoCairo, ROOT, Studio
 
 WIDTH, HEIGHT = 1006, 863
 
@@ -45,11 +45,31 @@ class ScreenshotApplication(Studio):
             output = Path(os.environ["TOUCH_TYPING_QA_OUTPUT"])
             name = "real-home-gtk.png" if exact else "real-home-gtk-size-mismatch.png"
             texture.save_to_png(str(output/name))
+            fontdir = ROOT / "fonts"
+            if not fontdir.is_dir():
+                fontdir = ROOT.parent / "assets" / "fonts"
+            font_map = PangoCairo.FontMap.get_default()
+            context = font_map.create_context()
+            weights = []
+            for weight, face in ((400, "Regular"), (500, "Medium"), (700, "Bold")):
+                assert (fontdir / f"Roboto-{face}.ttf").is_file(), f"missing packaged Roboto {face}"
+                requested = Pango.FontDescription()
+                requested.set_family("Roboto")
+                requested.set_weight(Pango.Weight(weight))
+                requested.set_absolute_size(20*Pango.SCALE)
+                resolved = font_map.load_font(context, requested).describe()
+                assert resolved.get_family() == "Roboto" and int(resolved.get_weight()) == weight, resolved.to_string()
+                label = Pango.Layout.new(context)
+                label.set_font_description(requested)
+                label.set_text("Практика без мыши. Ёё", -1)
+                assert not label.get_unknown_glyphs_count(), "missing Cyrillic glyphs"
+                weights.append(int(resolved.get_weight()))
             report = {"screen": "home", "platform": "GTK", "native_window": True,
                       "capture": "mapped Gtk.ApplicationWindow widget texture; excludes compositor shadow",
                       "pixels": [width,height], "target_pixels": [WIDTH,HEIGHT], "exact_for_compare": exact,
                       "recent_intrinsic_sizes": self.measurements[-12:], "image": name,
                       "scale_factor": self.window.get_scale_factor(), "layout": self.layout,
+                      "ui_font": "Roboto", "ui_font_weights": weights,
                       "isolated_data_root": str(Path(os.environ["XDG_DATA_HOME"]))}
             (output/"home-gtk.json").write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n")
             print(json.dumps(report,ensure_ascii=False),flush=True)

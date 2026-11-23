@@ -36,6 +36,12 @@ foreach ($diagnostic in $compilerOutput) { Write-Warning $diagnostic }
 $config = Join-Path $PSScriptRoot 'TouchTyping.exe.config'
 if ($appPath + '.config' -ne $config) { Copy-Item -LiteralPath $config -Destination ($appPath + '.config') }
 if (-not $LegacyOnly) {
+    $fontSource = Join-Path $PSScriptRoot 'assets\fonts'
+    $fontDirectory = Join-Path (Split-Path -Parent $appPath) 'fonts'
+    [void][IO.Directory]::CreateDirectory($fontDirectory)
+    foreach ($fontFile in @('Roboto-Regular.ttf', 'Roboto-Medium.ttf', 'Roboto-Bold.ttf', 'OFL.txt', 'ROBOTO-SOURCE.txt')) {
+        Copy-Item -LiteralPath (Join-Path $fontSource $fontFile) -Destination $fontDirectory
+    }
     $project = Join-Path $PSScriptRoot 'linux\engine\TouchTyping.Engine.csproj'
     $engineDirectory = Join-Path (Split-Path -Parent $appPath) 'engine'
     $sdk = (Get-Command dotnet -ErrorAction Stop).Source

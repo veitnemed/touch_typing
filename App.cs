@@ -43,6 +43,12 @@ namespace TouchTypingStudio
             bool workday = Array.IndexOf(args, "--windows") >= 0;
             bool explicitLive = Array.IndexOf(args, "--live") >= 0;
             string engine = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "engine", "TouchTyping.Engine.exe");
+            int liveFont = Array.IndexOf(args, "--check-live-font");
+            if (verify && liveFont >= 0 && liveFont + 1 < args.Length)
+            {
+                Environment.ExitCode = LiveUiFont.Check(args[liveFont + 1]);
+                return;
+            }
             int liveRender = Array.IndexOf(args, "--check-live-render");
             if (verify && liveRender >= 0 && liveRender + 1 < args.Length)
             {

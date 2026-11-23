@@ -91,6 +91,12 @@ jobs:
           $out = Join-Path $env:RUNNER_TEMP windows-evidence
           $render = Join-Path $out render
           New-Item -Path $render -ItemType Directory -Force | Out-Null
+          if ($env:GITHUB_REF -eq 'refs/heads/feature/reference-ui') {
+            $fontReport = Join-Path $out 'font-wpf.txt'
+            $fontProbe = Start-Process $app -ArgumentList "--qa --check-live-font `"$fontReport`"" -Wait -PassThru
+            Get-Content -LiteralPath $fontReport
+            if ($fontProbe.ExitCode -ne 0) { throw 'Packaged WPF font check failed' }
+          }
           $proc = Start-Process $app -ArgumentList "--qa --check-live-render `"$render`"" -Wait -PassThru
           Get-Content (Join-Path $render result.txt)
           if ($proc.ExitCode -ne 0) { throw 'WPF render failed' }

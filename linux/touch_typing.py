@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import argparse
+import ctypes
 import math
 
 import cairo
@@ -12,11 +13,46 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Graphene", "1.0")
-from gi.repository import Gdk, Gio, GLib, Graphene, Gtk, Pango
+gi.require_version("PangoCairo", "1.0")
+from gi.repository import Gdk, Gio, GLib, Graphene, Gtk, Pango, PangoCairo
 
 from platform_linux import APP_ID, Engine, EngineError, FINGERS, InputSources, MODIFIERS, PHYSICAL, ROOT, chord_label, key_label
 from lab_view import DesktopView
 from visuals import PracticeLine, fingers as paint_fingers, hand_picture, series_chart
+
+
+_reference_fonts_loaded = False
+
+
+def load_reference_fonts():
+    """Register shipped UI faces for this process only; don't install system fonts."""
+    global _reference_fonts_loaded
+    if _reference_fonts_loaded:
+        return
+    _reference_fonts_loaded = True
+    candidates = (ROOT / "fonts", ROOT.parent / "assets" / "fonts")
+    directory = next((path for path in candidates if path.is_dir()), None)
+    files = [directory / f"Roboto-{weight}.ttf" for weight in ("Regular", "Medium", "Bold")] if directory else []
+    if not files:
+        return
+    try:
+        # Ubuntu 24.04 Pango 1.52 has no add_font_file. Its Cairo font map
+        # consumes the current process's Fontconfig application set.
+        if Pango.version() < 15600:
+            fontconfig = ctypes.CDLL("libfontconfig.so.1")
+            add = fontconfig.FcConfigAppFontAddFile
+            add.argtypes = (ctypes.c_void_p, ctypes.c_char_p)
+            add.restype = ctypes.c_int
+            for path in files:
+                if not add(None, os.fsencode(path)):
+                    print(f"Не удалось загрузить шрифт {path.name}.", file=sys.stderr)
+        else:
+            fontmap = PangoCairo.FontMap.get_default()
+            for path in files:
+                if not fontmap.add_font_file(str(path)):
+                    print(f"Не удалось загрузить шрифт {path.name}.", file=sys.stderr)
+    except (OSError, AttributeError, GLib.Error) as exc:
+        print(f"Не удалось загрузить шрифты оформления: {exc}", file=sys.stderr)
 
 
 def box(direction=Gtk.Orientation.VERTICAL, gap=8, *styles):
@@ -494,6 +530,7 @@ class ReferenceGlyph(ReferenceCanvas):
 
 class Studio(Gtk.Application):
     def __init__(self, smoke=None, smoke_size=None, smoke_live=False):
+        load_reference_fonts()
         flags = Gio.ApplicationFlags.NON_UNIQUE if smoke else Gio.ApplicationFlags.DEFAULT_FLAGS
         super().__init__(application_id=APP_ID, flags=flags)
         self.smoke = smoke

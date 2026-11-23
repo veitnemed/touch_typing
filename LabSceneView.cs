@@ -16,7 +16,7 @@ namespace TouchTypingStudio
         private string classApp = "ubuntu";
         private DrawingContext context;
         private readonly Dictionary<string, double> fieldScroll = new Dictionary<string, double>();
-        private readonly Typeface regular = new Typeface("Segoe UI");
+        private readonly Typeface regular = LiveUiFont.Typeface(FontWeights.Normal);
         private readonly Typeface mono = new Typeface("Consolas");
         private const double WidthUnits = 1200, HeightUnits = 520;
 
@@ -197,7 +197,7 @@ namespace TouchTypingStudio
             Text("‹   ›   ⟳", 13, 71, 17, "#CDD5E2");
             Rounded(95, 70, w - 142, 26, window.S("focus") == "url" ? "#D8E9FD" : "#242039", 13);
             Field(window.S("focus") == "url" ? window.S("input") : window.S("url"), window, 109, 76, w - 180, 12,
-                window.S("focus") == "url" ? "#1F3E5F" : "#D4DCEB", 0, window.S("focus") == "url");
+                window.S("focus") == "url" ? "#1F3E5F" : "#D4DCEB", 0, window.S("focus") == "url", face: regular);
             Text("⋮", w - 24, 68, 21, "#D6DDE9");
             double left = Math.Max(28, w * .065);
             double pageScale = window.N("zoom", 100) / 100;
@@ -210,7 +210,7 @@ namespace TouchTypingStudio
             foreach (string line in body.Split('\n'))
             {
                 Field(line, window, left, lineY, w - left * 2, 14 * pageScale, "#302745", offset,
-                    window.I("bodyAnchor") != window.I("bodyCursor"), true);
+                    window.I("bodyAnchor") != window.I("bodyCursor"), true, face: regular);
                 lineY += 22 * pageScale; offset += line.Length + 1;
             }
             lineY += 15;
@@ -480,10 +480,11 @@ namespace TouchTypingStudio
         }
 
         private void Field(string value, Data window, double x, double y, double width, double size, string ink,
-            int offset, bool focused, bool document = false, string scrollKey = null)
+            int offset, bool focused, bool document = false, string scrollKey = null, Typeface face = null)
         {
             if (width <= 0) return;
-            var line = new FormattedText(value, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, mono,
+            var typeface = face ?? mono;
+            var line = new FormattedText(value, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, typeface,
                 size, Ui.Brush(ink), VisualTreeHelper.GetDpi(this).PixelsPerDip);
             int caret = window.I(document ? "bodyCursor" : "cursor") - offset;
             int anchor = window.I(document ? "bodyAnchor" : "anchor") - offset;
@@ -494,7 +495,7 @@ namespace TouchTypingStudio
             if (drawCaret && caret > 0)
             {
                 var prefix = new FormattedText(value.Substring(0, caret), CultureInfo.CurrentUICulture,
-                    FlowDirection.LeftToRight, mono, size, Ui.Brush(ink), VisualTreeHelper.GetDpi(this).PixelsPerDip);
+                    FlowDirection.LeftToRight, typeface, size, Ui.Brush(ink), VisualTreeHelper.GetDpi(this).PixelsPerDip);
                 cx = prefix.WidthIncludingTrailingWhitespace;
             }
             context.PushClip(new RectangleGeometry(new Rect(x, y, width, size * 1.7)));

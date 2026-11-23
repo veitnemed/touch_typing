@@ -15,6 +15,10 @@ fi
 dotnet_exe=${TOUCH_TYPING_DOTNET:-dotnet}
 mkdir -p -- "$target"
 "$dotnet_exe" build "$root/windows/TouchTyping.Windows.csproj" -c Release -p:DebugType=none -p:DebugSymbols=false -o "$target"
+# Fail packaging rather than silently launching the redesigned screens with a fallback family.
+for font in Roboto-Regular.ttf Roboto-Medium.ttf Roboto-Bold.ttf OFL.txt ROBOTO-SOURCE.txt; do
+    cmp "$root/assets/fonts/$font" "$target/fonts/$font"
+done
 "$dotnet_exe" publish "$root/linux/engine/TouchTyping.Engine.csproj" -c Release -r win-x64 \
     --self-contained -p:DebugType=none -p:DebugSymbols=false -o "$target/engine"
 runtime_version=$(python3 - "$target/engine/TouchTyping.Engine.deps.json" <<'PY'

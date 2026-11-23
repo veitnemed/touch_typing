@@ -312,7 +312,7 @@ namespace TouchTypingStudio
     {
         private readonly double?[] speed;
         private readonly double[] errors;
-        private static readonly Typeface Labels = new Typeface("Segoe UI");
+        private static readonly Typeface Labels = LiveUiFont.Typeface(FontWeights.Normal);
 
         internal LiveResultChart(double?[] speed, double[] errors)
         {

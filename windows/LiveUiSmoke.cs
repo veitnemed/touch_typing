@@ -142,6 +142,7 @@ internal static class LiveUiSmoke
                     Check(Find("LabResult").Current.HelpText.Contains("Ошибки"), "Result exposes completion, mistakes and record");
                     if (name == "ubuntu" && mode == 0)
                     {
+                        Find("LabRepeat").SetFocus();
                         Key("Space");
                         Until(delegate { return !Exists("LabResult") && Exists("LabClock"); }, "Space replays from the result");
                         Key("F10");

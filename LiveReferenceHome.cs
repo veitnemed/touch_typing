@@ -163,6 +163,8 @@ namespace TouchTypingStudio
                 var row = Stack(true);
                 row.Children.Add(ReferenceIcon(icons[index], 21, new Thickness(0, 0, 7, 0)));
                 var label = ReferenceLabel(titles[index], 13, ReferenceText, true);
+                label.FontWeight = FontWeights.Medium;
+                label.FontFamily = LiveUiFont.ForWeight(FontWeights.Medium);
                 label.VerticalAlignment = VerticalAlignment.Center;
                 row.Children.Add(label);
                 button.Content = row;
@@ -186,8 +188,10 @@ namespace TouchTypingStudio
             bool russian = CurrentLayout() == "RU";
             referenceEnChip.Background = !russian ? ReferenceGradient("#856AF6", "#603ADE", 90) : Brushes.Transparent;
             referenceRuChip.Background = russian ? ReferenceGradient("#856AF6", "#603ADE", 90) : Brushes.Transparent;
-            referenceLayoutEn.FontWeight = !russian ? FontWeights.SemiBold : FontWeights.Normal;
-            referenceLayoutRu.FontWeight = russian ? FontWeights.SemiBold : FontWeights.Normal;
+            referenceLayoutEn.FontWeight = !russian ? FontWeights.Medium : FontWeights.Normal;
+            referenceLayoutEn.FontFamily = LiveUiFont.ForWeight(referenceLayoutEn.FontWeight);
+            referenceLayoutRu.FontWeight = russian ? FontWeights.Medium : FontWeights.Normal;
+            referenceLayoutRu.FontFamily = LiveUiFont.ForWeight(referenceLayoutRu.FontWeight);
             AutomationProperties.SetName(!russian ? referenceEnChip : referenceRuChip, "Текущая раскладка: " + (russian ? "RU" : "EN"));
             AutomationProperties.SetName(russian ? referenceEnChip : referenceRuChip, russian ? "EN" : "RU");
         }
@@ -426,7 +430,7 @@ namespace TouchTypingStudio
 
         private static TextBlock ReferenceLabel(string text, double size, Brush foreground, bool strong)
         {
-            return new TextBlock { Text = text, FontSize = size, Foreground = foreground, TextWrapping = TextWrapping.Wrap,
+            return new TextBlock { Text = text, FontSize = size, FontFamily = strong ? LiveUiFont.ForWeight(FontWeights.Bold) : LiveUiFont.Sans, Foreground = foreground, TextWrapping = TextWrapping.Wrap,
                 FontWeight = strong ? FontWeights.Bold : FontWeights.Normal, LineHeight = size * 1.26,
                 LineStackingStrategy = LineStackingStrategy.BlockLineHeight };
         }

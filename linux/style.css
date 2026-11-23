@@ -182,10 +182,10 @@ button.class-button.selected { border-color: #e95420; background: #4c313a; color
 .reference-header button.reference-brand { padding: 1px 0; }
 .reference-mark {
   min-width: 32px; min-height: 44px; font-family: "DejaVu Sans Mono", monospace;
-  font-size: 20px; font-weight: 800; border-radius: 11px; color: #fff;
+  font-size: 20px; font-weight: 700; border-radius: 11px; color: #fff;
   background: linear-gradient(150deg,#7757ff,#522fba); padding: 0 6px;
 }
-.reference-wordmark { color: #fff; font-size: 21px; font-weight: 850; }
+.reference-wordmark { color: #fff; font-size: 22px; font-weight: 700; }
 .reference-header button.reference-nav { padding: 8px 9px; font-size: 13px; min-height: 23px; border: 1px solid transparent; }
 .reference-header button.reference-nav.active {
   background: linear-gradient(160deg, #8e6aff, #6b40ed); color: #fff; border-color: #9b77ff;
@@ -193,7 +193,7 @@ button.class-button.selected { border-color: #e95420; background: #4c313a; color
 }
 .reference-header button.reference-nav:hover, .reference-header button.reference-icon-control:hover { background: #383058; }
 .reference-header button.reference-icon-control { color: #d3c4ff; padding: 4px 5px; min-width: 22px; }
-.reference-layout { padding: 5px 7px; color: #e4d9ff; font-size: 13px; font-weight: 600; border-radius: 8px; }
+.reference-layout { padding: 5px 7px; color: #e4d9ff; font-size: 13px; font-weight: 500; border-radius: 8px; }
 .reference-layout.active { background: linear-gradient(163deg,#8b5ef7,#6240dc); color: #fff; }
 .reference-home {
   background: radial-gradient(ellipse at bottom right, #38205d, transparent 41%),
@@ -202,8 +202,8 @@ button.class-button.selected { border-color: #e95420; background: #4c313a; color
 }
 .reference-board { padding: 44px 26px 33px 35px; }
 .reference-hero { margin: 0 0 27px 18px; }
-.reference-hero-title { color: #faf7ff; font-family: "Noto Sans", sans-serif; font-size: 39px; font-weight: 820; }
-.reference-hero-subtitle { color: #d8cdee; font-size: 17px; font-weight: 400; }
+.reference-hero-title { color: #faf7ff; font-size: 43px; min-height: 54px; font-weight: 700; }
+.reference-hero-subtitle { color: #d8cdee; font-size: 18.5px; min-height: 47px; font-weight: 400; }
 button.reference-card {
   min-height: 227px; padding: 18px 29px 24px; border: 1px solid #3d325f; margin: 0;
   border-radius: 19px; color: #f9f4ff; background: linear-gradient(150deg,#241e44,#1b1833);
@@ -223,10 +223,10 @@ button.reference-card:focus-visible, .reference-header button.reference-nav:focu
 .reference-card.module-code .reference-app-icon { background: #30345a; }
 .reference-card.module-terminal .reference-app-icon { background: #3d375e; }
 .reference-card.module-workday .reference-app-icon { background: #22423d; }
-.reference-card-title { color: #faf6ff; font-size: 25px; font-weight: 820; margin: 6px 0 4px; }
-.reference-card-description { color: #e4dbf4; font-family: "Liberation Sans", sans-serif; font-size: 18px; font-weight: 430; }
+.reference-card-title { color: #faf6ff; font-size: 26px; font-weight: 700; margin: 6px 0 4px; }
+.reference-card-description { color: #e4dbf4; font-size: 17.7px; font-weight: 400; }
 .reference-progress { color: #ae94fa; margin: 10px 0 8px; }
-.reference-progress-label { color: #e8dcff; font-size: 16px; font-weight: 450; }
+.reference-progress-label { color: #e8dcff; font-size: 16px; font-weight: 400; }
 .reference-meter trough, .reference-meter progress { min-height: 11px; border: none; border-radius: 6px; }
 .reference-meter trough { background: #4b416a; }
 .reference-meter progress { background: linear-gradient(165deg, #a17cff, #7445e9); }
@@ -264,7 +264,7 @@ window.reference-window > .titlebar { background: #1e1734; border: 0; box-shadow
 /* Live practice uses the reference palette; the engine still owns every
    objective, key chord, preview field, progress value and recovery state. */
 .reference-lesson-chrome { background: #1c173a; color: #fcf8ff; min-height: 51px; padding: 0 13px 0 11px; }
-.reference-lesson-name { color: #fdfaff; font-size: 16px; font-weight: 760; }
+.reference-lesson-name { color: #fdfaff; font-size: 16px; font-weight: 700; }
 .reference-lesson-chrome button { background: transparent; border-color: transparent; color: #e2d7fc; padding: 0 4px; min-width: 19px; min-height: 27px; }
 .reference-lesson-chrome button:hover { background: #3b305f; color: #fff; }
 .lab-page.reference-live { background: linear-gradient(160deg,#1a1536,#16122b 62%,#22183d); padding: 4px 16px 15px; }
@@ -272,10 +272,10 @@ window.reference-window > .titlebar { background: #1e1734; border: 0; box-shadow
 .reference-live .reference-goal { background: #241c50; border: 1px solid #4b3777; border-radius: 13px; min-height: 46px; padding: 8px 10px; margin-bottom: 12px; }
 .reference-practice-icon { background: #372c58; color: #bfb1ff; border-radius: 11px; padding: 7px; }
 .reference-step-heading { color: #d1bff9; font-size: 13px; }
-.reference-goal-title { color: #fcf8ff; font-size: 15px; font-weight: 750; }
+.reference-goal-title { color: #fcf8ff; font-size: 15px; font-weight: 700; }
 .reference-gesture { padding: 4px; border-radius: 10px; background: #342a60; }
 .reference-keycap { background: linear-gradient(#4d4279,#39305d); min-width: 18px; min-height: 27px; border: 1px solid #66578f; border-radius: 7px; color: #fff; font-size: 14px; font-weight: 700; padding: 2px 9px; }
-.reference-key-join { color: #e6d9ff; font-weight: 750; }
+.reference-key-join { color: #e6d9ff; font-weight: 700; }
 .reference-workspace { border-radius: 11px; background: #24203c; }
 .reference-live .reference-lesson-footer { background: #211a3e; border-radius: 11px; margin-top: 8px; padding: 7px 8px 7px 12px; min-height: 48px; }
 .reference-step-footer { color: #ece2ff; font-size: 13px; }
@@ -290,13 +290,13 @@ button.reference-hint { color: #f3eaff; background: #3c2f68; border-color: #674a
 .reference-live .reference-workspace { border: 1px solid #3b3062; }
 .reference-live .lab-modal-layer { background: alpha(#191331,.94); }
 .reference-modal-panel { color: #fcf7ff; background: linear-gradient(150deg,#26204a,#1b1534); border: 1px solid #4a376d; border-radius: 14px; padding: 16px; }
-.reference-modal-title { font-size: 26px; font-weight: 800; color: #fdf9ff; }
+.reference-modal-title { font-size: 26px; font-weight: 700; color: #fdf9ff; }
 .reference-modal-subtitle { font-size: 14px; color: #d9c9f3; }
 .reference-result-check { background: #203f3c; border-radius: 11px; padding: 8px; }
 .reference-stat { background: #272045; border: 1px solid #433663; border-radius: 10px; min-height: 52px; padding: 7px; }
 .reference-stat-icon { background: #382d60; border-radius: 8px; padding: 4px; }
 .reference-stat-label { color: #ddd0f7; font-size: 12px; }
-.reference-stat-value { color: #fcf8ff; font-size: 19px; font-weight: 770; }
+.reference-stat-value { color: #fcf8ff; font-size: 19px; font-weight: 700; }
 .reference-result-details { background: #30254d; border: 1px solid #574570; padding: 8px 10px; border-radius: 9px; }
 .reference-modal-actions button { color: #f7efff; background: #3d325e; border-color: #64547f; min-height: 37px; padding: 3px 11px; }
 .reference-modal-actions button:hover { background: #594580; }
@@ -306,3 +306,10 @@ button.reference-primary:hover { background: #835af7; }
 .reference-stat-time { color: #87a4ff; }
 .reference-stat-count { color: #b294ff; }
 .reference-stat-speed { color: #ffd065; }
+
+/* Bundled reference face. System fonts and fixed-position simulator text stay intact. */
+.reference-header, .reference-home, .reference-lesson-chrome, .reference-goal,
+.reference-lesson-footer, .reference-long-help, .reference-modal-panel {
+  font-family: "Roboto", "Noto Sans", sans-serif;
+}
+.reference-mark { font-family: "DejaVu Sans Mono", monospace; font-weight: 800; }
