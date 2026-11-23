@@ -301,30 +301,40 @@ def draw_reference_wave(_widget, cr, width, height):
         cr.curve_to(789, 101 + line, 807, 65 + line, 878, 42 + line)
         cr.curve_to(920, 23 + line, 966, 26 + line, 1006, 42 + line)
 
+    def solid_shape():
+        ribbon()
+        cr.line_to(1006, 128)
+        cr.curve_to(943, 92, 881, 125, 842, 152)
+        cr.curve_to(768, 207, 716, 173, 644, 203)
+        cr.curve_to(570, 226, 542, 220, 502, 204)
+        cr.close_path()
+
+    solid_shape()
+    upper = cairo.LinearGradient(0, 30, 0, 205)
+    upper.add_color_stop_rgba(0, .24, .13, .53, .33)
+    upper.add_color_stop_rgba(.6, .19, .10, .49, .40)
+    upper.add_color_stop_rgba(1, .16, .09, .42, .13)
+    cr.set_source(upper)
+    cr.fill()
+
+    # Additive thin translucent copies keep the highlight close to the curve
+    # rather than creating a diagonal band across the whole coloured region.
     cr.save()
     cr.rectangle(0, 0, 1006, height)
     cr.clip()
     cr.set_operator(cairo.OPERATOR_ADD)
-    for line in range(-55, 76, 3):
-        cr.set_source_rgba(.34, .10, .72, .019 * math.exp(-(line / 31)**2))
+    for line in range(-72, 77):
+        thickness = 24 if line < 0 else 34
+        a = math.exp(-(line / thickness)**2)
+        glow = cairo.LinearGradient(510, 0, 1006, 0)
+        for stop, strength in ((0, 0), (.23, .14), (.43, .36), (.61, .97), (.74, .8), (1, .045)):
+            glow.add_color_stop_rgba(stop, .60, .31, .98, a * strength * .17)
+        cr.set_source(glow)
         ribbon(line)
-        cr.set_line_width(4.0)
+        cr.set_line_width(3.0)
         cr.stroke()
     cr.restore()
 
-    ribbon()
-    cr.line_to(1006, 130)
-    cr.curve_to(943, 95, 881, 130, 842, 155)
-    cr.curve_to(768, 210, 716, 178, 644, 207)
-    cr.curve_to(570, 226, 542, 223, 502, 204)
-    cr.close_path()
-    upper = cairo.LinearGradient(650, 196, 910, 52)
-    upper.add_color_stop_rgba(0, .28, .13, .62, .03)
-    upper.add_color_stop_rgba(.49, .35, .14, .65, .25)
-    upper.add_color_stop_rgba(.74, .48, .20, .91, .79)
-    upper.add_color_stop_rgba(1, .35, .23, .75, .37)
-    cr.set_source(upper)
-    cr.fill()
     crest = cairo.LinearGradient(502, 204, 1006, 42)
     crest.add_color_stop_rgba(0, .28, .12, .64, 0)
     crest.add_color_stop_rgba(.5, .58, .24, 1., .45)
@@ -554,7 +564,7 @@ class Studio(Gtk.Application):
 
     def build_header(self):
         handle = Gtk.WindowHandle()
-        bar = row(9, "reference-header")
+        bar = row(7, "reference-header")
         handle.set_child(bar)
         brand = button("", lambda: self.navigate("home"), "reference-brand")
         brand.set_child(add(row(14), text("</>", "reference-mark"), text("КОД ВСЛЕПУЮ", "reference-wordmark")))
@@ -589,18 +599,6 @@ class Studio(Gtk.Application):
         theme.set_tooltip_text("Переключить тёмное и светлое оформление")
         theme.set_valign(Gtk.Align.CENTER)
         bar.append(theme)
-        menu = Gtk.MenuButton(icon_name="open-menu-symbolic")
-        menu.add_css_class("reference-icon-control")
-        menu.set_tooltip_text("Дополнительные разделы")
-        bind_name(menu, "Дополнительные разделы")
-        pop = Gtk.Popover()
-        items = box(gap=4)
-        for page, title in (("shortcuts", "Клавиши"), ("editor", "Редактор упражнений")):
-            items.append(button(title, lambda dest=page: (pop.popdown(), self.navigate(dest))))
-        pop.set_child(items)
-        menu.set_popover(pop)
-        menu.set_valign(Gtk.Align.CENTER)
-        bar.append(menu)
         controls = row(1, "reference-window-controls")
         controls.set_valign(Gtk.Align.CENTER)
         maximize = lambda: self.window.unmaximize() if self.window.is_maximized() else self.window.maximize()
@@ -2177,7 +2175,10 @@ class LabPage(Gtk.Box):
         self.prep.append(self.hardware)
         self.check_status = text("", "muted", wrap=True)
         check_control = button("Автопроверка", lambda: host.run_checks(check_control, self.check_status))
-        self.prep.append(add(row(9), check_control, expand(self.check_status)))
+        utilities = add(row(9), button("Клавиши", lambda: host.navigate("shortcuts")),
+                        button("Редактор упражнений", lambda: host.navigate("editor")), check_control)
+        self.prep.append(utilities)
+        self.prep.append(self.check_status)
         for selector in (self.mode, self.picker, self.level):
             selector.connect("notify::selected", lambda *_: self.describe())
         self.content.append(self.prep)

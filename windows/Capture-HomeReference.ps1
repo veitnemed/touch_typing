@@ -94,9 +94,9 @@ try {
     if ($hwnd -eq [IntPtr]::Zero) { throw 'No application window.' }
     $app = [Windows.Automation.AutomationElement]::FromHandle($hwnd)
     if ($app.Current.ProcessId -ne $process.Id) { throw 'Window is not owned by the disposable app.' }
-    $home = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty,'HomeDashboard')
+    $homeCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty,'HomeDashboard')
     for ($i = 0; $i -lt 40; $i++) {
-        $dashboard = $app.FindFirst([Windows.Automation.TreeScope]::Descendants,$home)
+        $dashboard = $app.FindFirst([Windows.Automation.TreeScope]::Descendants,$homeCondition)
         if ($dashboard -ne $null) { break }
         Start-Sleep -Milliseconds 100
     }
