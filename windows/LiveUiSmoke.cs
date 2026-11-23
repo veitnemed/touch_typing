@@ -17,7 +17,7 @@ using System.Xml;
 internal static class LiveUiSmoke
 {
     private static Process app;
-    private static IntPtr trainer, focusProbe;
+    private static IntPtr trainer, focusProbe, normalTrainerExitHandle;
     private static AutomationElement window;
     private static int count;
     private static string evidenceDirectory;
@@ -294,6 +294,7 @@ internal static class LiveUiSmoke
         }
         finally
         {
+            if (normalTrainerExitHandle != IntPtr.Zero) CloseHandle(normalTrainerExitHandle);
             if (focusProbe != IntPtr.Zero) DestroyWindow(focusProbe);
             if (app != null)
             {
@@ -340,6 +341,12 @@ internal static class LiveUiSmoke
             if (app == null) Wait(80);
         }
         Check(app != null, "Only the expected extracted trainer executable is selected");
+        // Process.GetProcessesByName constructs a Process without a started-process
+        // handle; .NET Framework ExitCode is unavailable on that object after exit.
+        // Open and retain the exact selected PID's native handle before closing it.
+        normalTrainerExitHandle = OpenProcess(0x00100000 | 0x00001000, false, (uint)app.Id);
+        if (normalTrainerExitHandle == IntPtr.Zero)
+            throw new InvalidOperationException("Cannot open candidate exit handle: Win32 " + Marshal.GetLastWin32Error());
         Console.WriteLine("Normal trainer PID=" + app.Id + " path=" + executable);
         Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "normal trainer window", 12000);
         window = AutomationElement.FromHandle(trainer);
@@ -350,6 +357,19 @@ internal static class LiveUiSmoke
         Invoke("HomeClass-terminal");
         Until(delegate { return Exists("LabStart") && Exists("LabClass-terminal"); },
             "normal terminal chooser opens through its Home card");
+    }
+
+    private static void CheckNormalTrainerCleanExit(string description)
+    {
+        uint wait = WaitForSingleObject(normalTrainerExitHandle, 6000);
+        if (wait != 0)
+            throw new TimeoutException(description + "; process wait returned 0x" + wait.ToString("X8"));
+        uint code;
+        if (!GetExitCodeProcess(normalTrainerExitHandle, out code))
+            throw new InvalidOperationException("Cannot read candidate exit status: Win32 " + Marshal.GetLastWin32Error());
+        Check(code == 0, description + " (exit=" + code + ")");
+        CloseHandle(normalTrainerExitHandle);
+        normalTrainerExitHandle = IntPtr.Zero;
     }
 
     private static void CheckHostedNormalLaunch(string executable)
@@ -383,7 +403,7 @@ internal static class LiveUiSmoke
         RequestClose();
         Until(delegate { return ExitDialog() != null; }, "normal save and close");
         InvokeDialog("LabExitSave");
-        Check(app.WaitForExit(6000) && app.ExitCode == 0, "First normal trainer saved and exited normally");
+        CheckNormalTrainerCleanExit("First normal trainer saved and exited normally");
         app.Dispose();
         app = null;
         var file = Path.Combine(root, "progress.xml");
@@ -409,7 +429,7 @@ internal static class LiveUiSmoke
         RequestClose();
         Until(delegate { return ExitDialog() != null; }, "restored normal save and close");
         InvokeDialog("LabExitSave");
-        Check(app.WaitForExit(6000) && app.ExitCode == 0, "Restored trainer exits cleanly");
+        CheckNormalTrainerCleanExit("Restored trainer exits cleanly");
         xml.Load(file);
         Check(xml.SelectNodes("/StudioProfile/LiveDrafts/LiveDraft[App='terminal']").Count == 1,
             "Reopen and re-save do not duplicate the draft");
@@ -1687,6 +1707,10 @@ internal static class LiveUiSmoke
     [DllImport("user32.dll")] private static extern IntPtr GetKeyboardLayout(uint thread);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr LoadKeyboardLayout(string layout, uint flags);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GetExitCodeProcess(IntPtr handle, out uint exitCode);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool CloseHandle(IntPtr handle);
     [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] private static extern uint SendInput(uint count, Input[] inputs, int size);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
