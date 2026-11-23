@@ -34,7 +34,8 @@ internal static class LiveUiSmoke
             bool gnomeProfile = arguments.Contains("--gnome-profile");
             bool debugDay = arguments.Contains("--debug-day");
             bool codeTheme = arguments.Contains("--code-theme");
-            bool referenceEvidence = referenceBrowser || dailyUse || gnomeProfile || debugDay || codeTheme || arguments.Contains("--reference-evidence");
+            bool pythonEditor = arguments.Contains("--python-editor");
+            bool referenceEvidence = referenceBrowser || dailyUse || gnomeProfile || debugDay || codeTheme || pythonEditor || arguments.Contains("--reference-evidence");
             if (referenceEvidence && SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
                 throw new InvalidOperationException("Per-monitor-aware evidence capture cannot be enabled.");
             string path = Path.GetFullPath(arguments[0]);
@@ -46,12 +47,19 @@ internal static class LiveUiSmoke
                 Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_SOFT_FINISH_SECONDS", "7");
             Console.WriteLine("UI test seed " + Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"));
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_NAV_TRACE", gnomeProfile ? "workspace" :
-                referenceEvidence && !referenceBrowser && !dailyUse && !debugDay && !codeTheme ? "terminal" : null);
+                referenceEvidence && !referenceBrowser && !dailyUse && !debugDay && !codeTheme && !pythonEditor ? "terminal" : null);
+            Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_PYTHON_EDITOR", pythonEditor ? "1" : null);
             app = Process.Start(new ProcessStartInfo(path, "--qa --live") { WorkingDirectory = Path.GetDirectoryName(path) });
             Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "trainer window", 12000);
             window = AutomationElement.FromHandle(trainer);
             Check(window.Current.ProcessId == app.Id, "The automation root belongs to the new QA process");
             Focus();
+            if (pythonEditor)
+            {
+                CheckPythonEditingMissions();
+                Console.WriteLine("PASS: " + count + " native WPF Python editing, search, F12 and F2 checks");
+                return 0;
+            }
             if (codeTheme)
             {
                 CheckCodeTheme();
@@ -528,6 +536,208 @@ internal static class LiveUiSmoke
             "One final session persisted across close, continuation, and explicit finish");
         Check(xml.SelectSingleNode("/StudioProfile/LiveDrafts/LiveDraft[App='terminal']") == null,
             "No resumable parallel attempt after explicit finish");
+    }
+
+    private static void StartPythonWitness(string mission, int level)
+    {
+        if (Visible("LabPause") && !Visible("LabResult"))
+        {
+            Key("F10");
+            Until(delegate { return Visible("LabResult"); }, "previous Python lesson ended");
+        }
+        if (Visible("LabChooseClass"))
+        {
+            Invoke("LabChooseClass");
+            Until(delegate { return Exists("LabStart"); }, "Python lesson catalog");
+        }
+        Invoke("LabClass-code"); Select("LabMode", 0); Select("LabLevel", level);
+        Select("LabDuration", 0); Select("LabTimer", 0);
+        SelectMissionByName(mission);
+        Key("F5");
+        Until(delegate { return Visible("LabDesktop") && Name("LabPause").StartsWith("Пауза") &&
+            EditorWitness().Length == 9; }, mission + " active in owned WPF editor");
+        VirtualEnglish();
+    }
+
+    private static string[] EditorWitness()
+    {
+        return Find("LabDesktop").Current.ItemType.Split(';');
+    }
+
+    private static string[] FinishedEditorWitness(int solved)
+    {
+        Until(delegate { return Visible("LabResult"); }, "verified Python editing result");
+        string result = Find("LabResult").Current.ItemType;
+        string exact = solved.ToString(CultureInfo.InvariantCulture) + ":";
+        Check(result.StartsWith(exact, StringComparison.Ordinal), "Result records exactly " + solved + " credited steps");
+        return result.Substring(exact.Length).Split(';');
+    }
+
+    private static void EnterCharacters(string text)
+    {
+        foreach (char c in text) Send(Character(c));
+    }
+
+    private static void WaitEditorState(int solved, string focus, string file, int anchor, int caret)
+    {
+        Until(delegate {
+            var view = EditorWitness();
+            return ReadSolved() == solved && view.Length == 9 && view[0] == focus && view[1] == file &&
+                view[2] == anchor.ToString(CultureInfo.InvariantCulture) && view[3] == caret.ToString(CultureInfo.InvariantCulture);
+        }, "exact editor state " + solved + "/" + focus + "/" + file + "/" + anchor + "/" + caret);
+    }
+
+    private static bool ExactEditorTab(string[] view, string file, string body, string saved)
+    {
+        return view.Length == 9 && view[8].Split('|').Contains(file + "," + body + "," + saved + "," + saved);
+    }
+
+    private static void CheckPythonEditingMissions()
+    {
+        // Frozen from linux/tests/test_python_editor.py STEPS. Each witness is
+        // allowed to differ only after the actual physical input reaches WPF.
+        string[][] steps = {
+            new[] { "Enter", "fea9d979447f8e96e7bf217f5890d3d9449f17095e8e1f722be0d5c8e4990da7", "160", "160" },
+            new[] { "<write>", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "196", "196" },
+            new[] { "Left", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "195", "195" },
+            new[] { "Ctrl+Enter", "5c32d4f7251980b21d36dfa97be090c5907449a1b1e72fa502e36bf5e387e130", "205", "205" },
+            new[] { "Ctrl+Z", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "195", "195" },
+            new[] { "Ctrl+Shift+Enter", "de1c6e0e8647aa04a2c29965c3569013f259f1b821f5aad5ac38a652abad6e6a", "160", "160" },
+            new[] { "Ctrl+Z", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "195", "195" },
+            new[] { "Up", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "151", "151" },
+            new[] { "Up", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "130", "130" },
+            new[] { "Up", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "118", "118" },
+            new[] { "Up", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "81", "81" },
+            new[] { "End", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "106", "106" },
+            new[] { "Ctrl+Shift+Left", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "106", "98" },
+            new[] { "Ctrl+Backspace", "5d941dfab1695be44f1e22b1f3e9b81cd2767634f622c870b365a541c55e5eb0", "98", "98" },
+            new[] { "Ctrl+Z", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "106", "98" },
+            new[] { "Ctrl+Right", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "106", "106" },
+            new[] { "Ctrl+Backspace", "5d941dfab1695be44f1e22b1f3e9b81cd2767634f622c870b365a541c55e5eb0", "98", "98" },
+            new[] { "Ctrl+Z", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "106", "106" },
+            new[] { "Ctrl+Left", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "98", "98" },
+            new[] { "Ctrl+Delete", "5d941dfab1695be44f1e22b1f3e9b81cd2767634f622c870b365a541c55e5eb0", "98", "98" },
+            new[] { "Ctrl+Z", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "98", "98" },
+            new[] { "Ctrl+Shift+Right", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "98", "106" },
+            new[] { "Home", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "70", "70" },
+            new[] { "Shift+Down", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "70", "107" },
+            new[] { "Shift+Down", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "70", "119" },
+            new[] { "Tab", "78a06063a7a66c0e540719b7c732cfa8be0a3e2b9ba71226d49563640cb203b8", "70", "127" },
+            new[] { "Shift+Tab", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "70", "119" },
+            new[] { "Alt+Up", "2a3faf31805a286551e2a67c9415f8be6b57175a696e5bd7c85e72ea4bf8f782", "48", "97" },
+            new[] { "Alt+Down", "d49e26e0d0737352fa7bdedc80e061320e9406d39047f57f04b46db4679e0578", "70", "119" },
+            new[] { "Ctrl+Z", "2a3faf31805a286551e2a67c9415f8be6b57175a696e5bd7c85e72ea4bf8f782", "48", "97" },
+            new[] { "Ctrl+S", "2a3faf31805a286551e2a67c9415f8be6b57175a696e5bd7c85e72ea4bf8f782", "48", "97" },
+        };
+        const string initial = "e965a11277e2c78d641695c322f750242528b6b6df0895a9bb957dc86b922ceb";
+        StartPythonWitness("Отредактировать Python-функцию без мыши", 1);
+        Check(ExactEditorTab(EditorWitness(), "tasks.py", initial, initial), "Untouched tasks.py backing file at first launch");
+        for (int i = 0; i < steps.Length; i++)
+        {
+            int step = i + 1;
+            var row = steps[i];
+            if (row[0] == "<write>")
+            {
+                const string statement = "cost = subtotal + fee + tax + marker";
+                EnterCharacters(statement.Substring(0, statement.Length - 1));
+                Check(ReadSolved() == step - 1, "Incomplete Python statement cannot earn credit");
+                EnterCharacters(statement.Substring(statement.Length - 1));
+            }
+            else Chord(row[0]);
+            if (step < steps.Length)
+                WaitEditorState(step, "body", "tasks.py",
+                    int.Parse(row[2], CultureInfo.InvariantCulture), int.Parse(row[3], CultureInfo.InvariantCulture));
+            var view = step == steps.Length ? FinishedEditorWitness(step) : EditorWitness();
+            Check(view.Length == 9 && view[1] == "tasks.py" && view[2] == row[2] && view[3] == row[3] &&
+                ExactEditorTab(view, "tasks.py", row[1], step == steps.Length ? row[1] : initial),
+                "Python editing step " + step + " " + row[0] + " proves exact buffer, selection and backing file");
+            if (step == 2 || step == 13 || step == 26 || step == 31)
+                CaptureReferenceFrame("python-edit-" + step.ToString("00", CultureInfo.InvariantCulture));
+        }
+
+        CheckPythonSearchMission();
+        CheckNeutralPythonSymbols();
+    }
+
+    private static string NativeFixtureHash(string text)
+    {
+        using (var sha = System.Security.Cryptography.SHA256.Create())
+            return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(text)))
+                .Replace("-", "").ToLowerInvariant();
+    }
+
+    private static void CheckPythonSearchMission()
+    {
+        const string original = "from tasks import add_task\n\nadd_task(\"draft\", \"notes\")\nadd_task(\"draft\", \"report\")\nadd_task(\"draft\", \"archive\")\n";
+        var hits = Regex.Matches(original, "draft").Cast<Match>().Select(match => match.Index).ToArray();
+        string before = NativeFixtureHash(original);
+        string after = NativeFixtureHash(original.Replace("draft\", \"report", "ready\", \"report"));
+        StartPythonWitness("Найти и исправить нужное место", 0);
+        Check(EditorWitness()[1] == "tasks.py", "Exact search starts outside app.py");
+        Chord("Ctrl+P");
+        Until(delegate { return ReadSolved() == 1 && EditorWitness()[0] == "quick-open"; }, "Ctrl+P opens real quick file entry");
+        EnterCharacters("ap"); Key("Enter");
+        WaitEditorState(2, "body", "app.py", 0, 0);
+        Check(ExactEditorTab(EditorWitness(), "app.py", before, before), "Fuzzy ap opened exact unmodified app.py");
+        Chord("Ctrl+F"); EnterCharacters("absent"); Key("Enter");
+        Until(delegate { return ReadSolved() == 3 && Name("LabDesktop").Contains("Совпадений нет"); }, "No credit for query with zero matches");
+        for (int i = 0; i < "absent".Length; i++) Key("Backspace");
+        EnterCharacters("draft"); Key("Enter");
+        WaitEditorState(4, "find", "app.py", hits[0], hits[0] + 5);
+        int[] sequence = { 1, 2, 0, 2, 1 };
+        for (int i = 0; i < sequence.Length; i++)
+        {
+            Chord(i < 3 ? "F3" : "Shift+F3");
+            int hit = hits[sequence[i]];
+            WaitEditorState(5 + i, "find", "app.py", hit, hit + 5);
+        }
+        CaptureReferenceFrame("python-search-report-hit");
+        Key("Esc");
+        WaitEditorState(10, "body", "app.py", hits[1], hits[1] + 5);
+        EnterCharacters("ready");
+        Check(ExactEditorTab(EditorWitness(), "app.py", after, before), "Only the target selection changes; disk stays untouched before save");
+        Chord("Ctrl+S");
+        Until(delegate { return ReadSolved() == 11 && ExactEditorTab(EditorWitness(), "app.py", after, after); }, "Saved only the report status");
+        Key("Home");
+        Until(delegate { return ReadSolved() == 12; }, "Home moves to the exact call site");
+        Key("F12");
+        Until(delegate { return ReadSolved() == 13 && EditorWitness()[1] == "tasks.py"; }, "F12 follows imported add_task");
+        Chord("Alt+Left");
+        var final = FinishedEditorWitness(14);
+        int call = hits[1] - 10; // "add_task(" plus the opening quote.
+        Check(final[0] == "body" && final[1] == "app.py" && final[2] == call.ToString(CultureInfo.InvariantCulture) &&
+            final[3] == final[2] && ExactEditorTab(final, "app.py", after, after),
+            "Returns to the exact report call site and completes the search-edit route");
+    }
+
+    private static void CheckNeutralPythonSymbols()
+    {
+        const string original = "f5f482eb437481c7f209fb5409715ec29f12cce8076227c8ebaddfdade536115";
+        StartPythonWitness("Составить заметку по проекту", 0);
+        WaitEditorState(0, "body", "app.py", 0, 0);
+        Check(ExactEditorTab(EditorWitness(), "app.py", original, original), "Neutral app.py matches the reference fixture");
+        for (int i = 0; i < 8; i++) Key("Down");
+        Key("Home");
+        for (int i = 0; i < 12; i++) Key("Right");
+        WaitEditorState(0, "body", "app.py", 204, 204);
+        Key("F12");
+        WaitEditorState(0, "body", "tasks.py", 179, 179);
+        Chord("Alt+Left");
+        WaitEditorState(0, "body", "app.py", 204, 204);
+        Key("F2");
+        Until(delegate { var view = EditorWitness(); return view[0] == "symbol-rename" && view[6] == "find_task"; },
+            "F2 targets imported find_task");
+        EnterCharacters("fetch_task"); Key("Esc");
+        Check(ExactEditorTab(EditorWitness(), "app.py", original, original), "Escape cancels the rename without edits or writes");
+        Key("F2"); EnterCharacters("fetch_task"); Key("Enter");
+        var result = EditorWitness();
+        Check(ExactEditorTab(result, "app.py", "a5ae49896990a9c7ba85228098544a17738003bc75000715c5805766b5dc2555", original) &&
+            ExactEditorTab(result, "tasks.py", "0152ab7c4e7deb72d5837e81fb23afeb0baa92967458030c43e82b7ef2e6e813",
+                           "570d2abddfda7dd526adb10fbbd47404a8e0608aa5dc4fca8f31bb5b3978750e") &&
+            ExactEditorTab(result, "test_tasks.py", "53b19ec67ede50d6f55e651825b1efabd6205e33418a4fad255ef1f6e43c28da",
+                           "e038ee1a0b8342652f49b73aca9289b1153429f53f45e417379335af4a9582cf"),
+            "F2 updates the import, definition and real calls across three neutral project buffers, without saving");
+        CaptureReferenceFrame("python-neutral-rename");
     }
 
     private static void CheckCodeTheme()

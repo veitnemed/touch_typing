@@ -529,21 +529,49 @@ class DesktopView(Gtk.Widget):
             label({"find": "Поиск", "downloads": "Загрузки", "history": "История", "bookmarks": "Закладки"}.get(window["focus"], "")
                        + "  " + window.get("input", ""), x + max(20, w - 290), y + 74, 11, width=min(270, w - 40))
 
+    def python_file_icon(self, x, y):
+        """Two-tone Python badge at the Explorer's file-icon size."""
+        self.fill("#58a6ff", x + 1, y + 1, 9, 7, 2)
+        self.fill("#e3b341", x + 4, y + 7, 9, 7, 2)
+        self.fill(CODE_BG, x + 6, y + 3, 1, 1)
+        self.fill(CODE_BG, x + 9, y + 11, 1, 1)
+
     def code(self, window, x, y, w, h):
+        # Only an immersive, comfortably wide editor gets the desktop-style
+        # title bar. The editor embedded in lessons keeps its compact chrome.
+        wide = self.presentation_app == "code" and w >= 870
+        rail, tab_h, line_h = (48, 34, 20) if wide else (35, 28, 22)
         self.fill(CODE_BG, x, y, w, h)
-        self.fill(CODE_BG, x, y, 35, max(1, h - 19))
-        self.fill(CODE_BORDER, x + 34, y, 1, h - 19)
-        for i, icon in enumerate(("▣", "⌕", "⑂", "▷", "▧")):
+        if wide:
+            self.app_icon("code", x + 9, y + 7, 16)
+            self.label("File  Edit  Selection  View  Go  Run  Terminal  Help", x + 35, y + 6, 12, CODE_FG, width=385)
+            box_w = min(380, w * .34)
+            box_x = x + (w - box_w) / 2 + 65
+            self.fill(CODE_ROW, box_x, y + 4, box_w, 21, 5)
+            self.label("⌕   " + (window.get("projectName") or "Visual Studio Code"),
+                       box_x + 11, y + 6, 11, CODE_MUTED, width=box_w - 22)
+            self.label("−      □      ×", x + w - 92, y + 5, 12, CODE_MUTED)
+            self.fill(CODE_BORDER, x, y + 28, w, 1)
+            y, h = y + 29, h - 29
+        self.fill(CODE_BG, x, y, rail, max(1, h - 19))
+        self.fill(CODE_BORDER, x + rail - 1, y, 1, h - 19)
+        step = 44 if wide else 33
+        for i, icon in enumerate(("▤", "⌕", "⑂", "▷", "▦")):
+            if y + 28 + i * step >= y + h - 19:
+                break
             active_icon = {"explorer": 0, "project-search": 1, "changes": 2, "extensions": 4}.get(window.get("view"), 0)
             if i == active_icon and window.get("sidebar", True):
-                self.fill("#f78166", x, y + 7 + i * 33, 2, 29)
-            self.label(icon, x + 8, y + 13 + i * 33, 18,
+                self.fill(CODE_FG if wide else "#f78166", x, y + i * step, 2, step - 1)
+            self.label(icon, x + (12 if wide else 8), y + 9 + i * step, 21 if wide else 18,
                        CODE_FG if i == active_icon else CODE_MUTED)
-        sidebar = 155 if window.get("sidebar", True) and w > 450 else 0
+        sidebar = (min(225, int(w * .24)) if wide else 155) if window.get("sidebar", True) and w > 450 else 0
         if sidebar:
-            self.fill(CODE_INSET, x + 35, y, sidebar, h - 19)
-            self.fill(CODE_BORDER, x + 34 + sidebar, y, 1, h - 19)
-            self.label({"extensions": "РАСШИРЕНИЯ", "project-search": "ПОИСК" , "changes": "ИЗМЕНЕНИЯ"}.get(window.get("view"), "ПРОВОДНИК"), x + 46, y + 10, 9, "#b9b9b9")
+            self.fill(CODE_INSET, x + rail, y, sidebar, h - 19)
+            self.fill(CODE_BORDER, x + rail - 1 + sidebar, y, 1, h - 19)
+            self.label({"extensions": "РАСШИРЕНИЯ", "project-search": "ПОИСК", "changes": "ИЗМЕНЕНИЯ"}.get(
+                window.get("view"), "ПРОВОДНИК"), x + rail + 12, y + 10, 10, CODE_FG)
+            if wide:
+                self.label("···", x + rail + sidebar - 23, y + 8, 14, CODE_MUTED)
             view = window.get("view", "explorer")
             tabs = window.get("tabs", [])
             if view == "changes":
@@ -558,18 +586,23 @@ class DesktopView(Gtk.Widget):
                 shown = window.get("projectFiles", [])
             project = window.get("projectName", "")
             self.label(("⌄  " + project.upper()) if view == "explorer" and project else "",
-                       x + 44, y + 35, 10, CODE_FG, bold=True, width=sidebar - 14)
+                       x + rail + 9, y + 35, 10, CODE_FG, bold=True, width=sidebar - 14)
             for i, name in enumerate(shown):
                 if y + 80 + 22 * i >= y + h - 18:
                     break
                 if view == "explorer" and name == window.get("projectRelative"):
-                    self.fill(CODE_LIST_SELECTION, x + 36, y + 55 + 22 * i, sidebar - 2, 22)
-                symbol = "◇  " if view == "explorer" and name.lower().endswith(".py") else ""
-                self.label(symbol + name, x + 49, y + 57 + 22 * i, 12, CODE_FG, width=sidebar - 18)
-        editor_x = x + 35 + sidebar
-        editor_w = w - 35 - sidebar
-        self.fill(CODE_INSET, editor_x, y, editor_w, 28)
-        self.fill(CODE_BORDER, editor_x, y + 27, editor_w, 1)
+                    self.fill(CODE_LIST_SELECTION, x + rail, y + 55 + 22 * i, sidebar - 2, 22)
+                left = x + rail + 14
+                if view == "explorer" and name.lower().endswith(".py"):
+                    self.python_file_icon(left, y + 57 + 22 * i)
+                    left += 17
+                self.label(name, left, y + 57 + 22 * i, 12,
+                           CODE_FG if name == window.get("projectRelative") else CODE_MUTED,
+                           width=x + rail + sidebar - left - 4)
+        editor_x = x + rail + sidebar
+        editor_w = w - rail - sidebar
+        self.fill(CODE_INSET, editor_x, y, editor_w, tab_h)
+        self.fill(CODE_BORDER, editor_x, y + tab_h - 1, editor_w, 1)
         tabs = window.get("tabs", [])
         active_index = min(max(0, window.get("activeTab", 0)), max(0, len(tabs) - 1))
         capacity = max(1, int((editor_w - 42) / 98))
@@ -584,20 +617,28 @@ class DesktopView(Gtk.Widget):
         for i, tab in enumerate(visible_tabs):
             active = first_tab + i == active_index
             left = tab_start + i * tab_width
-            self.fill(CODE_BG if active else CODE_INSET, left, y, tab_width - 1, 28)
-            self.fill(CODE_BORDER, left + tab_width - 1, y, 1, 28)
+            self.fill(CODE_BG if active else CODE_INSET, left, y, tab_width - 1, tab_h)
+            self.fill(CODE_BORDER, left + tab_width - 1, y, 1, tab_h)
             if active:
                 self.fill("#f78166", left, y, tab_width - 2, 2)
             tab_title = tab.get("title", "")
-            self.label(("◇ " if tab_title.lower().endswith(".py") else "") + tab_title + ("  ●" if tab.get("modified") else ""),
-                       left + 8, y + 7, 11, CODE_FG if active else CODE_MUTED, width=tab_width - 16)
+            text_x = left + 9
+            if tab_title.lower().endswith(".py"):
+                self.python_file_icon(text_x, y + (9 if wide else 6))
+                text_x += 17
+            self.label(tab_title, text_x, y + (8 if wide else 7), 12, CODE_FG if active else CODE_MUTED,
+                       width=left + tab_width - text_x - 21)
+            if active or tab.get("modified"):
+                self.label("●" if tab.get("modified") else "×", left + tab_width - 18,
+                           y + (7 if wide else 5), 12, CODE_MUTED)
         name = tabs[active_index]["title"] if tabs else ""
         split = window.get("split", False)
         pane = editor_w / 2 if split else editor_w
         current = editor_x + (pane if split and window.get("group") == 1 else 0)
-        lines_visible = max(1, int(((h * .54 if window.get("panel") else h - 20) - 56) / 22))
+        body_top = tab_h + 29
+        lines_visible = max(1, int(((h * .54 if window.get("panel") else h - 20) - body_top + 1) / line_h))
         def document(path, body, left, active, syntax):
-            self.label("  ›  ".join(path.split("/")), left + 12, y + 35, 11, CODE_MUTED, width=pane - 22)
+            self.label("  ›  ".join(path.split("/")), left + 12, y + tab_h + 5, 11, CODE_MUTED, width=pane - 22)
             cursor = window.get("bodyCursor", 0) if active else 0
             line_num = body.encode("utf-16-le")[:cursor * 2].decode("utf-16-le", "ignore").count("\n")
             first = max(0, line_num - lines_visible + 1)
@@ -613,9 +654,9 @@ class DesktopView(Gtk.Widget):
                 if i >= first + lines_visible:
                     break
                 if i >= first:
-                    ly = y + 57 + (i - first) * 22
+                    ly = y + body_top + (i - first) * line_h
                     if i == line_num and active:
-                        self.fill(CODE_ROW, left, ly - 2, pane, 22)
+                        self.fill(CODE_ROW, left, ly - 2, pane, line_h)
                     self.label(str(i + 1).rjust(2), left + 9, ly, 11,
                                CODE_FG if active and i == line_num else CODE_LINE_NO, mono=True)
                     self.field(line, field, left + 43, ly, pane - 56, 14, CODE_FG, offset=offset,
@@ -626,7 +667,7 @@ class DesktopView(Gtk.Widget):
         if split:
             other = window.get("otherTab") or {}
             document(other.get("title", ""), other.get("body", ""), editor_x if current != editor_x else editor_x + pane, False, other.get("syntax", ()))
-            self.fill(CODE_BORDER, editor_x + pane, y + 29, 1, max(1, (h * .54 if window.get("panel") else h - 19) - 29))
+            self.fill(CODE_BORDER, editor_x + pane, y + tab_h + 1, 1, max(1, (h * .54 if window.get("panel") else h - 19) - tab_h - 1))
         if window.get("panel"):
             self.fill(CODE_INSET, editor_x, y + h * .54, editor_w, h * .46 - 19)
             if self.scene.get("diagnosticWorkspace") and window.get("focus") != "terminal":

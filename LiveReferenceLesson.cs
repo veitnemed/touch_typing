@@ -75,7 +75,8 @@ namespace TouchTypingStudio
             Grid.SetRow(referenceHintPanel, 1);
             root.Children.Add(referenceHintPanel);
 
-            labDesktop = new LabSceneView { MinHeight = 118 };
+            labDesktop = new LabSceneView { MinHeight = 118, WitnessPythonEditor = verifyMode &&
+                Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_PYTHON_EDITOR") == "1" };
             AutomationProperties.SetAutomationId(labDesktop, "LabDesktop");
             var sceneFrame = ReferenceLessonPanel(labDesktop, new Thickness(4), 13);
             sceneFrame.Margin = new Thickness(16, 15, 16, 0);
@@ -357,6 +358,13 @@ namespace TouchTypingStudio
             headingText.VerticalAlignment = VerticalAlignment.Center;
             var titleLabel = ReferenceLabel(title, 29, ReferenceText, true);
             AutomationProperties.SetAutomationId(titleLabel, pausedPreview ? "LabPauseResult" : "LabResult");
+            if (!pausedPreview && labDesktop != null && labDesktop.WitnessPythonEditor)
+            {
+                var snapshot = state.D("scene");
+                var selected = snapshot.Items("windows").FirstOrDefault(item => item.B("active") && item.S("app") == "code");
+                AutomationProperties.SetItemType(titleLabel, result.I("solved").ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                    ":" + labDesktop.PythonEditorWitness(snapshot, selected));
+            }
             AutomationProperties.SetHelpText(titleLabel, "Выполнено " + count + ". Ошибки " + errors + ". Рекорд " +
                 result.I("record") + ". " + (pausedPreview ? "Занятие на паузе." : complete ? "Цель занятия выполнена." : "Занятие сохранено."));
             headingText.Children.Add(titleLabel);

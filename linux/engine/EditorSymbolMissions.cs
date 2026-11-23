@@ -37,13 +37,13 @@ internal sealed partial class LabScene
     }
 
     // This is a small simulation of flat Python modules using an unaliased
-    // "from module import name". It is not a general Python language server:
+    // "from module import name[, name]". It is not a general Python language server:
     // dotted access, aliases, dynamic lookup and closures are not resolved.
     private static readonly Regex PythonLexemes = new(
         """(?s)(?<omit>\#[^\r\n]*|[rRuUbBfF]{0,2}(""" + "\"\"\"" + """(?:\\.|(?!""" + "\"\"\"" + """).)*""" + "\"\"\"" + """|'''(?:\\.|(?!''').)*'''|"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'))|(?<name>[A-Za-z_]\w*)""",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex Definitions = new(@"(?m)^def\s+(?<name>[A-Za-z_]\w*)\((?<params>[^\r\n()]*)\)\s*:", RegexOptions.Compiled);
-    private static readonly Regex Imports = new(@"(?m)^from[ \t]+(?<module>[A-Za-z_]\w*)[ \t]+import[ \t]+(?<name>[A-Za-z_]\w*)[ \t]*(?=\r?$)", RegexOptions.Compiled);
+    private static readonly Regex Imports = new(@"(?m)^from[ \t]+(?<module>[A-Za-z_]\w*)[ \t]+import[ \t]+(?<name>[A-Za-z_]\w*)(?:[ \t]*,[ \t]*(?<name>[A-Za-z_]\w*))*[ \t]*(?=\r?$)", RegexOptions.Compiled);
     private static readonly Regex TopStatements = new(@"(?m)^[^\s]", RegexOptions.Compiled);
     private static readonly HashSet<string> PythonKeywords =
         new("False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield".Split(' '));
@@ -57,6 +57,10 @@ internal sealed partial class LabScene
 
     private static IEnumerable<Group> NamedDefinitions(string code, string name) =>
         Definitions.Matches(code).Select(m => m.Groups["name"]).Where(g => g.Value == name);
+
+    private static IEnumerable<(string Module, Capture Name)> NamedImports(string code, string name) =>
+        Imports.Matches(code).SelectMany(m => m.Groups["name"].Captures.Where(c => c.Value == name)
+            .Select(c => (m.Groups["module"].Value, c)));
 
     private SymbolBinding ResolveSymbol(LabWindow w)
     {
@@ -74,9 +78,9 @@ internal sealed partial class LabScene
         if (definitions.Length == 1) definingPath = current;
         else
         {
-            var imports = Imports.Matches(masked[current]).Where(m => m.Groups["name"].Value == name).ToArray();
+            var imports = NamedImports(masked[current], name).ToArray();
             if (definitions.Length != 0 || imports.Length != 1) return null;
-            string module = imports[0].Groups["module"].Value;
+            string module = imports[0].Module;
             string folder = current[..(current.LastIndexOf('/') + 1)];
             definingPath = folder + module + ".py";
             if (!masked.ContainsKey(definingPath)) return null;
@@ -89,10 +93,11 @@ internal sealed partial class LabScene
         {
             if (path != definingPath)
             {
-                var imports = Imports.Matches(source).Where(m => m.Groups["name"].Value == name &&
-                    path[..(path.LastIndexOf('/') + 1)] + m.Groups["module"].Value + ".py" == definingPath).ToArray();
-                if (imports.Length != 1 || NamedDefinitions(source, name).Any()) continue;
-                spans.Add(new(path, imports[0].Groups["name"].Index, name.Length, "import"));
+                var imports = NamedImports(source, name).ToArray();
+                if (imports.Length != 1 ||
+                    path[..(path.LastIndexOf('/') + 1)] + imports[0].Module + ".py" != definingPath ||
+                    NamedDefinitions(source, name).Any()) continue;
+                spans.Add(new(path, imports[0].Name.Index, name.Length, "import"));
             }
             var scopes = Definitions.Matches(source).Select(m =>
             {

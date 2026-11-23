@@ -57,6 +57,84 @@ class NeutralProjectTest(unittest.TestCase):
         self.assertEqual({f for f in paths if f.endswith(".py")}, {PROJECT + name for name in FILES})
         return state
 
+    def test_neutral_import_lists_resolve_and_rename_one_binding(self):
+        shadow = '\nlabel = "find_task"\n\ndef local_demo():\n    find_task = print\n    return find_task("find_task")\n'
+        for platform in ("linux", "windows"):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as root, patch.dict(
+                    os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": root}), open_engine(platform) as engine:
+                self.clean_workspace(engine)
+                engine.call("lab-resume")
+
+                def type_text(text):
+                    physical = {'"': ("LShift", "'"), "_": ("LShift", "-"), ":": ("LShift", ";"),
+                                "(": ("LShift", "9"), ")": ("LShift", "0"), " ": ("Space",),
+                                "\n": ("Enter",)}
+                    for c in text:
+                        state = key(engine, *physical.get(c, (c.upper(),)), value="" if c == "\n" else c)
+                    return state
+
+                def saved(state):
+                    return {f["path"].rsplit("/", 1)[-1]: f["content"]
+                            for f in state["scene"]["terminal"]["files"] if f["path"].startswith(PROJECT)}
+
+                key(engine, "LCtrl", "End")
+                type_text(shadow.replace("\n    ", "\n"))  # editor inserts the indentation
+                for _ in range(4):
+                    key(engine, "Backspace")
+                state = key(engine, "LCtrl", "S")
+                baseline = saved(state)
+                self.assertTrue(baseline["app.py"].endswith(shadow), repr(baseline["app.py"]))
+                key(engine, "LCtrl", "Home")
+                for _ in range(8):
+                    key(engine, "Down")
+                key(engine, "Home")
+                for _ in range(12):
+                    state = key(engine, "Right")
+                before = selected(state)
+                offset = before["body"].index("find_task(tasks,")
+                self.assertEqual(before["bodyCursor"], offset + 1)
+                state = key(engine, "F12")
+                self.assertEqual(selected(state)["projectRelative"], "tasks.py")
+                self.assertEqual(selected(state)["bodyCursor"], baseline["tasks.py"].index("find_task("))
+                back = ("LCtrl", "LAlt", "-") if platform == "linux" else ("LAlt", "Left")
+                state = key(engine, *back)
+                self.assertEqual((selected(state)["projectRelative"], selected(state)["bodyCursor"]), ("app.py", offset + 1))
+
+                state = key(engine, "F2")
+                self.assertEqual((selected(state)["focus"], selected(state)["input"]), ("symbol-rename", "find_task"))
+                type_text("fetch_task")
+                state = key(engine, "Esc")
+                self.assertEqual(saved(state), baseline)
+                self.assertEqual(selected(state)["body"], baseline["app.py"])
+
+                key(engine, "F2")
+                type_text("fetch_task")
+                state = key(engine, "Enter")
+                expected = {**baseline,
+                            "app.py": baseline["app.py"].replace("add_task, find_task, mark_done", "add_task, fetch_task, mark_done")
+                            .replace('find_task(tasks, "Buy tea")', 'fetch_task(tasks, "Buy tea")'),
+                            "tasks.py": baseline["tasks.py"].replace("def find_task(", "def fetch_task("),
+                            "test_tasks.py": baseline["test_tasks.py"].replace("add_task, find_task, mark_done", "add_task, fetch_task, mark_done")
+                            .replace("find_task(tasks,", "fetch_task(tasks,")}
+                self.assertEqual(saved(state), baseline)  # F2 changes buffers, not disk
+                tabs = {t["title"]: t for t in selected(state)["tabs"]}
+                for name in ("app.py", "tasks.py", "test_tasks.py"):
+                    self.assertEqual((tabs[name]["body"], tabs[name]["savedBody"]), (expected[name], baseline[name]))
+                self.assertTrue(tabs["app.py"]["body"].endswith(shadow))
+                for _ in range(3):
+                    state = key(engine, "LCtrl", "S")
+                    state = key(engine, "LCtrl", "Tab")
+                self.assertEqual(saved(state), expected)
+
+    def test_python_edit_reports_the_nested_task_list_project(self):
+        with tempfile.TemporaryDirectory() as root, patch.dict(
+                os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": root}), open_engine("linux") as engine:
+            state = engine.call("lab-start", **{**OPTIONS, "level": 1, "mission": "code-python-edit"})
+            w = selected(state)
+            self.assertEqual((w["projectName"], w["projectRelative"], w["projectFiles"]), ("task-list", "tasks.py", FILES))
+            self.assertTrue(w["url"].endswith("/task-list/tasks.py"))
+            self.assertEqual(w["changedFiles"], [])
+
     def test_fresh_training_reference_and_restart_both_keyboard_profiles(self):
         for platform in ("linux", "windows"):
             with self.subTest(platform=platform), tempfile.TemporaryDirectory() as root, patch.dict(

@@ -21,10 +21,15 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - name: Package this exact source and run input/lexical checks
+      - name: Run lexical and exact edit acceptance, then package this source
         run: |
           set -euo pipefail
           dotnet run --project linux/tests/highlight/PythonHighlightRegression.csproj -c Release
+          dotnet build linux/engine/TouchTyping.Engine.csproj -c Release
+          export TOUCH_TYPING_ENGINE="$GITHUB_WORKSPACE/linux/engine/bin/Release/net10.0/TouchTyping.Engine"
+          export PYTHONPATH="$GITHUB_WORKSPACE/linux"
+          /usr/bin/python3 linux/tests/test_python_editor.py
+          /usr/bin/python3 linux/tests/test_neutral_project.py
           bash windows/build-release.sh "$RUNNER_TEMP/editor-package"
           (cd "$RUNNER_TEMP/editor-package" && zip -qr "$RUNNER_TEMP/touchtyping-python-editor.zip" .)
           (cd "$RUNNER_TEMP" && sha256sum touchtyping-python-editor.zip > SHA256SUMS.txt)
@@ -64,6 +69,15 @@ jobs:
           foreach ($file in @('editor-theme-03-add-task-selected.png','editor-theme-03-add-task-selected-viewport.png')) {
             if (-not (Test-Path -LiteralPath (Join-Path $frames $file) -PathType Leaf)) { throw "Missing native frame $file" }
           }
+      - name: Practice both Python missions and neutral-project navigation in native WPF
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $appDir = Join-Path $env:RUNNER_TEMP 'Editor comparison app'
+          $app = Join-Path $appDir 'TouchTyping.exe'
+          $env:TOUCH_TYPING_QA_LESSON_CHROME = 'compact'
+          $out = Join-Path $env:RUNNER_TEMP 'wpf-python-missions-evidence'
+          & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -PythonEditor -OutputDirectory $out
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -72,4 +86,7 @@ jobs:
             ${{ runner.temp }}/wpf-editor-evidence/native-reference-evidence/*.png
             ${{ runner.temp }}/wpf-editor-evidence/*.log
             ${{ runner.temp }}/wpf-editor-evidence/report.json
+            ${{ runner.temp }}/wpf-python-missions-evidence/native-reference-evidence/*.png
+            ${{ runner.temp }}/wpf-python-missions-evidence/*.log
+            ${{ runner.temp }}/wpf-python-missions-evidence/report.json
           if-no-files-found: warn

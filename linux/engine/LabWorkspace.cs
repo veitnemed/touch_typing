@@ -65,7 +65,7 @@ internal sealed partial class LabScene
     }
 
     private readonly Dictionary<string, string> originalFiles = [];
-    private string EditorProjectRoot => ExactEdit ? ExactRoot : DiagnosticWorkspace ? DiagnosticRoot : SearchProjectRoot ?? (symbolWorkspace ? SymbolProject : Project);
+    private string EditorProjectRoot => ExactEdit ? ExactRoot : PythonEditingExercise ? PythonEditRoot : DiagnosticWorkspace ? DiagnosticRoot : SearchProjectRoot ?? (symbolWorkspace ? SymbolProject : Project);
     private IEnumerable<string> ProjectDocuments() => DebugDay ? DebugProjectDocuments() :
         DiagnosticWorkspace ? Terminal.Entries(DiagnosticRoot).Where(path => !Terminal.DirectoryExists(path)) :
         Terminal.Entries(EditorProjectRoot)

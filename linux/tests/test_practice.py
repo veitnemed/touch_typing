@@ -670,8 +670,9 @@ class PracticeTest(unittest.TestCase):
     def test_project_typing_and_custom_text(self):
         for level in range(3):
             state = self.engine.call("typing-start", mode="Project", level=level, layout="EN")
-            self.assertEqual(state["key"], "D")
+            self.assertEqual(state["title"], "Python · task-list")
             first = state["after"][0]
+            self.assertEqual(state["key"], first.upper())
             self.assertEqual(self.engine.call("typing-key", text=first, layout="EN")["count"], 1)
             self.engine.call("typing-stop", layout="EN")
         library = self.engine.call("typing-save-set", title="Личный текст", content="abcd\n\nefgh")

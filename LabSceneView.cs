@@ -24,6 +24,41 @@ namespace TouchTypingStudio
         { return new FrameworkElementAutomationPeer(this); }
 
         internal LabSceneView() { ClipToBounds = true; MinHeight = 180; }
+        internal bool WitnessPythonEditor { get; set; }
+
+        private static string QaCodeHash(string text)
+        {
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+                return BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(text)))
+                    .Replace("-", "").ToLowerInvariant();
+        }
+
+        internal string PythonEditorWitness(Data snapshot, Data editor)
+        {
+            if (!WitnessPythonEditor) return "";
+            if (editor == null) return "";
+            var tabs = editor.Items("tabs").ToArray();
+            var active = tabs.ElementAtOrDefault(Math.Max(0, editor.I("activeTab"))) ?? Data.Empty;
+            var disk = snapshot.D("terminal").Items("files").ToDictionary(item => item.S("path"), item => item.S("content"));
+            string file, content;
+            string tabState = string.Join("|", tabs.Select(item => {
+                string title = item.S("title");
+                string url = item.S("url");
+                string saved;
+                var found = disk.TryGetValue(url, out saved);
+                if (!found && !url.StartsWith("/", StringComparison.Ordinal))
+                    found = disk.TryGetValue("/home/student/project/" + url, out saved);
+                return title + "," + QaCodeHash(item.S("body")) + "," + QaCodeHash(item.S("savedBody")) +
+                    "," + (found ? QaCodeHash(saved) : "-");
+            }));
+            file = active.S("title");
+            content = QaCodeHash(editor.S("body"));
+            return editor.S("focus") + ";" + file + ";" + editor.I("bodyAnchor") + ";" + editor.I("bodyCursor") + ";" +
+                content + ";" + QaCodeHash(active.S("savedBody")) + ";" + editor.S("input") + ";" +
+                string.Join(",", editor.Items("matches").Select(item => item.Integer().ToString(CultureInfo.InvariantCulture))) +
+                ";" + tabState;
+        }
+
         internal void Update(Data next, string app = "ubuntu")
         {
             scene = next;
@@ -62,6 +97,8 @@ namespace TouchTypingStudio
                     editor.Items("tabs").Skip(Math.Max(0, editor.I("activeTab"))).Select(item => item.S("title")).FirstOrDefault();
                 System.Windows.Automation.AutomationProperties.SetHelpText(this, description ?? "");
             }
+            if (WitnessPythonEditor)
+                System.Windows.Automation.AutomationProperties.SetItemType(this, PythonEditorWitness(scene, editor));
             InvalidateVisual();
         }
 
