@@ -21,6 +21,7 @@ def main():
     parser.add_argument("--full", action="store_true", help="Запустить C# стресс-тесты из исходников, требуется SDK .NET 10")
     parser.add_argument("--terminal-only", action="store_true", help="Проверить ввод в окно терминала на 1366×768")
     parser.add_argument("--gallery", action="store_true", help="Снимки открытых рабочих областей GTK")
+    parser.add_argument("--source-note", action="store_true", help="Пройти оконное поручение: методика → заметка")
     parser.add_argument("--save-retry", action="store_true", help="Включить проверку закрытия при ошибке сохранения")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
@@ -54,6 +55,7 @@ def main():
             if args.terminal_only: command.append("--terminal-only")
             if args.save_retry: command.append("--save-retry")
             if args.gallery: command.append("--gallery")
+            if args.source_note: command.append("--source-note")
             if args.full: command.append("--full")
             return subprocess.run(command, env=environment).returncode
     return run_checks(args)
@@ -65,7 +67,7 @@ def run_checks(args):
     environment.update(PYTHONPATH=os.pathsep.join((str(ROOT), str(tests))), WAYLAND_DISPLAY="training-qa",
                        TOUCH_TYPING_QA_OUTPUT=str(args.output), TOUCH_TYPING_QA_SEED=str(args.seed))
     report = {"status": "running", "started": datetime.now(timezone.utc).isoformat(), "seed": args.seed,
-              "isolated": True, "platform": "linux", "windowsNative": "requires Test-Live-UI.ps1 on Windows", "checks": [], "coverage": ["physical EN/RU keys", "four application classes and integrated workday", "51 complete missions", "selection pixels and caret", "untimed and count-limited sessions",
+              "isolated": True, "platform": "linux", "windowsNative": "requires Test-Live-UI.ps1 on Windows", "checks": [], "coverage": ["physical EN/RU keys", "four application classes and integrated workday", "52 complete missions", "selection pixels and caret", "untimed and count-limited sessions",
               "forms and confirmations", "held modifiers", "capture lifecycle", "single left Windows key",
               "connected scenarios", "shortcut-only Chrome and VS Code", "F11 versus Print",
               "Space resumes and Enter stays in the scene", "independent wrong-key highlight"]}
@@ -149,6 +151,15 @@ def run_checks(args):
             check("legacy-window", [sys.executable, str(tests / "test_wayland_window.py")])
             if args.timed:
                 check("native-180-seconds", [sys.executable, str(tests / "test_lab_window.py"), "--timed"], timeout=300)
+        if args.source_note:
+            report["coverage"].append("native GTK Workday source-note: browser, clipboard, editor, files and terminal")
+            with tempfile.TemporaryDirectory(prefix="typing-source-note-") as folder:
+                previous = environment["XDG_DATA_HOME"]
+                environment["XDG_DATA_HOME"] = folder
+                try:
+                    check("native-source-note", [sys.executable, str(tests / "test_source_note_window.py")], timeout=360)
+                finally:
+                    environment["XDG_DATA_HOME"] = previous
         report["status"] = "passed" if all(c["status"] == "passed" for c in report["checks"]) else "failed"
     except Exception as error:
         report["status"] = "failed"

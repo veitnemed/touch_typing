@@ -93,6 +93,14 @@ jobs:
           Get-Content (Join-Path $render result.txt)
           if ($proc.ExitCode -ne 0) { throw 'WPF render failed' }
           & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -OutputDirectory (Join-Path $out 'keyboard')
+      - name: Complete the Workday source note through the native WPF window
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $appDir = Join-Path $env:RUNNER_TEMP 'TouchTyping QA'
+          $app = Join-Path $appDir TouchTyping.exe
+          $out = Join-Path $env:RUNNER_TEMP windows-evidence
+          & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -WorkdaySourceNote -Seed 0 -OutputDirectory (Join-Path $out 'workday-source-note')
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -117,7 +125,7 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: |
           tar -xzf "$RUNNER_TEMP/candidate/touch-typing-linux-x64.tar.gz" -C "$RUNNER_TEMP/candidate"
-          bash "$RUNNER_TEMP/candidate/touch-typing-linux-x64/check.sh" --terminal-only --save-retry --gallery --output "$RUNNER_TEMP/linux-evidence" || {
+          bash "$RUNNER_TEMP/candidate/touch-typing-linux-x64/check.sh" --terminal-only --save-retry --gallery --source-note --output "$RUNNER_TEMP/linux-evidence" || {
             tail -n 80 -- "$RUNNER_TEMP/linux-evidence/"*.log
             exit 1
           }

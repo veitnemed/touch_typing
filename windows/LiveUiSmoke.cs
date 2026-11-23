@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Automation;
+using System.Xml;
 
 // Compile separately. This process drives only the new --qa trainer process it owns.
 internal static class LiveUiSmoke
@@ -30,6 +31,12 @@ internal static class LiveUiSmoke
             window = AutomationElement.FromHandle(trainer);
             Check(window.Current.ProcessId == app.Id, "The automation root belongs to the new QA process");
             Focus();
+            if (arguments.Contains("--workday-source-note"))
+            {
+                CheckWorkdaySourceNote();
+                Console.WriteLine("PASS: " + count + " native WPF Workday source-note assertions");
+                return 0;
+            }
             Chord("Ctrl+F5");
             Check(Exists("LabStart") && !Exists("LabClock"), "Modified F5 keeps the class chooser open");
             // Keep key/cursor evidence independent of later window-close assertions.
@@ -184,6 +191,143 @@ internal static class LiveUiSmoke
                 app.Dispose();
             }
         }
+    }
+
+    private static void CheckWorkdaySourceNote()
+    {
+        string qaRoot = Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT");
+        Check(!string.IsNullOrEmpty(qaRoot) && Path.IsPathRooted(qaRoot), "Use an explicit disposable QA profile");
+        string profile = Path.Combine(qaRoot, "TouchTypingStudio-QA", "progress.xml");
+        Check(!File.Exists(profile), "The Workday project starts with a fresh profile");
+
+        Invoke("LabClass-workday");
+        Select("LabMode", 1);
+        Select("LabLevel", 0);
+        Select("LabDuration", 0);
+        SelectMissionByName("Перенести методику из браузера в заметку");
+        Key("F5");
+        Until(delegate { return Exists("LabTask") && Exists("LabDesktop") && Name("LabPause").StartsWith("Пауза"); },
+            "active standalone Workday source-note project");
+
+        var number = Regex.Match(Name("LabKeys"), @"шаг 1/([0-9]+)");
+        Check(number.Success, "The new project shows the full task count");
+        int total = int.Parse(number.Groups[1].Value);
+        Check(total == 25 || total == 26, "The exact route has 25 steps and at most one initial layout correction");
+        Check(Name("LabCounter").Contains("Перенести методику из браузера в заметку"), "The selected project uses the correct route");
+
+        bool foundSource = false, copied = false, pasted = false, saved = false, reopened = false, submitted = false;
+        for (int step = 1; step <= total; step++)
+        {
+            Check(ReadSolved() == step - 1, "No missing or duplicate credit before step " + step);
+            var task = Find("LabTask");
+            string title = task.Current.Name, instruction = task.Current.ItemStatus;
+            Console.WriteLine("WORKDAY TASK " + step + " " + title + " | " + instruction);
+            string activeBefore = Name("LabDesktop");
+            if (title == "Откройте «Методика расчёта спектра»")
+                Check(activeBefore.Contains("Chrome."), "The simulated browser is active before opening the source");
+
+            int before = step - 1;
+            if (instruction.StartsWith("keys:", StringComparison.Ordinal) && instruction.Length > 5)
+            {
+                string gesture = instruction.Substring(5);
+                var scan = Parse(gesture);
+                var input = scan.Select(k => k.Down()).Concat(scan.Reverse().Select(k => k.Up())).ToArray();
+                int tries = gesture == "Tab" || gesture == "Down" ? 24 : 1;
+                for (int attempt = 0; attempt < tries; attempt++)
+                {
+                    Send(input);
+                    Wait(110);
+                    if (ReadSolved() > before) break;
+                }
+                Until(delegate { return ReadSolved() > before; }, "native " + gesture + " credit at step " + step);
+                if (title == "Откройте «Методика расчёта спектра»") foundSource = true;
+                if (gesture == "Ctrl+C")
+                {
+                    Check(foundSource && activeBefore.Contains("Chrome."), "Ctrl+C copies from the opened browser document");
+                    copied = true;
+                }
+                if (gesture == "Ctrl+V")
+                {
+                    Check(copied && activeBefore.Contains("Visual Studio Code."), "Ctrl+V pastes from the browser into the editor");
+                    pasted = true;
+                }
+                if (gesture == "Ctrl+S")
+                {
+                    Check(pasted && Name("LabDesktop").Contains("Файл «notes.txt» сохранён"), "Ctrl+S saves the pasted note in the project");
+                    saved = true;
+                }
+                if (title == "Откройте «notes.txt»" && activeBefore.Contains("Файлы."))
+                {
+                    Check(saved && Name("LabDesktop").Contains("Visual Studio Code."), "File manager reopens notes.txt in the editor");
+                    reopened = true;
+                }
+            }
+            else if (instruction.StartsWith("text:", StringComparison.Ordinal) && instruction.Length > 5)
+            {
+                string command = instruction.Substring(5);
+                Check(activeBefore.Contains("Терминал.") && activeBefore.Contains("Раскладка EN"), "Command target is the active English terminal");
+                foreach (char c in command) Send(Character(c));
+                Until(delegate { return Find("LabDesktop").Current.HelpText == command; }, "the full command reached the simulated terminal");
+                if (step == total)
+                {
+                    Check(reopened && command == "cat notes.txt", "The final native Enter submits cat notes.txt after save and reopen");
+                    Key("Enter");
+                    Until(delegate { return Exists("LabResult"); }, "completed Workday result");
+                    submitted = true;
+                }
+                else
+                {
+                    Key("Enter");
+                    Until(delegate { return ReadSolved() > before; }, "native command credit at step " + step);
+                }
+            }
+            else throw new InvalidOperationException("Missing native input for Workday: " + title + " [" + instruction + "]");
+        }
+        Check(foundSource && copied && pasted && saved && reopened && submitted, "Browser, clipboard, editor, files and terminal all performed their part");
+        string summary = Find("LabResult").Current.HelpText;
+        Check(summary.Contains("Выполнено " + total + ".") && summary.Contains("Ошибки 0.") && summary.Contains("Цель занятия выполнена"),
+            "The visible result confirms a completed error-free project");
+        var xml = new XmlDocument();
+        xml.XmlResolver = null;
+        xml.Load(profile);
+        var rows = xml.SelectNodes("/StudioProfile/ShortcutHistory/ShortcutAttempt[Mission='workday-source-note']");
+        Check(rows.Count == total, "The completed profile has exactly one record per native action");
+        var skills = rows.Cast<XmlNode>().Select(row => row.SelectSingleNode("Skill").InnerText).ToArray();
+        int copy = Array.IndexOf(skills, "lab/workday/copy");
+        int paste = Array.IndexOf(skills, "lab/workday/paste");
+        int save = Array.IndexOf(skills, "lab/workday/save");
+        int cat = Array.IndexOf(skills, "lab/workday/command/cat notes.txt");
+        Check(0 <= copy && copy < paste && paste < save && save < cat && cat == total - 1,
+            "The persisted credits prove copy, paste, save and strict cat verification in order");
+        Check(xml.SelectSingleNode("/StudioProfile/LiveDrafts/LiveDraft[Mission='workday-source-note']") == null,
+            "Completed Workday project leaves no unfinished draft");
+    }
+
+    private static void SelectMissionByName(string title)
+    {
+        var combos = window.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ComboBox));
+        foreach (AutomationElement combo in combos)
+        {
+            if (combo.Current.ProcessId != app.Id || !string.IsNullOrEmpty(combo.Current.AutomationId)) continue;
+            object pattern;
+            if (!combo.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out pattern)) continue;
+            var expand = (ExpandCollapsePattern)pattern;
+            expand.Expand();
+            Wait(120);
+            var isMission = new AndCondition(
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem),
+                new PropertyCondition(AutomationElement.NameProperty, title));
+            var option = combo.FindFirst(TreeScope.Descendants, isMission);
+            if (option != null && option.Current.ProcessId == app.Id)
+            {
+                ((SelectionItemPattern)option.GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+                if (expand.Current.ExpandCollapseState == ExpandCollapseState.Expanded) expand.Collapse();
+                Wait(100);
+                return;
+            }
+            expand.Collapse();
+        }
+        throw new InvalidOperationException("Could not select the Workday mission: " + title);
     }
 
     private static void WithBlockedProfile(Action attempt)
