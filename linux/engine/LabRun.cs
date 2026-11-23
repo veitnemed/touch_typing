@@ -22,13 +22,14 @@ internal sealed class LabRun
     private const string StrictReportEvent = "@strict-report";
     private const string ClusterNavigationEvent = "@cluster-navigation";
     private const string LineEditingEvent = "@line-editing";
-    private bool replayLegacyLineEditing;
+    private const string DesktopBindingEvent = "@gnome-binding-fallback";
+    private bool replayLegacyLineEditing, replayLegacyDesktopBindings;
     private int variant;
     private string initialLayout, attemptLayout;
     private bool initialVirtual;
     internal bool HasDraft => !CompletedRoute && !limitAccepted && (!ReachedLimit || softFinish || FinishingMission) &&
         (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 ||
-        trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent)));
+        trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or DesktopBindingEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask, inputAtActiveMilliseconds;
@@ -122,7 +123,9 @@ internal sealed class LabRun
         // Timed and action-limit sessions continue to honor the chosen length.
         finishSingleRoute = !string.IsNullOrEmpty(requestedMission) && TimeLimit == 0 && ActionLimit == 0;
         dockProfile = draft?.Dock ?? dock; layoutBinding = draft?.LayoutKey ?? layoutKey;
-        this.desktopProfile = draft?.DesktopProfile ?? desktopProfile ?? [];
+        this.desktopProfile = draft?.DesktopProfile == null ? desktopProfile ?? []
+            : LabScene.ReadSavedDesktopProfile(draft.DesktopProfile);
+        replayLegacyDesktopBindings = draft != null;
         variant = draft?.Variant ?? -1; restoring = replayLegacyNavigation = draft != null;
         var savedEvents = draft == null ? Array.Empty<LiveEvent>() : JsonSerializer.Deserialize<LiveEvent[]>(draft.Trace) ?? [];
         // New traces begin with format markers. Old ones acquire the line
@@ -147,6 +150,7 @@ internal sealed class LabRun
                 else if (e.Key == StrictReportEvent) { replayLegacyReport = false; trace.Add(e); }
                 else if (e.Key == ClusterNavigationEvent) EndLegacyNavigation(e);
                 else if (e.Key == LineEditingEvent) EndLegacyLineEditing(e);
+                else if (e.Key == DesktopBindingEvent) EndLegacyDesktopBindings(e);
                 else Input(e.Key, e.Down, e.Text);
             }
             if (replayLegacyUrl) trace.Add(new(ExactUrlEvent));
@@ -155,6 +159,11 @@ internal sealed class LabRun
             if (replayLegacyLineEditing) EndLegacyLineEditing(new(LineEditingEvent));
             replayLegacyUrl = replayLegacyReport = false;
             Pause();
+            if (replayLegacyDesktopBindings && Scene.GnomePractice is "workspaces" or "same-app")
+                EndLegacyDesktopBindings(new(DesktopBindingEvent));
+            // Legacy bindings apply only during replay, even if this draft
+            // belonged to another course in a longer Ubuntu session.
+            replayLegacyDesktopBindings = Scene.ReplayLegacyDesktopBindings = false;
             // Trace describes the current mission, not the whole attempt. Its
             // replay reconstructs the scene without generating any new credit.
             Solved = Math.Max(0, progress?.Solved ?? 0);
@@ -185,6 +194,29 @@ internal sealed class LabRun
         bool changed = replayLegacyLineEditing;
         replayLegacyLineEditing = Scene.ReplayLegacyLineEditing = false;
         if (changed && App == "code") LiveCourse.RebaseEditorLineGoals(pending, Scene);
+        trace.Add(marker);
+    }
+
+    private void EndLegacyDesktopBindings(LiveEvent marker)
+    {
+        bool changed = replayLegacyDesktopBindings;
+        replayLegacyDesktopBindings = Scene.ReplayLegacyDesktopBindings = false;
+        if (changed && Scene.GnomePractice is "workspaces" or "same-app")
+        {
+            // The evidence target is state, not a keystroke. Rebind only
+            // unfinished goals; do not replay or alter already earned credit.
+            for (int index = 0; index < pending.Count; index++)
+            {
+                var goal = pending[index];
+                var shortcut = LabCatalog.Shortcuts.FirstOrDefault(item => item.Id == goal.Task.Id &&
+                    LabScene.GnomeProfileActions.Contains(item.Id));
+                if (shortcut == null) continue;
+                var bound = Scene.WithBinding(shortcut);
+                pending[index] = goal with { Task = goal.Task with { Keys = bound.Keys, Hint = bound.Hint } };
+            }
+            if (pending.Count > 0) Task = pending[0].Task;
+            watching = null;
+        }
         trace.Add(marker);
     }
 
@@ -524,6 +556,7 @@ internal sealed class LabRun
                 trace.Add(new(StrictReportEvent));
                 trace.Add(new(ClusterNavigationEvent));
                 trace.Add(new(LineEditingEvent));
+                if (Scene.GnomePractice is "workspaces" or "same-app") trace.Add(new(DesktopBindingEvent));
             }
             foreach (string key in held) trace.Add(new("@held/" + key, superUsed));
             missionLength = pending.Count;
@@ -537,7 +570,7 @@ internal sealed class LabRun
     {
         var scene = new LabScene(App == "workday" ? "ubuntu" : App, initialLayout)
         { LayoutKey = layoutBinding, LayoutIsVirtual = initialVirtual, ReplayLegacyNavigation = replayLegacyNavigation,
-            ReplayLegacyLineEditing = replayLegacyLineEditing, UseWindowsBindings = windowsBindings };
+            ReplayLegacyLineEditing = replayLegacyLineEditing, ReplayLegacyDesktopBindings = replayLegacyDesktopBindings, UseWindowsBindings = windowsBindings };
         if (dockProfile != null) scene.Dock = dockProfile;
         scene.DesktopProfile = desktopProfile;
         scene.PrepareCase(variant, App);

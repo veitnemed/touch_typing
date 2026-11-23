@@ -472,6 +472,25 @@ class LabWindowTest(Studio):
         assert state()["scene"]["layout"] != initial and state()["scene"]["layoutIsVirtual"]
         yield from current("layout")
         assert state()["scene"]["layout"] == initial and state()["finished"] and state()["errors"] == 3
+        if custom:
+            assert settings.set_strv("move-to-workspace-right", [])
+            assert settings.set_strv("switch-windows", ["<Super><Shift>Page_Down"])
+            profile = self.sources.desktop_bindings()
+            assert profile["switch-next"] == "Super+Shift+PageDown" and "move-next" not in profile
+            yield from start("ubuntu-gnome-workspaces")
+            assert state()["task"]["keys"] == "Ctrl+Shift+F1"
+            assert self.lab.gesture.get_visible() and "F1" in self.lab.gesture_tokens
+            assert "только в тренажёре" in self.lab.details_text.get_label()
+            for expected in ("code", "terminal"):
+                yield from chord(profile["switch-next"])
+                assert active()["app"] == expected
+                assert (state()["solved"], state()["scene"]["workspace"]) == (0, 0)
+            yield from current("move-next")
+            assert (state()["solved"], state()["scene"]["workspace"]) == (1, 1)
+            assert {w["app"]: w["workspace"] for w in state()["scene"]["windows"]} == {"code": 0, "terminal": 1}
+            assert active()["app"] == "terminal"
+            yield from frame("workspace-conflicting-profile-resolved")
+
         print("PASS native GTK GNOME profile", "custom" if custom else "default", "workspaces, same-app, MateBook", flush=True)
 
     def exercise_daily_use(self, chord, capture, output, recording_boundary=lambda _name: None, switch_preview=None):

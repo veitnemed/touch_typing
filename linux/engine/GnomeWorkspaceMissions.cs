@@ -8,6 +8,7 @@ internal sealed partial class LabScene
 {
     internal string GnomePractice = "";
     internal string[] DesktopProfile = [];
+    internal bool ReplayLegacyDesktopBindings;
     internal string[] SwitchChoices = [];
 
     // Capture a normalized, supported single chord per exercise. The package
@@ -19,7 +20,7 @@ internal sealed partial class LabScene
     internal static string[] NormalizeDesktopProfile(IEnumerable<KeyValuePair<string, string>> source)
     {
         var result = new List<string>();
-        var gestures = new HashSet<string>();
+        var gestures = new List<KeyChord>();
         var entries = source.ToDictionary(item => item.Key, item => item.Value);
         for (int i = 0; i < GnomeProfileActions.Length; i++)
         {
@@ -31,8 +32,36 @@ internal sealed partial class LabScene
             // data-entry keys. Desktop-global keys have at least one Ctrl,
             // Alt or Super; Shift on its own cannot initiate a switcher.
             if (chord.Trigger == null || !chord.Modifiers.Any(key => KeyChord.Family(key) is "Ctrl" or "Alt" or "Super") ||
-                !gestures.Add(chord.Label)) continue;
+                gestures.Any(existing => DesktopChordsOverlap(existing, chord))) continue;
+            gestures.Add(chord);
             result.Add(id + "=" + chord.Label);
+        }
+        return [.. result];
+    }
+
+    // A generic modifier can match either real side; different labels therefore
+    // can describe the same physical gesture (e.g. Super+F1 and LSuper+F1).
+    private static bool DesktopChordsOverlap(KeyChord first, KeyChord second) =>
+        first.Trigger == second.Trigger && first.Modifiers.Length == second.Modifiers.Length &&
+        first.Modifiers.Zip(second.Modifiers).All(pair =>
+            KeyChord.Fits(pair.First, pair.Second) || KeyChord.Fits(pair.Second, pair.First));
+
+    internal static string[] ReadSavedDesktopProfile(IEnumerable<string> source)
+    {
+        // Older drafts store these entries directly in XML. Keep the first
+        // usable binding for each ID, without reprioritizing different IDs.
+        var first = new HashSet<string>(StringComparer.Ordinal);
+        var result = new List<string>();
+        foreach (var entry in source)
+        {
+            int separator = entry?.IndexOf('=') ?? -1;
+            if (separator < 1 || entry.Length - separator > 81) continue;
+            string id = entry[..separator];
+            if (!GnomeProfileActions.Contains(id) || !Gesture.TryParse(entry[(separator + 1)..], out var gesture) ||
+                gesture.Chords.Length != 1 || gesture.Chords[0].Trigger == null ||
+                !gesture.Chords[0].Modifiers.Any(key => KeyChord.Family(key) is "Ctrl" or "Alt" or "Super") ||
+                !first.Add(id)) continue;
+            result.Add(id + "=" + gesture.Chords[0].Label);
         }
         return [.. result];
     }
@@ -40,11 +69,41 @@ internal sealed partial class LabScene
     internal LabTask GnomeProfileBinding(LabTask task)
     {
         if (GnomePractice is not ("workspaces" or "same-app") || !GnomeProfileActions.Contains(task.Id)) return task;
-        var entry = DesktopProfile.FirstOrDefault(value => value.StartsWith(task.Id + "=", StringComparison.Ordinal));
-        var binding = entry?[(task.Id.Length + 1)..];
-        return binding == null
-            ? task with { Hint = task.Hint + " Используется учебная привязка по умолчанию." }
-            : task with { Keys = binding, Hint = task.Hint + " Привязка из профиля GNOME." };
+        if (DesktopProfile.Length == 0)
+            return task with { Hint = task.Hint + " Используется учебная привязка по умолчанию." };
+
+        var bindings = DesktopProfile.ToDictionary(entry => entry[..entry.IndexOf('=')],
+            entry => Gesture.Parse(entry[(entry.IndexOf('=') + 1)..]).Chords[0]);
+        if (bindings.TryGetValue(task.Id, out var binding))
+            return task with { Keys = binding.Label, Hint = task.Hint + " Привязка из профиля GNOME." };
+
+        bool DefaultCollides(LabTask item) =>
+            bindings.Values.Any(imported => DesktopChordsOverlap(imported, Gesture.Parse(item.Keys).Chords[0]));
+        if (ReplayLegacyDesktopBindings || !DefaultCollides(task))
+            return task with { Hint = task.Hint + " Используется учебная привязка по умолчанию." };
+
+        // Allocate consistently from the frozen imported profile, irrespective of
+        // which window is active or which task is asking for its binding.
+        var reserved = LabCatalog.Shortcuts.Where(item => Gesture.TryParse(item.Keys, out _))
+            .SelectMany(item => Gesture.Parse(item.Keys).Chords).Concat(bindings.Values).ToList();
+        if (Gesture.TryParse(LayoutKey, out var layout)) reserved.AddRange(layout.Chords);
+        // First choose familiar function keys, then other normal triggers for
+        // headroom. No Ctrl+Alt+Fn candidates (can be intercepted for VT switch).
+        var triggers = Enumerable.Range(1, 12).Select(index => "F" + index)
+            .Concat(KeyChord.StandardKeys.Where(key => key.Length == 1 && char.IsAsciiLetterOrDigit(key[0])));
+        var candidates = new Queue<KeyChord>(triggers.Select(key => Gesture.Parse("Ctrl+Shift+" + key).Chords[0])
+            .Where(candidate => !reserved.Any(existing => DesktopChordsOverlap(existing, candidate))));
+        var conflicted = LabCatalog.Shortcuts.Where(item => GnomeProfileActions.Contains(item.Id) &&
+            !bindings.ContainsKey(item.Id) && DefaultCollides(item));
+        foreach (var item in conflicted)
+        {
+            if (!candidates.TryDequeue(out var alternate)) break;
+            if (item.Id == task.Id)
+                return task with { Keys = alternate.Label, Hint = task.Hint +
+                    " Обычная учебная комбинация занята в профиле GNOME. Это сочетание работает только в тренажёре." };
+        }
+        // Defensive handling if a future catalog takes every training chord.
+        return task with { Hint = task.Hint + " Свободная учебная комбинация не найдена. Выберите другое упражнение в каталоге." };
     }
 
     internal void PrepareGnomeWorkspaces()

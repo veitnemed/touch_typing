@@ -188,7 +188,7 @@ internal sealed partial class LabScene
         ScreenshotCopied = source.ScreenshotCopied; ShowDesktop = source.ShowDesktop;
         UseWindowsBindings = source.UseWindowsBindings;
         LayoutIsVirtual = source.LayoutIsVirtual; ReplayLegacyNavigation = source.ReplayLegacyNavigation; Search = source.Search;
-        GnomeWindows = source.GnomeWindows; GnomePractice = source.GnomePractice; DesktopProfile = [.. source.DesktopProfile]; SwitchChoices = [.. source.SwitchChoices];
+        GnomeWindows = source.GnomeWindows; GnomePractice = source.GnomePractice; DesktopProfile = [.. source.DesktopProfile]; ReplayLegacyDesktopBindings = source.ReplayLegacyDesktopBindings; SwitchChoices = [.. source.SwitchChoices];
         ReplayLegacyLineEditing = source.ReplayLegacyLineEditing;
         windowNumber = source.windowNumber;
         historyDraft = source.historyDraft; killedText = source.killedText;

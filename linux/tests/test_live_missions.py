@@ -361,6 +361,142 @@ class MissionTest(unittest.TestCase):
         source.settings = {}
         self.assertEqual(source.desktop_bindings(), {})
 
+    def test_gnome_custom_switch_does_not_claim_the_advertised_workspace_move(self):
+        from unittest.mock import patch
+
+        options = dict(app="ubuntu", level=1, mode="sandbox", seconds=0,
+                       guidance="guided", mission="ubuntu-gnome-workspaces", seed=0)
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+                os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+            engine = Engine(verify=True)
+            def chord(*keys):
+                for key in keys:
+                    engine.call("lab-key", key=key, pressed=True, text="")
+                for key in reversed(keys):
+                    state = engine.call("lab-key", key=key, pressed=False, text="")
+                return state
+            try:
+                # Generic move default accepts left Super, although the profile
+                # deliberately specifies that physical side on its switch.
+                engine.call("configure", platform="linux", layout="EN", desktopBindings={
+                    "switch-next": "LSuper+Shift+PageDown",
+                    "switch-prev": "Ctrl+Shift+F1",
+                })
+                state = engine.call("lab-start", **options)
+                self.assertEqual(state["task"]["id"], "move-next")
+                self.assertEqual(state["task"]["keys"], "Ctrl+Shift+F2")
+                self.assertIn("только в тренажёре", state["task"]["hint"])
+                engine.call("lab-resume")
+                for expected_active in ("code", "terminal"):
+                    state = chord("LSuper", "LShift", "PageDown")
+                    self.assertEqual((state["solved"], state["scene"]["workspace"]), (0, 0))
+                    self.assertEqual(next(w["app"] for w in state["scene"]["windows"] if w["active"]),
+                                     expected_active)
+                engine.call("lab-stop")
+                engine.close()
+                engine = Engine(verify=True)
+                engine.call("configure", platform="linux", layout="EN", desktopBindings={})
+                state = engine.call("lab-start", **options, **{"continue": True})
+                self.assertEqual(state["task"]["keys"], "Ctrl+Shift+F2")
+                engine.call("lab-resume")
+                state = chord("LCtrl", "LShift", "F2")
+                self.assertEqual((state["solved"], state["scene"]["workspace"]), (1, 1))
+                self.assertEqual({w["app"]: w["workspace"] for w in state["scene"]["windows"]},
+                                 {"code": 0, "terminal": 1})
+                self.assertEqual(next(w["app"] for w in state["scene"]["windows"] if w["active"]), "terminal")
+            finally:
+                engine.close()
+
+    def test_legacy_gnome_draft_replays_old_binding_before_enabling_fallbacks(self):
+        import json
+        from pathlib import Path
+        from unittest.mock import patch
+        import xml.etree.ElementTree as ET
+
+        options = dict(app="ubuntu", level=1, mode="sandbox", seconds=0,
+                       guidance="guided", mission="ubuntu-gnome-workspaces", seed=0)
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+                os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+            engine = Engine(verify=True)
+
+            def chord(*keys, text=""):
+                for key in keys:
+                    engine.call("lab-key", key=key, pressed=True, text=text if key == keys[-1] else "")
+                for key in reversed(keys):
+                    state = engine.call("lab-key", key=key, pressed=False, text="")
+                return state
+
+            def type_text(value):
+                for key in value:
+                    state = chord(key.upper(), text=key)
+                return state
+
+            def resume():
+                nonlocal engine
+                engine.close()
+                engine = Engine(verify=True)
+                # Current host settings need not match those frozen in the draft.
+                engine.call("configure", platform="linux", layout="EN", desktopBindings={})
+                return engine.call("lab-start", **options, **{"continue": True})
+
+            def check(state, solved, desk, task, keys):
+                self.assertEqual((state["solved"], state["scene"]["workspace"], state["task"]["id"], state["task"]["keys"]),
+                                 (solved, desk, task, keys))
+                self.assertEqual({w["app"]: w["workspace"] for w in state["scene"]["windows"]},
+                                 {"code": 0, "terminal": 1})
+
+            try:
+                # Generate the same keystroke history as the 845766c preview:
+                # PageUp used to fall through to workspace-prev when the imported
+                # general switch had only the terminal available on desk two.
+                engine.call("configure", platform="linux", layout="EN",
+                            desktopBindings={"workspace-prev": "Super+PageUp"})
+                engine.call("lab-start", **options)
+                engine.call("lab-resume")
+                chord("LSuper", "LShift", "PageDown")
+                type_text("pwd")
+                chord("Enter")
+                chord("LSuper", "PageUp")
+                old = type_text("gno")
+                check(old, 3, 0, "gnome-write", "")
+                engine.call("lab-stop")
+                engine.close()
+
+                profile = Path(directory) / "TouchTypingStudio-QA" / "progress.xml"
+                tree = ET.parse(profile)
+                draft = tree.find("LiveDrafts/LiveDraft")
+                trace = draft.find("Trace")
+                trace.text = json.dumps([event for event in json.loads(trace.text)
+                                         if event["Key"] != "@gnome-binding-fallback"])
+                bindings = draft.find("DesktopProfile")
+                bindings.clear()
+                for entry in ("invalid-entry", "switch-next=invalid gesture", "switch-next=Super+PageUp",
+                              "switch-prev=Super+PageDown", "switch-next=Ctrl+Q"):
+                    ET.SubElement(bindings, "string").text = entry
+                tree.write(profile, encoding="utf-8", xml_declaration=True)
+
+                state = resume()
+                check(state, 3, 0, "gnome-write", "")
+                code = next(w for w in state["scene"]["windows"] if w["active"])
+                self.assertEqual((code["app"], code["url"], code["bodyCursor"]), ("code", "app.py", 5))
+                self.assertTrue(code["body"].startswith("# gno"))
+                engine.call("lab-resume")
+                type_text("me")
+                chord("Enter")
+                state = chord("LCtrl", "S")
+                check(state, 5, 0, "workspace-next", "Ctrl+Shift+F1")
+                state = chord("LCtrl", "LShift", "F1")
+                check(state, 6, 1, "workspace-prev", "Ctrl+Shift+F2")
+                engine.call("lab-stop")
+                state = resume()
+                check(state, 6, 1, "workspace-prev", "Ctrl+Shift+F2")
+                self.assertIn("# gnome", next(w["body"] for w in state["scene"]["windows"] if w["app"] == "code"))
+                engine.call("lab-resume")
+                state = chord("LCtrl", "LShift", "F2")
+                self.assertEqual((state["solved"], state["scene"]["workspace"], state["finished"]), (7, 0, True))
+            finally:
+                engine.close()
+
     def test_gnome_profile_missions_use_exact_bindings_and_keep_scope(self):
         from unittest.mock import patch
 
