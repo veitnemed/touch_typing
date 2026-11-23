@@ -1,0 +1,164 @@
+name: Qualify exact TouchTyping 1.8.0 Windows candidate (no publish)
+on:
+  push:
+    branches: [qa/stable18-windows-qualification]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  windows:
+    name: final-windows-${{ matrix.mode }}
+    runs-on: windows-2025
+    timeout-minutes: 15
+    continue-on-error: ${{ matrix.optional }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: editor
+            optional: false
+          - mode: terminal
+            optional: false
+          - mode: small
+            optional: false
+    env:
+      CANDIDATE_RUN_ID: '45213146057'
+      CANDIDATE_RUN_SHA: '28b1fc9dcb282be9fa8d15985e88f070a7c800de'
+      CANDIDATE_WORKFLOW_PATH: '.github/workflows/final-candidate-packages.yml'
+      PROBE_SHA: 'da4437af98772cb27f5c138c43c343bc3a504d51'
+      PRODUCT_SHA: '9c7773ab1bb319285e2ec341224c5714ee2efc86'
+      CANDIDATE_ZIP_SHA256: '35e15ae1286bfe3ed53ba76ebfcc34d4b5b95d0856d6a2fe8998d37901a97149'
+      GH_TOKEN: ${{ github.token }}
+      PROOF_MODE: ${{ matrix.mode }}
+      TOUCH_TYPING_NORMAL_LAUNCH_ISOLATED_JOB: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify builder identity and approved packaging step
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:CANDIDATE_RUN_ID -notmatch '^[1-9][0-9]*$' -or
+              $env:CANDIDATE_RUN_SHA -notmatch '^[0-9a-f]{40}$' -or
+              $env:CANDIDATE_ZIP_SHA256 -notmatch '^[0-9a-f]{64}$' -or
+              $env:CANDIDATE_WORKFLOW_PATH -notmatch '^\.github/workflows/[a-z0-9.-]+\.yml$') {
+            throw 'Supply observed immutable source run, packaging workflow and archive pins.'
+          }
+          if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_ARCH -ne 'X64') {
+            throw 'This check needs fresh GitHub-hosted Windows x64.'
+          }
+          $os = Get-CimInstance Win32_OperatingSystem
+          if ($os.Caption -notmatch 'Windows Server 2025' -or $os.ProductType -eq 1) {
+            throw "Unexpected platform: $($os.Caption)."
+          }
+          "Windows=$($os.Caption) build=$($os.BuildNumber) arch=$env:RUNNER_ARCH"
+          $meta = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:CANDIDATE_RUN_ID"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not locate the pinned candidate run.' }
+          $meta = $meta | ConvertFrom-Json
+          if ($meta.head_sha -ne $env:CANDIDATE_RUN_SHA -or $meta.head_branch -ne 'qa/stable18-candidate-archives' -or
+              $meta.event -ne 'push' -or $meta.conclusion -ne 'success' -or $meta.path -ne $env:CANDIDATE_WORKFLOW_PATH) {
+            throw 'Unexpected candidate run identity or status.'
+          }
+          $jobs = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:CANDIDATE_RUN_ID/jobs?per_page=50"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not verify builder job.' }
+          $jobs = ($jobs | ConvertFrom-Json).jobs
+          $build = @($jobs | Where-Object { $_.name -eq 'candidate' -and $_.conclusion -eq 'success' })
+          if ($build.Count -ne 1 -or -not ($build[0].steps | Where-Object {
+              $_.name -eq 'Verify source and package both x64 platforms' -and $_.conclusion -eq 'success'
+          })) { throw 'Missing positive pinned builder package step.' }
+          "Builder=$($meta.html_url) workflowHead=$($meta.head_sha) source=$env:PRODUCT_SHA"
+      - uses: actions/checkout@v4
+        with:
+          ref: da4437af98772cb27f5c138c43c343bc3a504d51
+          path: reviewed-probe
+          persist-credentials: false
+      - name: Apply only the reviewed test patch to the pinned probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $patchName = switch ($env:PROOF_MODE) {
+            editor   { 'normal-editor.patch' }
+            terminal { 'terminal-reset-fixed.patch' }
+            small    { 'small-viewport-tab.patch' }
+            default  { throw 'Unknown proof mode.' }
+          }
+          $probeRoot = Join-Path $env:GITHUB_WORKSPACE 'reviewed-probe'
+          $patch = Join-Path $env:GITHUB_WORKSPACE ("qa/" + $patchName)
+          if ((git -C $probeRoot rev-parse HEAD) -ne $env:PROBE_SHA) { throw 'Wrong probe checkout.' }
+          & git -C $probeRoot apply --check -- $patch
+          if ($LASTEXITCODE -ne 0) { throw "Cannot apply reviewed patch $patchName cleanly." }
+          & git -C $probeRoot apply -- $patch
+          if ($LASTEXITCODE -ne 0) { throw "Could not apply reviewed patch $patchName." }
+          $files = @(git -C $probeRoot diff --name-only | Sort-Object)
+          if (($files -join ' ') -ne 'windows/LiveUiSmoke.cs windows/Test-HostedNormalLaunch.ps1') { throw 'Patch touched unexpected files.' }
+          "ProbeSource=$env:PROBE_SHA Patch=$patchName SHA256=$((Get-FileHash -LiteralPath $patch -Algorithm SHA256).Hash)"
+      - uses: actions/download-artifact@v4
+        with:
+          name: touchtyping-180-candidate-archives
+          path: ${{ runner.temp }}/candidate-input
+          github-token: ${{ github.token }}
+          run-id: ${{ env.CANDIDATE_RUN_ID }}
+      - name: Verify unchanged Windows archive and exercise the stock launcher
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $inputDir = Join-Path $env:RUNNER_TEMP 'candidate-input'
+          $file = 'touch-typing-v1.8.0-windows-x64.zip'
+          $zip = Join-Path $inputDir $file
+          $output = Join-Path $env:RUNNER_TEMP 'stock-evidence'
+          New-Item -ItemType Directory -Path $output -ErrorAction Stop | Out-Null
+          $manifest = @(Get-Content -LiteralPath (Join-Path $inputDir 'SHA256SUMS.txt') |
+            Where-Object { $_ -match ('^[0-9a-fA-F]{64} [ *]' + [regex]::Escape($file) + '$') })
+          if ($manifest.Count -ne 1 -or $manifest[0].Substring(0, 64) -ne $env:CANDIDATE_ZIP_SHA256 -or
+              (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne $env:CANDIDATE_ZIP_SHA256) {
+            throw 'Candidate ZIP does not match both the pinned hash and the builder manifest.'
+          }
+          $appDir = Join-Path $env:RUNNER_TEMP 'TouchTyping Normal Extract'
+          if (Test-Path -LiteralPath $appDir) { throw 'Extraction path already exists.' }
+          Expand-Archive -LiteralPath $zip -DestinationPath $appDir
+          $cmd = Join-Path $appDir 'Start-Live.cmd'
+          $cmdSha = (Get-FileHash -LiteralPath $cmd -Algorithm SHA256).Hash
+          if ($cmdSha -ne '09d729bb568affdab98f8c74448ccffdb75a6ee3a0c0c84edcb9dcdf32b212eb') {
+            throw 'Stock launcher differs from the reviewed product file.'
+          }
+          "candidateRun=$env:CANDIDATE_RUN_ID candidateHead=$env:CANDIDATE_RUN_SHA product=$env:PRODUCT_SHA" |
+            Set-Content -LiteralPath (Join-Path $output 'provenance.txt')
+          "zipSha256=$env:CANDIDATE_ZIP_SHA256 stockCmdSha256=$cmdSha mode=$env:PROOF_MODE" |
+            Add-Content -LiteralPath (Join-Path $output 'provenance.txt')
+          $probe = Join-Path $env:GITHUB_WORKSPACE 'reviewed-probe/windows/Test-HostedNormalLaunch.ps1'
+          $app = Join-Path $appDir 'TouchTyping.exe'
+          switch ($env:PROOF_MODE) {
+            editor   { & $probe -Application $app -OutputDirectory $output -Editor }
+            terminal { & $probe -Application $app -OutputDirectory $output -ExactTerminal }
+            small    { & $probe -Application $app -OutputDirectory $output -SmallViewport }
+            default  { throw 'Unknown proof mode.' }
+          }
+          $log = Join-Path $output 'windows-normal-launch.log'
+          $summary = switch ($env:PROOF_MODE) {
+            editor   { 'stock normal-profile editor assertions' }
+            terminal { 'stock normal-launch and exact terminal edit assertions' }
+            small    { 'stock small-viewport Windows assertions' }
+          }
+          if (-not (Select-String -LiteralPath $log -Pattern ('^PASS: [1-9][0-9]* ' + [regex]::Escape($summary) + '$'))) {
+            throw 'Proof process did not record the required positive assertion summary.'
+          }
+          if ($env:PROOF_MODE -eq 'terminal') {
+            foreach ($case in @('fresh-delete','fresh-backspace','history-delete','history-backspace')) {
+              foreach ($stage in @('caret-between-b-c','after-insert')) {
+                if (-not (Test-Path -LiteralPath (Join-Path $output "terminal-frames/terminal-$case-$stage.png") -PathType Leaf)) {
+                  throw "Required exact UI evidence missing: $case $stage"
+                }
+              }
+            }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: final-windows-${{ matrix.mode }}-verification
+          path: |
+            ${{ runner.temp }}/stock-evidence/provenance.txt
+            ${{ runner.temp }}/stock-evidence/windows-normal-launch.log
+            ${{ runner.temp }}/stock-evidence/terminal-frames/*.png
+            ${{ runner.temp }}/stock-evidence/small-viewport-frames/*.png
+          if-no-files-found: warn
