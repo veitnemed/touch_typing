@@ -54,6 +54,36 @@ internal static class LiveUiSmoke
             window = AutomationElement.FromHandle(trainer);
             Check(window.Current.ProcessId == app.Id, "The automation root belongs to the new QA process");
             Focus();
+            if (arguments.Contains("--upgrade-launch"))
+            {
+                Until(delegate { return Exists("LabStart"); }, "v1.7.0 native Live chooser");
+                Console.WriteLine("PASS released WPF v1.7.0 launches against disposable QA root");
+                return 0;
+            }
+            if (arguments.Contains("--upgrade-resume"))
+            {
+                Invoke("LabClass-workday");
+                Select("LabMode", 1); // Guided, as seeded by the old engine.
+                Select("LabLevel", 0);
+                SelectMissionByName("Продолжить с сохранённого места");
+                Key("F5");
+                Until(delegate { return Exists("LabDesktop") && Name("LabPause").StartsWith("Пауза"); },
+                    "active upgraded saved lesson");
+                Check(Find("LabCounter").Current.Name.Contains("Шаг 22 из"), "Old profile resumes at exact Workday step 22");
+                int expected = arguments.Contains("--same-build") ? 21 : 0;
+                Check(ReadSolved() == expected, "Resumed counters match known archive format");
+                Key("F8");
+                Until(delegate { return Visible("LabPauseResult"); }, "checkpoint for resumed old profile");
+                var profile = Path.Combine(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT"),
+                    "TouchTypingStudio-QA", "progress.xml");
+                var xml = new XmlDocument();
+                xml.XmlResolver = null;
+                xml.Load(profile);
+                Check(xml.SelectNodes("/StudioProfile/ShortcutHistory/ShortcutAttempt").Count == 21,
+                    "Checkpoint did not duplicate or delete the old credits");
+                Console.WriteLine("PASS native WPF resumed the migrated v1.7.0 lesson after process restart");
+                return 0;
+            }
             if (pythonEditor)
             {
                 CheckPythonEditingMissions();
