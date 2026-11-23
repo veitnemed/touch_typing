@@ -17,11 +17,11 @@ class MissionTest(unittest.TestCase):
         tasks = ("explorer", "quick-open", "quick-choose", "save")
 
         def sample(level, *, count=10, independent=True, assisted=False, correct=True,
-                   skill_app="code", one_mission=False, one_session=False, one_task=False):
+                   skill_app="code", one_mission=False, one_session=False, one_task=False, layout="EN"):
             return [
                 {"Mission": "code-" + names[level][0 if one_mission else index % 3],
                  "Skill": f"lab/{skill_app}/" + tasks[0 if one_task else index % 4],
-                 "Verification": "lab-scene", "InputMode": "exact",
+                 "Verification": "lab-scene", "InputMode": "exact", "Layout": layout,
                  "Session": f"session-{0 if one_session else index % 2}",
                  "Independent": str(independent).lower(), "Assisted": str(assisted).lower(),
                  "Correct": str(correct).lower(), "FirstTry": str(correct).lower()}
@@ -37,6 +37,11 @@ class MissionTest(unittest.TestCase):
         for label, history, expected in (
             ("new", [], None),
             ("guided", sample(0, independent=False, assisted=True), None),
+            ("unknown-layout", sample(0, layout=None), None),
+            ("split-layout", sample(0, count=5) + sample(0, count=5, layout="RU"), None),
+            ("only-ru", sample(0, layout="RU"), None),
+            ("en-not-confirmed-by-ru", sample(0, one_task=True, layout="RU"), None),
+            ("unknown-cannot-confirm", sample(0, one_task=True, layout=None), None),
             ("helped", sample(0, assisted=True), None),
             ("cross-class", sample(0, skill_app="chrome"), None),
             ("unknown-mission", [{**x, "Mission": "missing"} for x in sample(0)], None),
@@ -79,6 +84,19 @@ class MissionTest(unittest.TestCase):
                     self.assertTrue(all(tips[entry]["level"] is None for entry in tips if entry != "code"))
                     self.assertEqual(catalog["drafts"], [dict(app="code", level=0, mission="code-first-fix", guidance="guided")])
                     self.assertEqual(profile.read_bytes(), previous)
+                    if label in {"editor-basic", "only-ru", "unknown-layout", "split-layout"}:
+                        engine.call("configure", layout="RU")
+                        ru_tip = next(item for item in engine.call("lab-catalog")["recommendations"] if item["app"] == "code")
+                        self.assertEqual(ru_tip["level"], 1 if label == "only-ru" else None)
+                        self.assertIn("RU", ru_tip["reason"])
+                        engine.call("configure", layout="EN")
+                        self.assertEqual(profile.read_bytes(), previous)
+                    if label in {"en-not-confirmed-by-ru", "unknown-cannot-confirm"}:
+                        def mastery():
+                            return next(item for item in engine.call("library")["liveSkills"] if item["key"] == "lab/code/explorer")
+                        self.assertEqual((mastery()["count"], mastery()["confirmed"]), (10, False))
+                        engine.call("configure", layout="RU")
+                        self.assertEqual((mastery()["count"], mastery()["confirmed"]), (10, label == "en-not-confirmed-by-ru"))
                     if label == "editor-basic":
                         self.assertIn("ещё не подтверждён", tips["code"]["reason"])
                         # Learner ignores advisory level 1, chooses level 2,
@@ -90,6 +108,78 @@ class MissionTest(unittest.TestCase):
                         self.assertEqual(resumed["mission"], "code-first-fix")
                 finally:
                     engine.close()
+
+    def test_live_attempt_layout_stamps_before_toggle_and_survives_reopen(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        import xml.etree.ElementTree as ET
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+            profile = Path(directory) / "TouchTypingStudio-QA" / "progress.xml"
+            profile.parent.mkdir()
+            # A real older record had no layout; do not infer one on save.
+            profile.write_text(
+                "<StudioProfile><ShortcutHistory><ShortcutAttempt>"
+                "<Skill>lab/ubuntu/layout</Skill><Mission>ubuntu-languages</Mission>"
+                "<Correct>true</Correct></ShortcutAttempt></ShortcutHistory></StudioProfile>",
+                encoding="utf-8",
+            )
+            def records():
+                return [(row.findtext("Skill"), row.findtext("Layout"), row.findtext("Correct"))
+                        for row in ET.parse(profile).findall("./ShortcutHistory/ShortcutAttempt")]
+
+            options = dict(app="ubuntu", level=1, mode="sandbox", seconds=0,
+                           guidance="guided", mission="ubuntu-languages", seed=0)
+            sides = {"Ctrl": "RCtrl", "Alt": "LAlt", "Shift": "LShift", "Super": "LSuper"}
+            engine = Engine(verify=True)
+            def chord(keys):
+                for key in keys:
+                    engine.call("lab-key", key=key, pressed=True, text="")
+                for key in reversed(keys):
+                    result = engine.call("lab-key", key=key, pressed=False, text="")
+                return result
+            def advance(state):
+                task = state["task"]
+                self.assertTrue(task["keys"], task["id"])
+                for _ in range(24):
+                    result = chord([sides.get(key, key) for key in task["keys"].split("+")])
+                    if result["solved"] > state["solved"]:
+                        return result
+                self.fail(("unreachable", task["id"], result))
+            try:
+                engine.call("lab-start", **options)
+                state = engine.call("lab-resume")
+                for _ in range(24):
+                    if state["task"]["id"] == "layout":
+                        break
+                    state = advance(state)
+                self.assertEqual((state["task"]["id"], state["scene"]["layout"]), ("layout", "EN"))
+                state = chord(["RCtrl", "F12"])
+                self.assertEqual(records()[-1], ("lab/ubuntu/layout", "EN", "false"))
+                state = advance(state)
+                self.assertEqual((state["task"]["id"], state["scene"]["layout"]), ("overview", "RU"))
+                self.assertEqual(records()[-1], ("lab/ubuntu/layout", "EN", "true"))
+                engine.call("lab-stop")
+                before = records()
+                self.assertEqual(before[0], ("lab/ubuntu/layout", None, "true"))
+                engine.close()
+                engine = Engine(verify=True)
+                state = engine.call("lab-start", **options, **{"continue": True})
+                self.assertEqual((state["task"]["id"], state["scene"]["layout"]), ("overview", "RU"))
+                self.assertEqual(records(), before)
+                state = advance(engine.call("lab-resume"))
+                self.assertEqual(records()[-1], ("lab/ubuntu/overview", "RU", "true"))
+                for _ in range(24):
+                    if state["task"]["id"] == "layout":
+                        break
+                    state = advance(state)
+                self.assertEqual((state["task"]["id"], state["scene"]["layout"]), ("layout", "RU"))
+                state = advance(state)
+                self.assertEqual(state["scene"]["layout"], "EN")
+                self.assertEqual(records()[-1], ("lab/ubuntu/layout", "RU", "true"))
+                self.assertEqual(records()[:len(before)], before)
+            finally:
+                engine.close()
 
     def test_routes(self):
         with tempfile.TemporaryDirectory() as directory:

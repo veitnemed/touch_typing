@@ -10,11 +10,11 @@ internal static class LiveStartingLevel
 
     private static bool FirstTrySuccess(ShortcutAttempt attempt) => attempt.Correct && attempt.FirstTry;
 
-    internal static IEnumerable<LiveStartRecommendation> Recommend(IEnumerable<ShortcutAttempt> history)
+    internal static IEnumerable<LiveStartRecommendation> Recommend(IEnumerable<ShortcutAttempt> history, string layout)
     {
         var missions = LiveCourse.Missions.ToDictionary(mission => mission.Id);
         var observed = (history ?? [])
-            .Where(attempt => attempt?.Independent == true && !attempt.Assisted &&
+            .Where(attempt => (layout is "RU" or "EN") && attempt?.Layout == layout && attempt.Independent && !attempt.Assisted &&
                 attempt.Verification == "lab-scene" && !string.IsNullOrEmpty(attempt.Session) &&
                 attempt.Mission != null && missions.ContainsKey(attempt.Mission))
             .Select(attempt => (attempt, mission: missions[attempt.Mission]))
@@ -41,7 +41,7 @@ internal static class LiveStartingLevel
                     passed.Select(attempt => attempt.Skill).Distinct().Count() < 4) continue;
 
                 int next = levels.Where(level => level > tier).DefaultIfEmpty(tier).Min();
-                string evidence = $"На уровне {tier + 1} — {passed.Length} из {samples.Length} действий с первой попытки без подсказок, в {missionCount} разных миссиях. ";
+                string evidence = $"На уровне {tier + 1} ({layout}) — {passed.Length} из {samples.Length} действий с первой попытки без подсказок, в {missionCount} разных миссиях. ";
                 recommendation = new(app, next, evidence + (next == tier
                     ? "Можно продолжить на этом уровне."
                     : "Можно попробовать следующий уровень; он ещё не подтверждён."));
@@ -49,7 +49,7 @@ internal static class LiveStartingLevel
             }
 
             yield return recommendation ?? new(app, null,
-                "Пока мало самостоятельных результатов в разных миссиях. Можно выбрать любой уровень.");
+                $"Пока мало самостоятельных результатов в разных миссиях для раскладки {layout}. Можно выбрать любой уровень.");
         }
     }
 }

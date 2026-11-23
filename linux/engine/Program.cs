@@ -87,7 +87,7 @@ internal sealed class PracticeService
                 if (message.TryGetProperty("dock", out var pinned) && pinned.ValueKind == JsonValueKind.Array)
                     dock = pinned.EnumerateArray().Take(9).Select(item => item.GetString() ?? "").ToArray();
                 return Library();
-            case "lab-catalog": return LabCatalog.Catalog(profile.LiveDrafts, profile.ShortcutHistory);
+            case "lab-catalog": return LabCatalog.Catalog(profile.LiveDrafts, profile.ShortcutHistory, layout);
             case "lab-start":
                 FinishLab();
                 if (lab?.Saved == false) return LabState(startBlocked: true);
@@ -230,7 +230,7 @@ internal sealed class PracticeService
             })),
             liveSkills = profile.ShortcutHistory.Where(a => a.Mission != null).GroupBy(a => a.Skill).Select(group =>
             {
-                var samples = group.Where(a => a.Independent && !a.Assisted).TakeLast(10).ToArray();
+                var samples = group.Where(a => a.Layout == layout && a.Independent && !a.Assisted).TakeLast(10).ToArray();
                 string id = group.Key[(group.Key.IndexOf('/', 4) + 1)..];
                 var successes = samples.Where(a => a.FirstTry).ToArray();
                 return new { group.Key, title = LabCatalog.Shortcuts.FirstOrDefault(t => t.Id == id)?.Title ?? id.Replace("command/", ""),

@@ -47,8 +47,62 @@ internal static class LabTests
     }
     private static LabRun Create(string app, int seed = 1, int level = 2, Func<double> clock = null)
         => new(app, "sandbox", level, 180, "EN", [], new Random(seed), clock);
+    private sealed class MissionDraws(params double[] draws) : Random
+    {
+        private int index;
+        public override double NextDouble() => draws[index++];
+    }
+
+    private static void TestCommandReviewWeighting()
+    {
+        static ShortcutAttempt Miss(string skill) => new() { Skill = skill, Correct = false };
+        string Pick(double[] draws, params ShortcutAttempt[] history) =>
+            new LabRun("terminal", "sandbox", 0, 0, "EN", history, new MissionDraws(draws)).MissionId;
+
+        double[] pwdDraws = [.4, .8, .8, .25];
+        var pwd = Miss("lab/terminal/command/pwd");
+        Check(Pick(pwdDraws) == "terminal-investigate", "Unweighted draw selects a route without pwd");
+        Check(Pick(pwdDraws, pwd, pwd) == "terminal-explore",
+            "Recorded pwd misses favor an otherwise unselected route that actually practices pwd");
+        Check(Pick(pwdDraws, pwd) == Pick(pwdDraws, pwd, pwd),
+            "Repeated misses identify the same skill, not multiple skill IDs");
+        Check(Pick(pwdDraws, Miss("lab/code/command/pwd")) == "terminal-investigate",
+            "Matching command recorded in another class does not affect the terminal picker");
+        double[] pathDraws = [.8, .8, .4, .3];
+        Check(Pick(pathDraws, Miss("lab/terminal/command/head -n 2 backup/signals.py")) == "terminal-backup",
+            "Picker retains the full path of a spaced command");
+        Check(Pick(pathDraws, Miss("lab/terminal/command/signals.py")) == "terminal-investigate",
+            "Path suffix alone does not match a command");
+
+        var spacedPath = new LiveMission("terminal", 0, "spacing-fixture", "Spacing fixture",
+            [new LivePhase("Read report", "cmd:cat~'/home/student/Work~Notes/report.txt'")]);
+        var otherPath = new LiveMission("terminal", 0, "other-spacing-fixture", "Other spacing fixture",
+            [new LivePhase("Read report", "cmd:cat~'/home/student/Other~Notes/report.txt'")]);
+        var reviewSpaced = new HashSet<string>(StringComparer.Ordinal) { "command/cat '/home/student/Work Notes/report.txt'" };
+        Check(LiveCourse.CountWeakRouteTasks(spacedPath, reviewSpaced) == 1 &&
+              LiveCourse.CountWeakRouteTasks(otherPath, reviewSpaced) == 0,
+            "A quoted path with spaces matches only the full command, not an equal basename in another directory");
+
+        var recentOther = new ShortcutAttempt { Skill = "lab/terminal/command/ls", Correct = true };
+        Check(Pick(pwdDraws, new[] { pwd }.Concat(Enumerable.Repeat(recentOther, 60)).ToArray()) == "terminal-investigate",
+            "An older pwd miss beyond the current 60 attempts does not increase weight");
+        var run = new LabRun("terminal", "sandbox", 0, 0, "EN", [], new Random(3), missionId: "terminal-explore");
+        run.Resume();
+        for (int i = 0; i < 5 && run.Task.Id != "command/pwd"; i++) Complete(run);
+        Check(run.Task.Id == "command/pwd", "The chosen route really reaches a pwd goal");
+        Type(run, "invalid-command");
+        Chord(run, "Enter");
+        var actualMiss = run.Attempts.Last();
+        Check(!actualMiss.Correct && actualMiss.Skill == "lab/terminal/command/pwd",
+            "A failed key-driven pwd submission records the matching full skill ID");
+        double[] freshDraws = [.8, .4, .3]; // recent terminal-explore is excluded
+        Check(Pick(freshDraws, actualMiss) == "terminal-backup",
+            "Novelty still excludes the recently practiced route; another route practicing pwd gains priority");
+    }
+
     private static void Main()
     {
+        TestCommandReviewWeighting();
         foreach (string app in LabCatalog.Apps)
         foreach (int level in new[] { 0, 1, 2 })
         {

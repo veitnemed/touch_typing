@@ -20,7 +20,7 @@ internal sealed class LabRun
     private const string ExactUrlEvent = "@exact-url";
     private const string StrictReportEvent = "@strict-report";
     private int variant;
-    private string initialLayout;
+    private string initialLayout, attemptLayout;
     private bool initialVirtual;
     internal bool HasDraft => trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent));
     private readonly HashSet<string> used = [];
@@ -144,6 +144,8 @@ internal sealed class LabRun
             return null; // repeat edits can move the caret, never complete a lesson step
         }
         if (!pressed && !held.Contains(key)) return null;
+        // Capture before a layout switch or other action can modify the scene.
+        attemptLayout = Scene.Layout;
         trace.Add(new(key, pressed, text));
         if (!pressed)
         {
@@ -277,7 +279,7 @@ internal sealed class LabRun
     {
         int milliseconds = (int)Math.Clamp(clock() - sinceTask, 1, 60000);
         var attempt = new ShortcutAttempt { Skill = "lab/" + App + "/" + Task.Id, Session = Session, Verification = "lab-scene",
-            Date = DateTime.Now, Correct = correct, Milliseconds = milliseconds, MistakeKey = correct ? null : key, InputMode = "exact", Mission = MissionId, Assisted = ShowGuide, Independent = Guidance == "independent", FirstTry = correct && !hadError };
+            Date = DateTime.Now, Correct = correct, Milliseconds = milliseconds, MistakeKey = correct ? null : key, InputMode = "exact", Mission = MissionId, Layout = attemptLayout, Assisted = ShowGuide, Independent = Guidance == "independent", FirstTry = correct && !hadError };
         Attempts.Add(attempt); points.Add(new LabPoint(Seconds, correct, key, Task.Id, milliseconds));
         return attempt;
     }
@@ -293,9 +295,13 @@ internal sealed class LabRun
             var recent = past.Concat(Attempts).Where(a => a.Mission != null).Select(a => a.Mission).Reverse().Distinct().Take(2).ToHashSet();
             var fresh = available.Where(m => !recent.Contains(m.Id)).ToArray();
             if (fresh.Length > 0) available = fresh;
-            var weak = past.Concat(Attempts).TakeLast(60).Where(a => !a.Correct).Select(a => a.Skill.Split('/').Last()).ToHashSet();
+            string skillPrefix = "lab/" + App + "/";
+            // The prefix identifies the class; the remainder is one ID, even when
+            // it contains command arguments with spaces or directory separators.
+            var weak = past.Concat(Attempts).TakeLast(60).Where(a => !a.Correct)
+                .Select(a => a.Skill[skillPrefix.Length..]).ToHashSet(StringComparer.Ordinal);
             mission = string.IsNullOrEmpty(requestedMission) ? available.OrderBy(m => random.NextDouble() /
-                (1 + m.Phases.Sum(phase => phase.Route.Split(' ').Count(weak.Contains)))).First()
+                (1 + LiveCourse.CountWeakRouteTasks(m, weak))).First()
                 : courses.FirstOrDefault(m => m.Id == requestedMission) ?? throw new ArgumentException("Поручение недоступно для выбранного уровня.");
             if (!restoring) variant = random.Next(3);
             requestedMission = null; used.Add(mission.Id); trace.Clear();

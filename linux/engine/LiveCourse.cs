@@ -30,9 +30,9 @@ internal static partial class LiveCourse
         var goals = new List<LiveGoal>();
         for (int phase = 0; phase < mission.Phases.Length; phase++)
         {
-            foreach (string token in mission.Phases[phase].Route.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            foreach (string token in RouteTokens(mission.Phases[phase]))
             {
-                if (token.StartsWith("cmd:") && trial.Layout == "RU")
+                if (IsCommandToken(token) && trial.Layout == "RU")
                 {
                     var change = trial.WithBinding(Actions["layout"]);
                     trial.Apply("layout");
@@ -63,6 +63,17 @@ internal static partial class LiveCourse
         return goals;
     }
 
+    private static IEnumerable<string> RouteTokens(LivePhase phase) =>
+        phase.Route.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+    private static bool IsCommandToken(string token) => token.StartsWith("cmd:", StringComparison.Ordinal);
+    private static string DecodeCommand(string token) => token[4..].Replace('~', ' ');
+    private static string CommandId(string command) => "command/" + command;
+
+    internal static int CountWeakRouteTasks(LiveMission mission, HashSet<string> weak) =>
+        mission.Phases.SelectMany(RouteTokens)
+            .Count(token => weak.Contains(IsCommandToken(token) ? CommandId(DecodeCommand(token)) : token));
+
     private static bool AtItem(LabScene scene, string target) => scene.Entries(scene.Active).ElementAtOrDefault(scene.Active.Focus is "quick-open" or "symbols" ? scene.Active.OptionIndex : scene.Active.Item)?.Title == target;
     private static readonly Dictionary<string, LabTask> Actions = LabCatalog.Shortcuts.ToDictionary(task => task.Id);
     private static LabTask MakeTask(string token, LabScene scene)
@@ -76,10 +87,10 @@ internal static partial class LiveCourse
             var picker = Actions[w.Focus == "quick-open" ? "quick-next" : w.Focus == "symbols" ? "symbol-next" : w.App == "files" ? "file-next" : "link-next"];
             return picker with { Title = "Выберите «" + entry.Title + "»", Text = entry.Title };
         }
-        if (token.StartsWith("cmd:"))
+        if (IsCommandToken(token))
         {
-            string value = token[4..].Replace('~', ' ');
-            return new("command/" + value, "Выполните «" + value + "»", "", value.Length > 12 ? "Ctrl+R — найти команду по фрагменту. Enter — выполнить, стрелка — перейти к правке." : "Введите команду и нажмите Enter.", value, "command");
+            string value = DecodeCommand(token);
+            return new(CommandId(value), "Выполните «" + value + "»", "", value.Length > 12 ? "Ctrl+R — найти команду по фрагменту. Enter — выполнить, стрелка — перейти к правке." : "Введите команду и нажмите Enter.", value, "command");
         }
         var task = scene.WithBinding(Actions[token]);
         if (task.Action == "item-open")

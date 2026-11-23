@@ -2,7 +2,7 @@ name: Live input candidate (no publish)
 
 on:
   push:
-    branches: [feature/live-input-reliability, feature/live-file-recovery, feature/live-level-advice]
+    branches: [feature/live-input-reliability, feature/live-file-recovery, feature/live-level-advice, feature/live-skill-identity]
   workflow_dispatch:
 
 permissions:

@@ -31,6 +31,8 @@ namespace TouchTypingStudio
     {
         public string Skill, Session, Verification, MistakeKey;
         public string InputMode, Mission;
+        // Simulated input layout just before the action; absent on older records.
+        public string Layout;
         public bool Assisted, Independent, FirstTry;
         public DateTime Date;
         public bool Correct;
