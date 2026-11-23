@@ -1,5 +1,6 @@
 """Run both workstation-debug cases through normal lab-key protocol."""
 import base64
+from contextlib import ExitStack
 import os
 import struct
 import tempfile
@@ -32,15 +33,22 @@ CASES = {
 class DebugDay(unittest.TestCase):
     def test_guided_and_independent(self):
         for mode, case in CASES.items():
-            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory, patch.dict(
-                    os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
-                engine = Engine(verify=True)
-                try:
-                    self.route(engine, mode, case)
-                finally:
-                    engine.close()
+            with self.subTest(mode=mode):
+                uninterrupted = self.route(mode, case, restart_midway=False)
+                self.assertEqual(self.route(mode, case, restart_midway=True), uninterrupted)
 
-    def route(self, engine, mode, case):
+    def route(self, mode, case, restart_midway):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+                os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}), ExitStack() as cleanup:
+            return self._run_route(mode, case, restart_midway, cleanup)
+
+    def _run_route(self, mode, case, restart_midway, cleanup):
+        def open_engine():
+            client = Engine(verify=True)
+            cleanup.callback(client.close)
+            return client
+
+        engine = open_engine()
         engine.call("configure", layout="EN", dock=["chrome", "code", "terminal", "files"])
         options = dict(app="workday", level=1, mode="sandbox", seconds=0, actionLimit=0,
                        guidance="guided" if mode == "independent" else "independent", mission=f"workday-debug-{mode}", seed=7)
@@ -69,6 +77,32 @@ class DebugDay(unittest.TestCase):
             self.assertEqual(state["solved"], before + 1, (value, state["task"], state["status"]))
             if mode == "independent":
                 self.assertFalse(state["showGuide"])
+
+        def restart():
+            nonlocal engine, state
+            old = state
+            engine.call("lab-pause")
+            self.assertIsNone(engine.storage_error)
+            state = engine.call("lab-resume")
+            # A force-kill must recover the newest committed snapshot, not an
+            # edit made after it which did not complete a credited action.
+            before = state["solved"]
+            type_text("z")
+            self.assertEqual(state["solved"], before)
+            prior = next(w for w in old["scene"]["windows"] if w["active"])
+            if prior["app"] == "code":
+                self.assertNotEqual(active("code")["body"], prior["body"])
+            else:
+                self.assertNotEqual(state["scene"]["terminalInput"], old["scene"]["terminalInput"])
+            engine.process.kill()
+            engine.close()
+            engine = open_engine()
+            engine.call("configure", layout="EN", dock=["chrome", "code", "terminal", "files"])
+            state = engine.call("lab-start", **dict(options, guidance=mode, **{"continue": True}))
+            self.assertEqual(state["solved"], old["solved"])
+            self.assertTrue(state["paused"])
+            state = engine.call("lab-resume")
+            return old
 
         def active(app):
             return next(w for w in state["scene"]["windows"] if w["active"] and w["app"] == app)
@@ -112,7 +146,18 @@ class DebugDay(unittest.TestCase):
         self.assertIn(case["incorrect"], active("code")["body"])
         step("Down")
         step("Ctrl+L")
-        type_text(case["corrected"])
+        type_text(case["corrected"][:-2])
+        if restart_midway:
+            gesture("Shift+Left")
+            before_restart = active("code")
+            self.assertNotEqual(before_restart["bodyCursor"], before_restart["bodyAnchor"])
+            restart()
+            for field in ("activeTab", "bodyCursor", "bodyAnchor", "body", "focus"):
+                self.assertEqual(active("code")[field], before_restart[field], field)
+            self.assertEqual([{k: v for k, v in t.items() if k != "id"} for t in active("code")["tabs"]],
+                             [{k: v for k, v in t.items() if k != "id"} for t in before_restart["tabs"]])
+            gesture("End")
+        type_text(case["corrected"][-2:])
         step("Enter")
         self.assertIn(case["corrected"], active("code")["body"])
         self.assertIn(case["incorrect"], active("code")["tabs"][active("code")["activeTab"]]["savedBody"])
@@ -148,7 +193,19 @@ class DebugDay(unittest.TestCase):
         self.assertIn("](evidence.png)", active("code")["body"])
         step("Ctrl+S")
         step("Ctrl+Alt+T")
-        type_text("cat " + case["report"])
+        type_text("cat " + case["report"][:-2])
+        if restart_midway:
+            gesture("Left")
+            before_restart = active("terminal")
+            self.assertEqual(state["scene"]["terminalInput"], "cat " + case["report"][:-2])
+            self.assertEqual(before_restart["cursor"], len(state["scene"]["terminalInput"]) - 1)
+            old = restart()
+            self.assertEqual(state["scene"]["terminal"], old["scene"]["terminal"])
+            self.assertEqual(state["scene"]["terminalInput"], old["scene"]["terminalInput"])
+            for field in ("cursor", "anchor", "focus"):
+                self.assertEqual(active("terminal")[field], before_restart[field], field)
+            gesture("End")
+        type_text(case["report"][-2:])
         step("Enter")
         self.assertEqual(state["solved"], initial_total)
         self.assertTrue(state["finished"] and state["saved"])
@@ -157,6 +214,21 @@ class DebugDay(unittest.TestCase):
         self.assertIn("](evidence.png)", files[report])
         self.assertTrue(files[report.rsplit("/",1)[0] + "/evidence.png"].startswith("data:image/png;base64,iVBORw0KGgo"))
         self.assertTrue(engine.call("lab-result")["completed"])
+        self.assertNotIn(options["mission"], [draft["mission"] for draft in engine.call("lab-catalog")["drafts"]])
+        def counts(client):
+            skills = client.call("configure", layout="EN")["liveSkills"]
+            return {row["key"]: row["count"] for row in skills}
+
+        credits = counts(engine)
+        self.assertTrue(credits)
+        # A fresh process sees exactly the same credits after the completed attempt.
+        reopened = Engine(verify=True)
+        try:
+            self.assertEqual(counts(reopened), credits)
+            self.assertNotIn(options["mission"], [draft["mission"] for draft in reopened.call("lab-catalog")["drafts"]])
+        finally:
+            reopened.close()
+        return credits
 
 
 def exercise_native(self, mode, chord, capture, output):

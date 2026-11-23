@@ -201,6 +201,35 @@ jobs:
           $app = Join-Path $env:RUNNER_TEMP 'TouchTyping QA/TouchTyping.exe'
           $destination = Join-Path $env:RUNNER_TEMP 'windows-evidence/reference-home'
           & (Join-Path $env:GITHUB_WORKSPACE 'windows/Capture-HomeReference.ps1') -Application $app -OutputDirectory $destination -AdjustHostedDisplay
+      - name: Verify hosted Windows upgrade and recovery from released v1.7.0
+        if: always() && !cancelled() && steps.unpack_wpf.outcome == 'success' && github.ref == 'refs/heads/feature/reference-ui'
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $python = (Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+          if (-not [IO.Path]::IsPathFullyQualified($python) -or $python -match '\\WindowsApps\\') { throw 'Runner Python installation unavailable' }
+          & $python -c "import sys; print(sys.version); sys.exit(sys.version_info < (3, 11))"
+          if ($LASTEXITCODE -ne 0) { throw 'Hosted migration probe requires installed Python 3.11+' }
+          $workspace = Join-Path $env:RUNNER_TEMP 'TouchTyping-upgrade-probe'
+          [void][IO.Directory]::CreateDirectory($workspace)
+          $oldZip = Join-Path $workspace 'v1.7.0-windows-x64.zip'
+          $oldUri = 'https://github.com/veitnemed/touch_typing/releases/download/v1.7.0/touch-typing-v1.7.0-windows-x64.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri $oldUri -OutFile $oldZip -TimeoutSec 60
+          if ((Get-FileHash -LiteralPath $oldZip -Algorithm SHA256).Hash -ne '0f781e9bae0b6f8fae67945e206a9384b0fffa470de66a033190cf411ea3709e') {
+            throw 'Published v1.7.0 Windows ZIP SHA256 mismatch'
+          }
+          $oldDir = Join-Path $workspace 'old'
+          Expand-Archive -LiteralPath $oldZip -DestinationPath $oldDir
+          $probe = Join-Path $env:GITHUB_WORKSPACE 'windows/Test-WindowsUpgrade.ps1'
+          $old = Join-Path $oldDir 'TouchTyping.exe'
+          $new = Join-Path $env:RUNNER_TEMP 'TouchTyping QA/TouchTyping.exe'
+          $out = Join-Path $workspace 'isolated-run'
+          $evidence = Join-Path $env:RUNNER_TEMP 'windows-evidence'
+          [void][IO.Directory]::CreateDirectory($evidence)
+          # Only the log is copied under the evidence root, never the profiles.
+          & $probe -OldApplication $old -NewApplication $new -OutputDirectory $out -Python $python -SourceRoot $env:GITHUB_WORKSPACE *>&1 |
+            Tee-Object -FilePath (Join-Path $evidence 'hosted-v1.7-upgrade.log')
       - uses: actions/upload-artifact@v4
         if: always()
         with:
