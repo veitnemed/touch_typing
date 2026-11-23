@@ -1,0 +1,109 @@
+name: Qualify exact 444892c stock Windows launcher (no publish)
+
+on:
+  push:
+    branches: [qa/stock-launch-444892c]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  stock-launch:
+    name: Stock launch (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            experimental: false
+          - os: windows-11-arm
+            experimental: true
+    timeout-minutes: 10
+    env:
+      TOUCH_TYPING_NORMAL_LAUNCH_ISOLATED_JOB: '1'
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE_RUN_ID: "45159030990"
+      EXPECTED_ZIP_SHA: "5c99ecca7d5a279c6593dd83abe6aa12f1b6ba35c2149c3f1532c5aab01ad8a0"
+      EXPECTED_RUNNER: ${{ matrix.os }}
+      CANDIDATE_SHA: 444892cfcc750af678e6c88835f05cfc758bc7f8
+      PROBE_SHA: da4437af98772cb27f5c138c43c343bc3a504d51
+    steps:
+      - name: Confirm source artifact provenance
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'Fresh GitHub-hosted runner required.' }
+          $os = Get-CimInstance Win32_OperatingSystem
+          if ($env:EXPECTED_RUNNER -eq 'windows-11-arm') {
+            if ($env:RUNNER_ARCH -ne 'ARM64' -or $os.Caption -notmatch 'Windows 11' -or $os.ProductType -ne 1) {
+              throw "Windows 11 ARM64 client required; observed $($os.Caption), $env:RUNNER_ARCH."
+            }
+          } elseif ($env:RUNNER_ARCH -ne 'X64' -or $os.Caption -notmatch 'Windows Server' -or $os.ProductType -eq 1) {
+            throw "Windows Server x64 required; observed $($os.Caption), $env:RUNNER_ARCH."
+          }
+          Write-Output "Host: $($os.Caption); build=$($os.BuildNumber); runner architecture=$env:RUNNER_ARCH"
+          if ($env:CANDIDATE_RUN_ID -notmatch '^[0-9]+$') { throw 'Run ID must be numeric.' }
+          $meta = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:CANDIDATE_RUN_ID"
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve run provenance.' }
+          $meta = $meta | ConvertFrom-Json
+          if ($meta.head_sha -ne $env:CANDIDATE_SHA -or $meta.conclusion -ne 'success' -or
+              $meta.path -ne '.github/workflows/python-editor-native-proof.yml') {
+            throw 'The referenced run is not the successful editor qualification for the pinned product commit.'
+          }
+          Write-Output "Pinned product SHA=$($meta.head_sha) artifact run=$($meta.html_url)"
+      - uses: actions/checkout@v4
+        with:
+          ref: da4437af98772cb27f5c138c43c343bc3a504d51
+          path: reviewed-probe
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-editor-windows-candidate
+          path: ${{ runner.temp }}/candidate-input
+          github-token: ${{ github.token }}
+          run-id: 45159030990
+      - name: Verify exact ZIP and exercise unchanged Start-Live.cmd
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $inputDir = Join-Path $env:RUNNER_TEMP 'candidate-input'
+          $zip = Join-Path $inputDir 'touchtyping-python-editor.zip'
+          $expected = (Get-Content -LiteralPath (Join-Path $inputDir 'SHA256SUMS.txt') -Raw).Split(' ')[0]
+          if ($expected -notmatch '^[0-9a-fA-F]{64}$') { throw 'Invalid ZIP SHA256 manifest.' }
+          $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+          if ($env:EXPECTED_ZIP_SHA -notmatch '^[0-9a-fA-F]{64}$' -or $actual -ne $env:EXPECTED_ZIP_SHA) {
+            throw 'Downloaded ZIP does not match the independently recorded original ZIP SHA256.'
+          }
+          if ($actual -ne $expected) { throw 'Downloaded ZIP SHA256 mismatch.' }
+          $appDir = Join-Path $env:RUNNER_TEMP 'TouchTyping Normal Extract'
+          Expand-Archive -LiteralPath $zip -DestinationPath $appDir
+          $cmd = Join-Path $appDir 'Start-Live.cmd'
+          $cmdSha = (Get-FileHash -LiteralPath $cmd -Algorithm SHA256).Hash
+          if ($cmdSha -ne '09d729bb568affdab98f8c74448ccffdb75a6ee3a0c0c84edcb9dcdf32b212eb') {
+            throw 'Stock Start-Live.cmd differs from the reviewed product blob.'
+          }
+          foreach ($file in @('TouchTyping.exe','engine/TouchTyping.Engine.exe')) {
+            $stream = [IO.File]::OpenRead((Join-Path $appDir $file))
+            try {
+              $pe = New-Object IO.BinaryReader($stream)
+              $stream.Position = 0x3c
+              $stream.Position = $pe.ReadInt32()
+              if ($pe.ReadUInt32() -ne 0x4550 -or $pe.ReadUInt16() -ne 0x8664) {
+                throw "$file is not an x64 PE executable."
+              }
+            } finally { $stream.Dispose() }
+          }
+          Write-Output "Exact archive ZIP SHA256=$actual  Start-Live.cmd SHA256=$cmdSha  probe=$env:PROBE_SHA"
+          $helper = Join-Path $env:GITHUB_WORKSPACE 'reviewed-probe/windows/Test-HostedNormalLaunch.ps1'
+          $output = Join-Path $env:RUNNER_TEMP 'windows-normal-evidence'
+          & $helper -Application (Join-Path $appDir 'TouchTyping.exe') -OutputDirectory $output
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.os }}-444892c-normal-profile-evidence
+          path: ${{ runner.temp }}/windows-normal-evidence/windows-normal-launch.log
+          if-no-files-found: warn
