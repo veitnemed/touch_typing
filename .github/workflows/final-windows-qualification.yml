@@ -140,7 +140,10 @@ jobs:
             terminal { 'stock normal-launch and exact terminal edit assertions' }
             small    { 'stock small-viewport Windows assertions' }
           }
-          if (-not (Select-String -LiteralPath $log -Pattern ('^PASS: [1-9][0-9]* ' + [regex]::Escape($summary) + '$'))) {
+          # Windows PowerShell can append UTF-16LE output to a differently encoded header.
+          $raw = [IO.File]::ReadAllBytes($log)
+          $normalized = [Text.Encoding]::UTF8.GetString($raw).Replace([string][char]0, '').Replace([string][char]65279, '')
+          if ($normalized -notmatch ('(?m)^PASS: [1-9][0-9]* ' + [regex]::Escape($summary) + '\r?$')) {
             throw 'Proof process did not record the required positive assertion summary.'
           }
           if ($env:PROOF_MODE -eq 'terminal') {
