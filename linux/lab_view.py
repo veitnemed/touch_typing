@@ -100,7 +100,7 @@ class DesktopView(Gtk.Widget):
         return len(value.encode("utf-16-le")) // 2
 
     def field(self, value, window, x, y, width, size, color, offset=0, focused=True,
-              mono=True, scroll_key=None, *, family="Noto Sans"):
+              mono=True, scroll_key=None, *, family="Noto Sans", line_break=0):
         """Draw one line using the same shaped layout for its text, selection and caret."""
         if width <= 0:
             return
@@ -113,7 +113,12 @@ class DesktopView(Gtk.Widget):
         caret = window.get("cursor", 0)
         anchor = window.get("anchor", caret)
         left, right = sorted((edge(caret), edge(anchor)))
-        draw_caret = focused and offset <= caret <= offset + len(encoded) // 2
+        line_end = offset + len(encoded) // 2
+        # The newline is represented by the gap after this line, not a
+        # standalone glyph. Keep the caret at the same Pango boundary.
+        selected_break = (line_break > 0 and min(anchor, caret) < line_end + line_break
+                          and max(anchor, caret) > line_end)
+        draw_caret = focused and offset <= caret <= line_end
         caret_x = edge(caret) if draw_caret else 0
         x_shift = max(0, caret_x - width + 3)
         if draw_caret and scroll_key is not None:
@@ -133,6 +138,10 @@ class DesktopView(Gtk.Widget):
                     self.fill("#385677", x + start, y, end - start, size * 1.45)
         if focused and right > left:
             self.fill("#35629b", x + left, y, right - left, size * 1.45)
+        if focused and selected_break:
+            end = edge(line_end)
+            space_width = self.text_layout(" ", size, mono=mono, family=family).get_size()[0] / Pango.SCALE
+            self.fill("#35629b", x + end, y, space_width, size * 1.45)
         point = Graphene.Point()
         point.init(x, y)
         self.snapshot.save()
@@ -408,7 +417,7 @@ class DesktopView(Gtk.Widget):
             field(line, body_field, left, top, available, 14 * scale, "#334154", offset=offset,
                        focused=body_field["cursor"] != body_field["anchor"])
             top += 23 * scale
-            offset += self.units(line) + 1
+            offset += self.units(line) + line_break
         top += 12
         entries = window.get("entries", [])
         visible = max(1, int((y + h - body_top - y - 18) / (33 * scale)))
@@ -498,7 +507,13 @@ class DesktopView(Gtk.Widget):
             first = max(0, line_num - lines_visible + 1)
             offset = 0
             field = dict(window, cursor=cursor, anchor=window.get("bodyAnchor", cursor) if active else cursor)
-            for i, line in enumerate(body.split("\n")):
+            lines = body.split("\n")
+            for i, raw in enumerate(lines):
+                line_break = 1 if i + 1 < len(lines) else 0
+                line = raw
+                if line_break and raw.endswith("\r"):
+                    line_break = 2
+                    line = raw[:-1]
                 if i >= first + lines_visible:
                     break
                 if i >= first:
@@ -506,8 +521,9 @@ class DesktopView(Gtk.Widget):
                     self.label(str(i + 1), left + 9, ly, 11, "#90949b", mono=True)
                     self.field(line, field, left + 43, ly, pane - 56, 14,
                                "#93b484" if line.lstrip().startswith("#") else "#d2dce6", offset=offset,
+                               line_break=line_break,
                                focused=active and (window.get("focus") == "body" or field["cursor"] != field["anchor"]))
-                offset += self.units(line) + 1
+                offset += self.units(line) + line_break
         document(name, window.get("body", ""), current, True)
         if split:
             other = window.get("otherTab") or {}

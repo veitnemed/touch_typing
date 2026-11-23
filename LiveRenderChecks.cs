@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -44,11 +45,69 @@ namespace TouchTypingStudio
             return count;
         }
 
+        private static byte[] DrawEditorSelection(string directory, string label, int anchor, int caret,
+            string body = "яe\u0301🙂\nб")
+        {
+            var editor = new Dictionary<string, object>
+            {
+                { "app", "code" }, { "active", true }, { "focus", "body" }, { "sidebar", false },
+                { "body", body }, { "bodyAnchor", anchor }, { "bodyCursor", caret }
+            };
+            return Draw(directory, "code", label, new Data(new Dictionary<string, object>
+            {
+                { "scene", new Dictionary<string, object> { { "windows", new object[] { editor } } } }
+            }));
+        }
+
+        private static int[] EditorBlueColumns(byte[] pixels, int row)
+        {
+            // 960 / 1200 scene scale, immersive editor origin y=-29, first row y=94,
+            // row pitch 21 scene units. Restrict both axes to the two content areas.
+            int top = row == 0 ? 52 : 69;
+            int bottom = row == 0 ? 68 : 85;
+            return Enumerable.Range(68, 110).Where(x => Enumerable.Range(top, bottom - top)
+                .Any(y =>
+                {
+                    int pixel = (y * 960 + x) * 4;
+                    return pixels[pixel] == 155 && pixels[pixel + 1] == 98 && pixels[pixel + 2] == 53;
+                })).ToArray();
+        }
+
+        private static void CheckEditorNewlineSelection(string directory)
+        {
+            var plain = DrawEditorSelection(directory, "code-unicode-caret", 5, 5);
+            var backward = DrawEditorSelection(directory, "code-newline-backward", 6, 5);
+            var forward = DrawEditorSelection(directory, "code-newline-forward", 5, 6);
+            var spanning = DrawEditorSelection(directory, "code-graphemes-and-newline", 1, 6);
+            var twoRows = DrawEditorSelection(directory, "code-emoji-newline-and-cyrillic", 3, 7);
+            var crlf = DrawEditorSelection(directory, "code-crlf", 5, 7, "яe\u0301🙂\r\nб");
+            var eof = DrawEditorSelection(directory, "code-no-marker-at-eof", 6, 7);
+            int[] glyphless = EditorBlueColumns(forward, 0);
+            int[] withCaret = EditorBlueColumns(backward, 0);
+            if (EditorBlueColumns(plain, 0).Length != 0 || glyphless.Length < 3 ||
+                // The backward caret can cover the marker's first pixel.
+                withCaret.Length < 2 || withCaret.Last() != glyphless.Last() ||
+                Math.Abs(withCaret.First() - glyphless.First()) > 2 ||
+                !glyphless.SequenceEqual(EditorBlueColumns(crlf, 0)) ||
+                EditorBlueColumns(backward, 1).Length != 0 || EditorBlueColumns(forward, 1).Length != 0)
+                throw new InvalidOperationException("Selected LF/CRLF must mark only the end of its own editor row, in both directions");
+            var firstSpan = EditorBlueColumns(spanning, 0);
+            var firstTwoRows = EditorBlueColumns(twoRows, 0);
+            if (firstSpan.Length <= glyphless.Length || firstTwoRows.Length <= glyphless.Length ||
+                firstSpan.First() >= firstTwoRows.First() || firstTwoRows.First() >= glyphless.First() ||
+                !glyphless.All(x => firstSpan.Contains(x) && firstTwoRows.Contains(x)) ||
+                EditorBlueColumns(spanning, 1).Length != 0 || EditorBlueColumns(twoRows, 1).Length < 2 ||
+                !EditorBlueColumns(twoRows, 1).SequenceEqual(EditorBlueColumns(eof, 1)) ||
+                EditorBlueColumns(eof, 0).Length != 0)
+                throw new InvalidOperationException("Rendered selection must include exactly the intended graphemes, line break and next-row glyph");
+        }
+
         internal static int Run(string executable, string directory)
         {
             Directory.CreateDirectory(directory);
             try
             {
+                CheckEditorNewlineSelection(directory);
                 using (var engine = new PracticeEngineClient(executable, true))
                 foreach (string app in new[] { "chrome", "code", "terminal" })
                 {
@@ -87,7 +146,7 @@ namespace TouchTypingStudio
                     }
                     engine.Call("lab-stop");
                 }
-                File.WriteAllText(Path.Combine(directory, "result.txt"), "PASS WPF selection, caret, Chrome Ctrl+F, Delete and Ctrl+J");
+                File.WriteAllText(Path.Combine(directory, "result.txt"), "PASS WPF selection, caret, Chrome Ctrl+F, editor LF/CRLF geometry, Delete and Ctrl+J");
                 return 0;
             }
             catch (Exception error)

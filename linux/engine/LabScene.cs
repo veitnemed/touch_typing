@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 
 namespace TouchTypingStudio;
 
@@ -71,6 +72,22 @@ internal sealed class LabWindow(string app, int number, int workspace)
         get => Anchor != Cursor;
         set { if (value) Select(0, Focus == "body" ? Body.Length : Input.Length); else Cursor = Cursor; }
     }
+    internal void RepairLegacyFieldPositions(Func<string, int, int> snap)
+    {
+        foreach (var field in positions)
+        {
+            if (App == "terminal" || field.Key == "terminal")
+            {
+                field.Value.Caret = snap(ShellInput, field.Value.Caret);
+                field.Value.Anchor = snap(ShellInput, field.Value.Anchor);
+            }
+            else if (fields.TryGetValue(field.Key, out var text))
+            {
+                field.Value.Caret = snap(text, field.Value.Caret);
+                field.Value.Anchor = snap(text, field.Value.Anchor);
+            }
+        }
+    }
     internal readonly HashSet<string> SavedBookmarks = [];
     internal int ActiveTab, Zoom = 100, OptionIndex;
     internal readonly List<LabTab> Tabs = [];
@@ -110,6 +127,7 @@ internal sealed partial class LabScene
     internal string LayoutKey = "Super+Space", SwitchTarget;
     internal string Layout, Clipboard = "build: 17 tests passed", ActiveWindow;
     internal bool Overview, Switcher, Screenshot, ScreenshotReady, ScreenshotCopied, ShowDesktop, LayoutIsVirtual;
+    internal bool ReplayLegacyNavigation;
     internal string Search = "";
     internal string TerminalInput { get => Active?.ShellInput ?? ""; set { if (Active != null) Active.ShellInput = value; } }
     private int windowNumber;
@@ -144,7 +162,7 @@ internal sealed partial class LabScene
         ActiveWindow = source.ActiveWindow; Overview = source.Overview; Switcher = source.Switcher;
         Screenshot = source.Screenshot; ScreenshotReady = source.ScreenshotReady;
         ScreenshotCopied = source.ScreenshotCopied; ShowDesktop = source.ShowDesktop;
-        LayoutIsVirtual = source.LayoutIsVirtual; Search = source.Search;
+        LayoutIsVirtual = source.LayoutIsVirtual; ReplayLegacyNavigation = source.ReplayLegacyNavigation; Search = source.Search;
         windowNumber = source.windowNumber;
         historyDraft = source.historyDraft; killedText = source.killedText;
         fileTransfer = source.fileTransfer; fileCut = source.fileCut; trashSequence = source.trashSequence;
@@ -441,7 +459,9 @@ internal sealed partial class LabScene
             w.Tab.ExtraMatches.Clear(); w.Body = updated;
         }
         else return;
-        w.Cursor = start + value.Length; Version++;
+        int caret = start + value.Length;
+        w.Cursor = ReplayLegacyNavigation ? caret : InsertionBoundary(updated, caret);
+        Version++;
     }
 
     internal bool CanRepeatEditing(string key)
@@ -550,19 +570,13 @@ internal sealed partial class LabScene
                 case "Left": case "Right":
                     bool left = key == "Left";
                     if (window.Selected && !extend && !word) target = left ? window.Start : window.End;
-                    else if (word)
-                    {
-                        if (left) { while (target > 0 && !char.IsLetterOrDigit(value[target - 1])) target--; while (target > 0 && char.IsLetterOrDigit(value[target - 1])) target--; }
-                        else { while (target < value.Length && char.IsLetterOrDigit(value[target])) target++; while (target < value.Length && !char.IsLetterOrDigit(value[target])) target++; }
-                    }
+                    else if (word) target = ReplayLegacyNavigation ? LegacyWordBoundary(value, pos, left) : WordBoundary(value, pos, left);
                     else target = left ? PreviousBoundary(value, pos) : NextBoundary(value, pos);
                     break;
                 case "Home": target = word ? 0 : LineStart(value, pos); break;
                 case "End": target = word ? value.Length : LineEnd(value, pos); break;
                 default:
-                    int start = LineStart(value, pos), end = LineEnd(value, pos);
-                    int adjacent = key == "Up" ? LineStart(value, Math.Max(0, start - 1)) : Math.Min(value.Length, end + 1);
-                    target = Math.Min(LineEnd(value, adjacent), adjacent + pos - start); break;
+                    target = VerticalBoundary(value, pos, up: key == "Up", legacy: ReplayLegacyNavigation); break;
             }
             window.Tab?.ExtraMatches.Clear();
             window.Select(extend ? window.Anchor : target, target); Version++; return true;
@@ -587,6 +601,105 @@ internal sealed partial class LabScene
 
     private static int NextBoundary(string value, int cursor) => StringInfo.ParseCombiningCharacters(value)
         .FirstOrDefault(index => index > cursor, value.Length);
+
+    // Keep published cursor positions in UTF-16 for the two renderers, but
+    // navigate text elements so one command cannot split a visual character.
+    private static int ElementAtOrBefore(int[] starts, int length, int offset)
+    {
+        if (offset == length) return starts.Length; // sentinel: end of text
+        int found = Array.BinarySearch(starts, offset);
+        return found < 0 ? Math.Max(0, (~found) - 1) : found;
+    }
+
+    private static int InsertionBoundary(string value, int caret)
+    {
+        if (caret == 0 || caret == value.Length) return caret;
+        // Between two ASCII characters, only CRLF is one grapheme. A
+        // non-ASCII Prepend character can bind even to an ASCII suffix.
+        if (value[caret] < 128 && value[caret - 1] < 128 &&
+            (value[caret] != '\n' || value[caret - 1] != '\r')) return caret;
+        int offset = 0;
+        while (offset < caret) offset += StringInfo.GetNextTextElementLength(value.AsSpan(offset));
+        return offset;
+    }
+
+    private static int WordBoundary(string value, int caret, bool left)
+    {
+        int[] starts = StringInfo.ParseCombiningCharacters(value);
+        int element = ElementAtOrBefore(starts, value.Length, caret);
+        bool IsWord(int index) =>
+            Rune.TryGetRuneAt(value, starts[index], out Rune rune) && Rune.IsLetterOrDigit(rune);
+        if (left)
+        {
+            while (element > 0 && !IsWord(element - 1)) element--;
+            while (element > 0 && IsWord(element - 1)) element--;
+        }
+        else
+        {
+            while (element < starts.Length && IsWord(element)) element++;
+            while (element < starts.Length && !IsWord(element)) element++;
+        }
+        return element == starts.Length ? value.Length : starts[element];
+    }
+
+    // Reproduce already-saved edits made under the former code-unit rules.
+    private static int LegacyWordBoundary(string value, int offset, bool left)
+    {
+        if (left)
+        {
+            while (offset > 0 && !char.IsLetterOrDigit(value[offset - 1])) offset--;
+            while (offset > 0 && char.IsLetterOrDigit(value[offset - 1])) offset--;
+        }
+        else
+        {
+            while (offset < value.Length && char.IsLetterOrDigit(value[offset])) offset++;
+            while (offset < value.Length && !char.IsLetterOrDigit(value[offset])) offset++;
+        }
+        return offset;
+    }
+
+    private static int VerticalBoundary(string value, int caret, bool up, bool legacy)
+    {
+        int start = LineStart(value, caret), end = LineEnd(value, caret);
+        int adjacent = up ? LineStart(value, Math.Max(0, start - 1)) : Math.Min(value.Length, end + 1);
+        if (legacy) return Math.Min(LineEnd(value, adjacent), adjacent + caret - start);
+        int[] starts = StringInfo.ParseCombiningCharacters(value);
+        int Index(int offset) => ElementAtOrBefore(starts, value.Length, offset);
+        int column = Index(caret) - Index(start);
+        int target = Math.Min(Index(LineEnd(value, adjacent)), Index(adjacent) + column);
+        return target == starts.Length ? value.Length : starts[target];
+    }
+
+    internal void EndLegacyNavigation()
+    {
+        ReplayLegacyNavigation = false;
+        // Former vertical moves and joining insertions could leave a caret
+        // inside a cluster. Keep already-edited text, snap old endpoints.
+        static int Snap(string text, int offset)
+        {
+            int safe = Math.Clamp(offset, 0, text.Length);
+            if (safe == 0 || safe == text.Length) return safe;
+            int[] starts = StringInfo.ParseCombiningCharacters(text);
+            return starts[ElementAtOrBefore(starts, text.Length, safe)];
+        }
+        static void Repair(Stack<EditRevision> stack)
+        {
+            var states = stack.Reverse().Select(revision => revision with {
+                Cursor = Snap(revision.Text, revision.Cursor), Anchor = Snap(revision.Text, revision.Anchor)
+            }).ToArray();
+            stack.Clear();
+            foreach (var state in states) stack.Push(state);
+        }
+        foreach (var window in Windows) window.RepairLegacyFieldPositions(Snap);
+        foreach (var tab in Windows.Where(window => window.App is "code" or "chrome")
+                                   .SelectMany(window => window.Tabs.Concat(window.ClosedTabs)))
+        {
+            tab.Position.Caret = Snap(tab.Body, tab.Position.Caret);
+            tab.Position.Anchor = Snap(tab.Body, tab.Position.Anchor);
+            // An Undo after upgrade must not resurrect the invalid coordinates.
+            Repair(tab.Undo); Repair(tab.Redo);
+        }
+    }
 
     private static string Erase(string value, int cursor, string key, out int nextCursor)
     {

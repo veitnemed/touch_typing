@@ -26,6 +26,7 @@ def main():
     parser.add_argument("--source-note", action="store_true", help="Пройти оконное поручение: методика → заметка")
     parser.add_argument("--save-retry", action="store_true", help="Включить проверку закрытия при ошибке сохранения")
     parser.add_argument("--soft-limit", action="store_true", help="Проверить выбор при достижении лимита в окне GTK")
+    parser.add_argument("--selection-render", action="store_true", help="Проверить отображение выбранного переноса строки в GTK")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -62,6 +63,7 @@ def main():
             if args.reference_terminal: command.append("--reference-terminal")
             if args.source_note: command.append("--source-note")
             if args.soft_limit: command.append("--soft-limit")
+            if args.selection_render: command.append("--selection-render")
             if args.full: command.append("--full")
             return subprocess.run(command, env=environment).returncode
     return run_checks(args)
@@ -175,6 +177,10 @@ def run_checks(args):
                     check("native-soft-limit", [sys.executable, str(tests / "test_lab_window.py"), "--soft-limit"])
                 finally:
                     environment["XDG_DATA_HOME"] = previous
+        if args.selection_render:
+            report["coverage"].append("GTK editor row selection geometry with Cyrillic, emoji, LF and CRLF")
+            check("native-selection-render", [sys.executable, str(tests / "test_native_selection_render.py"),
+                                              str(args.output / "selection-render")])
         if args.reference_terminal:
             report["coverage"].append("GTK terminal native abcde, Home, Right, Right, Delete")
             with tempfile.TemporaryDirectory(prefix="typing-reference-terminal-") as folder:

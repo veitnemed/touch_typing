@@ -197,6 +197,135 @@ class PracticeTest(unittest.TestCase):
         self.assertFalse(self.lab_chord("LCtrl", "J")["scene"]["windows"][0]["panel"])
         self.assertEqual(self.lab_chord("LCtrl", "LShift", "X")["scene"]["windows"][0]["focus"], "extensions")
 
+    def test_live_word_navigation_keeps_grapheme_clusters(self):
+        self.open_live("terminal")
+        def edit(*keys, text=""):
+            scene = self.lab_chord(*keys, text=text)["scene"]
+            active = next(w for w in scene["windows"] if w["active"])
+            return scene["terminalInput"], active["anchor"], active["cursor"]
+
+        self.assertEqual(edit("A", text="кра\u0301й слово"), ("кра\u0301й слово", 11, 11))
+        self.assertEqual(edit("LCtrl", "Left")[1:], (6, 6))
+        self.assertEqual(edit("LCtrl", "Left")[1:], (0, 0))
+        self.assertEqual(edit("LCtrl", "Right")[1:], (6, 6))
+        self.assertEqual(edit("LCtrl", "LShift", "Left")[1:], (6, 0))
+        self.assertEqual(edit("Delete"), ("слово", 0, 0))
+
+        # Supplementary-plane letters participate in words; emoji is a delimiter.
+        edit("End")
+        edit("A", text=" 😀 𐐀x")
+        self.assertEqual(edit("LCtrl", "Left")[1:], (9, 9))
+        self.assertEqual(edit("LCtrl", "Left")[1:], (0, 0))
+        self.assertEqual(edit("LCtrl", "Right")[1:], (9, 9))
+
+        edit("Home")
+        edit("LShift", "End")
+        self.assertEqual(edit("A", text="foo_bar baz"), ("foo_bar baz", 11, 11))
+        self.assertEqual(edit("LCtrl", "Left")[1:], (8, 8))
+        self.assertEqual(edit("LCtrl", "Left")[1:], (4, 4))
+        self.assertEqual(edit("LCtrl", "Right")[1:], (8, 8))
+
+    def test_live_vertical_caret_and_reversed_grapheme_selection(self):
+        self.open_live("code")
+        def edit(*keys, text=""):
+            window = next(w for w in self.lab_chord(*keys, text=text)["scene"]["windows"] if w["active"])
+            return window["body"], window["anchor"], window["cursor"]
+
+        edit("LCtrl", "A")
+        edit("A", text="a")
+        edit("Enter")
+        edit("A", text="😀b")
+        self.assertEqual(edit("LCtrl", "Home"), ("a\n😀b", 0, 0))
+        self.assertEqual(edit("End")[1:], (1, 1))
+        self.assertEqual(edit("Down")[1:], (4, 4))
+        self.assertEqual(edit("LShift", "Left")[1:], (4, 2))
+        self.assertEqual(edit("LShift", "Right")[1:], (4, 4))
+        self.assertEqual(edit("LShift", "Right")[1:], (4, 5))
+        self.assertEqual(edit("A", text="я\u0301"), ("a\n😀я\u0301", 6, 6))
+        self.assertEqual(edit("Backspace"), ("a\n😀", 4, 4))
+        self.assertEqual(edit("LShift", "Left")[1:], (4, 2))
+        self.assertEqual(edit("Delete"), ("a\n", 2, 2))
+
+        edit("A", text="е\u0301ж")
+        edit("LCtrl", "Home")
+        edit("End")
+        self.assertEqual(edit("Down")[1:], (4, 4))  # after the one-grapheme е́, not between base/accent
+        self.assertEqual(edit("Up")[1:], (1, 1))
+
+    def test_live_insertion_never_leaves_caret_in_joined_grapheme(self):
+        for app in ("code", "terminal", "chrome"):
+            with self.subTest(app=app):
+                self.open_live(app)
+                def edit(*keys, text=""):
+                    scene = self.lab_chord(*keys, text=text)["scene"]
+                    window = next(w for w in scene["windows"] if w["active"])
+                    value = (window["body"] if app == "code" else
+                             scene["terminalInput"] if app == "terminal" else window["input"])
+                    return value, window["anchor"], window["cursor"]
+                if app == "chrome":
+                    edit("LCtrl", "L")
+                if app != "terminal":
+                    edit("LCtrl", "A")
+                self.assertEqual(edit("A", text="\u0301b"), ("\u0301b", 2, 2))
+                self.assertEqual(edit("Home")[1:], (0, 0))
+                self.assertEqual(edit("A", text="a"), ("a\u0301b", 2, 2))
+                self.assertEqual(edit("Delete"), ("a\u0301", 2, 2))
+                self.assertEqual(edit("Backspace"), ("", 0, 0))
+
+                # Deleting a delimiter can also join its two neighbors.
+                edit("A", text="🇺x🇸")
+                edit("Home")
+                self.assertEqual(edit("Right")[1:], (2, 2))
+                self.assertEqual(edit("Delete"), ("🇺🇸", 4, 4))
+                self.assertEqual(edit("Backspace"), ("", 0, 0))
+
+                edit("A", text="b")
+                edit("Home")
+                self.assertEqual(edit("A", text="\u0600"), ("\u0600b", 2, 2))
+                self.assertEqual(edit("Backspace"), ("", 0, 0))
+
+    def test_pre_grapheme_draft_replays_old_edit_then_switches_navigation_once(self):
+        import json
+        import xml.etree.ElementTree as ET
+
+        options = dict(app="code", mode="sandbox", level=0, seconds=0, seed=1, guidance="guided")
+        self.engine.call("lab-start", **options)
+        self.engine.call("lab-resume")
+        self.lab_chord("LCtrl", "A")
+        self.lab_chord("A", text="aa")
+        self.lab_chord("Enter")
+        self.lab_chord("A", text="😀b")
+        self.lab_chord("LCtrl", "Home")
+        self.lab_chord("End")
+        self.lab_chord("Down")
+        self.lab_chord("Delete")
+        self.assertTrue(self.engine.call("lab-stop")["saved"])
+        self.engine.close()
+
+        # The same physical actions were valid before Unicode navigation, but
+        # old Down retained two UTF-16 units rather than two whole symbols.
+        path = Path(self.data.name) / "TouchTypingStudio-QA" / "progress.xml"
+        profile = ET.parse(path)
+        trace_tag = "./LiveDrafts/LiveDraft/Trace"
+        trace = profile.find(trace_tag)
+        events = json.loads(trace.text)
+        old_events = [event for event in events if event["Key"] != "@cluster-navigation"]
+        self.assertEqual(len(old_events), len(events) - 1)
+        trace.text = json.dumps(old_events)
+        profile.write(path, encoding="utf-8", xml_declaration=True)
+
+        for _ in range(2):
+            self.engine = Engine(verify=True)
+            state = self.engine.call("lab-start", **options, **{"continue": True})
+            window = next(w for w in state["scene"]["windows"] if w["active"])
+            self.assertEqual((window["body"], window["cursor"], window["anchor"]), ("aa\n😀", 5, 5))
+            self.assertTrue(self.engine.call("lab-stop")["saved"])
+            events = json.loads(ET.parse(path).findtext(trace_tag))
+            self.assertEqual([event["Key"] for event in events].count("@cluster-navigation"), 1)
+            self.assertEqual(events[:-1], old_events)
+            self.engine.close()
+        self.engine = Engine(verify=True)
+
     def test_history_search_runs_long_command_without_retyping(self):
         self.engine.call("lab-start", app="terminal", mode="sandbox", level=0, seconds=0, mission="terminal-explore")
         self.engine.call("lab-resume")

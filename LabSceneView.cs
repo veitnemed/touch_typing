@@ -292,8 +292,13 @@ namespace TouchTypingStudio
                 {
                     double row = 94 + (i - first) * 21;
                     Text((i + 1).ToString(), primary + 10, row, 11, "#89909A", 24, 1, true);
-                    Field(lines[i], window, primary + 42, row, editorWidth - 48, 13,
-                        lines[i].TrimStart().StartsWith("#") ? "#93B484" : "#D2DCE6", offset, window.S("focus") == "body" || window.I("bodyAnchor") != window.I("bodyCursor"), true);
+                    bool hasLineBreak = i + 1 < lines.Length;
+                    string line = hasLineBreak && lines[i].EndsWith("\r", StringComparison.Ordinal)
+                        ? lines[i].Substring(0, lines[i].Length - 1) : lines[i];
+                    Field(line, window, primary + 42, row, editorWidth - 48, 13,
+                        line.TrimStart().StartsWith("#") ? "#93B484" : "#D2DCE6", offset,
+                        window.S("focus") == "body" || window.I("bodyAnchor") != window.I("bodyCursor"),
+                        document: true, hasLineBreak: hasLineBreak);
                 }
                 offset += lines[i].Length + 1;
             }
@@ -481,7 +486,7 @@ namespace TouchTypingStudio
         }
 
         private void Field(string value, Data window, double x, double y, double width, double size, string ink,
-            int offset, bool focused, bool document = false, string scrollKey = null, Typeface face = null)
+            int offset, bool focused, bool document = false, string scrollKey = null, Typeface face = null, bool hasLineBreak = false)
         {
             if (width <= 0) return;
             if (face != null)
@@ -505,7 +510,11 @@ namespace TouchTypingStudio
                 cx = prefix.WidthIncludingTrailingWhitespace;
             }
             context.PushClip(new RectangleGeometry(new Rect(x, y, width, size * 1.7)));
-            double shift = Math.Max(0, cx - width + 3);
+            bool selectLineBreak = focused && hasLineBreak &&
+                Math.Min(caret, anchor) <= value.Length && Math.Max(caret, anchor) > value.Length;
+            double lineBreakWidth = Math.Ceiling(size * .6);
+            double caretMargin = selectLineBreak && caret == value.Length ? lineBreakWidth + 1 : 3;
+            double shift = Math.Max(0, cx - width + caretMargin);
             if (drawCaret && scrollKey != null)
             {
                 double prior;
@@ -531,6 +540,12 @@ namespace TouchTypingStudio
                 context.DrawGeometry(Ui.Brush("#35629B"), null, line.BuildHighlightGeometry(origin, start, end - start));
                 line.SetForegroundBrush(Brushes.White, start, end - start);
             }
+            // A newline owns no glyph in this per-line renderer. Give the
+            // selected break a cell immediately after the last visible glyph
+            // (including trailing spaces), on this row only.
+            if (selectLineBreak)
+                Rectangle(origin.X + line.WidthIncludingTrailingWhitespace, y,
+                    lineBreakWidth, Math.Max(size, line.Height), "#35629B");
             context.DrawText(line, origin);
             if (drawCaret) Rectangle(x + cx, y + 1, 1.5, size * 1.3, ink);
             context.Pop();

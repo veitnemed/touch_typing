@@ -16,14 +16,15 @@ internal sealed class LabRun
     private readonly HashSet<string> held = [];
     private readonly List<LabPoint> points = [];
     private readonly List<LiveEvent> trace = [];
-    private bool restoring, replayLegacyUrl, replayLegacyReport;
+    private bool restoring, replayLegacyUrl, replayLegacyReport, replayLegacyNavigation;
     private const string ExactUrlEvent = "@exact-url";
     private const string StrictReportEvent = "@strict-report";
+    private const string ClusterNavigationEvent = "@cluster-navigation";
     private int variant;
     private string initialLayout, attemptLayout;
     private bool initialVirtual;
     internal bool HasDraft => !CompletedRoute && !limitAccepted && (!ReachedLimit || softFinish || FinishingMission) &&
-        (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 || trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent)));
+        (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 || trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask;
@@ -105,7 +106,7 @@ internal sealed class LabRun
         // Timed and action-limit sessions continue to honor the chosen length.
         finishSingleRoute = !string.IsNullOrEmpty(requestedMission) && TimeLimit == 0 && ActionLimit == 0;
         dockProfile = draft?.Dock ?? dock; layoutBinding = draft?.LayoutKey ?? layoutKey;
-        variant = draft?.Variant ?? -1; restoring = draft != null;
+        variant = draft?.Variant ?? -1; restoring = replayLegacyNavigation = draft != null;
         Scene = new LabScene(app == "workday" ? "ubuntu" : app, draft?.Layout ?? layout) { LayoutKey = layoutKey, LayoutIsVirtual = draft?.VirtualLayout ?? false };
         if (dock != null) Scene.Dock = dock;
         Next();
@@ -120,10 +121,12 @@ internal sealed class LabRun
                 else if (e.Key == "@hint") Hint();
                 else if (e.Key == ExactUrlEvent) { replayLegacyUrl = false; trace.Add(e); }
                 else if (e.Key == StrictReportEvent) { replayLegacyReport = false; trace.Add(e); }
+                else if (e.Key == ClusterNavigationEvent) EndLegacyNavigation(e);
                 else Input(e.Key, e.Down, e.Text);
             }
             if (replayLegacyUrl) trace.Add(new(ExactUrlEvent));
             if (replayLegacyReport) trace.Add(new(StrictReportEvent));
+            if (replayLegacyNavigation) EndLegacyNavigation(new(ClusterNavigationEvent));
             replayLegacyUrl = replayLegacyReport = false;
             Pause();
             // Trace describes the current mission, not the whole attempt. Its
@@ -141,6 +144,13 @@ internal sealed class LabRun
             FinishingMission = progress?.FinishingMission == true;
             restoring = false;
         }
+    }
+
+    private void EndLegacyNavigation(LiveEvent marker)
+    {
+        if (replayLegacyNavigation) Scene.EndLegacyNavigation();
+        replayLegacyNavigation = false;
+        trace.Add(marker);
     }
 
     internal LiveDraft Draft() => new() { App = App, Level = Level, Mission = MissionId, Layout = initialLayout, Guidance = Guidance,
@@ -423,6 +433,7 @@ internal sealed class LabRun
             {
                 trace.Add(new(ExactUrlEvent));
                 trace.Add(new(StrictReportEvent));
+                trace.Add(new(ClusterNavigationEvent));
             }
             foreach (string key in held) trace.Add(new("@held/" + key, superUsed));
             missionLength = pending.Count;
@@ -434,7 +445,8 @@ internal sealed class LabRun
 
     private LabScene PrepareMissionScene()
     {
-        var scene = new LabScene(App == "workday" ? "ubuntu" : App, initialLayout) { LayoutKey = layoutBinding, LayoutIsVirtual = initialVirtual };
+        var scene = new LabScene(App == "workday" ? "ubuntu" : App, initialLayout)
+        { LayoutKey = layoutBinding, LayoutIsVirtual = initialVirtual, ReplayLegacyNavigation = replayLegacyNavigation };
         if (dockProfile != null) scene.Dock = dockProfile;
         scene.PrepareCase(variant, App);
         return scene;
