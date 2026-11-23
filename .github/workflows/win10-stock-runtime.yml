@@ -1,0 +1,112 @@
+name: TouchTyping 1.9.0 stock Windows runtime (no publish)
+on:
+  push:
+    branches: [qa/win10-190-stock-windows]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  windows:
+    name: TouchTyping 1.9.0 stock Windows x64 runtime
+    runs-on: windows-2025
+    timeout-minutes: 12
+    env:
+      CANDIDATE_RUN_ID: '45218762089'
+      CANDIDATE_RUN_SHA: '3aa701dd9fc0a24b34d79fde4e65f6cd41eb1d39'
+      PRODUCT_SHA: '48b108c40cc90a968e99111809772bc0ca18bd64'
+      CANDIDATE_ZIP_SHA256: '1433ebed4fc28271918456770afd5e7309534a630c20213c206fcd6c11aca356'
+      GH_TOKEN: ${{ github.token }}
+      TOUCH_TYPING_NORMAL_LAUNCH_ISOLATED_JOB: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify builder identity and approved packaging step
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_ARCH -ne 'X64') {
+            throw 'This check needs fresh GitHub-hosted Windows x64.'
+          }
+          $os = Get-CimInstance Win32_OperatingSystem
+          if ($os.Caption -notmatch 'Windows Server 2025' -or $os.ProductType -eq 1) {
+            throw "Unexpected platform: $($os.Caption)."
+          }
+          "Windows=$($os.Caption) build=$($os.BuildNumber) arch=$env:RUNNER_ARCH"
+          $meta = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:CANDIDATE_RUN_ID"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not locate the pinned candidate run.' }
+          $meta = $meta | ConvertFrom-Json
+          if ($meta.head_sha -ne $env:CANDIDATE_RUN_SHA -or $meta.head_branch -ne 'qa/win10-190-archives' -or $meta.event -ne 'push') {
+            throw 'Unexpected candidate run identity or status.'
+          }
+          $jobs = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:CANDIDATE_RUN_ID/jobs?per_page=50"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not verify builder job.' }
+          $jobs = ($jobs | ConvertFrom-Json).jobs
+          $build = @($jobs | Where-Object { $_.name -eq 'package' -and $_.conclusion -eq 'success' })
+          if ($build.Count -ne 1 -or -not ($build[0].steps | Where-Object {
+              $_.name -eq 'Run full Linux-host regressions and cross-build Windows without executing it' -and $_.conclusion -eq 'success'
+          })) { throw 'Missing positive pinned builder package step.' }
+          "Builder=$($meta.html_url) workflowHead=$($meta.head_sha) source=$env:PRODUCT_SHA"
+      - uses: actions/checkout@v4
+        with:
+          ref: da4437af98772cb27f5c138c43c343bc3a504d51
+          path: reviewed-probe
+          persist-credentials: false
+      - name: Apply reviewed test-only patch
+        shell: pwsh
+        run: |
+          $base = Join-Path $env:GITHUB_WORKSPACE 'reviewed-probe'
+          if ((git -C $base rev-parse HEAD) -ne 'da4437af98772cb27f5c138c43c343bc3a504d51') { throw 'Wrong probe source' }
+          $patch = Join-Path $env:GITHUB_WORKSPACE 'qa/windows-runtime.patch'
+          git -C $base apply --check -- $patch
+          if ($LASTEXITCODE -ne 0) { throw 'Test patch does not apply' }
+          git -C $base apply -- $patch
+          if ($LASTEXITCODE -ne 0) { throw 'Test patch could not be applied' }
+          if ((@(git -C $base diff --name-only | Sort-Object) -join ' ') -ne
+              'windows/LiveUiSmoke.cs windows/Test-HostedNormalLaunch.ps1') { throw 'Unexpected probe edits' }
+      - uses: actions/download-artifact@v4
+        with:
+          name: touchtyping-190-verified-candidate
+          path: ${{ runner.temp }}/candidate-input
+          github-token: ${{ github.token }}
+          run-id: ${{ env.CANDIDATE_RUN_ID }}
+      - name: Verify unchanged Windows archive and exercise the stock launcher
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $inputDir = Join-Path $env:RUNNER_TEMP 'candidate-input'
+          $file = 'touch-typing-v1.9.0-windows-x64.zip'
+          $zip = Join-Path $inputDir $file
+          $output = Join-Path $env:RUNNER_TEMP 'stock-evidence'
+          New-Item -ItemType Directory -Path $output -ErrorAction Stop | Out-Null
+          $manifest = @(Get-Content -LiteralPath (Join-Path $inputDir 'SHA256SUMS.txt') |
+            Where-Object { $_ -match ('^[0-9a-fA-F]{64} [ *]' + [regex]::Escape($file) + '$') })
+          if ($manifest.Count -ne 1 -or $manifest[0].Substring(0, 64) -ne $env:CANDIDATE_ZIP_SHA256 -or
+              (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne $env:CANDIDATE_ZIP_SHA256) {
+            throw 'Candidate ZIP does not match both the pinned hash and the builder manifest.'
+          }
+          $appDir = Join-Path $env:RUNNER_TEMP 'TouchTyping Normal Extract'
+          if (Test-Path -LiteralPath $appDir) { throw 'Extraction path already exists.' }
+          Expand-Archive -LiteralPath $zip -DestinationPath $appDir
+          $cmd = Join-Path $appDir 'Start-Live.cmd'
+          $cmdSha = (Get-FileHash -LiteralPath $cmd -Algorithm SHA256).Hash
+          if ($cmdSha -ne '09d729bb568affdab98f8c74448ccffdb75a6ee3a0c0c84edcb9dcdf32b212eb') {
+            throw 'Stock launcher differs from the reviewed product file.'
+          }
+          "candidateRun=$env:CANDIDATE_RUN_ID candidateHead=$env:CANDIDATE_RUN_SHA product=$env:PRODUCT_SHA" |
+            Set-Content -LiteralPath (Join-Path $output 'provenance.txt')
+          "zipSha256=$env:CANDIDATE_ZIP_SHA256 stockCmdSha256=$cmdSha" |
+            Add-Content -LiteralPath (Join-Path $output 'provenance.txt')
+          $probe = Join-Path $env:GITHUB_WORKSPACE 'reviewed-probe/windows/Test-HostedNormalLaunch.ps1'
+          & $probe -Application (Join-Path $appDir 'TouchTyping.exe') -OutputDirectory $output
+          if (-not (Select-String -LiteralPath (Join-Path $output 'windows-normal-launch.log') -Pattern '^PASS: [1-9][0-9]* stock Windows 1\.9\.0 runtime assertions$')) {
+            throw 'Proof process did not record the required positive assertion summary.'
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: touchtyping-190-stock-windows-verification
+          path: |
+            ${{ runner.temp }}/stock-evidence/provenance.txt
+            ${{ runner.temp }}/stock-evidence/windows-normal-launch.log
+          if-no-files-found: warn

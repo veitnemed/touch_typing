@@ -1,0 +1,142 @@
+--- a/windows/LiveUiSmoke.cs
++++ b/windows/LiveUiSmoke.cs
+@@ -28,6 +28,12 @@
+         if (arguments.Length == 0) { Console.Error.WriteLine("Pass the full path to TouchTyping.exe."); return 2; }
+         try
+         {
++            if (arguments.Contains("--hosted-win10"))
++            {
++                CheckHostedWin10(Path.GetFullPath(arguments[0]));
++                Console.WriteLine("PASS: " + count + " stock Windows 1.9.0 runtime assertions");
++                return 0;
++            }
+             if (arguments.Contains("--hosted-normal-launch"))
+             {
+                 CheckHostedNormalLaunch(Path.GetFullPath(arguments[0]));
+@@ -305,7 +311,7 @@
+         }
+     }
+ 
+-    private static void OpenNormalStarter(string executable)
++    private static void OpenNormalStarter(string executable, string appId = "terminal", Action home = null)
+     {
+         if (Process.GetProcessesByName("TouchTyping").Length != 0)
+             throw new InvalidOperationException("A TouchTyping process already exists; refusing to reuse it.");
+@@ -352,11 +358,12 @@
+         window = AutomationElement.FromHandle(trainer);
+         Check(window.Current.ProcessId == app.Id, "Native automation root belongs to the normal trainer PID");
+         Focus();
+-        Until(delegate { return Visible("HomeDashboard") && Exists("HomeClass-terminal"); },
+-            "normal Home draws its terminal exercise card");
+-        Invoke("HomeClass-terminal");
+-        Until(delegate { return Exists("LabStart") && Exists("LabClass-terminal"); },
+-            "normal terminal chooser opens through its Home card");
++        Until(delegate { return Visible("HomeDashboard") && Exists("HomeTitle"); }, "normal Home rendered");
++        if (home != null) home();
++        Until(delegate { return Visible("HomeClass-" + appId); }, "requested Home class rendered");
++        Invoke("HomeClass-" + appId);
++        Until(delegate { return Exists("LabStart") && Exists("LabClass-" + appId); },
++            "normal chooser opens through the visible Home card");
+     }
+ 
+     private static void CheckNormalTrainerCleanExit(string description)
+@@ -435,6 +442,88 @@
+             "Reopen and re-save do not duplicate the draft");
+     }
+ 
++    private static void CheckHostedWin10(string executable)
++    {
++        Check(Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT") == "github-hosted" &&
++            Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true" &&
++            Environment.GetEnvironmentVariable("TOUCH_TYPING_NORMAL_LAUNCH_ISOLATED_JOB") == "1" &&
++            string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT")),
++            "Exact stock runtime uses the isolated fresh hosted normal profile");
++        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
++        var data = Path.Combine(local, "TouchTypingStudio");
++        var qa = Path.Combine(local, "TouchTypingStudio-QA");
++        Check(Directory.Exists(local) && !Directory.Exists(data) && !File.Exists(data) &&
++            !Directory.Exists(qa) && !File.Exists(qa), "Fresh normal profile before the stock launch");
++        OpenNormalStarter(executable, "windows", delegate
++        {
++            Check(Visible("HomeClass-ubuntu") && Name("LabDesktopProfile-ubuntu").Contains("выбрано"),
++                "Fresh Home starts on the Ubuntu curriculum");
++            Invoke("LabDesktopProfile-windows");
++            Until(delegate { return Visible("HomeClass-windows") && !Exists("HomeClass-ubuntu") &&
++                Name("LabDesktopProfile-windows").Contains("выбрано"); }, "Windows 10 choice switches the actual Home catalog");
++            Check(Name("HomeClass-windows").Contains("Windows 10"), "Visible Windows 10 course is selected");
++        });
++        Invoke("LabClass-windows");
++        Select("LabMode", 1);        // Guided.
++        Select("LabLevel", 0);
++        Select("LabDuration", 0);
++        Select("LabTimer", 0);
++        SelectMissionByName("Windows 10: Пуск и окна");
++        Key("F5");
++        Until(delegate { return Win10Scene("Учебный рабочий стол Windows 10") && ReadSolved() == 0; },
++            "visible simulated Windows workspace actually starts");
++        Key("LSuper");
++        Until(delegate { return Win10Scene("Меню Пуск") && ReadSolved() == 1; },
++            "physical Win opens the simulated Start menu and earns one credit");
++        Key("Enter");
++        Until(delegate { return !Win10Scene("Меню Пуск") && ReadSolved() == 2; }, "physical Enter launches the selected simulated app");
++        Chord("LSuper+E");
++        Until(delegate { return Win10Scene("Проводник") && ReadSolved() == 3; }, "physical Win+E opens the simulated Explorer");
++        Chord("LSuper+Left");
++        Until(delegate { return Win10Scene("Подбор второго окна") && Win10Scene("слева") && ReadSolved() == 4; },
++            "physical Win+Left opens Snap Assist and places a real simulated window on the left");
++        Key("Enter");
++        Until(delegate { return !Win10Scene("Подбор второго окна") && Win10Scene("слева") && Win10Scene("справа") &&
++            ReadSolved() == 5; }, "physical Enter chooses a second window, displays both halves and advances the mission");
++        Console.WriteLine("WIN10 SNAP " + Name("LabDesktop"));
++        CloseWin10StockLesson();
++        var profile = Path.Combine(data, "progress.xml");
++        Check(File.Exists(profile) && !Directory.Exists(qa), "Normal Windows profile persisted, without using a QA profile");
++        var xml = new XmlDocument { XmlResolver = null };
++        xml.Load(profile);
++        var choice = xml.SelectSingleNode("/StudioProfile/LabDesktopEnvironment");
++        Check(choice != null && choice.InnerText == "windows", "Persisted preference actually contains Windows");
++        OpenNormalStarter(executable, "terminal", delegate
++        {
++            Check(Visible("HomeClass-windows") && !Exists("HomeClass-ubuntu") &&
++                Name("LabDesktopProfile-windows").Contains("выбрано"), "Normal restart rehydrates the Windows choice");
++        });
++        Invoke("LabClass-terminal");
++        Select("LabMode", 1); Select("LabLevel", 0); Select("LabDuration", 0); Select("LabTimer", 0);
++        Key("F5");
++        Until(delegate { return Exists("LabDesktop") && Name("LabPause").StartsWith("Пауза"); }, "packaged terminal training starts after restart");
++        VirtualEnglish();
++        Chord("LCtrl+U");
++        CheckTerminalState("", 0);
++        foreach (char character in "abcd") Send(Character(character));
++        Key("Left"); Key("Left"); Key("Delete"); Send(Character('X'));
++        CheckTerminalState("abXd", 3);
++        Check(true, "Physical Delete and uppercase insertion preserve terminal suffix and caret");
++        CloseWin10StockLesson();
++    }
++
++    private static bool Win10Scene(string token)
++    { return Visible("LabDesktop") && Name("LabDesktop").Contains(token); }
++
++    private static void CloseWin10StockLesson()
++    {
++        RequestClose();
++        Until(delegate { return ExitDialog() != null; }, "stock normal save/close dialog");
++        InvokeDialog("LabExitSave");
++        CheckNormalTrainerCleanExit("Stock WPF exits normally after confirming save");
++        app.Dispose(); app = null;
++    }
++
+     private static void CheckReferenceBrowser()
+     {
+         Check(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED") == "0",
+--- a/windows/Test-HostedNormalLaunch.ps1
++++ b/windows/Test-HostedNormalLaunch.ps1
+@@ -38,7 +38,7 @@
+ if ($LASTEXITCODE -ne 0) { throw 'Normal launcher probe compilation failed.' }
+ try {
+     $ErrorActionPreference = 'Continue'
+-    & $runner $applicationPath --hosted-normal-launch 2>&1 | Tee-Object -FilePath $log -Append
++    & $runner $applicationPath --hosted-win10 2>&1 | Tee-Object -FilePath $log -Append
+     $code = $LASTEXITCODE
+ } finally {
+     $ErrorActionPreference = 'Stop'
