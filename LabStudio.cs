@@ -35,6 +35,7 @@ namespace TouchTypingStudio
         private Viewbox labGuide;
         private FrameworkElement pausedLabView;
         private LabKeyboardCapture labCapture;
+        private readonly string labQaNavigationTrace = Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_NAV_TRACE");
         private int labNativeLayoutGeneration;
         private string labNativeLayout;
         private TextBlock labTask, labKeys, labCounter, labStatus;
@@ -374,8 +375,10 @@ namespace TouchTypingStudio
         {
             if (!labActive || paused || !IsActive) return;
             string key = ScanKey(scan, extended, vk);
-            // Only QA builds expose the two navigation keys, not arbitrary typed input.
-            if (verifyMode && down && (vk == 0x21 || vk == 0x22))
+            // Only targeted QA runs expose these physical navigation keys, never typed text.
+            if (verifyMode && down &&
+                (labQaNavigationTrace == "workspace" && (vk == 0x21 || vk == 0x22) ||
+                 labQaNavigationTrace == "terminal" && (vk == 0x24 || vk == 0x27)))
             {
                 var cachedModifiers = new[] { "LSuper", "RSuper", "LShift", "RShift", "LCtrl", "RCtrl", "LAlt", "RAlt" };
                 var label = "VK=" + vk.ToString("X2") + " scan=" + scan.ToString("X2") +

@@ -1166,6 +1166,9 @@ namespace TouchTypingStudio
                 case Key.OemComma: return ",";
                 case Key.OemPeriod: return ".";
                 case Key.OemQuestion: return "/";
+                // WPF also names these enum values Prior and Next.
+                case Key.PageUp: return "PageUp";
+                case Key.PageDown: return "PageDown";
                 case Key.Tab:
                 case Key.Left:
                 case Key.Right:
@@ -1175,9 +1178,6 @@ namespace TouchTypingStudio
                 case Key.End:
                 case Key.Insert:
                 case Key.Delete:
-                // WPF also names these enum values Prior and Next.
-                case Key.PageUp: return "PageUp";
-                case Key.PageDown: return "PageDown";
                 case Key.CapsLock: return input.ToString();
                 default: return "";
             }

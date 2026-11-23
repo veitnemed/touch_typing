@@ -43,6 +43,8 @@ internal static class LiveUiSmoke
             if (arguments.Contains("--soft-finish"))
                 Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_SOFT_FINISH_SECONDS", "7");
             Console.WriteLine("UI test seed " + Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"));
+            Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_NAV_TRACE", gnomeProfile ? "workspace" :
+                referenceEvidence && !referenceBrowser && !dailyUse && !debugDay ? "terminal" : null);
             app = Process.Start(new ProcessStartInfo(path, "--qa --live") { WorkingDirectory = Path.GetDirectoryName(path) });
             Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "trainer window", 12000);
             window = AutomationElement.FromHandle(trainer);
@@ -1107,10 +1109,13 @@ internal static class LiveUiSmoke
         Chord("Ctrl+U");
         foreach (var character in "abcde") Send(Character(character));
         CheckTerminalState("abcde", 5);
-        Key("Home");
-        Key("Right");
-        Key("Right");
-        CheckTerminalState("abcde", 2);
+        int rightCount = 0;
+        foreach (var key in new[] { "Home", "Right", "Right" })
+        {
+            // Keep each press real and distinct; fail on the first lost or misrouted transition.
+            Key(key);
+            CheckTerminalState("abcde", key == "Home" ? 0 : ++rightCount);
+        }
         CaptureReferenceFrame("01-terminal-before-delete");
         Key("Delete");
         CheckTerminalState("abde", 2);
@@ -1127,10 +1132,21 @@ internal static class LiveUiSmoke
     private static void CheckTerminalState(string text, int cursor)
     {
         string itemStatus = "cursor:" + cursor;
-        Until(delegate {
-            var scene = Find("LabDesktop").Current;
-            return scene.HelpText == text && scene.ItemStatus == itemStatus;
-        }, "terminal text '" + text + "' at caret " + cursor);
+        try
+        {
+            Until(delegate {
+                var scene = Find("LabDesktop").Current;
+                return scene.HelpText == text && scene.ItemStatus == itemStatus;
+            }, "terminal text '" + text + "' at caret " + cursor);
+        }
+        catch (TimeoutException)
+        {
+            var seen = Find("LabDesktop").Current;
+            Console.WriteLine("Terminal navigation observed: text='" + seen.HelpText + "', " +
+                "state=" + seen.ItemStatus + ", scene=" + seen.Name +
+                ", last trace=" + Find("LabStatus").Current.ItemStatus);
+            throw;
+        }
         Check(true, "Native terminal text '" + text + "' at caret " + cursor);
     }
 
