@@ -11,6 +11,7 @@ namespace TouchTypingStudio
 {
     public class StudioProfile
     {
+        public string LabDesktopEnvironment;
         public bool Configured;
         public bool F2Seen;
         public bool ShowKeys = true;

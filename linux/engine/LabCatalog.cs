@@ -11,8 +11,8 @@ internal sealed record LabTask(string Id, string Title, string Keys, string Hint
 
 internal static class LabCatalog
 {
-    internal static readonly string[] Apps = ["ubuntu", "chrome", "code", "terminal", "workday"];
-    internal static string Title(string app) => app switch { "workday" => "Рабочий день", "ubuntu" => "Ubuntu", "chrome" => "Chrome", "code" => "VS Code", _ => "Терминал" };
+    internal static readonly string[] Apps = ["ubuntu", "windows", "chrome", "code", "terminal", "workday"];
+    internal static string Title(string app) => app switch { "workday" => "Рабочий день", "ubuntu" => "Ubuntu", "windows" => "Windows 10", "chrome" => "Chrome", "code" => "VS Code", _ => "Терминал" };
     private static LabTask T(string id, string title, string keys, string action, int level = 0, string hint = "") =>
         new(id, title, keys, hint.Length == 0 ? "Удерживайте модификаторы и нажмите основную клавишу." : hint, Action: action, Level: level);
     internal static readonly LabTask[] Shortcuts =
@@ -167,6 +167,31 @@ internal static class LabCatalog
         T("gnome-left-super", "Нажмите и отпустите левый Super (⊞)", "LSuper", "gnome-left-super", 1,
             "На MateBook клавиша ⊞ слева от Alt. Буква Z (Я) находится выше."),
     ];
+    private static readonly LabTask[] WindowsTasks =
+    [
+        T("win-start", "Откройте меню «Пуск» клавишей ⊞", "Super", "win-start"),
+        T("win-explorer", "Откройте Проводник", "Super+E", "win-explorer"),
+        T("win-explorer-parent", "Перейдите в родительскую папку", "Alt+Up", "win-explorer-parent"),
+        T("win-overlay-next", "Выберите следующий вариант", "Down", "win-overlay-next"),
+        T("win-overlay-prev", "Выберите предыдущий вариант", "Up", "win-overlay-prev"),
+        T("win-overlay-open", "Подтвердите выбранный вариант", "Enter", "win-overlay-open"),
+        T("win-cancel", "Закройте меню без выбора", "Esc", "win-cancel"),
+        T("win-left", "Прикрепите окно слева", "Super+Left", "win-left"),
+        T("win-right", "Прикрепите окно справа", "Super+Right", "win-right"),
+        T("win-maximize", "Разверните окно", "Super+Up", "win-maximize"),
+        T("win-down", "Восстановите или сверните окно", "Super+Down", "win-down"),
+        T("win-close", "Закройте активное окно", "Alt+F4", "win-close"),
+        T("win-desktop", "Переключите показ рабочего стола", "Super+D", "win-desktop"),
+        T("win-task-view", "Откройте представление задач", "Super+Tab", "win-task-view"),
+        T("win-new-desktop", "Создайте виртуальный рабочий стол", "Super+Ctrl+D", "win-new-desktop"),
+        T("win-close-desktop", "Закройте текущий виртуальный рабочий стол", "Super+Ctrl+F4", "win-close-desktop"),
+        T("win-prev-desktop", "Перейдите на левый рабочий стол", "Super+Ctrl+Left", "win-prev-desktop"),
+        T("win-next-desktop", "Перейдите на правый рабочий стол", "Super+Ctrl+Right", "win-next-desktop"),
+        T("win-switch", "Переключитесь на предыдущее окно", "Alt+Tab", "win-switch"),
+        T("win-layout", "Переключите учебную раскладку", "Super+Space", "win-layout"),
+    ];
+    internal static IEnumerable<LabTask> AllTasks => Shortcuts.Concat(WindowsTasks);
+    internal static LabTask WindowsStartTask => WindowsTasks[0];
     private static readonly HashSet<string> UbuntuIds = new([
         "overview", "switch-next", "switch-prev", "open-terminal", "open-chrome", "open-code", "open-files",
         "close-window", "maximize", "restore", "tile-left", "tile-right", "minimize", "desktop",
@@ -182,13 +207,45 @@ internal static class LabCatalog
         CodeIds.UnionWith(Shortcuts.Where(task => task.Id.StartsWith("code-", StringComparison.Ordinal) || task.Id.StartsWith("project-search-", StringComparison.Ordinal)).Select(task => task.Id));
     }
     private static readonly HashSet<string> TerminalIds = new(Shortcuts.Where(task => task.Id.StartsWith("terminal-")).Select(task => task.Id).Concat(["layout", "escape"]));
-    internal static object Catalog(IEnumerable<LiveDraft> drafts, IEnumerable<ShortcutAttempt> history, string layout, bool neutralProject = false) => new { recommendations = LiveStartingLevel.Recommend(history, layout), drafts = (drafts ?? []).Select(d => new { d.App, d.Level, d.Mission, d.Guidance }), classes = Apps.Select(app => new { id = app, title = Title(app), description = app switch
-        { "workday" => "Общее рабочее место, файлы и окна четырёх приложений", "ubuntu" => "Окна, рабочие столы и системные сочетания", "chrome" => "Вкладки, навигация, поиск и адресная строка", "code" => "Файлы, код, панели и встроенный терминал", _ => "Сочетания, команды и учебная файловая система" },
-        shortcuts = Shortcuts.Where(task => InApp(task, app)).Select(task => task.Snapshot()) }), missions = (neutralProject ? NeutralProject.MissionCatalog : LiveCourse.Missions).Select(m => new { m.App, m.Level, m.Id, m.Title, m.Curated }), duration = 0, blockSize = 20 };
+    internal static IEnumerable<string> VisibleApps(string environment) =>
+        Apps.Where(app => app != (environment == "windows" ? "ubuntu" : "windows"));
+
+    internal static object Catalog(IEnumerable<LiveDraft> drafts, IEnumerable<ShortcutAttempt> history, string layout,
+        bool neutralProject = false, string environment = "ubuntu")
+    {
+        var draftRows = (drafts ?? []).Select(d => d.App is "ubuntu" or "windows" or "workday"
+            ? (object)new { d.App, d.Level, d.Mission, d.Guidance, desktopProfile = LabScene.DesktopEnvironment(d.DesktopEnvironment) }
+            : new { d.App, d.Level, d.Mission, d.Guidance });
+        var profiles = new[] { new { id = "ubuntu", title = "Ubuntu" }, new { id = "windows", title = "Windows 10" } };
+        return new {
+            desktopProfile = environment, desktopProfiles = profiles,
+            recommendations = LiveStartingLevel.Recommend(history, layout, environment), drafts = draftRows,
+            classes = VisibleApps(environment).Select(app => new {
+                id = app, title = Title(app), description = app switch {
+                    "workday" => "Общее рабочее место, файлы и окна приложений",
+                    "ubuntu" => "Окна, рабочие столы и системные сочетания",
+                    "windows" => "Пуск, Проводник, окна и виртуальные рабочие столы Windows 10",
+                    "chrome" => "Вкладки, навигация, поиск и адресная строка",
+                    "code" => "Файлы, код, панели и встроенный терминал",
+                    _ => "Сочетания, команды и учебная файловая система"
+                },
+                desktopProfile = app is "windows" or "ubuntu" ? app : null,
+                shortcuts = app == "windows" || app == "workday" && environment == "windows"
+                    ? WindowsTasks.Concat(Shortcuts.Where(task => FilesIds.Contains(task.Id))).Select(task => task.Snapshot())
+                    : Shortcuts.Where(task => InApp(task, app)).Select(task => task.Snapshot())
+            }),
+            missions = (neutralProject ? NeutralProject.MissionCatalog : LiveCourse.Missions)
+                .Where(m => LabScene.MissionEnvironment(m) is null || LabScene.MissionEnvironment(m) == environment)
+                .Select(m => new { m.App, m.Level, m.Id, m.Title, m.Curated, desktopProfile = LabScene.MissionEnvironment(m) }),
+            duration = 0, blockSize = 20
+        };
+    }
+
     private static bool InApp(LabTask task, string app) => app == "workday" || (app switch { "ubuntu" => UbuntuIds, "chrome" => ChromeIds, "code" => CodeIds, _ => TerminalIds }).Contains(task.Id);
 
     internal static bool Available(LabTask task, LabScene scene)
     {
+        if (task.Id.StartsWith("win-", StringComparison.Ordinal)) return scene.WindowsActionAvailable(task.Action);
         var window = scene.Active;
         bool terminal = window != null && (window.App == "terminal" || window.Focus == "terminal");
         return task.Id switch
@@ -276,6 +333,15 @@ internal static class LabCatalog
 
     internal static LabTask Resolve(string key, IEnumerable<string> held, LabScene scene)
     {
+        if (scene.WindowsDesktop)
+        {
+            var windowsTask = WindowsTasks.Skip(1).Where(task => Available(task, scene)).FirstOrDefault(task =>
+            {
+                var chord = Gesture.Parse(task.Keys).Chords[0];
+                return chord.Trigger == key && chord.FitsModifiers(held);
+            });
+            if (windowsTask != null || scene.DesktopOverlay.Length > 0 || scene.ShowDesktop) return windowsTask;
+        }
         string app = scene.Active?.App ?? "ubuntu";
         bool terminal = app == "terminal" || scene.Active?.Focus is "terminal" or "reverse-search";
         HashSet<string> context = terminal ? TerminalIds : app switch
@@ -311,7 +377,7 @@ internal static class LabCatalog
             if (!trigger || !chord.FitsModifiers(held) || !Available(task, scene)) return false;
             if (scene.DebugDay && task.Id.StartsWith("debug-", StringComparison.Ordinal)) return true;
             if (scene.ExactEdit && task.Id.StartsWith("exact-", StringComparison.Ordinal)) return true;
-            if (UbuntuIds.Contains(task.Id) || task.Id is "switch-group-next" or "switch-group-prev") return true;
+            if (UbuntuIds.Contains(task.Id) || task.Id is "switch-group-next" or "switch-group-prev") return !scene.WindowsDesktop;
             return context.Contains(task.Id) || terminal && app == "code" && task.Id is "terminal-toggle" or "panel" or "escape";
         });
     }

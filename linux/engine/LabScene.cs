@@ -102,7 +102,7 @@ internal sealed class LabWindow(string app, int number, int workspace)
     internal LabTab Tab => Tabs.Count == 0 ? null : Tabs[Math.Clamp(ActiveTab, 0, Tabs.Count - 1)];
     internal string Body { get => Tab?.Body ?? ""; set { if (Tab != null) Tab.Body = value; } }
     internal string Url => Tab?.Url ?? "";
-    internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults, string projectName, string projectRelative) => new { syntax = App == "code" ? PythonHighlight.For(Body, Url) : [], projectFiles, changedFiles, searchResults, projectName, projectRelative, ProjectSearchQuery, Id, App, Title, Workspace, State, NormalSlot, restoreState = MinimizedFrom, active, Folder, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(App == "code"), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
+    internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults, string projectName, string projectRelative, string windowsPath = null) => new { windowsPath, syntax = App == "code" ? PythonHighlight.For(Body, Url) : [], projectFiles, changedFiles, searchResults, projectName, projectRelative, ProjectSearchQuery, Id, App, Title, Workspace, State, NormalSlot, restoreState = MinimizedFrom, active, Folder, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(App == "code"), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
         tabs = Tabs.Select(tab => tab.Snapshot()), ActiveTab, Url, Body, Focus, Input, Find, Sidebar, Split, Status, Zoom, Selected, Cursor, Anchor, Panel, bodyCursor = Tab?.Position.Caret ?? 0, bodyAnchor = Tab?.Position.Anchor ?? 0, OptionIndex, Bookmarks, savedBookmarks = SavedBookmarks.ToArray() };
     internal LabWindow Clone()
     {
@@ -183,7 +183,8 @@ internal sealed partial class LabScene
         foreach (var path in ProjectDocuments()) originalFiles[path] = Terminal.ReadFile(path);
         Layout = layout == "RU" ? "RU" : "EN";
         Clipboard = app == "terminal" ? "pwd" : "build: 17 tests passed";
-        if (app != "ubuntu") Open(app);
+        if (app == "windows") { WindowsDesktop = true; WorkspaceCount = 1; }
+        else if (app != "ubuntu") Open(app);
     }
 
     private LabScene(LabScene source)
@@ -201,6 +202,8 @@ internal sealed partial class LabScene
         Screenshot = source.Screenshot; ScreenshotReady = source.ScreenshotReady;
         ScreenshotCopied = source.ScreenshotCopied; ShowDesktop = source.ShowDesktop;
         UseWindowsBindings = source.UseWindowsBindings;
+        WindowsDesktop = source.WindowsDesktop; DesktopOverlay = source.DesktopOverlay;
+        DesktopOverlaySelection = source.DesktopOverlaySelection; DesktopOverlayWindows = [.. source.DesktopOverlayWindows];
         LayoutIsVirtual = source.LayoutIsVirtual; ReplayLegacyNavigation = source.ReplayLegacyNavigation; Search = source.Search;
         GnomeWindows = source.GnomeWindows; GnomePractice = source.GnomePractice; DesktopProfile = [.. source.DesktopProfile]; SwitchChoices = [.. source.SwitchChoices];
         ReplayLegacyLineEditing = source.ReplayLegacyLineEditing;
@@ -234,7 +237,11 @@ internal sealed partial class LabScene
                     "# task-list\nДобавьте задачу, найдите по названию и сохраните список в JSON.\n"));
             if (GnomeWindows) window.Cursor = 2; // after "# " in the actual first tab
         }
-        else if (app == "files") window.Tabs.Add(new LabTab("Домашняя папка", "/home/student", "project/\nДокументы/\nЗагрузки/"));
+        else if (app == "files")
+        {
+            if (WindowsDesktop) window.Title = "Проводник";
+            window.Tabs.Add(new LabTab("Домашняя папка", "/home/student", "project/\nДокументы/\nЗагрузки/"));
+        }
         if (app == "chrome" && recentUrls.Count == 0)
             recentUrls.AddRange(window.Tabs.Select(tab => tab.Url));
         Windows.Add(window); Activate(window); Version++; return window;
@@ -245,7 +252,7 @@ internal sealed partial class LabScene
         if (window == null) return;
         window.Activation = Windows.Max(w => w.Activation) + 1;
         ActiveWindow = window.Id; Workspace = window.Workspace; ShowDesktop = Overview = false;
-        if (window.State == "minimized") window.State = GnomeWindows ? window.MinimizedFrom : "normal";
+        if (window.State == "minimized") window.State = GnomeWindows || WindowsDesktop ? window.MinimizedFrom : "normal";
     }
 
     internal bool Has(string app) => Windows.Any(window => window.App == app);
@@ -263,6 +270,7 @@ internal sealed partial class LabScene
 
     private bool ApplyCore(string action)
     {
+        if (action.StartsWith("win-", StringComparison.Ordinal)) return ApplyWindowsAction(action);
         var window = Active;
         if (ApplyDebugDayAction(action, window) is bool debug) return debug;
         bool changed = true;
@@ -615,7 +623,7 @@ internal sealed partial class LabScene
     internal bool CanRepeatEditing(string key)
     {
         var window = Active;
-        if (window == null || Overview || Switcher || Screenshot || window.Focus == "reverse-search") return false;
+        if (window == null || Overview || Switcher || Screenshot || DesktopOverlay.Length > 0 || ShowDesktop && WindowsDesktop || window.Focus == "reverse-search") return false;
         bool editor = window.App == "code" && window.Focus == "body";
         if (!editor && !IsTerminal(window)) return false;
         return key is "Left" or "Right" or "Home" or "End" or "Delete" or "Backspace"
@@ -878,7 +886,9 @@ internal sealed partial class LabScene
         tab.Position = new();
     }
 
-    internal object Snapshot() => new { Workspace, WorkspaceCount, Overview, Switcher, SwitchTarget, switchChoices = GnomePractice == "same-app" ? SwitchChoices : [], Dock, Layout, ActiveWindow, GnomeWindows, GnomePractice, DebugDay,
+    internal object Snapshot() => new { Workspace, WorkspaceCount, Overview, Switcher, SwitchTarget, switchChoices = GnomePractice == "same-app" || WindowsDesktop ? SwitchChoices : [],
+        desktopStyle = WindowsDesktop ? "win10" : "ubuntu", DesktopOverlay, DesktopOverlaySelection, DesktopOverlayWindows,
+        desktopStartApps = WindowsDesktop ? WindowsStartApps : [], Dock, Layout, ActiveWindow, GnomeWindows, GnomePractice, DebugDay,
         windows = Windows.Select(WindowSnapshot), terminal = Terminal.Snapshot(), terminalInput = TerminalInput,
         Clipboard, clipboardMime = ClipboardImage == null ? "text/plain" : "image/png", Screenshot, ScreenshotReady, ScreenshotCopied, Screenshots, ShowDesktop, Search, LayoutIsVirtual, Version, DiagnosticWorkspace, DiagnosticProblemCount };
 }

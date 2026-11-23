@@ -78,6 +78,8 @@ internal sealed class LabRun
     internal int Solved { get; private set; }
     internal int Errors { get; private set; }
     internal int Block { get; private set; } = 1;
+    internal string EnvironmentProfile { get; }
+    private string SceneApp => App == "workday" ? (EnvironmentProfile == "windows" ? "windows" : "ubuntu") : App;
     internal string ScenarioTitle => mission?.Title ?? "";
     internal int ScenarioStep => Math.Min(missionLength, missionLength - pending.Count + 1);
     internal int ScenarioLength => missionLength;
@@ -86,7 +88,9 @@ internal sealed class LabRun
         ActionLimit > 0 && Solved >= ActionLimit ? "actions" : null);
     private bool ReachedLimit => LimitReached != null;
     private bool CompletedRoute => !restoring && mission != null && pending.Count == 0 &&
-        (FinishingMission || softFinish && ReachedLimit || (finishSingleRoute || mission.Curated) && mission.FinishAfterRoute);
+        (FinishingMission || softFinish && ReachedLimit ||
+            (finishSingleRoute || mission.Curated && (EnvironmentProfile != "windows" || TimeLimit == 0 && ActionLimit == 0))
+                && mission.FinishAfterRoute);
     private bool PendingLimitChoice => softFinish && !restoring && ReachedLimit &&
         !limitAccepted && !FinishingMission && !CompletedRoute;
     internal bool AwaitingLimitChoice => !stopped && PendingLimitChoice;
@@ -98,7 +102,7 @@ internal sealed class LabRun
     internal string[] Held => held.ToArray();
 
     internal LabRun(string app, string mode, int level, int seconds, string layout, IEnumerable<ShortcutAttempt> history,
-        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null, bool softFinish = false, bool combinedLimits = false, bool windowsBindings = false, string[] desktopProfile = null, bool neutralProject = false)
+        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null, bool softFinish = false, bool combinedLimits = false, bool windowsBindings = false, string[] desktopProfile = null, bool neutralProject = false, string environment = "ubuntu")
     {
         if (!LabCatalog.Apps.Contains(app)) throw new ArgumentException("Выберите Ubuntu, Chrome, VS Code или Терминал.");
         if (mode is not ("drill" or "sandbox")) throw new ArgumentException("Выберите тренировку или учебный рабочий стол.");
@@ -106,6 +110,7 @@ internal sealed class LabRun
         this.neutralProject = draft == null ? neutralProject : draft.ProjectFixture == NeutralProject.FixtureId;
         this.softFinish = softFinish;
         this.windowsBindings = windowsBindings;
+        EnvironmentProfile = app == "windows" ? "windows" : app == "workday" ? LabScene.DesktopEnvironment(draft?.DesktopEnvironment ?? environment) : "ubuntu";
         App = app; Mode = progress?.Mode is "drill" or "sandbox" ? progress.Mode : mode; Level = Math.Clamp(level, 0, 2);
         ActionLimit = Math.Max(0, progress?.ActionLimit ?? actionLimit);
         // Old callers preserve action-over-timer precedence. Any saved pair
@@ -134,7 +139,7 @@ internal sealed class LabRun
             ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent);
         replayLegacyLineEditing = draft != null && !initialFormat.Any(e => e.Key == LineEditingEvent);
         replayLegacyPythonEditing = draft != null && !initialFormat.Any(e => e.Key == PythonEditingEvent);
-        Scene = new LabScene(app == "workday" ? "ubuntu" : app, draft?.Layout ?? layout, this.neutralProject) { LayoutKey = layoutKey, LayoutIsVirtual = draft?.VirtualLayout ?? false };
+        Scene = new LabScene(SceneApp, draft?.Layout ?? layout, this.neutralProject) { LayoutKey = layoutKey, LayoutIsVirtual = draft?.VirtualLayout ?? false };
         if (dock != null) Scene.Dock = dock;
         Next();
         if (draft != null)
@@ -202,7 +207,7 @@ internal sealed class LabRun
         trace.Add(marker);
     }
 
-    internal LiveDraft Draft() => new() { App = App, Level = Level, Mission = MissionId, Layout = initialLayout, Guidance = Guidance,
+    internal LiveDraft Draft() => new() { App = App, DesktopEnvironment = EnvironmentProfile, Level = Level, Mission = MissionId, Layout = initialLayout, Guidance = Guidance,
         Dock = Scene.Dock, ProjectFixture = neutralProject ? NeutralProject.FixtureId : null, DesktopProfile = Scene.GnomePractice.Length == 0 ? null : Scene.DesktopProfile, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, Trace = JsonSerializer.Serialize(trace),
         Progress = new() { Session = Session, Mode = Mode, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Solved = Solved,
             Errors = Errors, ActiveMilliseconds = ActiveMilliseconds, Series = JsonSerializer.Serialize(points),
@@ -311,7 +316,7 @@ internal sealed class LabRun
                         : "Это Alt. Сдвиньтесь на одну клавишу левее к кнопке ⊞.");
             }
             if (KeyChord.Family(key) == "Super" && !superUsed && held.Count == 0)
-                { Watch(); return Perform(LabCatalog.Shortcuts.First(task => task.Id == "overview"), key); }
+                { Watch(); return Perform(Scene.WindowsDesktop ? LabCatalog.WindowsStartTask : LabCatalog.Shortcuts.First(task => task.Id == "overview"), key); }
             return null;
         }
         if (!held.Add(key)) return null;
@@ -331,6 +336,8 @@ internal sealed class LabRun
         string before = Scene.Overview ? Scene.Search : Scene.Active?.App == "terminal" || Scene.Active?.Focus is "terminal" or "reverse-search" ? Scene.TerminalInput : Scene.Active?.Input ?? "";
         bool submitting = Task.Action == "command" && key == "Enter" && !commandModifiers;
         bool matches = submitting && Scene.Terminal.MatchesCommand(before, Task.Text);
+        if (actual == null && Scene.WindowsDesktop && (Scene.DesktopOverlay.Length > 0 || Scene.ShowDesktop))
+            return Miss(key, WrongKeyMessage(key));
         if (actual != null && !submitting)
         {
             if (actual.Id is "screenshot" or "debug-window-shot") Scene.StartCapture(text);
@@ -385,7 +392,7 @@ internal sealed class LabRun
             ? Scene.PerformPythonEdit(actual.Action) : LabCatalog.Available(actual, Scene) && Scene.Apply(actual.Action);
         if (changed && mission != null)
         {
-            if (Scene.Switcher && (actual.Id is "switch-next" or "switch-prev" or "switch-group-next" or "switch-group-prev"))
+            if (Scene.Switcher && (actual.Id is "switch-next" or "switch-prev" or "switch-group-next" or "switch-group-prev" or "win-switch"))
             {
                 switchEvidenceId = actual.Id;
                 switchReleaseKey = new[] { "Super", "Alt", "Ctrl" }
@@ -478,7 +485,7 @@ internal sealed class LabRun
     private void Next()
     {
         var courses = (neutralProject ? NeutralProject.MissionCatalog : LiveCourse.Missions)
-            .Where(m => m.App == App && m.Level == Level).ToArray();
+            .Where(m => m.App == App && m.Level == Level && (LabScene.MissionEnvironment(m) is null || LabScene.MissionEnvironment(m) == EnvironmentProfile)).ToArray();
         if (CompletedRoute)
         {
             Stop();
@@ -489,7 +496,7 @@ internal sealed class LabRun
             var last = mission?.Id;
             // Standalone projects are selected from the catalog, not injected
             // into a learner's existing continuous exercise rotation.
-            var rotation = courses.Where(m => !m.FinishAfterRoute).ToArray();
+            var rotation = courses.Where(m => !m.FinishAfterRoute || EnvironmentProfile == "windows" && m.Curated).ToArray();
             var available = rotation.Where(m => !used.Contains(m.Id)).ToArray();
             if (available.Length == 0) { used.Clear(); available = rotation.Where(m => m.Id != last || rotation.Length == 1).ToArray(); }
             var recent = past.Concat(Attempts).Where(a => a.Mission != null).Select(a => a.Mission).Reverse().Distinct().Take(2).ToHashSet();
@@ -557,7 +564,7 @@ internal sealed class LabRun
 
     private LabScene PrepareMissionScene()
     {
-        var scene = new LabScene(App == "workday" ? "ubuntu" : App, initialLayout, neutralProject)
+        var scene = new LabScene(SceneApp, initialLayout, neutralProject)
         { LayoutKey = layoutBinding, LayoutIsVirtual = initialVirtual, ReplayLegacyNavigation = replayLegacyNavigation,
             ReplayLegacyLineEditing = replayLegacyLineEditing, ReplayLegacyPythonEditing = replayLegacyPythonEditing, UseWindowsBindings = windowsBindings };
         if (dockProfile != null) scene.Dock = dockProfile;
@@ -566,12 +573,12 @@ internal sealed class LabRun
         return scene;
     }
 
-    internal LabSessionRecord SessionRecord() => new() { Session = Session, App = App, Mode = Mode, Level = Level, Date = DateTime.Now,
+    internal LabSessionRecord SessionRecord() => new() { Session = Session, App = App, DesktopEnvironment = EnvironmentProfile, Mode = Mode, Level = Level, Date = DateTime.Now,
         Seconds = Seconds, Solved = Solved, Errors = Errors, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Guidance = Guidance, Completed = Completed };
 
     internal object Result(IEnumerable<LabSessionRecord> sessions, IEnumerable<LabSessionRecord> records = null)
     {
-        var matching = sessions.Concat(records ?? []).GroupBy(item => item.Session).Select(group => group.First()).Where(item => item.App == App && item.Mode == Mode && item.Level == Level && item.TimeLimit == TimeLimit && item.ActionLimit == ActionLimit && item.Guidance == Guidance).ToArray();
+        var matching = sessions.Concat(records ?? []).GroupBy(item => item.Session).Select(group => group.First()).Where(item => item.App == App && LabScene.DesktopEnvironment(item.DesktopEnvironment) == EnvironmentProfile && item.Mode == Mode && item.Level == Level && item.TimeLimit == TimeLimit && item.ActionLimit == ActionLimit && item.Guidance == Guidance).ToArray();
         var previousBest = matching.Where(item => item.Session != Session && item.Completed)
             .OrderByDescending(item => item.Solved).ThenBy(item => item.Errors).FirstOrDefault();
         int previousRecord = previousBest?.Solved ?? 0;
@@ -581,7 +588,7 @@ internal sealed class LabRun
             accuracy = Solved + Errors == 0 ? 0 : Math.Round(100.0 * Solved / (Solved + Errors), 1),
             record = Math.Max(previousRecord, complete ? Solved : 0), previousRecord, previousRecordErrors = previousBest?.Errors ?? 0, newRecord = better,
             series = points, weak = points.Where(point => !point.Correct).GroupBy(point => point.Task).Select(group =>
-            { var task = LabCatalog.Shortcuts.FirstOrDefault(item => item.Id == group.Key); return new { id = group.Key, title = task?.Title ?? "Ввод команды", keys = task?.Keys ?? "", errors = group.Count() }; }),
+            { var task = LabCatalog.AllTasks.FirstOrDefault(item => item.Id == group.Key); return new { id = group.Key, title = task?.Title ?? "Ввод команды", keys = task?.Keys ?? "", errors = group.Count() }; }),
             history = matching.OrderByDescending(item => item.Date).Take(15).Select(item => new
             { item.Session, item.App, item.Mode, item.Level, item.Date, item.Seconds, item.Solved, item.Errors, item.Completed }) };
     }

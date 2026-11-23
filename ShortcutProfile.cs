@@ -11,7 +11,7 @@ namespace TouchTypingStudio
 
     public class LiveDraft
     {
-        public string App, Mission, Layout, Guidance, Trace, LayoutKey, ProjectFixture;
+        public string App, Mission, Layout, Guidance, Trace, LayoutKey, ProjectFixture, DesktopEnvironment;
         public string[] Dock, DesktopProfile;
         public int Level, Variant;
         public bool VirtualLayout;
@@ -29,7 +29,7 @@ namespace TouchTypingStudio
 
     public class LabSessionRecord
     {
-        public string Session, App, Mode;
+        public string Session, App, Mode, DesktopEnvironment;
         public int Level, Seconds, Solved, Errors;
         public int TimeLimit = 180, ActionLimit;
         public string Guidance = "guided";

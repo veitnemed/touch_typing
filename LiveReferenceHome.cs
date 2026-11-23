@@ -235,8 +235,8 @@ namespace TouchTypingStudio
 
         private FrameworkElement BuildReferenceHome()
         {
-            var catalog = Request("lab-catalog");
-            var classes = catalog.Items("classes").ToArray();
+            var catalog = Request("lab-catalog", "desktopProfile", labDesktopProfile);
+            var classes = catalog.Items("classes").Where(UsesSelectedDesktop).ToArray();
             var distinctConfirmed = new HashSet<string>(library.Items("liveSkills").Where(item => item.B("confirmed")).Select(item => item.S("key")));
             var main = new Grid { Background = ReferenceHomeSurface() };
             referenceHome = main;
@@ -258,6 +258,9 @@ namespace TouchTypingStudio
             lead.HorizontalAlignment = HorizontalAlignment.Left;
             hero.Children.Add(lead);
             pageContent.Children.Add(hero);
+            var profile = BuildDesktopProfileChoice(delegate { center.Content = BuildReferenceHome(); });
+            profile.Margin = new Thickness(18, 0, 0, 16);
+            pageContent.Children.Add(profile);
 
             var grid = new Grid();
             pageContent.Children.Add(grid);
@@ -363,7 +366,8 @@ namespace TouchTypingStudio
             var emblem = new Border
             {
                 Width = compactCard ? 62 : 70, Height = compactCard ? 62 : 70, CornerRadius = new CornerRadius(17), HorizontalAlignment = HorizontalAlignment.Left,
-                Background = app == "ubuntu" ? ReferenceGradient("#823E50", "#632831", 70) :
+                Background = app == "windows" ? ReferenceGradient("#21557D", "#183855", 70) :
+                    app == "ubuntu" ? ReferenceGradient("#823E50", "#632831", 70) :
                     app == "workday" ? Ui.Brush("#23423D") : app == "terminal" ? Ui.Brush("#3C375E") : Ui.Brush("#303057"),
                 Child = ReferenceIcon(app, 46)
             };
@@ -372,6 +376,7 @@ namespace TouchTypingStudio
             primary.Margin = new Thickness(0, 8, 0, 0);
             body.Children.Add(primary);
             string summary = app == "ubuntu" ? "Работа в Linux: окна, файлы, приложения, система." :
+                app == "windows" ? "Работа в Windows 10: Пуск, окна, задачи и рабочие столы." :
                 app == "chrome" ? "Эффективная работа в браузере без мыши." :
                 app == "code" ? "Навигация, редактирование и управление проектом." :
                 app == "terminal" ? "Быстрая работа в консоли: команды, файлы, процессы." :
@@ -519,6 +524,9 @@ namespace TouchTypingStudio
             {
                 case "brand":
                     stroke("M 15,13 L 5,24 15,34 M 33,13 L 43,24 33,34 M 29,9 L 19,39", white, 5.3); break;
+                case "windows":
+                    fill("M6,10 L22,7 L22,23 L6,23 Z M25,7 L43,4 L43,23 L25,23 Z M6,26 L22,26 L22,42 L6,39 Z M25,26 L43,26 L43,45 L25,42 Z", Ui.Brush("#6FC9FF"));
+                    break;
                 case "ubuntu":
                     var orange = Ui.Brush("#FF8415");
                     stroke("M 13,13 A 15,15 0 0 1 33,12 M 37,19 A 15,15 0 0 1 33,35 M 27,39 A 15,15 0 0 1 9,29", orange, 5.7);

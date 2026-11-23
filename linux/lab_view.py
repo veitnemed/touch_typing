@@ -1,11 +1,10 @@
-"""Native snapshots of the simulated Ubuntu desktop and application windows."""
+"""Native snapshots of simulated Ubuntu and Windows desktops and application windows."""
 import base64
 from functools import partial
-from pathlib import Path
 
 import gi
 gi.require_version("Gsk", "4.0")
-from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Graphene, Gsk, Gtk, Pango
+from gi.repository import Gdk, Gio, GLib, Graphene, Gsk, Gtk, Pango
 
 # GitHub Dark Default role mapping: primer/github-vscode-theme, src/theme.js.
 CODE_BG = "#0d1117"
@@ -36,16 +35,6 @@ class DesktopView(Gtk.Widget):
         self.scene = {}
         self.icons = {}
         self.field_scroll = {}
-        self.wallpaper = None
-        for candidate in ("ubuntu-default-greyscale-wallpaper.png", "warty-final-ubuntu.png"):
-            path = Path("/usr/share/backgrounds") / candidate
-            if path.is_file():
-                try:
-                    pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(path), 1480, 900, True)
-                    self.wallpaper = Gdk.Texture.new_for_pixbuf(pixbuf)
-                    break
-                except GLib.Error:
-                    continue
         self.presentation_app = "ubuntu"
         self.reference_chrome = False
         self.set_overflow(Gtk.Overflow.HIDDEN)
@@ -63,7 +52,10 @@ class DesktopView(Gtk.Widget):
             choices = (" " + "; ".join(e.get("title", "") for e in active.get("entries", ()))
                        if active.get("focus") in ("code-problems", "code-quick-fix") else "")
             self.update_property([Gtk.AccessibleProperty.LABEL], [
-                "Учебная сцена. " + active.get("title", "Рабочий стол") + ". " + active.get("body", "")[:300] + choices])
+                ("Учебный рабочий стол Windows 10. " if scene.get("desktopStyle") == "win10" else "Учебная сцена. ")
+                + {"start": "Пуск. ", "task-view": "Представление задач. ", "snap": "Выберите второе окно. "}
+                  .get(scene.get("desktopOverlay"), "")
+                + active.get("title", "Рабочий стол") + ". " + active.get("body", "")[:300] + choices])
 
     @staticmethod
     def rect(x, y, width, height):
@@ -236,7 +228,10 @@ class DesktopView(Gtk.Widget):
                        and w.get("state") != "minimized"]
             # A normal active terminal is the topmost of at most two visible
             # windows. Render the actual terminal content only, at its size.
-            _, _, w, h = self.window_bounds(active, min(1, len(windows) - 1), width, height)
+            win10 = self.scene.get("desktopStyle") == "win10"
+            index = max(0, min(1, len(windows) - 1))
+            _, _, w, h = (self.win10_window_bounds(active, index, width, height - min(36, height * .15))
+                          if win10 else self.window_bounds(active, index, width, height))
             if w < 90 or h < 50:
                 return ""
             scale = min(1, 500 / w)
@@ -245,7 +240,7 @@ class DesktopView(Gtk.Widget):
             old = self.snapshot
             try:
                 self.snapshot = snap
-                self.draw_window(active, 0, 0, w, h)
+                self.draw_window(active, 0, 0, w, h, win10=win10)
             finally:
                 self.snapshot = old
             node = snap.to_node()
@@ -265,9 +260,252 @@ class DesktopView(Gtk.Widget):
         texture = self.get_native().get_renderer().render_texture(node, None)
         return base64.b64encode(texture.save_to_png_bytes().get_data()).decode("ascii")
 
+    def gradient(self, x, y, w, h, start, end, palette):
+        points = []
+        for relative in (start, end):
+            point = Graphene.Point()
+            point.init(x + relative[0] * w, y + relative[1] * h)
+            points.append(point)
+        stops = []
+        for offset, color in palette:
+            stop = Gsk.ColorStop()
+            stop.offset = offset
+            stop.color = ink(color)
+            stops.append(stop)
+        self.snapshot.append_linear_gradient(self.rect(x, y, w, h), *points, stops)
+
+    def ubuntu_wallpaper(self, width, height):
+        # Original charcoal facets inspired by the classic Ubuntu greyscale.
+        self.gradient(0, 0, width, height, (0, 0), (1, 1),
+                      ((0, "#53525a"), (.46, "#33343d"), (1, "#202027")))
+        for i in range(4):
+            self.gradient(0, i * height / 4, width, height / 4 + 1, (0, 0), (1, 1),
+                          ((0, "rgba(255,255,255,.035)"), (.6, "rgba(0,0,0,0)"),
+                           (1, "rgba(0,0,0,.07)")))
+
+    def win10_mark(self, x, y, size, color="#ffffff"):
+        gap = max(1, size * .075)
+        pane = (size - gap) / 2
+        for row in range(2):
+            for col in range(2):
+                self.fill(color, x + col * (pane + gap), y + row * (pane + gap), pane, pane)
+
+    def win10_wallpaper(self, width, height):
+        # Original four-pane light study; no system wallpaper or trademark asset imported.
+        self.gradient(0, 0, width, height, (0, .2), (1, .64),
+                      ((0, "#06264c"), (.47, "#064b87"), (.72, "#087cba"), (1, "#063e82")))
+        self.gradient(0, 0, width, height, (.5, 0), (.5, 1),
+                      ((0, "rgba(1,9,37,.40)"), (.49, "rgba(4,16,41,0)"), (1, "rgba(0,5,28,.38)")))
+        size = min(width * .22, height * .65)
+        cx, cy = width * .74, height * .48
+        for i in range(5, 0, -1):
+            inset = i * size * .036
+            self.fill("rgba(55,221,255,.055)", cx - size / 2 - inset, cy - size / 2 - inset,
+                      size + 2 * inset, size + 2 * inset, inset)
+        pane = size * .478
+        for row in range(2):
+            for col in range(2):
+                x = cx - size / 2 + col * size * .522
+                y = cy - size / 2 + row * size * .522
+                self.gradient(x, y, pane, pane, (0, 0), (1, 1),
+                              ((0, "#43dcfb"), (.042, "#1cb3e7"), (.57, "#1093c8"), (1, "#167dbc")))
+                self.fill("rgba(208,255,255,.42)", x, y, pane, 1)
+
+    @staticmethod
+    def win10_caption(app):
+        return {"files": "Проводник", "chrome": "Chrome", "code": "VS Code",
+                "terminal": "Терминал", "settings": "Параметры"}.get(app, app)
+
+    def win10_app_icon(self, app, x, y, size):
+        if app == "files":
+            self.fill("#ffc951", x, y + size * .19, size * .51, size * .35, 2)
+            self.fill("#f9db79", x, y + size * .32, size, size * .54, 2)
+            self.fill("#2f83c5", x + size * .19, y + size * .59, size * .62, size * .2)
+        elif app == "terminal":
+            self.fill("#0c1520", x, y + size * .12, size, size * .77, 2)
+            self.label(">_", x + size * .14, y + size * .12, size * .58, "#dceafe", mono=True)
+        else:
+            self.app_icon(app, x, y, size)
+
+    def win10_taskbar(self, width, top, height, windows, workspace, overlay):
+        self.fill("#101a29", 0, top, width, height)
+        mid = top + height / 2
+        if overlay == "start":
+            self.fill("#30425a", 0, top, 44, height)
+        self.win10_mark(14, mid - 8, 16, "#74caff" if overlay == "start" else "#f2f5fa")
+        # Search icon and a two-window Task View glyph, without depending on symbol fonts.
+        self.fill("#e9f1ff", 56, mid - 6, 11, 11, 6)
+        self.fill("#101a29", 58, mid - 4, 7, 7, 4)
+        self.fill("#e9f1ff", 65, mid + 4, 5, 2)
+        if overlay == "task-view":
+            self.fill("#30425a", 76, top, 37, height)
+        for x, y in ((89, mid - 5), (94, mid - 8)):
+            self.fill("#d3e0ed", x, y, 12, 10)
+            self.fill("#192b3f", x + 1, y + 1, 10, 8)
+        for i, app in enumerate(("files", "chrome", "code", "terminal")):
+            x = 116 + i * 37
+            if x + 32 > width - 94:
+                break
+            opened = [v for v in windows if v.get("app") == app and v.get("workspace", 0) == workspace]
+            if any(v.get("active") and v.get("state") != "minimized" for v in opened):
+                self.fill("#263f57", x, top, 33, height)
+            if opened:
+                self.fill("#4cb9fa", x + 7, top + height - 2, 19, 2)
+            self.win10_app_icon(app, x + 7, mid - 9, 19)
+        self.label(self.scene.get("layout", "EN"), width - 80, mid - 8, 11, "#e2eaf3", width=25)
+        self.label("10:00", width - 49, mid - 8, 11, "#e2eaf3", width=44)
+        self.fill("#748395", width - 4, top, 1, height)
+
+    def win10_start(self, width, top):
+        wm = min(500, width - 2)
+        hm = min(326, top - 2)
+        y = top - hm
+        self.fill("rgba(0,0,0,.25)", 5, y - 2, wm, hm + 2)
+        self.fill("#202832", 0, y, wm, hm)
+        self.fill("#19212b", 0, y, 45, hm)
+        self.label("≡", 14, y + 8, 17)
+        self.label("⊙", 14, top - 29, 16)
+        self.label("Пуск", 57, y + 11, 14, "#f3f6f9", bold=True, width=wm - 65)
+        apps = self.scene.get("desktopStartApps") or ("chrome", "code", "terminal", "files")
+        selection = self.scene.get("desktopOverlaySelection", 0)
+        query = self.scene.get("search", "")
+        has_tiles = wm >= 355
+        list_width = 169 if has_tiles else wm - 58
+        show_query = hm >= 146
+        row = max(18, min(34, (hm - 32 - (26 if show_query else 0)) / max(1, len(apps))))
+        for i, app in enumerate(apps):
+            ty = y + 31 + i * row
+            if ty + row > top:
+                break
+            if i == selection:
+                self.fill("#34485b", 50, ty, list_width, row - 1)
+                self.fill("#63c3ff", 50, ty, 2, row - 1)
+            size = min(19, row - 4)
+            self.win10_app_icon(app, 59, ty + (row - size) / 2, size)
+            self.label(self.win10_caption(app), 85, ty + (row - 15) / 2, 11,
+                       "#e9f0f8", width=list_width - 40)
+        if show_query:
+            self.fill("#f3f5f7", 50, top - 26, list_width, 22)
+            self.label(str(query or "Поиск приложения"), 57, top - 23, 11, "#253648", width=list_width - 12)
+        if has_tiles:
+            self.label("Закреплённые", 235, y + 12, 11, "#d2deea", width=wm - 242)
+            unit = min(70, (wm - 243) / 2, (hm - 38) / 2)
+            for i, app in enumerate(apps[:4]):
+                x, ty = 237 + i % 2 * (unit + 4), y + 31 + i // 2 * (unit + 4)
+                self.fill(("#1762a1", "#1d4c77", "#176197", "#28405b")[i], x, ty, unit, unit)
+                size = min(22, unit * .36)
+                self.win10_app_icon(app, x + (unit - size) / 2, ty + (unit - size) * .37, size)
+                if unit >= 42:
+                    self.label(self.win10_caption(app), x + 4, ty + unit - 15, 9, width=unit - 8)
+
+    def win10_cards(self, width, top, windows, title, selection, workspaces=False, x=0):
+        area = width - x
+        self.fill("#10243b" if workspaces else "rgba(7,20,38,.91)", x, 0, area, top)
+        self.label(title, x + 16, 10, 15 if area >= 250 else 12, bold=True, width=area - 32)
+        start = 41
+        if workspaces:
+            count = self.scene.get("workspaceCount", 1)
+            current = self.scene.get("workspace", 0)
+            labels = [("Рабочий стол " + str(i + 1), i == current) for i in range(count)]
+            sw = min(116, max(70, (area - 35) / max(1, len(labels)) - 7))
+            for i, (label, active) in enumerate(labels):
+                left = x + 16 + i * (sw + 7)
+                if left + sw > width - 9:
+                    break
+                self.fill("#286090" if active else "#20354b", left, 36, sw, 25)
+                self.label(label, left + 5, 41, 10, width=sw - 10)
+            start = 73
+        if not windows:
+            self.label("На этом рабочем столе нет окон", x + 16, start + 5, 11, "#d1e1f3", width=area - 28)
+            return
+        columns = min(len(windows), 3 if area >= 615 else 2 if area >= 365 else 1)
+        cw = (area - 32 - 8 * (columns - 1)) / columns
+        rows = (len(windows) + columns - 1) // columns
+        ch = min(114, max(31, (top - start - 9 - (rows - 1) * 6) / rows))
+        for i, window in enumerate(windows):
+            left, y = x + 16 + (i % columns) * (cw + 8), start + (i // columns) * (ch + 6)
+            if y + ch > top:
+                break
+            selected = i == selection
+            self.fill("#9cdaff" if selected else "#4f6883", left, y, cw, ch)
+            self.fill("#152a42", left + 2, y + 2, cw - 4, ch - 4)
+            self.win10_app_icon(window["app"], left + 9, y + 7, 15)
+            self.label(window.get("title", self.win10_caption(window["app"])), left + 31, y + 7, 10,
+                       "#e1ecf9", width=cw - 39)
+            if ch >= 54:
+                self.fill("#24517b", left + 8, y + 26, cw - 16, ch - 34)
+                self.fill("#c2dbed", left + 8, y + 26, cw - 16, 5)
+                self.fill("#5e819e", left + 13, y + 35, (cw - 28) * .65, 2)
+
+    @staticmethod
+    def win10_window_bounds(window, index, width, top):
+        state = window.get("state")
+        if state in ("maximized", "fullscreen"):
+            return 0, 0, width, top
+        if state in ("left", "right", "snapped-left", "snapped-right"):
+            return (width / 2 if state in ("right", "snapped-right") else 0), 0, width / 2, top
+        slot = max(0, min(1, window.get("normalSlot", index)))
+        w, h = width * .74, top * .75
+        return (width - w) * (.21 + .6 * slot), (top - h) * (.22 + .64 * slot), w, h
+
+    def draw_win10(self, width, height):
+        workspace = self.scene.get("workspace", 0)
+        overlay = self.scene.get("desktopOverlay", "")
+        state_windows = self.scene.get("windows", [])
+        current = [v for v in state_windows if v.get("workspace", 0) == workspace]
+        windows = [v for v in current if v.get("state") != "minimized" and not self.scene.get("showDesktop")]
+        windows.sort(key=lambda item: bool(item.get("active")))
+        bar = min(36, height * .15)
+        top = height - bar
+        self.win10_wallpaper(width, top)
+        active = next((window for window in windows if window.get("active")), None)
+        snapped = {"snapped-left", "snapped-right", "left", "right"}
+        right = {"snapped-right", "right"}
+        if active and active.get("state") in ("maximized", "fullscreen"):
+            windows = [active]
+        elif active and active.get("state") in snapped:
+            other = [v for v in windows if v is not active and v.get("state") in snapped
+                     and (v["state"] in right) != (active["state"] in right)]
+            windows = other[-1:] + [active]
+        else:
+            windows = windows[-2:]
+        for i, window in enumerate(windows):
+            self.draw_window(window, *self.win10_window_bounds(window, i, width, top), win10=True)
+        if overlay in ("task-view", "snap"):
+            by_id = {v["id"]: v for v in current}
+            ids = self.scene.get("desktopOverlayWindows")
+            candidates = list(current) if ids is None else [by_id[i] for i in ids if i in by_id]
+        if overlay == "start":
+            self.win10_start(width, top)
+        elif overlay == "task-view":
+            self.win10_cards(width, top, candidates, "Представление задач",
+                             self.scene.get("desktopOverlaySelection", -1), workspaces=True)
+        elif overlay == "snap":
+            x = width / 2 if active and active.get("state") not in right else 0
+            limit = width if x else width / 2
+            self.win10_cards(limit, top, candidates, "Выберите второе окно",
+                             self.scene.get("desktopOverlaySelection", -1), x=x)
+        elif self.scene.get("switcher"):
+            candidates = current
+            ids = self.scene.get("switchChoices")
+            if ids:
+                by_id = {v["id"]: v for v in candidates}
+                candidates = [by_id[i] for i in ids if i in by_id]
+            target = self.scene.get("switchTarget")
+            self.win10_cards(width, top, candidates, "Переключение окон",
+                             next((i for i, v in enumerate(candidates) if v["id"] == target), -1))
+        self.win10_taskbar(width, top, bar, state_windows, workspace, overlay)
+
     def do_snapshot(self, snapshot):
         self.snapshot = snapshot
         width, height = self.get_width(), self.get_height()
+        if self.scene.get("desktopStyle") == "win10" and (self.presentation_app not in ("chrome", "code")
+                or self.scene.get("desktopOverlay") or self.scene.get("switcher") or self.scene.get("showDesktop")
+                or not any(v.get("active") and v.get("app") == self.presentation_app for v in self.scene.get("windows", []))):
+            self.draw_win10(width, height)
+            self.draw_capture_feedback(width, height)
+            self.snapshot = None
+            return
         if self.presentation_app in ("chrome", "code") and not self.scene.get("overview") and not self.scene.get("showDesktop") and not self.scene.get("switcher") and any(v.get("active") and v.get("app") == self.presentation_app for v in self.scene.get("windows", [])):
             self.fill("#202124" if self.presentation_app == "chrome" else "#1f1f1f", 0, 0, width, height)
             windows = [window for window in self.scene.get("windows", [])
@@ -284,11 +522,7 @@ class DesktopView(Gtk.Widget):
             self.draw_capture_feedback(width, height)
             self.snapshot = None
             return
-        self.fill("#351d32", 0, 0, width, height)
-        if self.wallpaper:
-            scale = max(width / self.wallpaper.get_width(), height / self.wallpaper.get_height())
-            ww, wh = self.wallpaper.get_width() * scale, self.wallpaper.get_height() * scale
-            self.snapshot.append_texture(self.wallpaper, self.rect((width - ww) / 2, (height - wh) / 2, ww, wh))
+        self.ubuntu_wallpaper(width, height)
         self.fill("#261f2b", 0, 0, width, 25)
         workspace = self.scene.get("workspace", 0)
         self.label("Деятельность", 12, 4, 11, bold=True)
@@ -378,34 +612,44 @@ class DesktopView(Gtk.Widget):
             return 52 + (width - 54 - w) * (.15 + .7 * slot), 27 + (height - 29 - h) * (.24 + .52 * slot), w, h
         return 67 + index * 18, 39 + index * 16, width - 105 - index * 18, height - 60 - index * 16
 
-    def draw_window(self, window, x, y, w, h):
+    def draw_window(self, window, x, y, w, h, *, win10=False):
         if h < 50 or w < 90:
             return
-        self.fill("#16151b", x + 3, y + 4, w, h, 7)
-        self.fill("#303036", x, y, w, h, 7)
+        radius = 0 if win10 else 7
+        self.fill("#16151b", x + 3, y + 4, w, h, radius)
+        self.fill("#569ace" if win10 and window.get("active") else "#303036", x, y, w, h, radius)
         self.snapshot.push_clip(self.rect(x + 1, y + 1, w - 2, h - 2))
         app = window.get("app", "terminal")
         purple = self.reference_chrome and self.presentation_app == app == "chrome"
-        self.fill("#282541" if purple else "#303036", x, y, w, 27)
-        if purple:
-            self.app_icon("chrome", x + 10, y + 5, 17)
-        self.label(window.get("title", app), x + (34 if purple else 10), y + 6,
-                   12 if purple else 11, width=w - 105, bold=True,
-                   family=self.chrome_font if purple else "Noto Sans")
-        self.label("−    □", x + w - 79, y + 5, 12)
-        self.fill("#e95420" if window.get("active") else "#66616c", x + w - 25, y + 5, 17, 17, 9)
-        self.label("×", x + w - 21, y + 3, 15)
+        if win10:
+            self.fill("#f4f7fa", x + 1, y + 1, w - 2, 26)
+            self.win10_app_icon(app, x + 8, y + 7, 13)
+            self.label(window.get("title", self.win10_caption(app)), x + 27, y + 6, 11,
+                       "#1c2937", width=w - 111)
+            for i, glyph in enumerate(("−", "□", "×")):
+                bx = x + w - 77 + i * 24
+                self.label(glyph, bx + 6, y + 3, 14, "#263648")
+        else:
+            self.fill("#282541" if purple else "#303036", x, y, w, 27)
+            if purple:
+                self.app_icon("chrome", x + 10, y + 5, 17)
+            self.label(window.get("title", app), x + (34 if purple else 10), y + 6,
+                       12 if purple else 11, width=w - 105, bold=True,
+                       family=self.chrome_font if purple else "Noto Sans")
+            self.label("−    □", x + w - 79, y + 5, 12)
+            self.fill("#e95420" if window.get("active") else "#66616c", x + w - 25, y + 5, 17, 17, 9)
+            self.label("×", x + w - 21, y + 3, 15)
         if app == "chrome":
             self.chrome(window, x, y + 27, w, h - 27)
         elif app == "files":
-            self.files(window, x, y + 27, w, h - 27)
+            self.files(window, x, y + 27, w, h - 27, win10=win10)
         elif app == "code":
             self.code(window, x, y + 27, w, h - 27)
         else:
             self.terminal(window, x, y + 27, w, h - 27)
         self.snapshot.pop()
 
-    def files(self, window, x, y, w, h):
+    def files(self, window, x, y, w, h, *, win10=False):
         if window.get("focus") == "image-preview" and window.get("imagePreview"):
             data = base64.b64decode(window["imagePreview"].split(",", 1)[1])
             texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(data))
@@ -415,19 +659,22 @@ class DesktopView(Gtk.Widget):
             self.snapshot.append_texture(texture, self.rect(x + (w - iw) / 2, y + (h - ih) / 2, iw, ih))
             return
         sidebar = min(178, w * .23)
-        self.fill("#f7f6f5", x, y, w, h)
-        self.fill("#eeecea", x, y, sidebar, h)
-        self.label("Места", x + 16, y + 16, 13, "#57504d", bold=True)
+        self.fill("#ffffff" if win10 else "#f7f6f5", x, y, w, h)
+        self.fill("#f0f4fa" if win10 else "#eeecea", x, y, sidebar, h)
+        self.label("Быстрый доступ" if win10 else "Места", x + 16, y + 16, 13, "#57504d", bold=True)
         names = [("Домашняя папка", "/home/student"), ("Загрузки", "/home/student/Downloads"),
                  ("Изображения", "/home/student/Pictures"), ("Проект", "/home/student/project")]
         for i, (name, path) in enumerate(names):
             ty = y + 53 + i * 35
             if window.get("folder") == path:
-                self.fill("#e2d6cf", x + 7, ty - 6, sidebar - 14, 31, 6)
+                self.fill("#cce8ff" if win10 else "#e2d6cf", x + 7, ty - 6, sidebar - 14, 31, 0 if win10 else 6)
             self.label(name, x + 16, ty, 12, "#37302c", width=sidebar - 28)
         left = x + sidebar + 22
-        self.label(window.get("folder", "").replace("/home/student", "Домашняя папка", 1).replace("/", "  ›  "),
-                   left, y + 13, 14, "#302c29", width=w - sidebar - 38, bold=True)
+        folder = (window.get("windowsPath") if win10 else
+                  window.get("folder", "").replace("/home/student", "Домашняя папка", 1).replace("/", "  ›  "))
+        self.label(folder or ("Проводник" if win10 else ""), left, y + 13, 14, "#302c29",
+                   width=w - sidebar - 38, bold=True)
+
         self.fill("#dedad6", x + sidebar, y + 41, w - sidebar, 1)
         entries = window.get("entries", [])
         first = max(0, window.get("item", -1) - max(1, int((h - 52) / 37)) + 1)
@@ -436,7 +683,7 @@ class DesktopView(Gtk.Widget):
             if ty + 34 > y + h:
                 break
             if i == window.get("item"):
-                self.fill("#f1d9c9", left - 9, ty - 2, w - sidebar - 26, 33, 6)
+                self.fill("#cce8ff" if win10 else "#f1d9c9", left - 9, ty - 2, w - sidebar - 26, 33, 0 if win10 else 6)
             folder = entry["kind"] == "folder"
             if folder:
                 self.fill("#bc7439", left + 1, ty + 4, 10, 7, 2)

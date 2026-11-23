@@ -139,8 +139,9 @@ internal static class LabTests
         foreach (int level in new[] { 0, 1, 2 })
         {
             var courses = LiveCourse.Missions.Where(m => m.App == app && m.Level == level).ToList();
-            int expectedCourses = app == "workday" ? (level == 0 ? 2 : 1) : 4;
+            int expectedCourses = app == "windows" ? 0 : app == "workday" ? (level == 0 ? 2 : 1) : 4;
             Check(courses.Count(course => !course.Curated) == expectedCourses, "Course count: " + app);
+            if (app == "windows") Check(courses.Count == 1 && courses[0].Curated, "Windows curated route: " + level);
             foreach (var course in courses)
             foreach (int variant in Enumerable.Range(0, 3))
             foreach (string layout in new[] { "RU", "EN" })

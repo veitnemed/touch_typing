@@ -456,7 +456,13 @@ class ReferenceGlyph(ReferenceCanvas):
         color = widget.get_style_context().get_color()
         cr.set_source_rgba(color.red, color.green, color.blue, color.alpha)
         name = self.name
-        if name == "ubuntu":
+        if name == "windows":
+            rgb(.44, .79, 1)
+            for row in range(2):
+                for col in range(2):
+                    cr.rectangle(10 + col * 15, 10 + row * 15, 13, 13)
+                    cr.fill()
+        elif name == "ubuntu":
             rgb(1, .47, 0)
             cr.set_line_width(5)
             for angle in (23, 143, 263):
@@ -687,6 +693,9 @@ class Studio(Gtk.Application):
         else:
             self.window.add_css_class("reference-light")
 
+    def lab_desktop_profile(self):
+        return "windows" if self.library.get("desktopProfile") == "windows" else "ubuntu"
+
     def open_reference_module(self, module):
         self.navigate("lab")
         if self.lab is None:
@@ -723,6 +732,9 @@ class Studio(Gtk.Application):
         skills = self.library.get("liveSkills", ())
         self.home_cards = {}
         for index, (module, title, description) in enumerate(self.HOME_MODULES):
+            if module == "ubuntu" and self.lab_desktop_profile() == "windows":
+                module, title = "windows", "Windows 10"
+                description = "Работа в Windows: Пуск,\nокна, рабочие столы."
             tile = button("", lambda dest=module: self.open_reference_module(dest), "reference-card", "module-" + module)
             if index == 0:
                 tile.add_css_class("reference-selected")
@@ -2206,11 +2218,15 @@ class LabPage(Gtk.Box):
         self.modal_layer.set_visible(False)
         self.canvas.add_overlay(self.modal_layer)
         catalog = host.call("lab-catalog") or {"classes": []}
-        self.classes = catalog["classes"]
-        self.missions = catalog.get("missions", [])
+        self.all_classes = catalog["classes"]
+        self.all_missions = catalog.get("missions", [])
+        self.desktop_profile = host.lab_desktop_profile()
+        self.classes = []
+        self.missions = []
+        self.rebuilding_profile = False
         self.mission_picker = dropdown(["Подобрать поручение"])
         self.mission_picker.set_hexpand(True)
-        self.picker = dropdown([item["title"] for item in self.classes])
+        self.picker = dropdown([])
         self.picker.set_visible(False)
         self.mode = dropdown(["По шагам", "Самостоятельно"])
         self.action_limits = (0, 20, 40, 60, 100)
@@ -2226,14 +2242,14 @@ class LabPage(Gtk.Box):
         self.begin = button("Начать · Пробел", self.start, "primary")
         self.prep = box(Gtk.Orientation.VERTICAL, 12, "lab-prep")
         self.prep.append(text("Практика без мыши", "h2"))
-        class_cards = row(10)
+        self.os_selector = bind_name(dropdown(["Ubuntu", "Windows 10"]), "Учебная операционная система")
+        self.os_selector.set_selected(self.desktop_profile == "windows")
+        self.os_selector.set_tooltip_text("Меняет учебные сочетания, сценарии и рабочий стол, а не текущую систему.")
+        self.os_selector.connect("notify::selected", self.change_desktop_profile)
+        self.prep.append(add(row(8), text("Учебная операционная система", "muted"), self.os_selector))
+        self.class_cards = row(10)
         self.class_buttons = []
-        for index, item in enumerate(self.classes):
-            select = button(item["title"], lambda i=index: self.picker.set_selected(i), "class-button")
-            select.set_tooltip_text(item["description"])
-            class_cards.append(expand(select))
-            self.class_buttons.append(select)
-        self.prep.append(class_cards)
+        self.prep.append(self.class_cards)
         self.prep.append(self.mission_picker)
         self.prep.append(add(row(8), self.picker, self.mode, self.level, expand(box()), self.begin))
         self.prep.append(add(row(8), self.limit, self.time_limit))
@@ -2366,10 +2382,49 @@ class LabPage(Gtk.Box):
         self.guide_scroll.set_child(self.guide)
         self.content.append(self.guide_scroll)
         self.guide.paint(host.library, host.layout)
-        self.describe()
+        self.set_desktop_classes()
         for widget in (self.toolbar, self.stage, self.footer, self.guide_scroll, self.details):
             widget.set_visible(False)
-        self.begin.grab_focus()
+        self.os_selector.grab_focus()
+
+    def set_desktop_classes(self):
+        selected = self.picker.get_selected()
+        previous = self.classes[selected]["id"] if selected < len(self.classes) else None
+        if previous in ("ubuntu", "windows"):
+            previous = self.desktop_profile
+        self.rebuilding_profile = True
+        clear(self.class_cards)
+        self.class_buttons = []
+        self.classes = [item for item in self.all_classes
+                        if item["id"] not in ("ubuntu", "windows") or item["id"] == self.desktop_profile]
+        self.missions = [item for item in self.all_missions
+                         if (item.get("desktopProfile") or self.desktop_profile) == self.desktop_profile]
+        for i, item in enumerate(self.classes):
+            control = button(item["title"], lambda i=i: self.picker.set_selected(i), "class-button")
+            control.set_tooltip_text(item["description"])
+            self.class_cards.append(expand(control))
+            self.class_buttons.append(control)
+        self.picker.set_model(Gtk.StringList.new([item["title"] for item in self.classes]))
+        if self.classes:
+            self.picker.set_selected(next((i for i, item in enumerate(self.classes) if item["id"] == previous), 0))
+        self.rebuilding_profile = False
+        self.begin.set_sensitive(bool(self.classes))
+        self.describe()
+
+    def change_desktop_profile(self, *_):
+        chosen = "windows" if self.os_selector.get_selected() == 1 else "ubuntu"
+        if chosen == self.desktop_profile or self.active:
+            return
+        catalog = self.host.call("lab-catalog", desktopProfile=chosen)
+        updated = self.host.call("settings", desktopProfile=chosen) if catalog else None
+        if not updated or updated.get("desktopProfile") != chosen:
+            self.os_selector.set_selected(self.desktop_profile == "windows")
+            return
+        self.desktop_profile = chosen
+        self.host.library = updated
+        self.all_classes = catalog["classes"]
+        self.all_missions = catalog.get("missions", [])
+        self.set_desktop_classes()
 
     def toggle_goal_details(self, options):
         options.popdown()
@@ -2388,8 +2443,9 @@ class LabPage(Gtk.Box):
                                      and (self.guide.show_keys or self.guide.show_hands))
 
     def describe(self):
-        if self.classes:
-            selected = self.classes[self.picker.get_selected()]
+        index = self.picker.get_selected()
+        if not self.rebuilding_profile and index < len(self.classes):
+            selected = self.classes[index]
             for index, item in enumerate(self.class_buttons):
                 item.remove_css_class("selected")
                 if index == self.picker.get_selected():
@@ -2399,7 +2455,8 @@ class LabPage(Gtk.Box):
             guidance = "guided" if self.mode.get_selected() == 0 else "independent"
             catalog = self.host.call("lab-catalog") or {}
             description = selected["description"]
-            advice = next((r for r in catalog.get("recommendations", []) if r.get("app") == app), None)
+            advice = next((r for r in catalog.get("recommendations", []) if r.get("app") == app
+                           and (r.get("desktopProfile") or self.desktop_profile) == self.desktop_profile), None)
             if advice and advice.get("reason", "").strip():
                 suggested = advice.get("level")
                 title = (f"Рекомендуемый уровень: {self.level_titles[suggested]}. "
@@ -2407,7 +2464,11 @@ class LabPage(Gtk.Box):
                 description += "\n" + title + advice["reason"]
             self.summary.set_label(description)
             self.choices = [("", "Подобрать поручение")]
-            if any(d["app"] == app and d["level"] == level and d["guidance"] == guidance for d in catalog.get("drafts", [])):
+            # The engine keeps direct app drafts shared between simulations.
+            draft_profile = self.desktop_profile if app in ("workday", "windows") else "ubuntu"
+            if any(d["app"] == app and d["level"] == level and d["guidance"] == guidance
+                   and (d.get("desktopProfile") or "ubuntu") == draft_profile
+                   for d in catalog.get("drafts", [])):
                 self.choices.append(("@resume", "Продолжить с сохранённого места"))
             self.choices.extend((m["id"], m["title"]) for m in self.missions if m["app"] == app and m["level"] == level)
             self.mission_picker.set_model(Gtk.StringList.new([title for _, title in self.choices]))
@@ -2597,6 +2658,7 @@ class LabPage(Gtk.Box):
         mission = self.choices[self.mission_picker.get_selected()][0]
         self.state = self.host.call("lab-start", app=app, mode="sandbox", level=self.level.get_selected(), mission="" if mission == "@resume" else mission,
                                     **{"continue": mission == "@resume"}, softFinish=True, combinedLimits=True,
+                                    desktopProfile=self.desktop_profile,
                                     guidance="guided" if self.mode.get_selected() == 0 else "independent",
                                     seconds=self.time_limits[self.time_limit.get_selected()],
                                     actionLimit=self.action_limits[self.limit.get_selected()])
@@ -3018,7 +3080,8 @@ class LabPage(Gtk.Box):
         if self.active:
             self.stop(show=False, on_saved=self.replay)
             return
-        selected_class = self.picker.get_selected()
+        selected_class = self.classes[self.picker.get_selected()]["id"]
+        desktop_profile = self.desktop_profile
         selected_mode = self.mode.get_selected()
         selected_level = self.level.get_selected()
         def selection(widget, options, key):
@@ -3027,7 +3090,11 @@ class LabPage(Gtk.Box):
         limit = selection(self.limit, self.action_limits, "actionLimit")
         time_limit = selection(self.time_limit, self.time_limits, "timeLimit")
         self.host.navigate("lab")
-        self.host.lab.picker.set_selected(selected_class)
+        self.host.lab.os_selector.set_selected(desktop_profile == "windows")
+        class_index = next((i for i, item in enumerate(self.host.lab.classes) if item["id"] == selected_class), None)
+        if class_index is None:
+            return
+        self.host.lab.picker.set_selected(class_index)
         self.host.lab.mode.set_selected(selected_mode)
         self.host.lab.level.set_selected(selected_level)
         self.host.lab.limit.set_selected(limit)

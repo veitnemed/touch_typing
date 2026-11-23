@@ -64,7 +64,8 @@ namespace TouchTypingStudio
             scene = next;
             classApp = app;
             System.Windows.Automation.AutomationProperties.SetName(this,
-                (app == "chrome" ? "Учебный Chrome" : app == "code" ? "Учебный VS Code" : "Учебный рабочий стол Ubuntu") +
+                (scene.S("desktopStyle") == "win10" ? "Учебный рабочий стол Windows 10. " + Windows10StateDescription() :
+                app == "chrome" ? "Учебный Chrome" : app == "code" ? "Учебный VS Code" : "Учебный рабочий стол Ubuntu") +
                 ". Раскладка " + scene.S("layout") + ". " +
                 string.Join(". ", scene.Items("windows").Where(w => w.B("active")).Select(w => w.S("title") + ". " + w.S("status"))) +
                 (scene.B("gnomeWindows") ? ". Окна: " + string.Join("; ", scene.Items("windows").Select(w =>
@@ -106,6 +107,12 @@ namespace TouchTypingStudio
         {
             if (ActualWidth < 1 || ActualHeight < 1) return;
             context = dc;
+            if (scene.S("desktopStyle") == "win10")
+            {
+                DrawSimulatedWindows10(dc);
+                context = null;
+                return;
+            }
             if ((classApp == "chrome" || classApp == "code") && !scene.B("overview") && !scene.B("showDesktop") && !scene.B("switcher") &&
                 scene.Items("windows").Any(item => item.B("active") && item.S("app") == classApp && item.S("state") != "minimized"))
             {
@@ -117,10 +124,7 @@ namespace TouchTypingStudio
             dc.PushTransform(new TranslateTransform((ActualWidth - WidthUnits * scale) / 2, (ActualHeight - HeightUnits * scale) / 2));
             dc.PushTransform(new ScaleTransform(scale, scale));
             dc.PushClip(new RectangleGeometry(new Rect(0, 0, WidthUnits, HeightUnits), 10, 10));
-            dc.DrawRectangle(new LinearGradientBrush(Color.FromRgb(44, 22, 56), Color.FromRgb(96, 37, 60), 30), null,
-                new Rect(0, 0, WidthUnits, HeightUnits));
-            dc.DrawGeometry(Ui.Brush("#732E4B"), null, Geometry.Parse("M0,520 L500,70 L900,520Z"));
-            dc.DrawGeometry(Ui.Brush("#4A2340"), null, Geometry.Parse("M1200,50 L580,520 L1200,520Z"));
+            DrawUbuntuGrayWallpaper(dc);
             Rectangle(0, 0, 1200, 28, "#151519");
             Text("●  Обзор", 15, 6, 11, "#EEEEF0");
             Text(scene.S("gnomePractice") == "workspaces" ? "Ubuntu  ·  рабочий стол " +

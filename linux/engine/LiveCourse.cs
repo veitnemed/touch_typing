@@ -25,6 +25,7 @@ internal static partial class LiveCourse
         EditorDiagnosticMissions(result);
         TerminalMissions(result);
         DesktopMissions(result);
+        WindowsDesktopMissions(result);
         WorkdayDebugMissions(result);
         return result;
     }
@@ -101,7 +102,7 @@ internal static partial class LiveCourse
         goals.Count(goal => weak.Contains((goal.Task.Id, goal.Layout)));
 
     private static bool AtItem(LabScene scene, string target) => scene.Entries(scene.Active).ElementAtOrDefault(scene.Active.Focus is "quick-open" or "symbols" ? scene.Active.OptionIndex : scene.Active.Item)?.Title == target;
-    private static readonly Dictionary<string, LabTask> Actions = LabCatalog.Shortcuts.ToDictionary(task => task.Id);
+    private static readonly Dictionary<string, LabTask> Actions = LabCatalog.AllTasks.ToDictionary(task => task.Id);
     private static LabTask MakeTask(string token, LabScene scene)
     {
         if (PythonEditTask(token) is LabTask edit) return edit;
@@ -196,6 +197,7 @@ internal static partial class LiveCourse
     {
         var w = scene.Active;
         string app = w?.App ?? "", action = task.Action;
+        if (scene.WindowsDesktop) return JsonSerializer.Serialize(scene.WindowsDesktopEvidence());
         if (scene.PythonEditingExercise) return JsonSerializer.Serialize(scene.PythonEditEvidence());
         if (scene.GnomePractice is "workspaces" or "same-app")
             return JsonSerializer.Serialize(scene.GnomeScopeEvidence(task, equivalentCommand));

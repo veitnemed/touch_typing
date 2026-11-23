@@ -96,16 +96,31 @@ internal sealed class PracticeService
                 if (message.TryGetProperty("dock", out var pinned) && pinned.ValueKind == JsonValueKind.Array)
                     dock = pinned.EnumerateArray().Take(9).Select(item => item.GetString() ?? "").ToArray();
                 return Library();
-            case "lab-catalog": return LabCatalog.Catalog(profile.LiveDrafts, profile.ShortcutHistory, layout, neutralProject);
+            case "lab-catalog": return LabCatalog.Catalog(profile.LiveDrafts, profile.ShortcutHistory, layout, neutralProject, RequestedDesktop(message));
             case "lab-start":
+                string chosenEnvironment = RequestedDesktop(message, Text(message, "app"));
+                string chosenApp = Text(message, "app");
+                if (chosenApp == "ubuntu" && chosenEnvironment == "windows") chosenApp = "windows";
+                if (chosenApp == "windows" && chosenEnvironment != "windows")
+                    throw new ArgumentException("Для этого класса выберите Windows 10.");
+                bool continuing = Flag(message, "continue");
+                bool explicitEnvironment = message.TryGetProperty("desktopProfile", out _);
+                LiveDraft MatchingDraft() => profile.LiveDrafts.LastOrDefault(item =>
+                    item.App == chosenApp && item.Level == Number(message, "level") && item.Guidance == Text(message, "guidance") &&
+                    LabScene.DesktopEnvironment(item.DesktopEnvironment) == (chosenApp is "workday" or "windows" ? chosenEnvironment : "ubuntu"));
+                if (continuing && explicitEnvironment && MatchingDraft() == null)
+                    throw new ArgumentException("Для выбранной среды нет сохранённого поручения.");
                 FinishLab();
                 if (lab?.Saved == false) return LabState(startBlocked: true);
-                var draft = Flag(message, "continue") ? profile.LiveDrafts.LastOrDefault(item =>
-                    item.App == Text(message, "app") && item.Level == Number(message, "level") && item.Guidance == Text(message, "guidance")) : null;
+                // Finishing may update the durable revision. Read the current
+                // draft again, while preserving old clients' fresh fallback.
+                var draft = continuing ? MatchingDraft() : null;
+                if (continuing && explicitEnvironment && draft == null)
+                    throw new ArgumentException("Для выбранной среды нет сохранённого поручения.");
                 bool combinedLimits = Flag(message, "combinedLimits");
-                lab = new LabRun(Text(message, "app"), Text(message, "mode"), Number(message, "level"),
+                lab = new LabRun(chosenApp, Text(message, "mode"), Number(message, "level"),
                     Number(message, "seconds", combinedLimits ? 0 : 180), layout, profile.ShortcutHistory,
-                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit"), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: Text(message, "mission"), draft: draft, softFinish: Flag(message, "softFinish"), combinedLimits: combinedLimits, windowsBindings: windows, desktopProfile: windows ? null : desktopProfile, neutralProject: neutralProject);
+                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit"), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: Text(message, "mission"), draft: draft, softFinish: Flag(message, "softFinish"), combinedLimits: combinedLimits, windowsBindings: windows, desktopProfile: windows ? null : desktopProfile, neutralProject: neutralProject, environment: chosenEnvironment);
                 persistedLabAttempts = 0;
                 labCheckpoint = draft;
                 labLimitCheckpointAttempted = draft?.Progress?.LimitDecisionPending == true;
@@ -214,7 +229,7 @@ internal sealed class PracticeService
     private object LabState(bool startBlocked = false)
     {
         if (lab == null) return null;
-        return new { lab.App, lab.Mode, lab.Level, task = lab.Task.Snapshot(), scene = lab.Scene.Snapshot(), held = lab.Held,
+        return new { lab.App, lab.Mode, lab.Level, desktopProfile = lab.EnvironmentProfile, task = lab.Task.Snapshot(), scene = lab.Scene.Snapshot(), held = lab.Held,
             lab.LastKey, lab.Status, lab.Feedback, lab.Errors, lab.Solved, lab.Block, index = lab.Solved % 20 + 1,
             lab.Seconds, lab.Remaining, lab.TimeLimit, lab.ActionLimit, lab.Guidance, lab.ShowGuide, lab.Finished, lab.Paused, lab.Saved, startBlocked, saveError = labSaveError, needsCapture = true,
             limitDecisionPending = lab.AwaitingLimitChoice, finishingMission = lab.FinishingMission, limitReached = lab.LimitReached,
@@ -245,7 +260,7 @@ internal sealed class PracticeService
         lab.Pause();
         lab.HoldForLimit();
         var record = lab.SessionRecord();
-        bool hasOldDraft = profile.LiveDrafts.Any(item => item.App == lab.App && item.Level == lab.Level && item.Guidance == lab.Guidance);
+        bool hasOldDraft = profile.LiveDrafts.Any(item => item.App == lab.App && item.Level == lab.Level && item.Guidance == lab.Guidance && LabScene.DesktopEnvironment(item.DesktopEnvironment) == lab.EnvironmentProfile);
         // An elapsed-only timed session has no credits but its previous
         // checkpoint must still be retired if this attempt reached its limit.
         if (!lab.HasDraft && record.Solved + record.Errors == 0 && !lab.LimitAccepted && !(record.Completed && hasOldDraft))
@@ -264,7 +279,7 @@ internal sealed class PracticeService
         var previousProfile = profile;
         Save(current =>
         {
-            bool SameSlot(LiveDraft item) => item.App == lab.App && item.Level == lab.Level && item.Guidance == lab.Guidance;
+            bool SameSlot(LiveDraft item) => item.App == lab.App && item.Level == lab.Level && item.Guidance == lab.Guidance && LabScene.DesktopEnvironment(item.DesktopEnvironment) == lab.EnvironmentProfile;
             var previousDraft = current.LiveDrafts.LastOrDefault(SameSlot);
             // Two engines can restore the same durable attempt. Only the one
             // whose snapshot still matches may add credits to that attempt.
@@ -319,7 +334,7 @@ internal sealed class PracticeService
                 item.Lesson, item.Date, item.Speed, item.Accuracy, item.Count, item.Errors, item.Seconds
             }),
             profile.ShowKeys, profile.ShowHands, profile.ShowMistakeKey, profile.RightHandChord,
-            profile.KeyboardProfile, profile.FnMode
+            profile.KeyboardProfile, profile.FnMode, desktopProfile = LabScene.DesktopEnvironment(profile.LabDesktopEnvironment)
         };
     }
 
@@ -351,8 +366,18 @@ internal sealed class PracticeService
         };
     }
 
+    private string RequestedDesktop(JsonElement message, string app = null)
+    {
+        if (!message.TryGetProperty("desktopProfile", out var property))
+            return app == "windows" ? "windows" : LabScene.DesktopEnvironment(profile.LabDesktopEnvironment);
+        if (property.ValueKind == JsonValueKind.String && property.GetString() is string choice && choice is "ubuntu" or "windows")
+            return choice;
+        throw new ArgumentException("Выберите учебную среду Ubuntu или Windows 10.");
+    }
+
     private object Settings(JsonElement message)
     {
+        string savedEnvironment = message.TryGetProperty("desktopProfile", out _) ? RequestedDesktop(message) : null;
         string savedForward = windows && message.TryGetProperty("forward", out _)
             ? WindowsLayoutBinding(Text(message, "forward")) : null;
         string savedBackward = windows && message.TryGetProperty("backward", out _)
@@ -375,6 +400,7 @@ internal sealed class PracticeService
                 current.FnMode = value;
             }
             if (message.TryGetProperty("paired", out var paired)) current.RightHandChord = paired.GetBoolean();
+            if (savedEnvironment != null) current.LabDesktopEnvironment = savedEnvironment;
             if (savedForward != null) current.WindowsLayoutForward = savedForward;
             if (savedBackward != null) current.WindowsLayoutBackward = savedBackward;
         });

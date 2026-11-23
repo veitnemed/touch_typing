@@ -110,12 +110,41 @@ class LiveVisualFields(unittest.TestCase):
             assert layout.font.family == "DejaVu Sans Mono"
 
     def test_overflowing_code_tabs_show_active_tab_not_just_its_body_name(self):
-        tabs = [{"title": "file" + str(i)} for i in range(12)]
-        self.view.code({"tabs": tabs, "activeTab": 9, "sidebar": False}, 0, 0, 520, 360)
-        header = [(label[0], label[2]) for label in self.labels if label[2] < 28]
-        assert ("file9", 8) in header
-        assert ("‹", 5) in header and ("›", 5) in header
-        assert any(p[0] == "#007acc" and p[-1] == 2 for p in self.paints)
+        tabs = [{"title": f"file{i}-long-python-module.py"} for i in range(12)]
+        title = tabs[9]["title"]
+        for width, sidebar, rail, header_top, tab_row in (
+                (520, False, 35, 0, 28), (1024, True, 48, 29, 34)):
+            with self.subTest(width=width):
+                self.view.presentation_app = "code"
+                x, y = 13, 19
+                labels = []
+                self.paints.clear()
+                self.view.label = lambda *args, **options: labels.append((args, options))
+                self.view.app_icon = lambda *_: None
+                self.view.code({"tabs": tabs, "activeTab": 9, "sidebar": sidebar}, x, y, width, 360)
+
+                top = y + header_top
+                header = [(args, options) for args, options in labels if top <= args[2] < top + tab_row]
+                header_files = {args[0] for args, _ in header if args[0].startswith("file")}
+                self.assertIn(title, header_files)
+                self.assertNotIn(tabs[0]["title"], header_files)
+                self.assertNotIn(tabs[-1]["title"], header_files)
+                self.assertTrue(any(args[0] == title and args[2] > top + tab_row for args, _ in labels),
+                                "the same name should also occur in the editor breadcrumb")
+
+                (active, active_options), = [(args, options) for args, options in header if args[0] == title]
+                left_arrow, = [args for args, _ in header if args[0] == "‹"]
+                right_arrow, = [args for args, _ in header if args[0] == "›"]
+                highlight, = [p for p in self.paints if p[0] == "#f78166" and p[2] == top and p[4] == 2]
+                _, active_left, _, active_width, _ = highlight
+                active_right = active_left + active_width
+                self.assertEqual(active[4], "#e6edf3")  # GitHub Dark active label
+                self.assertGreater(active_left, max(x + rail, left_arrow[1]))
+                self.assertLess(active_right, min(x + width, right_arrow[1]))
+                self.assertGreater(active[1], active_left)
+                self.assertGreater(active_options["width"], 0)
+                self.assertLess(active[1] + active_options["width"], active_right,
+                                "long active filenames need a bounded ellipsis before tab controls")
 
 
 if __name__ == "__main__":

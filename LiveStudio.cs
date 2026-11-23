@@ -144,6 +144,7 @@ namespace TouchTypingStudio
                 throw new InvalidOperationException(notice.Text);
             }
             library = initialLibrary;
+            HydrateDesktopProfile(initialLibrary);
             ShowPage(string.IsNullOrEmpty(initial) ? LivePage : initial);
         }
 
@@ -231,7 +232,7 @@ namespace TouchTypingStudio
         private void RefreshLibrary()
         {
             var next = Request("library");
-            if (next.Exists) library = next;
+            if (next.Exists) { library = next; HydrateDesktopProfile(next); }
         }
 
         private void RefreshLayoutIfChanged()
@@ -241,6 +242,7 @@ namespace TouchTypingStudio
             var next = Request("configure", "platform", "windows", "layout", layout);
             if (!next.Exists) return;
             library = next;
+            HydrateDesktopProfile(next);
             if (center.Content != null) ShowPage(page);
         }
 
@@ -253,7 +255,7 @@ namespace TouchTypingStudio
             MinHeight = 540;
             page = next;
             var updated = Request("configure", "platform", "windows", "layout", CurrentLayout());
-            if (updated.Exists) library = updated;
+            if (updated.Exists) { library = updated; HydrateDesktopProfile(updated); }
             UpdateHeader();
             switch (page)
             {

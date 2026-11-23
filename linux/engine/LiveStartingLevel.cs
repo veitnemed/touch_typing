@@ -10,9 +10,11 @@ internal static class LiveStartingLevel
 
     private static bool FirstTrySuccess(ShortcutAttempt attempt) => attempt.Correct && attempt.FirstTry;
 
-    internal static IEnumerable<LiveStartRecommendation> Recommend(IEnumerable<ShortcutAttempt> history, string layout)
+    internal static IEnumerable<LiveStartRecommendation> Recommend(IEnumerable<ShortcutAttempt> history, string layout, string environment)
     {
-        var missions = LiveCourse.Missions.ToDictionary(mission => mission.Id);
+        var missions = LiveCourse.Missions
+            .Where(mission => LabScene.MissionEnvironment(mission) is null || LabScene.MissionEnvironment(mission) == environment)
+            .ToDictionary(mission => mission.Id);
         var observed = (history ?? [])
             .Where(attempt => (layout is "RU" or "EN") && attempt?.Layout == layout && attempt.Independent && !attempt.Assisted &&
                 attempt.Verification == "lab-scene" && !string.IsNullOrEmpty(attempt.Session) &&
@@ -22,9 +24,9 @@ internal static class LiveStartingLevel
                 item.attempt.Skill.Length > item.mission.App.Length + 5)
             .ToLookup(item => (item.mission.App, item.mission.Level), item => item.attempt);
 
-        foreach (string app in LabCatalog.Apps)
+        foreach (string app in LabCatalog.VisibleApps(environment))
         {
-            var levels = LiveCourse.Missions.Where(mission => mission.App == app)
+            var levels = missions.Values.Where(mission => mission.App == app)
                 .Select(mission => mission.Level).Distinct().OrderByDescending(level => level).ToArray();
             LiveStartRecommendation recommendation = null;
             foreach (int tier in levels)

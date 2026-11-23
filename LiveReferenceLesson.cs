@@ -192,7 +192,7 @@ namespace TouchTypingStudio
         private string ReferenceAppTitle()
         {
             return labApp == "chrome" ? "Браузер" : labApp == "code" ? "VS Code" :
-                labApp == "ubuntu" ? "Ubuntu" : labApp == "workday" ? "Рабочий день" : "Терминал";
+                labApp == "windows" ? "Windows 10" : labApp == "ubuntu" ? "Ubuntu" : labApp == "workday" ? "Рабочий день" : "Терминал";
         }
 
         private static Border ReferenceLessonPanel(UIElement child, Thickness inset, double radius)

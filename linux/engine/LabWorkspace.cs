@@ -83,7 +83,8 @@ internal sealed partial class LabScene
         var projectRelative = w.App != "code" ? "" : w.Tab == null ? "" :
             DebugDay && activePath.StartsWith(debugDay.Root + "/", StringComparison.Ordinal) ? DebugRelative(activePath) : activePath.StartsWith(EditorProjectRoot + "/", StringComparison.Ordinal)
                 ? Relative(activePath) : NameOf(activePath);
-        return w.Snapshot(w.Id == ActiveWindow, Entries(w), paths.Select(Relative), changes, results, projectName, projectRelative);
+        return w.Snapshot(w.Id == ActiveWindow, Entries(w), paths.Select(Relative), changes, results, projectName, projectRelative,
+            WindowsDesktop && w.App == "files" ? WindowsPath(w.Folder) : null);
     }
 
     private static bool IsIdentifier(char c) => char.IsLetterOrDigit(c) || c == '_';
@@ -127,7 +128,7 @@ internal sealed partial class LabScene
             originalFiles[Project + "/" + names[variant] + ".md"] = Terminal.ReadFile(Project + "/" + names[variant] + ".md");
         }
         if (app == "chrome" && variant == 1) Active.ActiveTab = 1;
-        if (app is "ubuntu" or "workday") Workspace = variant % 2;
+        if (!WindowsDesktop && (app is "ubuntu" or "workday")) Workspace = variant % 2;
         if (app == "code" && !NeutralWorkspace)
         {
             var example = TypingRun.Project[variant];

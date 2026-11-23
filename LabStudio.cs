@@ -30,6 +30,75 @@ namespace TouchTypingStudio
         private FrameworkElement labLimitOverlay;
         private string labApp = "ubuntu", labMode = "sandbox";
         private int labLevel;
+        private string labDesktopProfile = "ubuntu";
+        private Button labDesktopUbuntuChoice, labDesktopWindowsChoice;
+
+        private string LessonDesktopProfile
+        { get { return labApp == "windows" || labApp == "workday" ? labDesktopProfile : "ubuntu"; } }
+
+        private void HydrateDesktopProfile(Data settings)
+        {
+            if (!settings.Exists || !string.IsNullOrWhiteSpace(engine.Notice)) return;
+            string id = settings.S("desktopProfile");
+            if ((id != "ubuntu" && id != "windows") || id == labDesktopProfile) return;
+            if (labApp == "ubuntu" || labApp == "windows") labApp = id;
+            labDesktopProfile = id;
+            lastLabMission = "";
+        }
+
+        private FrameworkElement BuildDesktopProfileChoice(Action redraw)
+        {
+            var group = Stack();
+            group.Margin = new Thickness(0, 0, 0, 14);
+            var title = Label("Система для практики", 17, Ink, true);
+            AutomationProperties.SetAutomationId(title, "LabDesktopProfileHeading");
+            group.Children.Add(title);
+            var row = new WrapPanel { Margin = new Thickness(0, 5, 0, 1) };
+            labDesktopUbuntuChoice = DesktopProfileButton("Ubuntu", "ubuntu", redraw);
+            labDesktopWindowsChoice = DesktopProfileButton("Windows 10", "windows", redraw);
+            row.Children.Add(labDesktopUbuntuChoice);
+            row.Children.Add(labDesktopWindowsChoice);
+            group.Children.Add(row);
+            var hint = Label("Выбор системы меняет сочетания и задания, но не настройки компьютера.", 13, Dim);
+            hint.TextWrapping = TextWrapping.Wrap;
+            group.Children.Add(hint);
+            return group;
+        }
+
+        private Button DesktopProfileButton(string label, string id, Action redraw)
+        {
+            bool selected = labDesktopProfile == id;
+            Button button = null;
+            button = ActionButton(label, delegate
+            {
+                if (labDesktopProfile == id) return;
+                var updated = Request("settings", "desktopProfile", id);
+                if (!updated.Exists || !string.IsNullOrWhiteSpace(engine.Notice) || updated.S("desktopProfile") != id)
+                {
+                    if (string.IsNullOrWhiteSpace(notice.Text))
+                        SetNotice("Не удалось сохранить выбор системы. Повторите действие.");
+                    button.Focus();
+                    return;
+                }
+                library = updated;
+                HydrateDesktopProfile(updated);
+                redraw();
+                var next = id == "windows" ? labDesktopWindowsChoice : labDesktopUbuntuChoice;
+                if (next != null) next.Focus();
+            }, selected);
+            button.Margin = new Thickness(0, 0, 10, 5);
+            button.MinWidth = 130;
+            AutomationProperties.SetAutomationId(button, "LabDesktopProfile-" + id);
+            AutomationProperties.SetName(button, label + (selected ? ", выбрано" : ", выбрать для практики"));
+            button.ToolTip = "Тренировать сочетания и рабочий стол " + label + " в симуляции";
+            return button;
+        }
+
+        private bool UsesSelectedDesktop(Data item)
+        {
+            string target = item.S("desktopProfile");
+            return target.Length == 0 || target == labDesktopProfile;
+        }
         private ComboBox labModeSelect, labLevelSelect;
         private LabSceneView labDesktop;
         private Viewbox labGuide;
@@ -45,8 +114,9 @@ namespace TouchTypingStudio
         private FrameworkElement BuildLabHome()
         {
             var root = PagePanel("Live", "Практикум работы с клавиатурой");
-            var catalog = Request("lab-catalog");
-            var classes = catalog.Items("classes").ToArray();
+            root.Children.Add(BuildDesktopProfileChoice(delegate { center.Content = BuildLabHome(); }));
+            var catalog = Request("lab-catalog", "desktopProfile", labDesktopProfile);
+            var classes = catalog.Items("classes").Where(UsesSelectedDesktop).ToArray();
             var layout = new UniformGrid { Columns = 2, Margin = new Thickness(0, 0, 0, 15) };
             labClassButtons.Clear();
             var shortcuts = Label("", 13, Dim);
@@ -69,9 +139,9 @@ namespace TouchTypingStudio
                 int level = labLevelSelect == null ? 0 : Math.Max(0, labLevelSelect.SelectedIndex);
                 var ids = new List<string> { "" }; var titles = new List<string> { "Подобрать поручение" };
                 string guidance = labModeSelect != null && labModeSelect.SelectedIndex == 0 ? "independent" : "guided";
-                if (catalog.Items("drafts").Any(d => d.S("app") == labApp && d.I("level") == level && d.S("guidance") == guidance))
+                if (catalog.Items("drafts").Any(d => d.S("desktopProfile", "ubuntu") == LessonDesktopProfile && d.S("app") == labApp && d.I("level") == level && d.S("guidance") == guidance))
                 { ids.Add("@resume"); titles.Add("Продолжить с сохранённого места"); }
-                foreach (var m in catalog.Items("missions").Where(m => m.S("app") == labApp && m.I("level") == level))
+                foreach (var m in catalog.Items("missions").Where(m => UsesSelectedDesktop(m) && m.S("app") == labApp && m.I("level") == level))
                 { ids.Add(m.S("id")); titles.Add(m.S("title")); }
                 labMissionIds = ids.ToArray(); labMissionSelect.ItemsSource = titles; labMissionSelect.SelectedIndex = 0;
                 foreach (var entry in labClassButtons)
@@ -192,8 +262,8 @@ namespace TouchTypingStudio
             if (resume) mission = "";
             int seed;
             var initial = verifyMode && int.TryParse(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"), out seed)
-                ? Request("lab-start", "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "softFinish", true, "combinedLimits", true, "seed", seed)
-                : Request("lab-start", "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "softFinish", true, "combinedLimits", true);
+                ? Request("lab-start", "desktopProfile", labDesktopProfile, "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "softFinish", true, "combinedLimits", true, "seed", seed)
+                : Request("lab-start", "desktopProfile", labDesktopProfile, "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "softFinish", true, "combinedLimits", true);
             if (!initial.Exists || initial.B("startBlocked")) return;
             labSavePending = labSaveClosePending = labSaveBackPending = labExplicitFinishPending = false;
             lastLabMission = initial.S("mission");
@@ -433,7 +503,7 @@ namespace TouchTypingStudio
             AutomationProperties.SetHelpText(labCounter, "Выполнено " + state.I("solved"));
             var task = state.D("task");
             labTask.Text = state.B("showGuide", true) ? task.S("title") : state.S("phase");
-            labTask.ToolTip = state.S("scenario") + "\n" + string.Join("\n", state.Items("objectives").Select(item => item.Value()));
+            labTask.ToolTip = (state.S("desktopProfile", LessonDesktopProfile) == "windows" ? "Windows 10" : "Ubuntu") + " · " + state.S("scenario") + "\n" + string.Join("\n", state.Items("objectives").Select(item => item.Value()));
             labKeys.ToolTip = state.B("showGuide", true) ? task.S("hint") : "";
             AutomationProperties.SetHelpText(labKeys, task.S("keys"));
             AutomationProperties.SetHelpText(labTask, task.S("text"));
