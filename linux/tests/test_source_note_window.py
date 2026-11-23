@@ -39,6 +39,21 @@ class SourceNoteWindow(LabWindowTest):
             sys.argv.pop()
 
     def exercise_terminal(self, chord, hold, capture_png, output):
+        # Other native checks in this compositor may leave its real source at RU
+        # while InputSources.guess() still reports EN. Align both before Live
+        # inhibits system shortcuts; do not bypass native key translation.
+        for _ in range(3):
+            yield from chord('A')
+            for _ in range(6):
+                yield
+            if getattr(self, 'last_character', '').lower() == 'a' and self.layout == 'EN':
+                break
+            yield from chord('Super+Space')
+            for _ in range(40):
+                yield
+        else:
+            raise AssertionError(('GNOME did not switch to EN', self.layout,
+                                  getattr(self, 'last_character', '')))
         lab = self.lab
         lab.picker.set_selected(next(i for i, row in enumerate(lab.classes) if row['id'] == 'workday'))
         lab.level.set_selected(0)
