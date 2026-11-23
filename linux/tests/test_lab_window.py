@@ -368,7 +368,10 @@ class LabWindowTest(Studio):
             assert lab.active and not lab.state['paused'], (mission, lab.status.get_label())
 
         def window(app):
-            return next(w for w in self.lab.state['scene']['windows'] if w['app'] == app)
+            state = self.lab.state
+            found = next((w for w in state['scene']['windows'] if w['app'] == app), None)
+            assert found is not None, (app, state['task'], state['status'], state['scene']['dock'])
+            return found
 
         def position():
             view = window('code')
@@ -441,7 +444,28 @@ class LabWindowTest(Studio):
         yield from chord('Super+Left')
         assert window('chrome')['state'] == 'left'
         yield from frame('gnome-01-single-left')
-        yield from chord('Super+2')
+        # The learner's GNOME favorites define the slot on Linux. If Code is
+        # not pinned, the genuine exercise asks for Super and an overview
+        # search query instead. Drive the visible route and require its credit.
+        task, solved = self.lab.state['task'], self.lab.state['solved']
+        assert task['id'] == 'open-code', task
+        if task['keys']:
+            assert task['keys'].startswith('Super+'), task
+            yield from chord(task['keys'])
+        else:
+            assert task['text'], task
+            yield from chord('Super')
+            assert self.lab.state['scene']['overview'], self.lab.state['status']
+            layout = self.lab.state['scene']['layout'].lower()
+            physical = {letter: ('Shift+' if shifted else '') + cap['key']
+                        for row in self.library['keyboard'] for cap in row
+                        for shifted in (False, True)
+                        for letter in [cap[layout + ('Shift' if shifted else '')]]
+                        if len(letter) == 1}
+            for char in task['text']:
+                yield from chord(physical[char])
+            yield from chord('Enter')
+        assert self.lab.state['solved'] == solved + 1, (task, self.lab.state['status'])
         origin = position()
         yield from chord('Super+Right')
         assert window('code')['state'] == 'right' and window('chrome')['state'] == 'left'
