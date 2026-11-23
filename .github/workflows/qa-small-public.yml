@@ -1,0 +1,57 @@
+name: Verify preview.7 Windows small viewport (no publish)
+on:
+  push:
+    branches: [qa/preview7-small-viewport]
+permissions:
+  contents: read
+jobs:
+  windows-small:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TOUCH_TYPING_NORMAL_LAUNCH_ISOLATED_JOB: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: checks
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: da4437af98772cb27f5c138c43c343bc3a504d51
+          path: reviewed-probe
+          persist-credentials: false
+      - name: Verify public ZIP and test keyboard access on a measured small viewport
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $server = Get-CimInstance Win32_OperatingSystem
+          if ($env:RUNNER_ARCH -ne 'X64' -or $server.ProductType -eq 1 -or $server.Caption -notmatch 'Windows Server') {
+            throw 'Fresh Windows Server x64 expected.'
+          }
+          $tag = 'v1.8.0-preview.7-windows-beta'
+          $asset = "touch-typing-$tag-x64.zip"
+          $dir = Join-Path $env:RUNNER_TEMP 'Public Release'
+          New-Item -ItemType Directory $dir | Out-Null
+          gh release download $tag --repo veitnemed/touch_typing --pattern $asset --dir $dir
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot download exact published beta.' }
+          $zip = Join-Path $dir $asset
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne '5c99ecca7d5a279c6593dd83abe6aa12f1b6ba35c2149c3f1532c5aab01ad8a0') { throw 'Public ZIP SHA256 mismatch.' }
+          $app = Join-Path $env:RUNNER_TEMP 'TouchTyping Public Extract'
+          Expand-Archive -LiteralPath $zip -DestinationPath $app
+          if ((Get-FileHash (Join-Path $app 'Start-Live.cmd') -Algorithm SHA256).Hash -ne '09d729bb568affdab98f8c74448ccffdb75a6ee3a0c0c84edcb9dcdf32b212eb') { throw 'Launcher SHA256 mismatch.' }
+          $qa = Join-Path $env:GITHUB_WORKSPACE 'reviewed-probe'
+          $patch = Join-Path $env:GITHUB_WORKSPACE 'checks/qa/small-viewport.patch'
+          git -C $qa apply --check --ignore-space-change $patch
+          if ($LASTEXITCODE -ne 0) { throw 'Probe patch does not apply to pinned source.' }
+          git -C $qa apply --ignore-space-change $patch
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot stage isolated test-only probe.' }
+          & (Join-Path $qa 'windows/Test-HostedNormalLaunch.ps1') -SmallViewport -Application (Join-Path $app 'TouchTyping.exe') -OutputDirectory (Join-Path $env:RUNNER_TEMP 'small-viewport-check')
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-preview7-small-viewport-evidence
+          path: |
+            ${{ runner.temp }}/small-viewport-check/windows-normal-launch.log
+            ${{ runner.temp }}/small-viewport-check/small-viewport-frames/*.png
+          if-no-files-found: warn

@@ -1,0 +1,370 @@
+--- a/windows/LiveUiSmoke.cs
++++ b/windows/LiveUiSmoke.cs
+@@ -28,6 +28,42 @@
+         if (arguments.Length == 0) { Console.Error.WriteLine("Pass the full path to TouchTyping.exe."); return 2; }
+         try
+         {
++            if (arguments.Contains("--hosted-small-viewport"))
++            {
++                if (arguments.Length != 3 || !Path.IsPathRooted(arguments[2]) ||
++                    Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT") != "github-hosted" ||
++                    Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true" ||
++                    Environment.GetEnvironmentVariable("TOUCH_TYPING_NORMAL_LAUNCH_ISOLATED_JOB") != "1" ||
++                    !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT")))
++                    throw new InvalidOperationException("Stock viewport evidence requires a fresh hosted job and an absolute evidence path.");
++                if (SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
++                    throw new InvalidOperationException("Per-monitor-aware evidence capture cannot be enabled.");
++                evidenceDirectory = Directory.CreateDirectory(arguments[2]).FullName;
++                CheckHostedSmallViewport(Path.GetFullPath(arguments[0]));
++                Console.WriteLine("PASS: " + count + " stock small-viewport Windows assertions");
++                return 0;
++            }
++            if (arguments.Contains("--hosted-exact-terminal"))
++            {
++                if (arguments.Length != 3 || !Path.IsPathRooted(arguments[2]))
++                    throw new InvalidOperationException("Pass an absolute disposable evidence path.");
++                if (Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT") != "github-hosted" ||
++                    Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true" ||
++                    Environment.GetEnvironmentVariable("TOUCH_TYPING_NORMAL_LAUNCH_ISOLATED_JOB") != "1")
++                    throw new InvalidOperationException("Exact stock terminal evidence only runs on the fresh hosted job.");
++                if (SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
++                    throw new InvalidOperationException("Per-monitor-aware evidence capture cannot be enabled.");
++                evidenceDirectory = Directory.CreateDirectory(arguments[2]).FullName;
++                CheckHostedNormalLaunch(Path.GetFullPath(arguments[0]), true);
++                Console.WriteLine("PASS: " + count + " stock normal-launch and exact terminal edit assertions");
++                return 0;
++            }
++            if (arguments.Contains("--hosted-normal-editor"))
++            {
++                CheckHostedNormalEditor(Path.GetFullPath(arguments[0]));
++                Console.WriteLine("PASS: " + count + " stock normal-profile editor assertions");
++                return 0;
++            }
+             if (arguments.Contains("--hosted-normal-launch"))
+             {
+                 CheckHostedNormalLaunch(Path.GetFullPath(arguments[0]));
+@@ -305,7 +341,7 @@
+         }
+     }
+ 
+-    private static void OpenNormalStarter(string executable)
++    private static void OpenNormalStarter(string executable, string classId = "terminal", string visibleClass = null)
+     {
+         if (Process.GetProcessesByName("TouchTyping").Length != 0)
+             throw new InvalidOperationException("A TouchTyping process already exists; refusing to reuse it.");
+@@ -352,11 +388,16 @@
+         window = AutomationElement.FromHandle(trainer);
+         Check(window.Current.ProcessId == app.Id, "Native automation root belongs to the normal trainer PID");
+         Focus();
+-        Until(delegate { return Visible("HomeDashboard") && Exists("HomeClass-terminal"); },
+-            "normal Home draws its terminal exercise card");
+-        Invoke("HomeClass-terminal");
+-        Until(delegate { return Exists("LabStart") && Exists("LabClass-terminal"); },
+-            "normal terminal chooser opens through its Home card");
++        var homeCard = "HomeClass-" + classId;
++        Until(delegate { return Visible("HomeDashboard") && Visible(homeCard); },
++            "normal Home draws the selected exercise card");
++        if (visibleClass != null)
++            Check(Name(homeCard).Contains(visibleClass), "Normal Home exposes the VS Code card by its displayed label");
++        Invoke(homeCard);
++        Until(delegate { return Visible("LabStart") && Visible("LabClass-" + classId); },
++            "the exercise chooser opens from the visible Home card");
++        if (visibleClass != null)
++            Check(Name("LabClass-" + classId).Contains(visibleClass), "Chooser exposes the VS Code class by its displayed label");
+     }
+ 
+     private static void CheckNormalTrainerCleanExit(string description)
+@@ -372,7 +413,7 @@
+         normalTrainerExitHandle = IntPtr.Zero;
+     }
+ 
+-    private static void CheckHostedNormalLaunch(string executable)
++    private static void CheckHostedNormalLaunch(string executable, bool exactTerminal = false)
+     {
+         Check(Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT") == "github-hosted" &&
+             Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true" &&
+@@ -396,6 +437,7 @@
+         Key("F5");
+         Until(delegate { return Exists("LabDesktop") && Name("LabPause").StartsWith("Пауза"); }, "normal terminal lesson");
+         VirtualEnglish();
++        if (exactTerminal) CheckExactTerminalEditSequences();
+         Chord("LCtrl+U");
+         foreach (char c in "abcde") Send(Character(c));
+         Key("Home"); Key("Right"); Key("Right");
+@@ -435,6 +477,232 @@
+             "Reopen and re-save do not duplicate the draft");
+     }
+ 
++    private static void CheckHostedSmallViewport(string executable)
++    {
++        OpenNormalStarter(executable, "code", "VS Code");
++        ResizeStockClient(1024, 600);
++        CheckViewportElement("LabStart");
++        CaptureReferenceFrame("small-01-chooser");
++        Invoke("LabClass-code");
++        Select("LabMode", 1); Select("LabLevel", 0); Select("LabDuration", 0); Select("LabTimer", 0);
++        const string mission = "Найти и исправить нужное место";
++        SelectMissionByName(mission);
++        Key("F5");
++        Until(delegate { return EditorAt("tasks.py", "body", 0); }, "small window displays editor caret at zero");
++        CheckViewportElement("LabTask");
++        Check(Name("LabTask").Length > 0 && Name("LabCounter").Contains(mission), "Small editor displays the actual mission and initial goal");
++        CheckViewportElement("LabDesktop"); CheckViewportElement("LabPause"); CheckViewportElement("LabFinish");
++        CaptureReferenceFrame("small-02-editor-initial");
++        VirtualEnglish();
++        Chord("Ctrl+P"); TypeStockText("ap"); Key("Enter");
++        Until(delegate { return ReadSolved() == 2 && EditorAt("app.py", "body", 0); }, "keyboard opens app.py and locates caret within small viewport");
++        CaptureReferenceFrame("small-03-editor-caret");
++        Key("F8");
++        Until(delegate { return Visible("LabPauseResult"); }, "small viewport pause shows result card");
++        CheckViewportElement("LabPauseContinue"); CheckViewportElement("LabPauseFinish");
++        Until(delegate { return OwnedFocus("LabPauseContinue"); }, "Continue gets keyboard focus on pause");
++        CaptureReferenceFrame("small-04-pause");
++        Chord("Shift+Tab");
++        Check(OwnedFocus("LabPauseRestart"), "Keyboard can move backward from Continue");
++        Key("Tab");
++        Check(OwnedFocus("LabPauseContinue"), "Keyboard can reach Continue again");
++        Key("Space");
++        Until(delegate { return !Visible("LabPauseResult") && EditorAt("app.py", "body", 0); },
++            "Space resumes with the same editor and caret");
++        Key("F10");
++        Until(delegate { return Visible("LabResult"); }, "F10 opens stored result");
++        CheckViewportElement("LabResult"); CheckViewportElement("LabChooseClass"); CheckViewportElement("ResultMetric-count");
++        Check(Find("LabResult").Current.HelpText.Contains("Выполнено 2."), "Visible result reports the two real keyboard actions");
++        CaptureReferenceFrame("small-05-end-result");
++    }
++
++    private static bool OwnedFocus(string id)
++    {
++        var focus = AutomationElement.FocusedElement;
++        return focus != null && focus.Current.ProcessId == app.Id && focus.Current.AutomationId == id;
++    }
++
++    private static void CheckViewportElement(string id)
++    {
++        CaptureRect rect;
++        var origin = new CapturePoint();
++        Check(GetClientRect(trainer, out rect) && ClientToScreen(trainer, ref origin), "Actual client bounds available");
++        var area = new System.Windows.Rect(origin.X, origin.Y, rect.Right - rect.Left, rect.Bottom - rect.Top);
++        var bounds = Find(id).Current.BoundingRectangle;
++        Check(Visible(id) && !bounds.IsEmpty && bounds.Width > 1 && bounds.Height > 1 && area.Contains(bounds),
++            id + " is visible and entirely inside the real client bounds: " + bounds);
++    }
++
++    private static void ResizeStockClient(int dipWidth, int dipHeight)
++    {
++        Check(!app.HasExited && window.Current.ProcessId == app.Id && GetForegroundWindow() == trainer,
++            "Only resize the owned foreground stock window");
++        ShowWindow(trainer, 9);
++        Wait(180);
++        var screen = System.Windows.Forms.Screen.FromHandle(trainer);
++        var area = screen.WorkingArea;
++        uint dpi = GetDpiForWindow(trainer);
++        Check(dpi >= 96, "Windows supplied a real window DPI");
++        int width = (int)Math.Round(dipWidth * dpi / 96.0);
++        int height = (int)Math.Round(dipHeight * dpi / 96.0);
++        for (int pass = 0; pass < 4; pass++)
++        {
++            CaptureRect client, outer;
++            if (!GetClientRect(trainer, out client) || !GetWindowRect(trainer, out outer))
++                throw new InvalidOperationException("Cannot read the physical client and outer frame.");
++            int fullWidth = outer.Right - outer.Left + width - (client.Right - client.Left);
++            int fullHeight = outer.Bottom - outer.Top + height - (client.Bottom - client.Top);
++            if (!area.Contains(new Rectangle(area.X, area.Y, fullWidth, fullHeight)))
++                throw new InvalidOperationException("The actual physical desktop cannot fit the requested client at its real DPI.");
++            if (!SetWindowPos(trainer, IntPtr.Zero, area.X, area.Y, fullWidth, fullHeight, 0x0014))
++                throw new InvalidOperationException("Could not size the owned stock window.");
++            Wait(180);
++        }
++        Focus();
++        CaptureRect final;
++        Check(GetClientRect(trainer, out final) && final.Right - final.Left == width &&
++            final.Bottom - final.Top == height && GetDpiForWindow(trainer) == dpi, "Exact native application viewport obtained");
++        Console.WriteLine("MEASURED monitor=" + screen.Bounds.Width + "x" + screen.Bounds.Height +
++            " px; work area=" + area.Width + "x" + area.Height + " px; dpi=" + dpi +
++            "; scale=" + (100.0 * dpi / 96).ToString("0.##", CultureInfo.InvariantCulture) +
++            "%; client=" + width + "x" + height + " px / " + dipWidth + "x" + dipHeight + " DIP");
++    }
++
++    private static void CheckExactTerminalEditSequences()
++    {
++        Check(Visible("LabDesktop") && Find("LabDesktop").Current.ItemStatus.StartsWith("cursor:", StringComparison.Ordinal),
++            "The visible scene exposes the active terminal caret");
++        CheckExactTerminalEdit(false, false);
++        CheckExactTerminalEdit(false, true);
++        CheckExactTerminalEdit(true, false);
++        CheckExactTerminalEdit(true, true);
++        Chord("LCtrl+U");
++        CheckTerminalState("", 0);
++    }
++
++    private static void CheckExactTerminalEdit(bool recalled, bool backspace)
++    {
++        string op = backspace ? "Backspace" : "Delete";
++        string origin = recalled ? "history" : "fresh";
++        string label = "terminal-" + origin + "-" + op.ToLowerInvariant();
++        Chord("LCtrl+U");
++        CheckTerminalState("", 0);
++        TypeStockText("abcd");
++        CheckTerminalState("abcd", 4);
++        if (recalled)
++        {
++            Key("Enter"); // Only the trainer's virtual shell; no host command executes.
++            CheckTerminalState("", 0);
++            Key("Up");
++            CheckTerminalState("abcd", 4);
++        }
++        Key("Left");
++        CheckTerminalState("abcd", 3);
++        Key("Left");
++        CheckTerminalState("abcd", 2);
++        CaptureReferenceFrame(label + "-caret-between-b-c");
++        Key(op);
++        CheckTerminalState(backspace ? "acd" : "abd", backspace ? 1 : 2);
++        Send(Character('X'));
++        CheckTerminalState(backspace ? "aXcd" : "abXd", backspace ? 2 : 3);
++        CaptureReferenceFrame(label + "-after-insert");
++        Check(true, "Exact " + origin + " " + op + " gives " + (backspace ? "aXcd at caret 2" : "abXd at caret 3"));
++    }
++
++    private static void CheckHostedNormalEditor(string executable)
++    {
++        Check(Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT") == "github-hosted" &&
++            Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true" &&
++            Environment.GetEnvironmentVariable("TOUCH_TYPING_NORMAL_LAUNCH_ISOLATED_JOB") == "1",
++            "Stock editor check requires the dedicated fresh hosted job");
++        foreach (var name in new[] { "TOUCH_TYPING_QA_DATA_ROOT", "TOUCH_TYPING_QA_SEED",
++            "TOUCH_TYPING_QA_LESSON_CHROME", "TOUCH_TYPING_QA_PYTHON_EDITOR" })
++            Check(string.IsNullOrEmpty(Environment.GetEnvironmentVariable(name)), "No QA override: " + name);
++        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
++        var normal = Path.Combine(local, "TouchTypingStudio");
++        var qa = Path.Combine(local, "TouchTypingStudio-QA");
++        Check(Path.IsPathRooted(local) && Directory.Exists(local) && !Directory.Exists(normal) &&
++            !File.Exists(normal) && !Directory.Exists(qa) && !File.Exists(qa), "Fresh normal LocalApplicationData");
++        const string mission = "Найти и исправить нужное место";
++        OpenNormalStarter(executable, "code", "VS Code");
++        Invoke("LabClass-code");
++        Select("LabMode", 0); Select("LabLevel", 0); Select("LabDuration", 0); Select("LabTimer", 0);
++        SelectMissionByName(mission);
++        Key("F5");
++        Until(delegate { return EditorAt("tasks.py", "body", 0); }, "normal VS Code starts with the neutral tasks.py");
++        Check(Name("LabCounter").Contains(mission) && ReadSolved() == 0, "The chosen visible mission starts without credit");
++        VirtualEnglish();
++        Chord("Ctrl+P"); TypeStockText("ap"); Key("Enter");
++        Until(delegate { return ReadSolved() == 2 && EditorAt("app.py", "body", 0); }, "quick-open navigates to neutral app.py");
++        Chord("Ctrl+F"); TypeStockText("draft"); Key("Enter");
++        Until(delegate { return ReadSolved() == 4; }, "search finds the real matching text");
++        for (int i = 0; i < 3; i++) Key("F3");
++        for (int i = 0; i < 2; i++) Chord("Shift+F3");
++        Key("Esc");
++        Until(delegate { return ReadSolved() == 10 && EditorAt("app.py", "body", 70); },
++            "return from Find with the report match selected");
++        TypeStockText("ready");
++        Check(ReadSolved() == 10, "Typing alone cannot earn saved-edit credit");
++        Chord("Ctrl+S");
++        Until(delegate { return ReadSolved() == 11 && EditorAt("app.py", "body", 70); }, "Ctrl+S accepts the precise report edit");
++        SaveNormalEditorAndExit();
++
++        var profile = Path.Combine(normal, "progress.xml");
++        Check(File.Exists(profile) && !File.Exists(profile + ".writing") && !Directory.Exists(profile + ".writing") &&
++            !Directory.Exists(qa) && !File.Exists(qa), "Only the normal profile contains the persisted checkpoint");
++        var saved = ReadSingleEditorDraft(profile);
++        var session = saved.SelectSingleNode("Progress/Session").InnerText;
++        Check(!string.IsNullOrEmpty(session) && saved.SelectSingleNode("Progress/Solved").InnerText == "11",
++            "Normal profile stores the exact saved stage and session");
++
++        OpenNormalStarter(executable, "code", "VS Code");
++        Invoke("LabClass-code");
++        Select("LabMode", 0); Select("LabLevel", 0);
++        SelectMissionByName("Продолжить с сохранённого места");
++        Key("F5");
++        Until(delegate { return ReadSolved() == 11 && EditorAt("app.py", "body", 70); },
++            "stock restart restores the exact edited-file stage and caret");
++        Key("Home");
++        Until(delegate { return ReadSolved() == 12 && EditorAt("app.py", "body", 55); },
++            "a new native action advances the restored mission without replay credit");
++        SaveNormalEditorAndExit();
++        saved = ReadSingleEditorDraft(profile);
++        Check(saved.SelectSingleNode("Progress/Session").InnerText == session &&
++            saved.SelectSingleNode("Progress/Solved").InnerText == "12",
++            "Reopen and resave keep one session and advance exactly one stage");
++    }
++
++    private static void TypeStockText(string text)
++    { foreach (char c in text) Send(Character(c)); }
++
++    private static bool EditorAt(string file, string focus, int cursor)
++    {
++        if (!Visible("LabDesktop") || !Visible("LabPause") || !Name("LabPause").StartsWith("Пауза")) return false;
++        var scene = Find("LabDesktop").Current;
++        return scene.Name.StartsWith("Учебный VS Code", StringComparison.Ordinal) && scene.HelpText == file &&
++            scene.ItemStatus == "editor:" + focus + ":" + cursor.ToString(CultureInfo.InvariantCulture);
++    }
++
++    private static void SaveNormalEditorAndExit()
++    {
++        RequestClose();
++        Until(delegate { return ExitDialog() != null; }, "normal editor save and close");
++        InvokeDialog("LabExitSave");
++        CheckNormalTrainerCleanExit("Normal editor saved and exited");
++        app.Dispose();
++        app = null;
++    }
++
++    private static XmlNode ReadSingleEditorDraft(string profile)
++    {
++        var xml = new XmlDocument { XmlResolver = null };
++        xml.Load(profile);
++        var drafts = xml.SelectNodes("/StudioProfile/LiveDrafts/LiveDraft[App='code']");
++        Check(drafts.Count == 1 && !string.IsNullOrEmpty(drafts[0].SelectSingleNode("ProjectFixture").InnerText),
++            "Exactly one neutral VS Code draft exists in normal progress.xml");
++        return drafts[0];
++    }
++
+     private static void CheckReferenceBrowser()
+     {
+         Check(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED") == "0",
+@@ -1700,6 +1968,9 @@
+     [StructLayout(LayoutKind.Sequential)] private struct Message { internal IntPtr Window; internal uint Id; internal UIntPtr WParam; internal IntPtr LParam; internal uint Time; internal int X, Y; internal uint Private; }
+     [StructLayout(LayoutKind.Sequential)] private struct CaptureRect { internal int Left,Top,Right,Bottom; }
+     [StructLayout(LayoutKind.Sequential)] private struct CapturePoint { internal int X,Y; }
++    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hwnd, int command);
++    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out CaptureRect rect);
++    [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr above, int x, int y, int cx, int cy, uint flags);
+     [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hwnd, out CaptureRect rect);
+     [DllImport("user32.dll")] private static extern bool ClientToScreen(IntPtr hwnd, ref CapturePoint point);
+     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);
+--- a/windows/Test-HostedNormalLaunch.ps1
++++ b/windows/Test-HostedNormalLaunch.ps1
+@@ -1,7 +1,10 @@
+ [CmdletBinding()]
+ param(
+     [Parameter(Mandatory=$true)][string]$Application,
+-    [Parameter(Mandatory=$true)][string]$OutputDirectory
++    [Parameter(Mandatory=$true)][string]$OutputDirectory,
++    [switch]$Editor,
++    [switch]$ExactTerminal,
++    [switch]$SmallViewport
+ )
+ $ErrorActionPreference = 'Stop'
+ if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:GITHUB_ACTIONS -ne 'true' -or
+@@ -38,7 +41,18 @@
+ if ($LASTEXITCODE -ne 0) { throw 'Normal launcher probe compilation failed.' }
+ try {
+     $ErrorActionPreference = 'Continue'
+-    & $runner $applicationPath --hosted-normal-launch 2>&1 | Tee-Object -FilePath $log -Append
++    if (([int][bool]$Editor + [int][bool]$ExactTerminal + [int][bool]$SmallViewport) -gt 1) { throw 'Select only one proof mode.' }
++    $argsForProbe = @($applicationPath)
++    if ($SmallViewport) {
++        $argsForProbe += @('--hosted-small-viewport', (Join-Path $outputPath 'small-viewport-frames'))
++    } elseif ($ExactTerminal) {
++        $argsForProbe += @('--hosted-exact-terminal', (Join-Path $outputPath 'terminal-frames'))
++    } elseif ($Editor) {
++        $argsForProbe += '--hosted-normal-editor'
++    } else {
++        $argsForProbe += '--hosted-normal-launch'
++    }
++    & $runner @argsForProbe 2>&1 | Tee-Object -FilePath $log -Append
+     $code = $LASTEXITCODE
+ } finally {
+     $ErrorActionPreference = 'Stop'
