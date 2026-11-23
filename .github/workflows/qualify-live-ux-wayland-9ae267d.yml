@@ -1,0 +1,235 @@
+name: Qualify exact Live UX on GNOME Wayland (no publish)
+on:
+  push:
+    branches: [qa/live-ux-wayland-9ae267d]
+permissions:
+  contents: read
+jobs:
+  ubuntu-live:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 9ae267d4919d902e17da28e6593f8dafd61b3e24
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build the Linux archive from exact product SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '9ae267d4919d902e17da28e6593f8dafd61b3e24'
+          mkdir -p "$RUNNER_TEMP/live-qa/verified" "$RUNNER_TEMP/live-wayland-evidence"
+          bash linux/build-release.sh "$RUNNER_TEMP/live-qa/verified/touch-typing-linux-x64"
+          cd "$RUNNER_TEMP/live-qa/verified"
+          tar -czf touch-typing-live-9ae267d-linux-x64.tar.gz touch-typing-linux-x64
+          sha256sum touch-typing-live-9ae267d-linux-x64.tar.gz | tee "$RUNNER_TEMP/live-wayland-evidence/SHA256SUMS.txt"
+          printf '%s\n' '9ae267d4919d902e17da28e6593f8dafd61b3e24' > "$RUNNER_TEMP/live-wayland-evidence/product-sha.txt"
+      - name: Install GNOME and GTK test-session dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sources="$RUNNER_TEMP/win10-noble-sources.list"
+          cat > "$sources" <<'APT'
+          deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://archive.ubuntu.com/ubuntu/ noble main universe
+          deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://archive.ubuntu.com/ubuntu/ noble-updates main universe
+          deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://security.ubuntu.com/ubuntu/ noble-security main universe
+          APT
+          options=(
+            -o "Dir::Etc::sourcelist=$sources" -o Dir::Etc::sourceparts=-
+            -o Acquire::Retries=2 -o Acquire::https::Timeout=25 -o Acquire::http::Timeout=25 )
+          pkgs=(gnome-shell gsettings-desktop-schemas gir1.2-gtk-4.0 python3-gi
+                python3-gi-cairo python3-cairo dbus-x11 fonts-dejavu-core libgl1-mesa-dri)
+          sudo timeout --kill-after=15s 180s apt-get "${options[@]}" -o APT::Update::Error-Mode=any update
+          sudo timeout --kill-after=15s 540s apt-get "${options[@]}" -y --download-only --no-install-recommends install "${pkgs[@]}"
+          sudo timeout --kill-after=15s 300s apt-get "${options[@]}" -y --no-download --no-install-recommends install "${pkgs[@]}"
+          gnome-shell --version
+          /usr/bin/python3 -c 'import gi; gi.require_version("Gtk","4.0"); from gi.repository import Gtk; print("GTK", Gtk.get_major_version(), Gtk.get_minor_version())'
+      - name: Verify real GTK Wayland keyboard and pointer Live flow
+        shell: bash
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          set -euo pipefail
+          pkg="$RUNNER_TEMP/live-qa/verified"
+          proof="$RUNNER_TEMP/live-wayland-evidence"
+          cd "$pkg"
+          sha256sum -c "$proof/SHA256SUMS.txt"
+          mkdir "$RUNNER_TEMP/live-qa/runtime"
+          tar -xzf touch-typing-live-9ae267d-linux-x64.tar.gz -C "$RUNNER_TEMP/live-qa/runtime"
+          cd "$RUNNER_TEMP/live-qa/runtime/touch-typing-linux-x64"
+          sha256sum touch_typing.py style.css lab_view.py platform_linux.py engine/TouchTyping.Engine.dll > "$proof/runtime-SHA256SUMS.txt"
+          base64 -d > "$RUNNER_TEMP/attach-live-harness.py" <<'ADAPTER'
+          ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmRlZiByZXBsYWNlKHBhdGgsIG9sZCwgbmV3LCBmaXJz
+          dD1GYWxzZSk6CiAgICBwPVBhdGgocGF0aCkKICAgIHM9cC5yZWFkX3RleHQoKQogICAgYXNzZXJ0
+          IHMuY291bnQob2xkKT49MSBpZiBmaXJzdCBlbHNlIHMuY291bnQob2xkKT09MSwgKHBhdGgsIG9s
+          ZCkKICAgIHAud3JpdGVfdGV4dChzLnJlcGxhY2Uob2xkLG5ldywxKSkKcmVwbGFjZSgicWFfcnVu
+          bmVyLnB5IiwgJyAgICBwYXJzZXIuYWRkX2FyZ3VtZW50KCItLXNlZWQiJywgJyAgICBwYXJzZXIu
+          YWRkX2FyZ3VtZW50KCItLWxpdmUtZW50cnktbmF0aXZlIiwgYWN0aW9uPSJzdG9yZV90cnVlIilc
+          biAgICBwYXJzZXIuYWRkX2FyZ3VtZW50KCItLXNlZWQiJykKcmVwbGFjZSgicWFfcnVubmVyLnB5
+          IiwgJyAgICAgICAgICAgIGlmIGFyZ3MuZnVsbDogY29tbWFuZC5hcHBlbmQoIi0tZnVsbCIpJywg
+          JyAgICAgICAgICAgIGlmIGFyZ3MuZnVsbDogY29tbWFuZC5hcHBlbmQoIi0tZnVsbCIpXG4gICAg
+          ICAgICAgICBpZiBhcmdzLmxpdmVfZW50cnlfbmF0aXZlOiBjb21tYW5kLmFwcGVuZCgiLS1saXZl
+          LWVudHJ5LW5hdGl2ZSIpJykKcmVwbGFjZSgicWFfcnVubmVyLnB5IiwgJyAgICAgICAgaWYgbm90
+          IGFyZ3MudGVybWluYWxfb25seTpcbicsICcgICAgICAgIGlmIG5vdCBhcmdzLnRlcm1pbmFsX29u
+          bHkgYW5kIG5vdCBhcmdzLmxpdmVfZW50cnlfbmF0aXZlOlxuJykKcmVwbGFjZSgicWFfcnVubmVy
+          LnB5IiwgJyAgICAgICAgaWYgYXJncy5yZWZlcmVuY2VfaG9tZTpcbicsICIiIiAgICAgICAgaWYg
+          YXJncy5saXZlX2VudHJ5X25hdGl2ZToKICAgICAgICAgICAgcmVwb3J0WyJjb3ZlcmFnZSJdID0g
+          WyJHVEsgTGl2ZSBuYXRpdmUgV2F5bGFuZCBvbmUgY2xpY2sgYW5kIEVudGVyIGRpcmVjdGx5IHRv
+          IGNyZWRpdGVkIENocm9tZSB0YXNrIl0KICAgICAgICAgICAgb2sgPSBjaGVjaygibmF0aXZlLWxp
+          dmUtZW50cnkiLCBbc3lzLmV4ZWN1dGFibGUsIHN0cih0ZXN0cyAvICJ0ZXN0X2xhYl93aW5kb3cu
+          cHkiKSwKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIi0tbGl2
+          ZS1lbnRyeS1uYXRpdmUiXSwgdGltZW91dD0zMDApCiAgICAgICAgICAgIHJlcG9ydFsic3RhdHVz
+          Il0gPSAicGFzc2VkIiBpZiBvayBlbHNlICJmYWlsZWQiCiAgICAgICAgICAgIHJldHVybiAwIGlm
+          IG9rIGVsc2UgMQogICAgICAgIGlmIGFyZ3MucmVmZXJlbmNlX2hvbWU6CiIiIikKcmVwbGFjZSgi
+          cWEvdGVzdF9sYWJfd2luZG93LnB5IiwgIiAgICAgICAgICAgIHNlbGYubmF2aWdhdGUoJ2xhYicp
+          XG4iLCAiIiIgICAgICAgICAgICBpZiAnLS1saXZlLWVudHJ5LW5hdGl2ZScgaW4gc3lzLmFyZ3Y6
+          CiAgICAgICAgICAgICAgICBmcm9tIHFhX2xpdmVfd2F5bGFuZCBpbXBvcnQgZXhlcmNpc2UKICAg
+          ICAgICAgICAgICAgIHNlbGYubmF2aWdhdGUoImhvbWUiKQogICAgICAgICAgICAgICAgeWllbGQK
+          ICAgICAgICAgICAgICAgIHlpZWxkIGZyb20gZXhlcmNpc2Uoc2VsZiwgY2hvcmQsIGNhcHR1cmVf
+          cG5nLCBQYXRoKG9zLmVudmlyb25bIlRPVUNIX1RZUElOR19RQV9PVVRQVVQiXSksIGNhbGwsIHNl
+          c3Npb24pCiAgICAgICAgICAgICAgICByZXR1cm4KICAgICAgICAgICAgc2VsZi5uYXZpZ2F0ZSgn
+          bGFiJykKIiIiLCBmaXJzdD1UcnVlKQo=
+          ADAPTER
+          base64 -d > qa/qa_live_wayland.py <<'QA_CODE'
+          IiIiRXhlcmNpc2UgYSBvbmUtY2xpY2sgQ2hyb21lIGxlc3NvbiBvbiBhIGdlbnVpbmUgaXNvbGF0
+          ZWQgR05PTUUgY29tcG9zaXRvci4iIiIKaW1wb3J0IGpzb24KaW1wb3J0IG9zCmZyb20gdGltZSBp
+          bXBvcnQgbW9ub3RvbmljCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aAoKCmRlZiBleGVyY2lzZShh
+          cHAsIGNob3JkLCBjYXB0dXJlLCBvdXRwdXQsIG11dHRlcl9jYWxsLCBzZXNzaW9uKToKICAgIGZy
+          b20gZ2kucmVwb3NpdG9yeSBpbXBvcnQgR0xpYiwgR3RrCiAgICBmcm9tIHRvdWNoX3R5cGluZyBp
+          bXBvcnQgaW5zaWRlX3dpZGdldAogICAgaW1wb3J0IHRvdWNoX3R5cGluZwoKICAgIHBhY2thZ2Ug
+          PSBQYXRoKF9fZmlsZV9fKS5yZXNvbHZlKCkucGFyZW50c1sxXQogICAgYXNzZXJ0IFBhdGgodG91
+          Y2hfdHlwaW5nLl9fZmlsZV9fKS5yZXNvbHZlKCkucGFyZW50ID09IHBhY2thZ2UKICAgIGFzc2Vy
+          dCBvcy5lbnZpcm9uWyJXQVlMQU5EX0RJU1BMQVkiXSA9PSAidHJhaW5pbmctcWEiCiAgICBhc3Nl
+          cnQgYXBwLndpbmRvdy5nZXRfZGlzcGxheSgpLl9fZ3R5cGVfXy5uYW1lID09ICJHZGtXYXlsYW5k
+          RGlzcGxheSIKICAgIGFzc2VydCBhcHAud2luZG93LmlzX2FjdGl2ZSgpCiAgICBhc3NlcnQgc2V0
+          KGFwcC5uYXZpZ2F0aW9uKSA9PSB7ImhvbWUiLCAidHlwaW5nIn0KICAgIGFzc2VydCBsZW4oYXBw
+          LmhvbWVfY2FyZHMpID09IDUgYW5kIGFwcC5saXZlX29zX3NlbGVjdG9yLmdldF9tYXBwZWQoKQog
+          ICAgYXBwLndpbmRvdy5tYXhpbWl6ZSgpCiAgICBmb3IgXyBpbiByYW5nZSgxMCk6CiAgICAgICAg
+          eWllbGQKCiAgICBzdGFydGVkID0gbW9ub3RvbmljKCkKICAgIGRlZiB0cmFjZSh0YWcpOgogICAg
+          ICAgIGxhYiA9IGFwcC5sYWIKICAgICAgICBzdXJmID0gYXBwLndpbmRvdy5nZXRfc3VyZmFjZSgp
+          CiAgICAgICAgcHJpbnQoIkNBUFRVUkVfVFJBQ0UiLCB0YWcsIHJvdW5kKG1vbm90b25pYygpLXN0
+          YXJ0ZWQsMyksIGFwcC53aW5kb3cuaXNfYWN0aXZlKCksCiAgICAgICAgICAgICAgc3VyZi5nZXRf
+          cHJvcGVydHkoInNob3J0Y3V0cy1pbmhpYml0ZWQiKSwgYm9vbChsYWIgYW5kIGxhYi53YWl0aW5n
+          X2NhcHR1cmUpLAogICAgICAgICAgICAgIChsYWIuc3RhdGUgb3Ige30pLmdldCgicGF1c2VkIikg
+          aWYgbGFiIGVsc2UgTm9uZSwgZmx1c2g9VHJ1ZSkKICAgIGFwcC53aW5kb3cuY29ubmVjdCgibm90
+          aWZ5Ojppcy1hY3RpdmUiLCBsYW1iZGEgKl86dHJhY2UoImZvY3VzIikpCiAgICBhcHAud2luZG93
+          LmdldF9zdXJmYWNlKCkuY29ubmVjdCgibm90aWZ5OjpzaG9ydGN1dHMtaW5oaWJpdGVkIixsYW1i
+          ZGEgKl86dHJhY2UoImdkay1pbmhpYml0ZWQiKSkKICAgIGRlZiBkd2VsbChzZWNvbmRzKToKICAg
+          ICAgICBkZWFkbGluZT1tb25vdG9uaWMoKStzZWNvbmRzCiAgICAgICAgd2hpbGUgbW9ub3Rvbmlj
+          KCk8ZGVhZGxpbmU6CiAgICAgICAgICAgIHlpZWxkCgogICAgZGVmIHJlY29yZChuYW1lKToKICAg
+          ICAgICBwYXRoID0gb3V0cHV0IC8gKG5hbWUgKyAiLnBuZyIpCiAgICAgICAgY2FwdHVyZShwYXRo
+          KQogICAgICAgIGFzc2VydCBwYXRoLnN0YXQoKS5zdF9zaXplID4gMTAyNAoKICAgIGlmYWNlID0g
+          Im9yZy5nbm9tZS5NdXR0ZXIuUmVtb3RlRGVza3RvcC5TZXNzaW9uIgogICAgcG9pbnRlcl9tb3Rp
+          b24gPSBbXQogICAgbW9uaXRvciA9IEd0ay5FdmVudENvbnRyb2xsZXJNb3Rpb24oKQogICAgbW9u
+          aXRvci5zZXRfcHJvcGFnYXRpb25fcGhhc2UoR3RrLlByb3BhZ2F0aW9uUGhhc2UuQ0FQVFVSRSkK
+          ICAgIG1vbml0b3IuY29ubmVjdCgibW90aW9uIiwgbGFtYmRhIF8sIHgsIHk6IHBvaW50ZXJfbW90
+          aW9uLmFwcGVuZCgoeCx5KSkpCiAgICBhcHAud2luZG93LmFkZF9jb250cm9sbGVyKG1vbml0b3Ip
+          CiAgICBkZWYgbW92ZShkeCwgZHkpOgogICAgICAgIG11dHRlcl9jYWxsKHNlc3Npb24sIGlmYWNl
+          LCAiTm90aWZ5UG9pbnRlck1vdGlvblJlbGF0aXZlIiwKICAgICAgICAgICAgICAgICAgICBHTGli
+          LlZhcmlhbnQoIihkZCkiLCAoZmxvYXQoZHgpLCBmbG9hdChkeSkpKSkKCiAgICBkZWYgbW91c2Vf
+          Y2xpY2sod2lkZ2V0KToKICAgICAgICBzdXJmYWNlID0gYXBwLndpbmRvdy5nZXRfc3VyZmFjZSgp
+          CiAgICAgICAgcG9pbnRlciA9IGFwcC53aW5kb3cuZ2V0X2Rpc3BsYXkoKS5nZXRfZGVmYXVsdF9z
+          ZWF0KCkuZ2V0X3BvaW50ZXIoKQogICAgICAgIGRlZiBwb3NpdGlvbigpOgogICAgICAgICAgICBp
+          bnNpZGUsIHgsIHksIF8gPSBzdXJmYWNlLmdldF9kZXZpY2VfcG9zaXRpb24ocG9pbnRlcikKICAg
+          ICAgICAgICAgYXNzZXJ0IGluc2lkZSwgKCJwb2ludGVyIG91dHNpZGUgR1RLIHN1cmZhY2UiLCB4
+          LCB5KQogICAgICAgICAgICByZXR1cm4geCwgeQogICAgICAgICMgRG9uJ3Qgc2VuZCBvdXQtb2Yt
+          b3V0cHV0IGNvb3JkaW5hdGVzIHRvIE11dHRlci4gQSBuZXcgdmlydHVhbCBzZWF0CiAgICAgICAg
+          IyBtYXkgaGF2ZSBubyBHREsgcG9pbnRlciBwb3NpdGlvbiB1bnRpbCBhIGZpbml0ZSByZWFsIG1v
+          dGlvbiBhcnJpdmVzLgogICAgICAgIGZvciBkeCwgZHkgaW4gWygxNiwyMCksKDQ4LDM0KSwoLTI0
+          LDUpLCg0NSwxMiksKC0zOCwtMjUpXSAqIDM6CiAgICAgICAgICAgIG1vdmUoZHgsZHkpCiAgICAg
+          ICAgICAgIGZvciBfIGluIHJhbmdlKDYpOgogICAgICAgICAgICAgICAgeWllbGQKICAgICAgICAg
+          ICAgaWYgcG9pbnRlcl9tb3Rpb246CiAgICAgICAgICAgICAgICBicmVhawogICAgICAgIGlmIG5v
+          dCBwb2ludGVyX21vdGlvbjoKICAgICAgICAgICAgeDAsIHkwID0gcG9zaXRpb24oKQogICAgICAg
+          IGVsc2U6CiAgICAgICAgICAgIHgwLCB5MCA9IHBvaW50ZXJfbW90aW9uWy0xXQogICAgICAgIG1h
+          cHBlZCwgYm91bmRzID0gd2lkZ2V0LmNvbXB1dGVfYm91bmRzKGFwcC53aW5kb3cpCiAgICAgICAg
+          YXNzZXJ0IG1hcHBlZCBhbmQgd2lkZ2V0LmdldF9tYXBwZWQoKQogICAgICAgIHggPSBib3VuZHMu
+          Z2V0X3goKSArIGJvdW5kcy5nZXRfd2lkdGgoKS8yCiAgICAgICAgeSA9IGJvdW5kcy5nZXRfeSgp
+          ICsgYm91bmRzLmdldF9oZWlnaHQoKS8yCiAgICAgICAgIyBCb3VuZCBlYWNoIGRlbHRhOyByZXJl
+          YWQgZGVsaXZlcmVkIEdUSyBjb29yZGluYXRlcyBhZnRlciBtb3Rpb24uCiAgICAgICAgZm9yIF8g
+          aW4gcmFuZ2UoMTIpOgogICAgICAgICAgICBpZiBhYnMoeC14MCk8PTQgYW5kIGFicyh5LXkwKTw9
+          NDoKICAgICAgICAgICAgICAgIGJyZWFrCiAgICAgICAgICAgIG1vdmUobWF4KC0xNDAsbWluKDE0
+          MCx4LXgwKSksIG1heCgtMTI1LG1pbigxMjUseS15MCkpKQogICAgICAgICAgICBmb3IgXyBpbiBy
+          YW5nZSg2KToKICAgICAgICAgICAgICAgIHlpZWxkCiAgICAgICAgICAgIHgwLHkwID0gcG9pbnRl
+          cl9tb3Rpb25bLTFdIGlmIHBvaW50ZXJfbW90aW9uIGVsc2UgcG9zaXRpb24oKQogICAgICAgIGFz
+          c2VydCBhYnMoeDAteCk8PTQgYW5kIGFicyh5MC15KTw9NCwoeDAseTAseCx5KQogICAgICAgIGZv
+          ciBkb3duIGluIChUcnVlLCBGYWxzZSk6CiAgICAgICAgICAgIG11dHRlcl9jYWxsKHNlc3Npb24s
+          IGlmYWNlLCAiTm90aWZ5UG9pbnRlckJ1dHRvbiIsIEdMaWIuVmFyaWFudCgiKGliKSIsICgweDEx
+          MCwgZG93bikpKQogICAgICAgICAgICB5aWVsZAoKICAgIGRlZiBhd2FpdF9jaHJvbWUoKToKICAg
+          ICAgICBmb3IgXyBpbiByYW5nZSg0NSk6CiAgICAgICAgICAgIGlmIGFwcC5sYWIgYW5kIGFwcC5s
+          YWIuYWN0aXZlOgogICAgICAgICAgICAgICAgYnJlYWsKICAgICAgICAgICAgeWllbGQKICAgICAg
+          ICBhc3NlcnQgYXBwLmxhYiBhbmQgYXBwLmxhYi5hY3RpdmUgYW5kIGFwcC5sYWIuc3RhdGUsICJv
+          bmUgYWN0aXZhdGlvbiBkaWQgbm90IHN0YXJ0IENocm9tZSIKICAgICAgICB5aWVsZCBmcm9tIGFw
+          cC5hd2FpdF9sZXNzb25fY2FwdHVyZShjaG9yZCkKICAgICAgICBsYWIgPSBhcHAubGFiCiAgICAg
+          ICAgYXNzZXJ0IGxhYi5zdGF0ZVsibWlzc2lvbiJdID09ICJjaHJvbWUtcmVhZGVyIiBhbmQgbGFi
+          LnN0YXRlWyJzb2x2ZWQiXSA9PSAwCiAgICAgICAgYXNzZXJ0IGxhYi5zdGF0ZVsidGFzayJdWyJr
+          ZXlzIl0gPT0gIkN0cmwrTCIKICAgICAgICBhc3NlcnQgbGFiLnN1cmZhY2UuZ2V0X3Byb3BlcnR5
+          KCJzaG9ydGN1dHMtaW5oaWJpdGVkIikKICAgICAgICBhc3NlcnQgbm90IGxhYi5ndWlkZV9zY3Jv
+          bGwuZ2V0X3Zpc2libGUoKQogICAgICAgIHJldHVybiBsYWIKCiAgICByZWNvcmQoIjAxLWxpdmUt
+          Y2F0YWxvZyIpCiAgICBhc3NlcnQgYXBwLmhvbWVfY2FyZHNbImNocm9tZSJdLmdyYWJfZm9jdXMo
+          KQogICAgeWllbGQgZnJvbSBjaG9yZCgiRW50ZXIiKQogICAgbGFiID0geWllbGQgZnJvbSBhd2Fp
+          dF9jaHJvbWUoKQogICAgcmVjb3JkKCIwMi1jaHJvbWUtZmlyc3QtdGFzayIpCiAgICB5aWVsZCBm
+          cm9tIGNob3JkKCJDdHJsK0wiKQogICAgYXNzZXJ0IGxhYi5zdGF0ZVsic29sdmVkIl0gPT0gMSBh
+          bmQgbGFiLnN0YXRlWyJlcnJvcnMiXSA9PSAwCiAgICByZWNvcmQoIjAzLWNocm9tZS1maXJzdC1j
+          cmVkaXQiKQogICAgdHJhY2UoImNyZWRpdCIpCiAgICB5aWVsZCBmcm9tIGR3ZWxsKC4wOCkgICMg
+          cmFwaWQgaHVtYW4tc2NhbGUgcGF1c2U7IG9sZGVyIGNhbGxiYWNrcyBtdXN0IG5vdCBkZW55IG5l
+          dyBjYXB0dXJlCgogICAgeWllbGQgZnJvbSBjaG9yZChsYWIuYmluZGluZ3MoKVswXSkKICAgIHRy
+          YWNlKCJwYXVzZWQtYnktZjgiKQogICAgYXNzZXJ0IGxhYi5zdGF0ZVsicGF1c2VkIl0gYW5kIGxh
+          Yi5tb2RhbF9sYXllci5nZXRfdmlzaWJsZSgpCiAgICByZWNvcmQoIjA0LXBhdXNlZCIpCiAgICB5
+          aWVsZCBmcm9tIGR3ZWxsKC4wOCkgICMgZXhlcmNpc2UgcmFwaWQgcmVhY3F1aXJlIG9uIGZpeGVk
+          IGxpZmVjeWNsZQogICAgeWllbGQgZnJvbSBjaG9yZCgiU3BhY2UiKQogICAgdHJhY2UoInJlc3Vt
+          ZS1yZXF1ZXN0ZWQiKQogICAgeWllbGQgZnJvbSBhcHAuYXdhaXRfbGVzc29uX2NhcHR1cmUoY2hv
+          cmQpCiAgICB0cmFjZSgicmVzdW1lLWFjY2VwdGVkIikKICAgIGFzc2VydCBsYWIuc3RhdGVbInNv
+          bHZlZCJdID09IDEgYW5kIG5vdCBsYWIuc3RhdGVbInBhdXNlZCJdCgogICAgeWllbGQgZnJvbSBj
+          aG9yZChsYWIuYmluZGluZ3MoKVsxXSkKICAgIGFzc2VydCBsYWIuc3RhdGVbImZpbmlzaGVkIl0g
+          YW5kIGxhYi5zdGF0ZVsic2F2ZWQiXSBhbmQgbGFiLnJlc3VsdAogICAgcmVzdWx0ID0gYXBwLmNh
+          bGwoImxhYi1yZXN1bHQiKQogICAgYXNzZXJ0IHJlc3VsdFsic29sdmVkIl0gPT0gMQogICAgcmVj
+          b3JkKCIwNS1zYXZlZC1yZXN1bHQiKQogICAgZm9yIF8gaW4gcmFuZ2UoMTQpOgogICAgICAgIGZv
+          Y3VzZWQgPSBhcHAud2luZG93LmdldF9mb2N1cygpCiAgICAgICAgaWYgaXNpbnN0YW5jZShmb2N1
+          c2VkLCBHdGsuQnV0dG9uKSBhbmQgZm9jdXNlZC5nZXRfbGFiZWwoKSA9PSAi0JIg0LrQsNGC0LDQ
+          u9C+0LMiOgogICAgICAgICAgICBicmVhawogICAgICAgIHlpZWxkIGZyb20gY2hvcmQoIlRhYiIp
+          CiAgICAgICAgYXNzZXJ0IGluc2lkZV93aWRnZXQoYXBwLndpbmRvdy5nZXRfZm9jdXMoKSwgbGFi
+          Lm1vZGFsX2xheWVyKSwgImZvY3VzIGxlZnQgcmVzdWx0IGJlZm9yZSByZXR1cm4iCiAgICBlbHNl
+          OgogICAgICAgIHJhaXNlIEFzc2VydGlvbkVycm9yKCJrZXlib2FyZCBjb3VsZCBub3QgcmVhY2gg
+          Y2F0YWxvZyByZXR1cm4iKQogICAgeWllbGQgZnJvbSBjaG9yZCgiRW50ZXIiKQogICAgYXNzZXJ0
+          IGFwcC5tb2RlID09ICJob21lIiBhbmQgYXBwLndpbmRvdy5nZXRfZm9jdXMoKSBpcyBhcHAuaG9t
+          ZV9jYXJkc1siY2hyb21lIl0KICAgIHJlY29yZCgiMDYtZm9jdXNlZC1yZXR1cm4iKQoKICAgIHBy
+          b29mID0geyJzaGEiOiAiOWFlMjY3ZDQ5MTlkOTAyZTE3ZGEyOGU2NTkzZjhkYWZkNjFiM2UyNCIs
+          ICJzdXJmYWNlIjogIkdUSzQgZ2VudWluZSBHTk9NRSBXYXlsYW5kIiwKICAgICAgICAgICAgICJj
+          YXB0dXJlIjogIkdESyBjb21wb3NpdG9yIGluaGliaXRpb247IE11dHRlciBuYXRpdmUgdmlydHVh
+          bCBrZXlib2FyZDsgbm8gc2hpbSIsCiAgICAgICAgICAgICAiZGVza3RvcFBoeXNpY2FsIjogWzE0
+          NDAsIDk2MF0sICJvbmVDbGljayI6IEZhbHNlLCAib25lRW50ZXIiOiBUcnVlLCAiZmlyc3RDcmVk
+          aXQiOiAiQ3RybCtMIiwKICAgICAgICAgICAgICJwYXVzZVJlc3VtZSI6IFRydWUsICJzYXZlZFJl
+          c3VsdCI6IFRydWUsICJzb3VyY2VDYXJkRm9jdXMiOiBUcnVlfQogICAgKG91dHB1dC8ia2V5Ym9h
+          cmQtcHJvb2YuanNvbiIpLndyaXRlX3RleHQoanNvbi5kdW1wcyhwcm9vZiwgaW5kZW50PTIpKQog
+          ICAgcHJpbnQoIktleWJvYXJkLW9ubHkgY2hlY2twb2ludHMgcGFzc2VkIGJlZm9yZSBXYXlsYW5k
+          IHBvaW50ZXIgZ2F0ZSIsIGZsdXNoPVRydWUpCiAgICB0cnk6CiAgICAgICAgeWllbGQgZnJvbSBt
+          b3VzZV9jbGljayhhcHAuaG9tZV9jYXJkc1siY2hyb21lIl0pCiAgICBleGNlcHQgKEFzc2VydGlv
+          bkVycm9yLCBHTGliLkVycm9yKSBhcyBleGM6CiAgICAgICAgcHJvb2ZbInBvaW50ZXJTdGF0dXMi
+          XSA9ICJVbmFibGUgdG8gZXN0YWJsaXNoIHBoeXNpY2FsIE11dHRlciBwb2ludGVyOyBrZXlib2Fy
+          ZCBnYXRlIG9ubHkiCiAgICAgICAgcHJpbnQoIk9wdGlvbmFsIG5hdGl2ZSBwb2ludGVyIHVuYXZh
+          aWxhYmxlOiIsIHN0cihleGMpLCBmbHVzaD1UcnVlKQogICAgICAgIChvdXRwdXQvInByb29mLmpz
+          b24iKS53cml0ZV90ZXh0KGpzb24uZHVtcHMocHJvb2YsIGluZGVudD0yKSkKICAgICAgICBwcmlu
+          dChqc29uLmR1bXBzKHByb29mKSwgZmx1c2g9VHJ1ZSkKICAgICAgICByZXR1cm4KICAgIHNlY29u
+          ZCA9IHlpZWxkIGZyb20gYXdhaXRfY2hyb21lKCkKICAgIGFzc2VydCBzZWNvbmQgaXMgbm90IGxh
+          YgogICAgeWllbGQgZnJvbSBjaG9yZCgiQ3RybCtMIikKICAgIGFzc2VydCBzZWNvbmQuc3RhdGVb
+          InNvbHZlZCJdID09IDEgYW5kIHNlY29uZC5zdGF0ZVsiZXJyb3JzIl0gPT0gMAogICAgcmVjb3Jk
+          KCIwNy1wb2ludGVyLXJlb3BlbiIpCiAgICBhc3NlcnQgc2Vjb25kLnN0b3Aoc2hvdz1GYWxzZSkg
+          YW5kIHNlY29uZC5zdGF0ZVsic2F2ZWQiXQogICAgcHJvb2ZbIm9uZUNsaWNrIl0gPSBUcnVlCiAg
+          ICBwcm9vZlsicG9pbnRlclN0YXR1cyJdID0gIk11dHRlciBuYXRpdmUgdmlydHVhbCBwb2ludGVy
+          IGRlbGl2ZXJlZCByZWFsIEJUTl9MRUZUIgogICAgKG91dHB1dC8icHJvb2YuanNvbiIpLndyaXRl
+          X3RleHQoanNvbi5kdW1wcyhwcm9vZiwgaW5kZW50PTIpKQogICAgcHJpbnQoanNvbi5kdW1wcyhw
+          cm9vZiksIGZsdXNoPVRydWUpCg==
+          QA_CODE
+          /usr/bin/python3 "$RUNNER_TEMP/attach-live-harness.py"
+          sha256sum -c "$proof/runtime-SHA256SUMS.txt"
+          bash check.sh --live-entry-native --output "$proof" || {
+            tail -n 100 "$proof/"*.log; exit 1; }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-ux-9ae267d-wayland
+          path: ${{ runner.temp }}/live-wayland-evidence/
+          if-no-files-found: warn
