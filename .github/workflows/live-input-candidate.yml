@@ -75,6 +75,7 @@ jobs:
           name: windows-x64-candidate
           path: ${{ runner.temp }}/candidate
       - name: Verify and extract ZIP
+        id: unpack_wpf
         shell: pwsh
         run: |
           $inputDir = Join-Path $env:RUNNER_TEMP candidate
@@ -161,7 +162,7 @@ jobs:
           $env:TOUCH_TYPING_QA_LESSON_CHROME = 'compact'
           & (Join-Path $appDir 'Test-Live-UI.ps1') -Application $app -GnomeProfilePractice -OutputDirectory $dest
       - name: Verify both native WPF debug missions and scoped screenshot
-        if: github.ref == 'refs/heads/feature/reference-ui'
+        if: ${{ !cancelled() && steps.unpack_wpf.outcome == 'success' && github.ref == 'refs/heads/feature/reference-ui' }}
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'

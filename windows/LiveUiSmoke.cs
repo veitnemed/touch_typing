@@ -788,7 +788,14 @@ internal static class LiveUiSmoke
         });
         foreach (char c in "pwd") Send(Character(c));
         Key("Enter");
-        Until(delegate { return Name("LabTask").Contains("рабочий стол"); }, "exact pwd advances to desktop return");
+        // The drill mode deliberately labels the phase instead of exposing
+        // the expected action as the visible title. Check the credit and QA
+        // target independently of the translated visible copy.
+        Until(delegate
+        {
+            return ReadSolved() == 2 && scene().Name.Contains("Рабочий стол 2 из 2") &&
+                Find("LabTask").Current.ItemStatus == "keys:Super+PageUp";
+        }, "exact pwd earns the second credit and advances to PageUp on desk 2");
         CaptureReferenceFrame("gnome-workspace-2-terminal");
         expectDesktopTransition("Super+PageUp", "PageUp", delegate
         {
