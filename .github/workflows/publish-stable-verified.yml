@@ -1,0 +1,96 @@
+name: Publish qualified TouchTyping 1.8.0
+on:
+  push:
+    branches: [release/v1.8.0-verified]
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: touchtyping-stable-18
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: veitnemed/touch_typing
+      PRODUCT: 9c7773ab1bb319285e2ec341224c5714ee2efc86
+      TAG: v1.8.0
+      BUILD: "45213146057"
+      WIN: "45214461908"
+      MIGRATE: "45214071646"
+      GNOME: "45213978395"
+      LINUX_SHA: e27aef28026bb52c869812fb8c157a4835dee69179b6fe50be60f9b36e929855
+      WIN_SHA: 35e15ae1286bfe3ed53ba76ebfcc34d4b5b95d0856d6a2fe8998d37901a97149
+    steps:
+      - name: Verify required gates and publish the original archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          pass_run() {
+            local run="$1" sha="$2" branch="$3" workflow="$4"; shift 4
+            [[ "$run" =~ ^[1-9][0-9]*$ ]]
+            gh api "repos/$REPO/actions/runs/$run" | jq -e --arg sha "$sha" --arg branch "$branch" --arg path "$workflow" '
+              .head_sha == $sha and .head_branch == $branch and .path == $path and .event == "push" and
+              .status == "completed" and .conclusion == "success"' >/dev/null
+            local payload
+            payload=$(gh api "repos/$REPO/actions/runs/$run/jobs?per_page=50")
+            for name; do
+              jq -e --arg n "$name" 'any(.jobs[]; .name == $n and .conclusion == "success")' <<< "$payload" >/dev/null
+            done
+          }
+          pass_run "$BUILD" 28b1fc9dcb282be9fa8d15985e88f070a7c800de qa/stable18-candidate-archives .github/workflows/final-candidate-packages.yml candidate
+          pass_run "$WIN" "7d82d859f3b0c4bc9039008311de838df6ae6c36" qa/stable18-windows-qualification .github/workflows/final-windows-qualification.yml final-windows-editor final-windows-terminal final-windows-small
+          pass_run "$MIGRATE" "2cb59df85c4e3cb3642395f1a0c277fa20939f78" qa/stable18-final-migration .github/workflows/final-migration.yml exact-archive-upgrade
+          pass_run "$GNOME" "ce864989f1bd7e212256710ff8b95ffad2793890" qa/stable18-final-linux-wayland .github/workflows/final-linux-wayland.yml linux-window
+          p="$RUNNER_TEMP/touchtyping-release"
+          mkdir -p "$p"
+          cd "$p"
+          gh run download "$BUILD" --repo "$REPO" --name touchtyping-180-candidate-archives --dir .
+          linux="touch-typing-$TAG-linux-x64.tar.gz"
+          windows="touch-typing-$TAG-windows-x64.zip"
+          sha256sum -c SHA256SUMS.txt
+          printf '%s  %s\n%s  %s\n' "$LINUX_SHA" "$linux" "$WIN_SHA" "$windows" | sha256sum -c
+          tar -tzf "$linux" > linux.txt
+          unzip -tq "$windows"
+          unzip -Z1 "$windows" > windows.txt
+          grep -Fx touch-typing-linux-x64/install.sh linux.txt
+          grep -Fx Start-Live.cmd windows.txt
+          if grep -Ei '\.exe$' linux.txt; then exit 1; fi
+          if grep -Ei '(^|/)(\.env(\.|$)|\.git(/|$)|progress\.xml($|[.~])|.*\.(pem|pfx|p12|key)$|profiles?/|secrets?/|credentials($|\.))' linux.txt windows.txt; then exit 1; fi
+          if git ls-remote --exit-code "https://github.com/$REPO.git" "refs/tags/$TAG" >/dev/null; then
+            echo "Existing tag; do not overwrite"; exit 1
+          else
+            code=$?
+            [ "$code" -eq 2 ] || exit "$code"
+          fi
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then echo "Existing draft or release; do not overwrite"; exit 1; fi
+          cat > notes.md <<'NOTES'
+          **TouchTyping 1.8.0 — практикум работы с клавиатурой.**
+          
+          - **Windows x64:** распакуйте ZIP целиком и запустите `Start-Live.cmd`. Нужен .NET Framework 4.8 или новее.
+          - **Linux x86-64:** распакуйте архив и выполните `bash install.sh`. Нужны GTK 4, Python 3, PyGObject и Cairo. EXE в архиве нет.
+          
+          ### Изменения
+          - Учебный VS Code с подсветкой в стиле GitHub Dark Default и нейтральным проектом `task-list`.
+          - Два сценария Python без мыши: редактирование функции; поиск и исправление только нужного совпадения с переходом к определению и возвратом каретки.
+          - Сценарии Chrome и GNOME, сохранение незаконченного занятия. В Linux клавиатурный фокус больше не уходит за окно результатов.
+          
+          ### Приёмка
+          - **Linux GTK/X11:** чистый запуск, сохранение и продолжение, правка терминальной команды после ввода и вызова из истории, восстановление профилей 1.7.0 и preview.7, результат с клавиатуры при 1024×600.
+          - **Ubuntu 24.04 / GNOME Wayland:** на этом архиве пройдена новая миссия поиска в редакторе, с сохранением правки и возвратом каретки.
+          - **Windows Server 2025 x64:** штатный запуск проверенного ZIP, урок и продолжение, стрелки и удаление в терминале, перенос тестовых профилей и малое окно 1024×600 при 100%.
+          - Домашняя Windows 10/11, физическая клавиатура и масштаб 125–150% не входили в проверенные прогоны. Старый черновик 1.7.0 сохраняет зачёты и точку продолжения; счётчик открытой сессии начинается с нуля.
+          
+          [Скриншоты и инструкция](https://github.com/veitnemed/touch_typing/tree/docs/preview7-readme#readme)
+          NOTES
+          printf '\nИсходники: `%s`. Архивы не пересобирались после проверок.\n' "$PRODUCT" >> notes.md
+          gh release create "$TAG" --repo "$REPO" --target "$PRODUCT" --draft --title "TouchTyping 1.8.0 — практикум работы с клавиатурой" --notes-file notes.md "$windows" "$linux" SHA256SUMS.txt
+          rid=$(gh api "repos/$REPO/releases?per_page=30" | jq -er --arg tag "$TAG" '
+            [.[] | select(.tag_name == $tag and .draft == true) | .id] |
+            if length == 1 then .[0] else error("Expected one new draft") end')
+          gh api "repos/$REPO/releases/$rid/assets" | jq -e --arg l "$linux" --arg w "$windows" --arg lh "sha256:$LINUX_SHA" --arg wh "sha256:$WIN_SHA" '
+            length == 3 and any(.[]; .name == $l and .state == "uploaded" and .digest == $lh) and
+            any(.[]; .name == $w and .state == "uploaded" and .digest == $wh) and any(.[]; .name == "SHA256SUMS.txt" and .state == "uploaded")'
+          gh release edit "$TAG" --repo "$REPO" --draft=false --latest
