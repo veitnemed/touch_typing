@@ -1,0 +1,60 @@
+name: Publish TouchTyping Windows x64 beta
+on:
+  push:
+    branches: [release/v1.8.0-preview.4-windows-beta]
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: touchtyping-windows-beta-preview-4
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE_SHA: '49f8bde175c1d54b2dc4af3a7ec4e175256be737'
+      RUN: '45118669528'
+      WINDOWS_SHA256: 'c75420b42ba3a2415ab2415b6d0cf74b07d6ebe70a438ea9d3c48f672690cc1e'
+      REPO: 'veitnemed/touch_typing'
+      TAG: 'v1.8.0-preview.4-windows-beta'
+    steps:
+      - name: Publish only the exact verified Windows ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/actions/runs/$RUN" | jq -e --arg sha "$CANDIDATE_SHA" '
+            .head_sha == $sha and .head_branch == "feature/reference-ui"
+            and .path == ".github/workflows/live-input-candidate.yml"' >/dev/null
+          gh api "repos/$REPO/actions/runs/$RUN/jobs?per_page=50" | jq -e '
+            .jobs as $j | ["engine","windows-package","windows-window"] |
+            all(. as $name | any($j[]; .name==$name and .conclusion=="success"))' >/dev/null
+          mkdir -p "$RUNNER_TEMP/windows-beta"
+          cd "$RUNNER_TEMP/windows-beta"
+          gh run download "$RUN" --repo "$REPO" --name windows-x64-candidate --dir .
+          sha256sum -c SHA256SUMS.txt
+          echo "$WINDOWS_SHA256  touch-typing-windows-x64.zip" | sha256sum -c
+          unzip -tq touch-typing-windows-x64.zip
+          unzip -Z1 touch-typing-windows-x64.zip > files.txt
+          grep -Fx 'Start-Live.cmd' files.txt
+          grep -Fx 'TouchTyping.exe' files.txt
+          for asset in Roboto-Regular.ttf Roboto-Medium.ttf Roboto-Bold.ttf OFL.txt ROBOTO-SOURCE.txt; do
+            grep -Fx "fonts/$asset" files.txt
+          done
+          if grep -E '(^|/)progress\.xml$' files.txt; then echo 'Unexpected user profile'; exit 1; fi
+          mv touch-typing-windows-x64.zip "touch-typing-$TAG-x64.zip"
+          sha256sum "touch-typing-$TAG-x64.zip" > SHA256SUMS.txt
+          cat > notes.md <<'NOTES'
+          Отдельная переносимая бета Windows x64. Распакуйте ZIP целиком в отдельную папку и запустите `Start-Live.cmd`. Требуется .NET Framework 4.8 или совместимая новая версия. Windows 10/11 на рабочем ПК и системный масштаб 125–150% пока не подтверждены; проверено на Windows Server 2025.
+          
+          Во время занятия убрана отдельная верхняя полоса с названием модуля. Освободившееся место занимает рабочая область; задача, нужные клавиши, прогресс, пауза, настройки и возврат доступны. Главная и каталог сохраняют своё оформление.
+          
+          Сохранённое занятие восстанавливает активное время, исходный лимит и зачёты без повторного начисления.
+          
+          Это предварительный выпуск, не полная приёмка всех функций.
+          NOTES
+          printf '\nZIP без пересборки из [прошедшего прогона](https://github.com/%s/actions/runs/%s) на `%s`.\n' "$REPO" "$RUN" "$CANDIDATE_SHA" >> notes.md
+          gh release create "$TAG" --repo "$REPO" --target "$CANDIDATE_SHA" --prerelease --latest=false \
+            --title "TouchTyping v1.8.0-preview.4 — Windows x64 beta" --notes-file notes.md \
+            "touch-typing-$TAG-x64.zip" SHA256SUMS.txt
