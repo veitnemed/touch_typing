@@ -345,7 +345,11 @@ internal static class LiveUiSmoke
         window = AutomationElement.FromHandle(trainer);
         Check(window.Current.ProcessId == app.Id, "Native automation root belongs to the normal trainer PID");
         Focus();
-        Until(delegate { return Exists("LabStart"); }, "normal Live chooser draws");
+        Until(delegate { return Visible("HomeDashboard") && Exists("HomeClass-terminal"); },
+            "normal Home draws its terminal exercise card");
+        Invoke("HomeClass-terminal");
+        Until(delegate { return Exists("LabStart") && Exists("LabClass-terminal"); },
+            "normal terminal chooser opens through its Home card");
     }
 
     private static void CheckHostedNormalLaunch(string executable)
