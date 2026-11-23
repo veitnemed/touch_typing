@@ -1,0 +1,78 @@
+name: Qualify Linux Python editor package (no publish)
+on:
+  push:
+    branches: [qa/linux-python-444892c]
+permissions:
+  contents: read
+jobs:
+  linux-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 444892cfcc750af678e6c88835f05cfc758bc7f8
+          path: product
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build and test exact Linux archive
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 444892cfcc750af678e6c88835f05cfc758bc7f8
+          export PYTHONPATH="$PWD/linux"
+          pkg="$RUNNER_TEMP/out"
+          mkdir -p "$pkg"
+          bash linux/build-release.sh "$pkg/touch-typing-linux-x64"
+          export TOUCH_TYPING_ENGINE="$pkg/touch-typing-linux-x64/engine/TouchTyping.Engine"
+          /usr/bin/python3 linux/tests/test_python_editor.py
+          /usr/bin/python3 linux/tests/test_neutral_project.py
+          /usr/bin/python3 linux/tests/test_practice.py
+          /usr/bin/python3 linux/tests/test_live_missions.py
+          tar -czf "$pkg/touch-typing-linux-x64.tar.gz" -C "$pkg" touch-typing-linux-x64
+          (cd "$pkg" && sha256sum touch-typing-linux-x64.tar.gz | tee SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64-candidate
+          path: |
+            ${{ runner.temp }}/out/touch-typing-linux-x64.tar.gz
+            ${{ runner.temp }}/out/SHA256SUMS.txt
+          if-no-files-found: error
+  linux-window:
+    needs: linux-package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-x64-candidate
+          path: ${{ runner.temp }}/archive
+      - name: Install GNOME test session dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnome-shell gsettings-desktop-schemas gir1.2-gtk-4.0 python3-gi python3-gi-cairo python3-cairo dbus-x11 fonts-dejavu-core libgl1-mesa-dri
+      - name: Send keys through isolated GNOME Wayland to the packaged GTK window
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/archive"
+          sha256sum -c SHA256SUMS.txt
+          tar -xzf touch-typing-linux-x64.tar.gz
+          cd touch-typing-linux-x64
+          patch --batch --fuzz=0 -p1 < "$GITHUB_WORKSPACE/qa/python-search-wayland.patch"
+          /usr/bin/python3 qa_runner.py --python-search-only --output "$RUNNER_TEMP/linux-evidence" || {
+            tail -n 80 -- "$RUNNER_TEMP/linux-evidence/"*.log
+            exit 1
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-python-search-evidence
+          path: ${{ runner.temp }}/linux-evidence/
