@@ -32,7 +32,7 @@ namespace TouchTypingStudio
                         InspectField(engine, report, directory, "find", "F");
                         engine.Call("lab-stop");
                     }
-                    report.WriteLine("PASS exact mixed text, trailing-space selection, movement and Delete on both fields; see measured boundary deltas above.");
+                    report.WriteLine("PASS shared shaped caret/selection/scroll, Unicode cluster edges, real engine mixed text and Delete in both Chrome fields.");
                     return 0;
                 }
                 catch (Exception error)
@@ -51,34 +51,59 @@ namespace TouchTypingStudio
                 !string.Equals("Roboto-Regular.ttf", Path.GetFileName(physical.FontUri.LocalPath), StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Expected the exact bundled proportional Roboto face in this probe.");
             report.WriteLine("proportional-face=" + physical.FontUri);
-            report.WriteLine("WPF FormattedText diagnostic; explicit pixelsPerDip, not live monitor DPI.");
+            report.WriteLine("WPF shaped-line diagnostic; explicit pixelsPerDip, not live monitor DPI.");
             foreach (double scale in new[] { 1d, 1.25d, 1.5d })
             {
-                foreach (string value in new[] { Sample, "To Ё ", "office Ё " })
+                foreach (string value in new[] { Sample, "To Ё ", "office Ё ", "A\u030AV Ё ", "\uD83D\uDE42AV Ё " })
                 {
                     const double size = 12;
-                    var line = Line(value, face, size, scale);
-                    report.WriteLine(string.Format(Format, "scale={0:0.00} text=[{1}] full={2:0.000} with-trailing={3:0.000}",
-                        scale, value, line.Width, line.WidthIncludingTrailingWhitespace));
-                    if (line.WidthIncludingTrailingWhitespace <= line.Width)
-                        throw new InvalidOperationException("Trailing space was omitted from line extent.");
-                    for (int caret = 1; caret < value.Length; caret++)
+                    using (var line = new ChromeTextLine(value, face, size, Brushes.Black, scale))
                     {
-                        // This models current Field()'s isolated prefix vs one position derived from the full shaped line.
-                        double prior = Line(value.Substring(0, caret), face, size, scale).WidthIncludingTrailingWhitespace;
-                        var followingGlyph = line.BuildHighlightGeometry(new Point(), caret, 1);
-                        var preceding = line.BuildHighlightGeometry(new Point(), 0, caret);
-                        report.WriteLine(string.Format(Format, "  caret={0} current-prefix={1:0.000} next-full-left={2} prior-full-right={3}",
-                            caret, prior, Number(followingGlyph, true), Number(preceding, false)));
+                        double end = line.Distance(value.Length);
+                        report.WriteLine(string.Format(Format, "scale={0:0.00} text=[{1}] full={2:0.000} with-trailing={3:0.000}",
+                            scale, value, line.Width, line.WidthWithTrailingWhitespace));
+                        if (end <= line.Width || Math.Abs(end - line.WidthWithTrailingWhitespace) > .1)
+                            throw new InvalidOperationException("Trailing space is not included in the final caret hit.");
+                        var space = line.Bounds(value.Length - 1, value.Length).ToArray();
+                        if (space.Length == 0 || Math.Abs(space.Min(rect => rect.Left) - line.Distance(value.Length - 1)) > .1 ||
+                            Math.Abs(space.Max(rect => rect.Right) - end) > .1)
+                            throw new InvalidOperationException("Trailing-space selection differs from the two caret hits.");
+
+                        const double viewport = 16;
+                        double shift = ChromeTextLine.VisibleShift(end, viewport, 0);
+                        if (end - shift > viewport - 2.9 || end - shift < 0 ||
+                            ChromeTextLine.VisibleShift(line.Distance(0), viewport, shift) != 0)
+                            throw new InvalidOperationException("The same shaped caret is not exposed by horizontal scrolling.");
+
+                        int[] boundaries = StringInfo.ParseCombiningCharacters(value);
+                        if (boundaries[1] > 1 && (Math.Abs(line.Distance(1) - line.Distance(0)) > .1 ||
+                            !line.Bounds(0, boundaries[1]).SequenceEqual(line.Bounds(1, boundaries[1]))))
+                            throw new InvalidOperationException("Combining/surrogate interiors must use visible cluster edges.");
+
+                        double previous = line.Distance(0);
+                        for (int caret = 1; caret < value.Length; caret++)
+                        {
+                            double current = line.Distance(caret);
+                            if (double.IsNaN(current) || current < previous - .01 || current > end + .01)
+                                throw new InvalidOperationException("Invalid left-to-right shaped caret sequence.");
+                            double isolated = Line(value.Substring(0, caret), face, size, scale).WidthIncludingTrailingWhitespace;
+                            report.WriteLine(string.Format(Format, "  caret={0} old-isolated={1:0.000} shaped={2:0.000}",
+                                caret, isolated, current));
+                            previous = current;
+                        }
+
+                        if (value == Sample)
+                        {
+                            // AV is a kerning pair but not a ligature. The left selection edge
+                            // for V must be the caret between A and V on this actual TextLine.
+                            var v = line.Bounds(1, 2).ToArray();
+                            if (v.Length == 0 || Math.Abs(v.Min(rect => rect.Left) - line.Distance(1)) > .1 ||
+                                line.Distance(1) >= Line("A", face, size, scale).WidthIncludingTrailingWhitespace - .15)
+                                throw new InvalidOperationException("The AV boundary did not preserve full-line kerning.");
+                        }
                     }
                 }
             }
-        }
-
-        private static string Number(Geometry value, bool left)
-        {
-            if (value == null || value.Bounds.IsEmpty) return "empty";
-            return (left ? value.Bounds.Left : value.Bounds.Right).ToString("0.000", Format);
         }
 
         private static FormattedText Line(string value, Typeface face, double size, double scale)

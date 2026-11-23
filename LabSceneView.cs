@@ -197,7 +197,8 @@ namespace TouchTypingStudio
             Text("‹   ›   ⟳", 13, 71, 17, "#CDD5E2");
             Rounded(95, 70, w - 142, 26, window.S("focus") == "url" ? "#D8E9FD" : "#242039", 13);
             Field(window.S("focus") == "url" ? window.S("input") : window.S("url"), window, 109, 76, w - 180, 12,
-                window.S("focus") == "url" ? "#1F3E5F" : "#D4DCEB", 0, window.S("focus") == "url", face: regular);
+                window.S("focus") == "url" ? "#1F3E5F" : "#D4DCEB", 0, window.S("focus") == "url",
+                scrollKey: "address:" + window.S("id"), face: regular);
             Text("⋮", w - 24, 68, 21, "#D6DDE9");
             double left = Math.Max(28, w * .065);
             double pageScale = window.N("zoom", 100) / 100;
@@ -483,7 +484,12 @@ namespace TouchTypingStudio
             int offset, bool focused, bool document = false, string scrollKey = null, Typeface face = null)
         {
             if (width <= 0) return;
-            var typeface = face ?? mono;
+            if (face != null)
+            {
+                ProportionalField(value, window, x, y, width, size, ink, offset, focused, document, scrollKey, face);
+                return;
+            }
+            var typeface = mono;
             var line = new FormattedText(value, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, typeface,
                 size, Ui.Brush(ink), VisualTreeHelper.GetDpi(this).PixelsPerDip);
             int caret = window.I(document ? "bodyCursor" : "cursor") - offset;
@@ -528,6 +534,60 @@ namespace TouchTypingStudio
             context.DrawText(line, origin);
             if (drawCaret) Rectangle(x + cx, y + 1, 1.5, size * 1.3, ink);
             context.Pop();
+        }
+
+        private void ProportionalField(string value, Data window, double x, double y, double width, double size, string ink,
+            int offset, bool focused, bool document, string scrollKey, Typeface face)
+        {
+            int caret = window.I(document ? "bodyCursor" : "cursor") - offset;
+            int anchor = window.I(document ? "bodyAnchor" : "anchor") - offset;
+            bool drawCaret = focused && caret >= 0 && caret <= value.Length;
+            using (var shaped = new ChromeTextLine(value, face, size, Ui.Brush(ink), VisualTreeHelper.GetDpi(this).PixelsPerDip))
+            {
+                double cx = drawCaret ? shaped.Distance(caret) : 0;
+                double prior = 0;
+                if (drawCaret && scrollKey != null) fieldScroll.TryGetValue(scrollKey, out prior);
+                double shift = ChromeTextLine.VisibleShift(cx, width, prior);
+                if (drawCaret && scrollKey != null)
+                {
+                    if (!fieldScroll.ContainsKey(scrollKey) && fieldScroll.Count >= 32)
+                        fieldScroll.Remove(fieldScroll.Keys.First());
+                    fieldScroll[scrollKey] = shift;
+                }
+                var origin = new Point(x - shift, y);
+                context.PushClip(new RectangleGeometry(new Rect(x, y, width, size * 1.7)));
+                try
+                {
+                    // Keep a single foreground run so selecting text never changes the shaping.
+                    // Use a light highlight behind dark address/document text and retain the existing
+                    // dark highlight behind the white Find text.
+                    var selection = Ui.Brush(ink == "#FFFFFF" ? "#35629B" : "#ADC8F0");
+                    if (focused && document)
+                    {
+                        int length = Math.Abs(anchor - caret);
+                        foreach (Data match in window.Items("matches"))
+                        {
+                            int mark = match.Integer() - offset;
+                            DrawProportionalBounds(shaped, origin, mark, mark + length, Ui.Brush("#C6D8F1"));
+                        }
+                    }
+                    if (focused && caret != anchor)
+                        DrawProportionalBounds(shaped, origin, Math.Min(caret, anchor), Math.Max(caret, anchor), selection);
+                    shaped.Draw(context, origin);
+                    if (drawCaret) Rectangle(origin.X + cx, y + 1, 1.5, size * 1.3, ink);
+                }
+                finally { context.Pop(); }
+            }
+        }
+
+        private void DrawProportionalBounds(ChromeTextLine shaped, Point origin, int first, int end, Brush brush)
+        {
+            foreach (Rect bound in shaped.Bounds(first, end))
+            {
+                Rect shifted = bound;
+                shifted.Offset(origin.X, origin.Y);
+                context.DrawRectangle(brush, null, shifted);
+            }
         }
 
         private void Text(string value, double x, double y, double size, string ink, double width = 1200, int lines = 1, bool code = false)

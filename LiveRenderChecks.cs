@@ -39,7 +39,8 @@ namespace TouchTypingStudio
         {
             int count = 0;
             for (int i = 0; i < pixels.Length; i += 4)
-                if (pixels[i] == 155 && pixels[i + 1] == 98 && pixels[i + 2] == 53) count++;
+                if ((pixels[i] == 155 && pixels[i + 1] == 98 && pixels[i + 2] == 53) ||
+                    (pixels[i] == 240 && pixels[i + 1] == 200 && pixels[i + 2] == 173)) count++;
             return count;
         }
 
