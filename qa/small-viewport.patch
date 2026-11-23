@@ -91,7 +91,7 @@
          Chord("LCtrl+U");
          foreach (char c in "abcde") Send(Character(c));
          Key("Home"); Key("Right"); Key("Right");
-@@ -435,6 +477,232 @@
+@@ -435,6 +477,260 @@
              "Reopen and re-save do not duplicate the draft");
      }
  
@@ -99,39 +99,62 @@
 +    {
 +        OpenNormalStarter(executable, "code", "VS Code");
 +        ResizeStockClient(1024, 600);
-+        CheckViewportElement("LabStart");
-+        CaptureReferenceFrame("small-01-chooser");
++        CaptureReferenceFrame("small-01-chooser-first-paint");
 +        Invoke("LabClass-code");
 +        Select("LabMode", 1); Select("LabLevel", 0); Select("LabDuration", 0); Select("LabTimer", 0);
 +        const string mission = "Найти и исправить нужное место";
++        // Seed focus on an existing class once; all scrolling from here to Start is
++        // caused by keyboard focus traversal, never ScrollIntoView or a scrollbar.
++        Find("LabClass-code").SetFocus();
++        ReachViewportControlByTab("LabMission");
 +        SelectMissionByName(mission);
-+        Key("F5");
-+        Until(delegate { return EditorAt("tasks.py", "body", 0); }, "small window displays editor caret at zero");
++        Find("LabMission").SetFocus(); // restore focus to the combobox after its UIA popup closes
++        ReachViewportControlByTab("LabStart", true);
++        CaptureReferenceFrame("small-01b-start-focused-in-view");
++        Key("Space");
++        Until(delegate { return EditorAt("tasks.py", "body", 0); }, "keyboard-activated Start displays editor caret at zero");
++        CaptureReferenceFrame("small-02-editor-initial");
 +        CheckViewportElement("LabTask");
 +        Check(Name("LabTask").Length > 0 && Name("LabCounter").Contains(mission), "Small editor displays the actual mission and initial goal");
 +        CheckViewportElement("LabDesktop"); CheckViewportElement("LabPause"); CheckViewportElement("LabFinish");
-+        CaptureReferenceFrame("small-02-editor-initial");
 +        VirtualEnglish();
 +        Chord("Ctrl+P"); TypeStockText("ap"); Key("Enter");
 +        Until(delegate { return ReadSolved() == 2 && EditorAt("app.py", "body", 0); }, "keyboard opens app.py and locates caret within small viewport");
 +        CaptureReferenceFrame("small-03-editor-caret");
 +        Key("F8");
 +        Until(delegate { return Visible("LabPauseResult"); }, "small viewport pause shows result card");
-+        CheckViewportElement("LabPauseContinue"); CheckViewportElement("LabPauseFinish");
++        CaptureReferenceFrame("small-04-pause-first-paint");
 +        Until(delegate { return OwnedFocus("LabPauseContinue"); }, "Continue gets keyboard focus on pause");
-+        CaptureReferenceFrame("small-04-pause");
++        CheckViewportElement("LabPauseContinue");
 +        Chord("Shift+Tab");
 +        Check(OwnedFocus("LabPauseRestart"), "Keyboard can move backward from Continue");
-+        Key("Tab");
++        ReachViewportControlByTab("LabPauseFinish", true);
++        ReachViewportControlByTab("LabPauseContinue");
 +        Check(OwnedFocus("LabPauseContinue"), "Keyboard can reach Continue again");
 +        Key("Space");
 +        Until(delegate { return !Visible("LabPauseResult") && EditorAt("app.py", "body", 0); },
 +            "Space resumes with the same editor and caret");
 +        Key("F10");
 +        Until(delegate { return Visible("LabResult"); }, "F10 opens stored result");
-+        CheckViewportElement("LabResult"); CheckViewportElement("LabChooseClass"); CheckViewportElement("ResultMetric-count");
++        CaptureReferenceFrame("small-05-end-result-first-paint");
++        CheckViewportElement("LabResult"); CheckViewportElement("ResultMetric-count");
 +        Check(Find("LabResult").Current.HelpText.Contains("Выполнено 2."), "Visible result reports the two real keyboard actions");
-+        CaptureReferenceFrame("small-05-end-result");
++        ReachViewportControlByTab("LabChooseClass", true);
++        CaptureReferenceFrame("small-05b-end-result-action-focused");
++    }
++
++    private static void ReachViewportControlByTab(string id, bool reverse = false)
++    {
++        for (int i = 0; i < 30 && !OwnedFocus(id); i++)
++        {
++            var before = AutomationElement.FocusedElement;
++            Console.WriteLine("KEYBOARD " + (reverse ? "Shift+Tab" : "Tab") + " toward " + id +
++                "; prior=" + (before == null ? "<none>" : before.Current.AutomationId));
++            Chord(reverse ? "Shift+Tab" : "Tab");
++        }
++        Check(OwnedFocus(id), id + " reached by keyboard Tab traversal");
++        Until(delegate { return ViewportContains(id); }, id + " scrolls fully into the visible client by keyboard focus");
++        CheckViewportElement(id);
 +    }
 +
 +    private static bool OwnedFocus(string id)
@@ -140,15 +163,20 @@
 +        return focus != null && focus.Current.ProcessId == app.Id && focus.Current.AutomationId == id;
 +    }
 +
-+    private static void CheckViewportElement(string id)
++    private static bool ViewportContains(string id)
 +    {
 +        CaptureRect rect;
 +        var origin = new CapturePoint();
-+        Check(GetClientRect(trainer, out rect) && ClientToScreen(trainer, ref origin), "Actual client bounds available");
++        if (!Visible(id) || !GetClientRect(trainer, out rect) || !ClientToScreen(trainer, ref origin)) return false;
 +        var area = new System.Windows.Rect(origin.X, origin.Y, rect.Right - rect.Left, rect.Bottom - rect.Top);
 +        var bounds = Find(id).Current.BoundingRectangle;
-+        Check(Visible(id) && !bounds.IsEmpty && bounds.Width > 1 && bounds.Height > 1 && area.Contains(bounds),
-+            id + " is visible and entirely inside the real client bounds: " + bounds);
++        return !bounds.IsEmpty && bounds.Width > 1 && bounds.Height > 1 && area.Contains(bounds);
++    }
++
++    private static void CheckViewportElement(string id)
++    {
++        Check(ViewportContains(id), id + " is visible and entirely inside the real client bounds: " +
++            Find(id).Current.BoundingRectangle);
 +    }
 +
 +    private static void ResizeStockClient(int dipWidth, int dipHeight)
@@ -324,7 +352,7 @@
      private static void CheckReferenceBrowser()
      {
          Check(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED") == "0",
-@@ -1700,6 +1968,9 @@
+@@ -1700,6 +1996,9 @@
      [StructLayout(LayoutKind.Sequential)] private struct Message { internal IntPtr Window; internal uint Id; internal UIntPtr WParam; internal IntPtr LParam; internal uint Time; internal int X, Y; internal uint Private; }
      [StructLayout(LayoutKind.Sequential)] private struct CaptureRect { internal int Left,Top,Right,Bottom; }
      [StructLayout(LayoutKind.Sequential)] private struct CapturePoint { internal int X,Y; }
