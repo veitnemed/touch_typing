@@ -1,0 +1,90 @@
+name: Final Windows Stage 2 (published archives; no publish)
+on:
+  workflow_dispatch:
+  push:
+    branches: [qa/final-windows-stage2]
+
+permissions:
+  contents: read
+
+jobs:
+  exact-archive-upgrade:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify published Windows ZIPs, migrate a disposable profile and credit the next step
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $python = (Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+          if ($python -match '\\WindowsApps\\') { throw 'Real runner Python required' }
+          $qa = Join-Path $env:RUNNER_TEMP ('TouchTyping Stage 2 ' + [guid]::NewGuid())
+          $evidence = Join-Path $qa 'evidence'
+          [void][IO.Directory]::CreateDirectory($evidence)
+          'TT_STAGE2_EVIDENCE=' + $evidence >> $env:GITHUB_ENV
+          $log = Join-Path $evidence 'stage2.log'
+          & {
+            Get-ComputerInfo -Property WindowsProductName,WindowsVersion,OsBuildNumber,OsArchitecture | Out-String | Write-Output
+            & $python -c "import sys; print(sys.version); sys.exit(sys.version_info < (3, 11))"
+            if ($LASTEXITCODE -ne 0) { throw 'Python 3.11 or newer is required' }
+            $base = 'https://github.com/veitnemed/touch_typing/releases/download'
+            $oldZip = Join-Path $qa 'old.zip'
+            $p7Zip = Join-Path $qa 'preview7.zip'
+            Invoke-WebRequest -Uri "$base/v1.7.0/touch-typing-v1.7.0-windows-x64.zip" -OutFile $oldZip -TimeoutSec 90
+            Invoke-WebRequest -Uri "$base/v1.8.0-preview.7-windows-beta/touch-typing-v1.8.0-preview.7-windows-beta-x64.zip" -OutFile $p7Zip -TimeoutSec 90
+            foreach ($zip in @(
+              @{ Path=$oldZip; Hash='0f781e9bae0b6f8fae67945e206a9384b0fffa470de66a033190cf411ea3709e' },
+              @{ Path=$p7Zip; Hash='5c99ecca7d5a279c6593dd83abe6aa12f1b6ba35c2149c3f1532c5aab01ad8a0' }
+            )) {
+              $actual = (Get-FileHash -LiteralPath $zip.Path -Algorithm SHA256).Hash
+              if ($actual -ne $zip.Hash) { throw "Published ZIP SHA-256 mismatch: $($zip.Path)" }
+              Write-Output "Verified published ZIP: $($zip.Path) $actual"
+            }
+            $old = Join-Path $qa 'v170 original'
+            $p7Source = Join-Path $qa 'preview7 first extraction'
+            $p7New = Join-Path $qa 'preview7 fresh extraction'
+            Expand-Archive -LiteralPath $oldZip -DestinationPath $old
+            Expand-Archive -LiteralPath $p7Zip -DestinationPath $p7Source
+            Expand-Archive -LiteralPath $p7Zip -DestinationPath $p7New
+            $oldApp = Join-Path $old 'TouchTyping.exe'
+            $p7NewApp = Join-Path $p7New 'TouchTyping.exe'
+            $engineRelative = 'engine\TouchTyping.Engine.exe'
+            Get-FileHash -Algorithm SHA256 -LiteralPath $oldApp,$p7NewApp,(Join-Path $old $engineRelative),(Join-Path $p7New $engineRelative) | Out-String | Write-Output
+
+            $env:PYTHONPATH = Join-Path $env:GITHUB_WORKSPACE 'linux'
+            $probe = Join-Path $env:GITHUB_WORKSPACE 'windows/Test-FinalReleaseProfile.py'
+            $upgradeProfile = Join-Path $qa 'upgrade'
+            $reinstallProfile = Join-Path $qa 'reinstall'
+            & $python $probe (Join-Path $old $engineRelative) (Join-Path $p7New $engineRelative) $upgradeProfile
+            if ($LASTEXITCODE -ne 0) { throw 'v1.7.0 -> exact published preview.7 failed' }
+            & $python $probe (Join-Path $p7Source $engineRelative) (Join-Path $p7New $engineRelative) $reinstallProfile --reinstall
+            if ($LASTEXITCODE -ne 0) { throw 'preview.7 same-ZIP re-extraction failed' }
+
+            $framework = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
+            $ui = Join-Path $qa 'TouchTyping-Stage2UiCheck.exe'
+            & (Join-Path $framework 'csc.exe') /nologo /target:exe /platform:x64 /codepage:65001 "/out:$ui" `
+              "/reference:$framework\WPF\UIAutomationClient.dll" "/reference:$framework\WPF\UIAutomationTypes.dll" `
+              "/reference:$framework\WPF\WindowsBase.dll" "/reference:$framework\System.Xml.dll" `
+              "/reference:$framework\System.Drawing.dll" "/reference:$framework\System.Windows.Forms.dll" `
+              (Join-Path $env:GITHUB_WORKSPACE 'windows/LiveUiSmoke.cs')
+            if ($LASTEXITCODE -ne 0) { throw 'Could not compile native WPF proof helper' }
+            $env:TOUCH_TYPING_QA_DATA_ROOT = Join-Path $qa 'old-ui-only'
+            & $ui $oldApp --upgrade-launch
+            if ($LASTEXITCODE -ne 0) { throw 'Old published WPF launcher failed' }
+            foreach ($profile in @($upgradeProfile,$reinstallProfile)) {
+              $env:TOUCH_TYPING_QA_DATA_ROOT = Join-Path $profile 'control'
+              $arguments = @('--upgrade-resume')
+              if ($profile -eq $reinstallProfile) { $arguments += '--same-build' }
+              & $ui $p7NewApp @arguments
+              if ($LASTEXITCODE -ne 0) { throw "Published preview.7 native UI did not show its resumed draft: $profile" }
+            }
+            'PASS hosted Windows Server x64 exact published archive matrix (no publication)'
+          } 2>&1 | Tee-Object -FilePath $log
+      - uses: actions/upload-artifact@v4
+        if: always() && env.TT_STAGE2_EVIDENCE != ''
+        with:
+          name: final-windows-stage2-diagnostics
+          path: ${{ env.TT_STAGE2_EVIDENCE }}/stage2.log
+          if-no-files-found: error
+          retention-days: 7
