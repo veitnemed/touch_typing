@@ -5,7 +5,7 @@ on:
 permissions:
   contents: read
 env:
-  PRODUCT_SHA: 8aa1d69b9321207d987c214829ba748f4f111c18
+  PRODUCT_SHA: 9d24e6ed2e02ad16fa362400c19b1a62dfc36e75
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 8aa1d69b9321207d987c214829ba748f4f111c18
+          ref: 9d24e6ed2e02ad16fa362400c19b1a62dfc36e75
           persist-credentials: false
       - uses: actions/setup-dotnet@v4
         with:
@@ -124,7 +124,7 @@ jobs:
         run: |
           $dir = "$env:RUNNER_TEMP/TouchTyping Stock Extract"
           $report = "$env:RUNNER_TEMP/live-ux-native-proof/NativeLayout"
-          & "$dir/Test-Live-UI.ps1" -Application "$dir/TouchTyping.exe" -NativeLayout -ReferenceEvidence -OutputDirectory $report
+          & "$dir/Test-Live-UI.ps1" -Application "$dir/TouchTyping.exe" -NativeLayout -OutputDirectory $report
           if ((Get-Content -LiteralPath "$report/report.json" -Raw | ConvertFrom-Json).status -ne 'passed') {
             throw 'NativeLayout did not pass.'
           }
