@@ -38,7 +38,7 @@ jobs:
           /usr/bin/python3 linux/tests/test_practice.py
           /usr/bin/python3 linux/tests/test_live_entry_preferences.py
           /usr/bin/python3 linux/tests/test_live_missions.py
-          /usr/bin/python3 linux/tests/test_win10_protocol.py
+          /usr/bin/python3 linux/tests/test_win10_protocol.py "$TOUCH_TYPING_ENGINE"
           /usr/bin/python3 linux/tests/audit_live_shortcuts.py
       - uses: actions/upload-artifact@v4
         with:
