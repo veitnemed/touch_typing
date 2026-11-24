@@ -49,6 +49,14 @@ internal static partial class LiveCourse
             ShellPhase("Снимите состояние до перезапуска: пользователь, система, процессы", "id", "uname", "ps"),
             ShellPhase("Перезапустите симуляцию и сравните путь и список процессов", "reboot", "pwd", "ps"),
             ShellPhase("Проверьте историю этой сессии", "history", "ls"));
+        Essentials(1, "home-check", "Проверить рабочую папку после возврата",
+            ShellPhase("Запомните текущую папку и посмотрите, что в ней", "pwd", "ls"),
+            ShellPhase("Вернитесь домой и подтвердите новый путь", "cd", "pwd", "ls"),
+            ShellPhase("Проверьте, сохранилась ли история после очистки экрана", "clear", "history"));
+        Essentials(2, "process-check", "Сопоставить старое и новое состояние терминала",
+            ShellPhase("Узнайте, кто запустил оболочку, и откройте список процессов", "whoami", "ps"),
+            ShellPhase("Откройте чистый экран и проверьте папку и содержимое", "clear", "pwd", "ls"),
+            ShellPhase("Восстановите последовательность по истории", "history"));
         void Add(int level, string id, string title, params string[] parts) =>
             list.Add(new("terminal", level, "terminal-" + id, title, parts.Select(p => ShellParts[p]).ToArray()));
         Add(0,"explore","Разобраться в незнакомом проекте","inspect","history","find","notes");

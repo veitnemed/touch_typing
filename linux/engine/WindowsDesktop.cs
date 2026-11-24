@@ -197,6 +197,22 @@ internal static partial class LiveCourse
             list.Add(new("workday", level, "workday-windows-" + level, "Windows 10: организуйте рабочее место",
                 level switch { 0 => [open, arrange, explorer, focus], 1 => [open, arrange, appChoice, focus, desks, explorer],
                     _ => [open, arrange, focus, desks, explorer, appChoice, finishDesk] }, FinishAfterRoute: true, Curated: true, Prepare: scene => scene.PrepareWindowsDesktop()));
+            var returnToProject = new LivePhase("Проверьте папку проекта после возвращения",
+                "win-explorer pick:project file-open win-explorer-parent");
+            var keepExplorer = new LivePhase("Спрячьте и верните открытый Проводник",
+                "win-desktop win-desktop");
+            var secondary = level switch
+            {
+                0 => new[] { returnToProject, keepExplorer },
+                1 => new[] { returnToProject, desks, keepExplorer },
+                _ => new[] { returnToProject, desks, appChoice, finishDesk, keepExplorer }
+            };
+            list.Add(new("windows", level, "windows-desktop-return-" + level,
+                "Windows 10: вернуться к папке проекта", secondary,
+                FinishAfterRoute: true, Curated: true, Prepare: scene => scene.PrepareWindowsDesktop()));
+            list.Add(new("workday", level, "workday-windows-return-" + level,
+                "Windows 10: проверить папку и сохранить рабочий контекст", secondary,
+                FinishAfterRoute: true, Curated: true, Prepare: scene => scene.PrepareWindowsDesktop()));
         }
     }
 }
