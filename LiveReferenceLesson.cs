@@ -66,13 +66,13 @@ namespace TouchTypingStudio
             labKeys.TextAlignment = TextAlignment.Center;
             labKeys.TextWrapping = TextWrapping.Wrap;
             AutomationProperties.SetAutomationId(labKeys, "LabKeys");
-            referenceKeysFrame = new Border { Child = labKeys, Margin = new Thickness(0, 4, 0, 0),
+            referenceKeysFrame = new Border { Child = labKeys, Margin = new Thickness(0, 3, 0, 0),
                 HorizontalAlignment = HorizontalAlignment.Center };
             prompt.Children.Add(referenceKeysFrame);
 
-            var taskBox = ReferenceLessonPanel(prompt, new Thickness(14, 8, 14, 8), 11);
+            var taskBox = ReferenceLessonPanel(prompt, new Thickness(14, 5, 14, 5), 11);
             taskBox.BorderBrush = Ui.Brush("#77658B");
-            taskBox.Margin = new Thickness(16, 8, 16, 0);
+            taskBox.Margin = new Thickness(16, 6, 16, 0);
             root.Children.Add(taskBox);
 
             referenceHelpText = ReferenceLabel("", 13, ReferenceMuted, false);
