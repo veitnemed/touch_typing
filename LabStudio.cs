@@ -89,8 +89,8 @@ namespace TouchTypingStudio
             }, 8);
             button.Content = label;
             button.Foreground = ReferenceText;
-            button.Background = selected ? ReferenceGradient("#8C72FA", "#693FE6", 90) : Ui.Brush("#30254D");
-            button.BorderBrush = Ui.Brush(selected ? "#B69AFF" : "#514171");
+            button.Background = selected ? ReferencePrimary : ReferenceField;
+            button.BorderBrush = selected ? ReferenceAccent : ReferenceEdge;
             button.BorderThickness = new Thickness(1);
             button.Padding = new Thickness(12, 6, 12, 6);
             button.Margin = new Thickness(0, 0, 10, 5);
