@@ -55,7 +55,7 @@ internal sealed partial class LabScene
         if (url == RepositoryPage) return ("veitnemed / touch_typing", "GitHub · репозиторий\nКод вслепую · Учебный тренажёр с режимами «Печать» и Live.");
         if (url == SearchDecoy) return ("Статьи о слепой печати", "Здесь собраны советы. Исходников тренажёра здесь нет.");
         if (url == "https://github.com/other/typing-demo") return ("Учебный пример typing-demo", "Это другой репозиторий.");
-        return null;
+        return ResearchPage(url);
     }
 
     private LabEntry[] PracticeSearchEntries(string url)
@@ -68,6 +68,18 @@ internal sealed partial class LabScene
             ("Документация Python", "https://docs.python.org/3/", "python docs documentation документация"),
         };
         var terms = query.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+        if (browserResearch != null)
+        {
+            var research = ResearchCases.Where(item => terms.Length > 0 && terms.All(term =>
+                (item.Query + " " + item.Title).Contains(term, StringComparison.OrdinalIgnoreCase)))
+                .SelectMany(item =>
+                {
+                    LabEntry target = new(item.Title, item.Target, "page");
+                    LabEntry decoy = new(ResearchDecoyTitle(item), ResearchDecoy(item), "page");
+                    return browserCaseVariant == 1 ? new[] { target, decoy } : new[] { decoy, target };
+                }).ToArray();
+            if (research.Length > 0) return research;
+        }
         return catalog.Where(site => terms.Length > 0 && terms.All(term =>
                 site.Keywords.Contains(term, StringComparison.OrdinalIgnoreCase) ||
                 site.Path.Contains(term, StringComparison.OrdinalIgnoreCase)))
@@ -129,6 +141,13 @@ internal sealed partial class LabScene
         // entry. Also verify the generated results, not just the address.
         "back" or "navigate-pasted" when window?.App == "chrome" =>
             new { window.Url, window.Focus, results = Entries(window).Select(entry => entry.Path).ToArray(), window.Item },
+        "research-find" => new { window?.Url, window?.Focus, window?.Find,
+            from = window?.Tab?.Position.Anchor, to = window?.Tab?.Position.Caret,
+            matched = window?.Status == "Найдено: " + BrowserResearchNeedle },
+        "item-open" when browserResearch is { Download.Length: > 0 } =>
+            new { window?.App, window?.Url, window?.Focus, window?.Folder, DownloadCount,
+                file = Terminal.ReadFile("/home/student/Downloads/" + browserResearch.Download),
+                delivered = Terminal.ReadFile(Project + "/" + browserResearch.Download) },
         _ => null
     };
 }

@@ -214,5 +214,6 @@ internal static partial class LiveCourse
                 "Windows 10: проверить папку и сохранить рабочий контекст", secondary,
                 FinishAfterRoute: true, Curated: true, Prepare: scene => scene.PrepareWindowsDesktop()));
         }
+        BrowserFileHandoff(list, windows: true);
     }
 }

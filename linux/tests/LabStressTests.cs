@@ -208,7 +208,7 @@ internal static class LabStressTests
         {
             var service = new PracticeService(true);
             Call(service, "configure", "layout", "RU", "platform", "linux", "forward", "Super+Space", "backward", "Super+Shift+Space");
-            var state = Call(service, "lab-start", "app", "chrome", "mode", "sandbox", "level", 0, "seed", 432);
+            var state = Call(service, "lab-start", "app", "chrome", "mode", "sandbox", "level", 0, "mission", "chrome-reader", "seed", 432);
             Call(service, "lab-resume");
             var chord = Gesture.Parse(state.GetProperty("task").GetProperty("keys").GetString()).Chords[0];
             foreach (string key in chord.Modifiers.Select(key => key switch { "Ctrl" => "RCtrl", "Shift" => "RShift", "Alt" => "LAlt", "Super" => "LSuper", _ => key }).Concat(chord.Trigger == null ? [] : new[] { chord.Trigger }))

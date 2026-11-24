@@ -135,6 +135,32 @@ def one(engine, profile):
                     if state["solved"] == before:
                         assert state["task"]["id"] == "file-next", state["task"]
                 assert state["finished"] and state["saved"] and state["solved"] >= 10, state["task"]
+        def files_window(state):
+            return next(w for w in state["scene"]["windows"] if w["active"] and w["app"] == "files")
+
+        begin(c, app="windows", mission="windows-desktop-return-0")
+        c.call("lab-resume")
+        explorer = c.chord("Super+E")
+        home = files_window(explorer)
+        assert home["folder"] == "/home/student" and home["item"] == -1
+        assert not home["folderCanBack"] and not home["folderCanForward"]
+        for _ in home["entries"]:
+            explorer = c.chord("Down")
+            candidate = files_window(explorer)
+            if candidate["entries"][candidate["item"]]["title"] == "project":
+                break
+        else:
+            raise AssertionError("The seeded project is missing")
+        folder = files_window(c.chord("Enter"))
+        assert folder["windowsPath"] == r"C:\Users\Student\project"
+        assert folder["folderCanBack"] and not folder["folderCanForward"]
+        assert {"file", "folder"} == {entry["kind"] for entry in folder["entries"]}
+        returned = files_window(c.chord("Alt+Left"))
+        assert returned["folder"] == home["folder"]
+        assert not returned["folderCanBack"] and returned["folderCanForward"]
+        restored = files_window(c.chord("Alt+Right"))
+        assert restored["folder"] == folder["folder"]
+        assert restored["folderCanBack"] and not restored["folderCanForward"]
         assert begin(c, app="workday", desktopProfile="ubuntu", **{"continue": True})["desktopProfile"] == "ubuntu"
 
 

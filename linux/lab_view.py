@@ -1,6 +1,7 @@
 """Native snapshots of simulated Ubuntu and Windows desktops and application windows."""
 import base64
 from functools import partial
+from urllib.parse import urlsplit
 
 import gi
 gi.require_version("Gsk", "4.0")
@@ -624,11 +625,21 @@ class DesktopView(Gtk.Widget):
         if win10:
             self.fill("#f4f7fa", x + 1, y + 1, w - 2, 26)
             self.win10_app_icon(app, x + 8, y + 7, 13)
-            self.label(window.get("title", self.win10_caption(app)), x + 27, y + 6, 11,
+            title = self.files_caption(window, True) if app == "files" else window.get("title", self.win10_caption(app))
+            self.label(title, x + 27, y + 6, 11,
                        "#1c2937", width=w - 111)
             for i, glyph in enumerate(("−", "□", "×")):
                 bx = x + w - 77 + i * 24
                 self.label(glyph, bx + 6, y + 3, 14, "#263648")
+        elif app == "files":
+            self.fill("#f6f4f2" if window.get("active") else "#eceae7", x, y, w, 27)
+            title = self.files_caption(window, False)
+            title_w = self.text_layout(title, 11, bold=True).get_pixel_size()[0]
+            self.label(title, x + (w - min(title_w, w - 148)) / 2, y + 6, 11, "#252525",
+                       bold=True, width=w - 148)
+            self.label("−    □", x + w - 79, y + 5, 12, "#5d5c59")
+            self.fill("#e3e0dd", x + w - 25, y + 5, 17, 17, 9)
+            self.label("×", x + w - 21, y + 3, 15, "#454441")
         else:
             self.fill("#282541" if purple else "#303036", x, y, w, 27)
             if purple:
@@ -649,48 +660,148 @@ class DesktopView(Gtk.Widget):
             self.terminal(window, x, y + 27, w, h - 27)
         self.snapshot.pop()
 
+    @staticmethod
+    def files_caption(window, win10):
+        if window.get("focus") == "image-preview":
+            return "Просмотр фотографий" if win10 else "Просмотр изображения"
+        folder = window.get("folder", "/home/student")
+        if folder == "/home/student":
+            return "Student" if win10 else "Домашняя папка"
+        return folder.rsplit("/", 1)[-1] or ("Учебный диск" if win10 else "Файловая система")
+
     def files(self, window, x, y, w, h, *, win10=False):
         if window.get("focus") == "image-preview" and window.get("imagePreview"):
             data = base64.b64decode(window["imagePreview"].split(",", 1)[1])
             texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(data))
             self.fill("#242427", x, y, w, h)
-            scale = min((w - 20) / texture.get_width(), (h - 20) / texture.get_height())
+            scale = max(0, min((w - 20) / texture.get_width(), (h - 20) / texture.get_height()))
             iw, ih = texture.get_width() * scale, texture.get_height() * scale
             self.snapshot.append_texture(texture, self.rect(x + (w - iw) / 2, y + (h - ih) / 2, iw, ih))
             return
-        sidebar = min(178, w * .23)
-        self.fill("#ffffff" if win10 else "#f7f6f5", x, y, w, h)
-        self.fill("#f0f4fa" if win10 else "#eeecea", x, y, sidebar, h)
-        self.label("Быстрый доступ" if win10 else "Места", x + 16, y + 16, 13, "#57504d", bold=True)
-        names = [("Домашняя папка", "/home/student"), ("Загрузки", "/home/student/Downloads"),
-                 ("Изображения", "/home/student/Pictures"), ("Проект", "/home/student/project")]
-        for i, (name, path) in enumerate(names):
-            ty = y + 53 + i * 35
-            if window.get("folder") == path:
-                self.fill("#cce8ff" if win10 else "#e2d6cf", x + 7, ty - 6, sidebar - 14, 31, 0 if win10 else 6)
-            self.label(name, x + 16, ty, 12, "#37302c", width=sidebar - 28)
-        left = x + sidebar + 22
-        folder = (window.get("windowsPath") if win10 else
-                  window.get("folder", "").replace("/home/student", "Домашняя папка", 1).replace("/", "  ›  "))
-        self.label(folder or ("Проводник" if win10 else ""), left, y + 13, 14, "#302c29",
-                   width=w - sidebar - 38, bold=True)
+        home = "/home/student"
+        folder = window.get("folder", home)
+        leaf = self.files_caption(window, win10)
+        fg = "#232323"
+        muted = "#5b6470" if win10 else "#5d5c59"
+        edge = "#dedfe2" if win10 else "#ddd9d5"
+        selected_bg = "#cce8ff" if win10 else "#f4e0d4"
+        # Keep the collapsed ribbon and the location bar full-width, even above the sidebar.
+        ribbon = 21 if win10 else 0
+        bar = y + ribbon
+        list_top = bar + (30 if win10 else 34)
+        side = min(155, w * .29)
+        status_h = 18
+        status_y = y + h - status_h
+        self.fill("#ffffff", x, y, w, h)
+        self.fill("#fcfcfc" if win10 else "#f5f3f1", x, y, w, list_top - y)
+        if win10:
+            self.fill("#0067b8", x, y, 47, ribbon)
+            self.label("Файл", x + 9, y + 3, 10, "#ffffff")
+            for offset, caption in ((56, "Главная"), (118, "Поделиться"), (199, "Вид")):
+                self.label(caption, x + offset, y + 3, 10, fg)
+            self.fill(edge, x + 47, bar - 1, w - 47, 1)
+        for offset, glyph, available in (
+            (8, "←", window.get("folderCanBack")), (26, "→", window.get("folderCanForward")),
+            (44, "↑" if win10 else "⌃", folder != "/")
+        ):
+            self.label(glyph, x + offset, bar + 4, 14, fg if available else "#939393")
+        if win10:
+            location = (window.get("windowsPath") or folder).replace("\\", "   ›   ")
+        elif folder == home or folder.startswith(home + "/"):
+            location = "Домашняя папка" + folder[len(home):].replace("/", "   ›   ")
+        else:
+            location = "Файловая система" + (("   ›   " + folder.strip("/").replace("/", "   ›   ")) if folder != "/" else "")
+        address_x = x + 62
+        address_right = x + w - (145 if win10 and w > 595 else 9)
+        self.fill(edge, address_x, bar + 3, address_right - address_x, 23, 0 if win10 else 4)
+        self.fill("#ffffff", address_x + 1, bar + 4, address_right - address_x - 2, 21, 0 if win10 else 3)
+        self.files_glyph("folder" if win10 else "home", address_x + 6, bar + 9, win10)
+        self.label(location, address_x + 25, bar + 6, 11, fg, width=address_right - address_x - 31)
+        if win10 and w > 595:
+            self.fill(edge, address_right + 7, bar + 3, x + w - address_right - 16, 23)
+            self.fill("#ffffff", address_right + 8, bar + 4, x + w - address_right - 18, 21)
+            self.label("Поиск: " + leaf, address_right + 14, bar + 6, 10, muted, width=x + w - address_right - 26)
 
-        self.fill("#dedad6", x + sidebar, y + 41, w - sidebar, 1)
-        entries = window.get("entries", [])
-        first = max(0, window.get("item", -1) - max(1, int((h - 52) / 37)) + 1)
-        for i, entry in enumerate(entries[first:], first):
-            ty = y + 51 + (i - first) * 37
-            if ty + 34 > y + h:
+        self.fill("#fafafa" if win10 else "#f5f3f1", x, list_top, side, status_y - list_top)
+        self.fill(edge, x + side, list_top, 1, status_y - list_top)
+        self.fill(edge, x, list_top, w, 1)
+        names = ([("Быстрый доступ", "", "star"), ("Рабочий стол", "/Desktop", "desktop"),
+                  ("Загрузки", "/Downloads", "download"), ("Документы", "/Documents", "file"),
+                  ("Изображения", "/Pictures", "picture"), ("Этот компьютер", "/", "desktop"),
+                  ("Student", home, "home"), ("project", "/project", "folder")] if win10 else
+                 [("Недавние", "", "clock"), ("Домашняя папка", home, "home"),
+                  ("Рабочий стол", "/Desktop", "desktop"), ("Документы", "/Documents", "file"),
+                  ("Загрузки", "/Downloads", "download"), ("Изображения", "/Pictures", "picture"),
+                  ("Проект", "/project", "folder"), ("Корзина", "/.Trash", "bin")])
+        for i, (name, alias, icon) in enumerate(names):
+            ty = list_top + 5 + i * 22 + (6 if win10 and i >= 5 else 0)
+            if ty + 21 > status_y:
                 break
-            if i == window.get("item"):
-                self.fill("#cce8ff" if win10 else "#f1d9c9", left - 9, ty - 2, w - sidebar - 26, 33, 0 if win10 else 6)
-            folder = entry["kind"] == "folder"
-            if folder:
-                self.fill("#bc7439", left + 1, ty + 4, 10, 7, 2)
-            self.fill("#d99a56" if folder else "#9dadbd", left, ty + 8, 22 if folder else 16, 15, 3)
-            self.label(entry["title"], left + 34, ty + 4, 14, "#35302d", width=w - sidebar - 76)
-        if not entries:
-            self.label("Папка пуста", left, y + 62, 14, "#817872")
+            if win10 and i == 5:
+                self.fill(edge, x + 8, ty - 3, side - 16, 1)
+            path = alias if alias in ("", "/", home) else home + alias
+            current = path and (folder == path or (path not in ("/", home) and folder.startswith(path + "/")))
+            if current:
+                self.fill(selected_bg, x + 5, ty - 1, side - 10, 20, 0 if win10 else 4)
+            self.files_glyph(icon, x + 11, ty + 3, win10)
+            self.label(name, x + 30, ty + 1, 11, fg, width=side - 35)
+
+        entries = window.get("entries", [])
+        selected = window.get("item", -1)
+        start = list_top + 25
+        kind_x = x + side + (w - side) * .72
+        self.label("Имя", x + side + 11, list_top + 5, 10, muted, width=kind_x - x - side - 21)
+        self.label("Тип", kind_x + 7, list_top + 5, 10, muted, width=x + w - kind_x - 13)
+        self.fill(edge, kind_x, list_top + 3, 1, 17)
+        self.fill(edge, x + side + 1, start - 3, w - side - 1, 1)
+        row = 22 if win10 else 25
+        visible = max(0, int((status_y - start) / row))
+        first = max(0, selected - visible + 1)
+        for i, entry in enumerate(entries[first:first + visible], first):
+            ty = start + (i - first) * row
+            is_folder = entry.get("kind") == "folder"
+            name = entry.get("title", "")
+            extension = name.rsplit(".", 1)[-1].lower() if "." in name.strip(".") else ""
+            if i == selected:
+                self.fill(selected_bg, x + side + 4, ty, w - side - 8, row - 1, 0 if win10 else 4)
+            elif not win10 and (i - first) % 2:
+                self.fill("#faf9f8", x + side + 1, ty, w - side - 1, row - 1)
+            self.files_glyph("folder" if is_folder else "picture" if extension == "png" else "file",
+                             x + side + 11, ty + (row - 12) / 2, win10)
+            self.label(name, x + side + 31, ty + (row - 15) / 2, 11, fg, width=kind_x - x - side - 39)
+            kind = ("Папка с файлами" if win10 else "Папка") if is_folder else {
+                "py": "Файл Python", "txt": "Текстовый документ", "md": "Документ Markdown",
+                "csv": "Таблица CSV", "json": "Файл JSON", "png": "Изображение PNG",
+            }.get(extension, ("Файл " + extension.upper()) if extension else "Файл")
+            self.label(kind, kind_x + 7, ty + (row - 14) / 2, 10, muted, width=x + w - kind_x - 13)
+        if not entries and status_y - start >= 23:
+            self.label("Папка пуста", x + side + 11, start + 7, 11, muted, width=w - side - 21)
+
+        self.fill("#f8f8f8" if win10 else "#f7f5f3", x, status_y, w, status_h)
+        self.fill(edge, x, status_y, w, 1)
+        status = f"Объектов: {len(entries)}"
+        if 0 <= selected < len(entries):
+            status += "   |   Выбран: " + entries[selected].get("title", "")
+        self.label(status, x + 10, status_y + 2, 10, muted, width=w - 20)
+
+    def files_glyph(self, kind, x, y, win10):
+        icon = "#337aae" if win10 else "#67645f"
+        if kind == "folder":
+            self.fill("#dcae47" if win10 else "#967568", x + 1, y, 6, 4, 1.5)
+            self.fill("#f3ca5e" if win10 else "#af8a79", x, y + 3, 14, 9, 1.5)
+            self.fill("#ffe391" if win10 else "#ccaa9a", x + 1, y + 4, 12, 1)
+        elif kind in ("file", "picture"):
+            self.fill(icon, x + 2, y, 10, 12, 1.5)
+            self.fill("#ffffff", x + 3, y + 1, 8, 10)
+            if kind == "picture":
+                self.fill("#7bb29b", x + 4, y + 5, 6, 5)
+                self.fill("#cb933f", x + 8, y + 3, 2, 2, 1)
+            else:
+                self.fill(icon, x + 4, y + 4, 5, 1)
+                self.fill(icon, x + 4, y + 7, 5, 1)
+        else:
+            self.label({"home": "⌂", "download": "↓", "desktop": "▣", "star": "★",
+                        "clock": "◷", "bin": "▤"}[kind], x, y - 3, 13, icon)
 
     def chrome(self, window, x, y, w, h):
         purple = self.reference_chrome and self.presentation_app == "chrome"
@@ -730,58 +841,24 @@ class DesktopView(Gtk.Widget):
             self.fill("#303134", x, y + 62, w, 23)
             label("    ".join(window.get("savedBookmarks", [])), x + 15, y + 65, 10, width=w - 30)
             body_top += 23
-        self.fill("#f8f6ff" if purple else "#f8f9fb", x, y + body_top, w, max(1, h - body_top))
-        body = window.get("body", "")
+        self.fill("#f8f9fb", x, y + body_top, w, max(1, h - body_top))
         tab = tabs[window["activeTab"]] if tabs else {}
+        body = window.get("body", "") or tab.get("body", "")
         scale = window.get("zoom", 100) / 100
-        left = x + min(w * (.059 if purple else .075), 72)
-        available = w - (left - x) * 2
-        top = y + body_top + (15 if purple else 24)
         url = window.get("url", "")
-        search_home = url == "https://www.google.com/"
-        search_results = url.startswith("https://www.google.com/search?q=")
-        if search_home or search_results:
-            bar_width = min(435, available)
-            sx = x + (w - bar_width) / 2 if search_home else left
-            label("Google", x + w / 2 - 54 if search_home else sx, top, 32 if search_home else 24,
-                  "#4285f4", width=available, bold=True)
-            self.fill("#e4edf8", sx, top + 38, bar_width, 29, 14)
-            label("⌕  " + ("Введите запрос в адресной строке" if search_home else body),
-                  sx + 12, top + 45, 12, "#234975", width=bar_width - 24)
-            body = ""
-            top += 34
-        else:
-            label(tab.get("title", "Новая вкладка"), left, top, (26 if purple else 23) * scale,
-                  "#211834" if purple else "#222936", width=available, bold=True)
-            if url == "https://github.com/veitnemed/touch_typing":
-                label("Code   ·   Issues   ·   README", left, top + 31, 11, "#205496", width=available)
-                top += 10
-        body_field = dict(window, cursor=window.get("bodyCursor", 0), anchor=window.get("bodyAnchor", 0))
-        offset = 0
-        top += (42 if purple else 45) * scale
-        for line in body.splitlines():
-            if top + 20 >= y + h:
-                break
-            field(line, body_field, left, top, available, 14 * scale, "#334154", offset=offset,
-                       focused=body_field["cursor"] != body_field["anchor"])
-            top += 23 * scale
-            offset += self.units(line) + 1
-        top += 12
+        top = y + body_top
+        status = window.get("status", "")
+        show_status = bool(status) and status != "Готово"
+        bottom = y + h - (24 if show_status else 8)
         entries = window.get("entries", [])
-        visible = max(1, int((y + h - body_top - y - 18) / (33 * scale)))
-        if window.get("item", -1) >= 0:
-            top = min(top, max(y + body_top + 8, y + h - min(len(entries), visible) * 33 * scale))
-        start = max(0, window.get("item", -1) - visible + 1)
-        if entries and top < y + body_top + 85:
-            self.fill("#f8f9fb", x, top - 4, w, y + h - top + 4)
-        for i, entry in enumerate(entries[start:], start):
-            if top + 30 > y + h:
-                break
-            selected = i == window.get("item") and window.get("focus") == "body"
-            if selected:
-                self.fill("#d8e8ff", left - 8, top - 4, min(available + 8, 440), 31, 5)
-            label(entry["title"], left, top, 14 * scale, "#205496", width=available)
-            top += 34 * scale
+        search_home = url == "https://www.google.com/"
+        if search_home or url.startswith("https://www.google.com/search?q="):
+            self.browser_search_page(window, x, top, w, bottom, search_home, body, entries, scale)
+        elif url in ("chrome://bookmarks", "chrome://history", "chrome://downloads"):
+            self.browser_manager(window, x, top, w, bottom, url, entries, scale)
+        else:
+            self.browser_document(window, x, top, w, bottom, url,
+                                  tab.get("title", "Новая вкладка"), body, entries, scale)
         if window.get("zoom", 100) != 100:
             self.fill("#303134", x + w - 160, y + body_top + 2, 150, 25, 5)
             label("Масштаб  " + str(window["zoom"]) + "%", x + w - 147, y + body_top + 8, 10)
@@ -792,13 +869,222 @@ class DesktopView(Gtk.Widget):
             label("⌕", left + 9, y + 73, 14)
             field(window.get("input", ""), window, left + 29, y + 74, box_width - 42,
                        13, "#ffffff", scroll_key=("find", window.get("id")))
-        elif window.get("focus") in ("downloads", "history", "bookmarks"):
+        elif url not in ("chrome://bookmarks", "chrome://history", "chrome://downloads") and window.get("focus") in ("downloads", "history", "bookmarks"):
             self.fill("#303134", x + max(10, w - 300), y + 64, min(290, w - 20), 38, 5)
             label({"find": "Поиск", "downloads": "Загрузки", "history": "История", "bookmarks": "Закладки"}.get(window["focus"], "")
                        + "  " + window.get("input", ""), x + max(20, w - 290), y + 74, 11, width=min(270, w - 40))
-        if window.get("browserPractice") and window.get("status", "").startswith("Сохранено в закладки"):
+        if show_status:
             self.fill("#e5edf8", x, y + h - 24, w, 24)
-            label(window["status"], x + 9, y + h - 19, 11, "#284571", width=w - 18)
+            label(status, x + 9, y + h - 19, 11, "#284571", width=w - 18)
+
+    @staticmethod
+    def browser_address_parts(value):
+        # The lesson can navigate to an arbitrary typed string. Malformed
+        # URLs should render as plain text rather than aborting the frame.
+        try:
+            parts = urlsplit(value)
+            return parts.netloc.lower(), parts.path
+        except ValueError:
+            return "", ""
+
+    @staticmethod
+    def browser_short_address(value):
+        host, path = DesktopView.browser_address_parts(value)
+        if not host:
+            return value
+        path = path.strip("/").replace("/", "  ›  ")
+        return host + ("  ›  " + path if path else "")
+
+    def browser_centered(self, value, center, y, size, color, width):
+        measure = self.text_layout(value, size, family=self.chrome_font)
+        advance = min(width, measure.get_pixel_size()[0])
+        self.label(value, center - advance / 2, y, size, color, width=width, family=self.chrome_font)
+
+    def google_wordmark(self, x, y, size, centered):
+        colors = ("#4285f4", "#ea4335", "#fbbc05", "#4285f4", "#34a853", "#ea4335")
+        word = "Google"
+        layout = self.text_layout(word, size, family=self.chrome_font)
+        attrs = Pango.AttrList()
+        for i, color in enumerate(colors):
+            rgb = ink(color)
+            attr = Pango.attr_foreground_new(*(round(value * 65535) for value in (rgb.red, rgb.green, rgb.blue)))
+            attr.start_index, attr.end_index = i, i + 1
+            attrs.insert(attr)
+        layout.set_attributes(attrs)
+        point = Graphene.Point()
+        point.init(x - layout.get_pixel_size()[0] / 2 if centered else x, y)
+        self.snapshot.save()
+        self.snapshot.translate(point)
+        self.snapshot.append_layout(layout, ink(colors[0]))
+        self.snapshot.restore()
+
+    def browser_search_bar(self, x, y, width, value, active):
+        self.fill("#dadce0" if active else "#dfe1e5", x, y, width, 39, 20)
+        self.fill("#ffffff", x + 1, y + 1, width - 2, 37, 19)
+        label = partial(self.label, family=self.chrome_font)
+        label("⌕", x + 14, y + 7, 18, "#70757a", width=22)
+        label(value, x + 43, y + 10, 14, "#202124" if active else "#5f6368", width=width - 60)
+
+    def browser_search_page(self, window, x, top, width, bottom, home, query, entries, scale):
+        label = partial(self.label, family=self.chrome_font)
+        pad = min(36, width * .075)
+        self.fill("#ffffff", x, top, width, bottom - top)
+        if home:
+            logo_size = 49 if bottom - top < 300 else 64
+            label("Учебный поиск", x + width - 124, top + 12, 11, "#5f6368", width=110)
+            logo_y = top + max(22, min(74, (bottom - top - 133) * .35))
+            self.google_wordmark(x + width / 2, logo_y, logo_size * min(1.18, scale), True)
+            bar_w = min(584, width - 2 * pad)
+            bar_y = logo_y + (logo_size + 20) * min(1.18, scale)
+            self.browser_search_bar(x + (width - bar_w) / 2, bar_y, bar_w, "Поиск в Google", False)
+            self.browser_centered("Начните поиск в адресной строке: Ctrl+L", x + width / 2, bar_y + 54,
+                                  12, "#5f6368", bar_w)
+            if bottom - bar_y > 106:
+                self.fill("#f1f3f4", x, bottom - 32, width, 32)
+                label("Учебная копия · Интернет не используется", x + pad, bottom - 24, 11,
+                      "#5f6368", width=width - 2 * pad)
+            return
+        left = x + (133 if width >= 700 else pad)
+        bar_w = min(612, x + width - left - pad)
+        if width >= 700:
+            self.google_wordmark(x + pad, top + 14, 22, False)
+        self.browser_search_bar(left, top + 9, bar_w, query, True)
+        label("Все", left + 4, top + 55, 12, "#202124", width=66)
+        label("Учебный поиск", left + 45, top + 55, 11, "#5f6368", width=bar_w - 45)
+        self.fill("#ebedf0", x, top + 76, width, 1)
+        self.fill("#202124", left + 4, top + 74, 24, 2)
+        first_y = top + 86
+        if not entries:
+            label("По этому запросу ничего не найдено", left, first_y + 6, 16, "#202124", width=bar_w)
+            label("Проверьте слова в запросе или попробуйте другой.", left, first_y + 34, 13,
+                  "#5f6368", width=bar_w)
+            return
+
+        pitch = min(84, max(46, (bottom - first_y) / min(3, len(entries))))
+        visible = max(1, int((bottom - first_y + 3) / pitch))
+        selected = window.get("item", -1)
+        start = max(0, selected - visible + 1)
+        for i, entry in enumerate(entries[start:start + visible], start):
+            row_y = first_y + (i - start) * pitch
+            if i == selected and window.get("focus") == "body":
+                self.fill("#e9f1fd", left - 8, row_y - 3, bar_w + 12, pitch - 2, 8)
+                self.fill("#1a73e8", left - 8, row_y + 3, 2, pitch - 14)
+            path = entry.get("path", "")
+            host, _ = self.browser_address_parts(path)
+            self.fill("#e9eef6", left + 1, row_y + 2, 22, 22, 11)
+            self.browser_centered((host[:1] or "↗").upper(), left + 12, row_y + 5, 11, "#36567d", 20)
+            label(self.browser_short_address(path), left + 33, row_y + 3, 11, "#5f6368", width=bar_w - 33)
+            label(entry["title"], left, row_y + 23, min(22, 18 * scale), "#1a0dab", width=bar_w)
+            detail = entry.get("detail") or {
+                "github.com": "Исходный код, документация и выпуски проекта.",
+                "docs.python.org": "Руководство и справочные материалы по Python.",
+            }.get(host, "")
+            if not detail and path == "https://practice.local/tutorials/touch-typing":
+                detail = "Советы и упражнения для слепой печати."
+            if pitch >= 64 and detail:
+                label(detail, left, row_y + 49, 12, "#4d5156", width=bar_w)
+
+    def browser_manager(self, window, x, top, width, bottom, url, entries, scale):
+        label = partial(self.label, family=self.chrome_font)
+        title, icon = {"chrome://bookmarks": ("Закладки", "☆"),
+                       "chrome://downloads": ("Загрузки", "↓"),
+                       "chrome://history": ("История", "◷")}[url]
+        self.fill("#f3f6fc", x, top, width, bottom - top)
+        self.fill("#dce7fc", x, top, width, 46)
+        label("☰", x + 18, top + 13, 16, "#29466b", width=23)
+        label(title, x + 54, top + 12, 18, "#202124", width=170)
+        panel_w = min(650, width - 38)
+        panel_x = x + (width - panel_w) / 2
+        row_y = top + 58
+        pitch = min(55, max(38, 46 * scale))
+        if not entries:
+            label("Пока ничего нет", panel_x + 16, row_y + 11, 14, "#5f6368", width=panel_w - 32)
+            return
+        visible = max(1, int((bottom - row_y) / pitch))
+        selected = window.get("item", -1)
+        start = max(0, selected - visible + 1)
+        self.fill("#ffffff", panel_x, row_y, panel_w, min(len(entries), visible) * pitch, 9)
+        for i, entry in enumerate(entries[start:start + visible], start):
+            if i == selected:
+                self.fill("#deeafd", panel_x + 4, row_y + 2, panel_w - 8, pitch - 4, 6)
+            label(icon, panel_x + 13, row_y + 11, 16, "#4b6586")
+            label(entry["title"], panel_x + 42, row_y + 5, 14, "#202124", width=panel_w - 58)
+            label(self.browser_short_address(entry.get("path", "")), panel_x + 42, row_y + 23, 11,
+                  "#526274", width=panel_w - 58)
+            row_y += pitch
+
+    def browser_document(self, window, x, top, width, bottom, url, title, body, entries, scale):
+        label = partial(self.label, family=self.chrome_font)
+        field = partial(self.field, family=self.chrome_font, mono=False)
+        host, path = self.browser_address_parts(url)
+        repository, python = host == "github.com", host == "docs.python.org"
+        release = repository and "/releases" in path
+        page_bg = "#ffffff" if repository else "#f6f7f9" if python else "#fafbfc"
+        header = "#f6f8fa" if repository else "#285273" if python else "#173640"
+        site_name = "◉  GitHub" if repository else "Python" if python else (host or "Материалы")
+        if host == "practice.local":
+            if path.startswith("/workshop/"):
+                site_name, header, page_bg = "Мастерская  /  Отчёты", "#25493d", "#fcfcf8"
+            elif path.startswith("/handbook/"):
+                site_name, header, page_bg = "Справочник  /  Рабочие инструкции", "#583f3b", "#fcf9f5"
+            elif path.startswith("/releases/"):
+                site_name, header, page_bg = "Версии  /  Журнал изменений", "#3f3b5c", "#faf9fe"
+        text_ink = "#1f2328" if repository else "#263342"
+        pad = min(64, width * .07)
+        left, pane = x + pad, width - pad * 2
+        self.fill(page_bg, x, top, width, bottom - top)
+        self.fill(header, x, top, width, 32)
+        label(site_name, left, top + 6, 15, "#1f2328" if repository else "#ffffff", width=pane)
+        content = top + 43
+        if python and width >= 680:
+            self.fill("#e8eef3", left, content, 145, bottom - content - 5)
+            label("Содержание", left + 12, content + 10, 13, "#234968", width=121)
+            label("Документация", left + 12, content + 39, 12, "#234968", width=121)
+            label("Версия Python 3", left + 12, content + 61, 11, "#536c7f", width=121)
+            left, pane = left + 166, pane - 166
+        label(title, left, content, min(31, 24 * scale), text_ink, width=pane)
+        if repository:
+            label("Релизы" if release else "Код", left, content + 32, 12, "#1f2328", width=pane)
+            self.fill("#d0d7de", left, content + 51, pane, 1)
+            self.fill("#fd8c73", left, content + 49, 52 if release else 29, 2)
+            content += 20
+        body_y = content + 39
+        if repository:
+            self.fill("#d0d7de", left, body_y, pane, bottom - body_y - 7, 6)
+            self.fill("#ffffff", left + 1, body_y + 1, pane - 2, bottom - body_y - 9, 5)
+            label("◇  Заметки к выпуску" if release else "▤  README", left + 12, body_y + 7, 11, "#57606a", width=pane - 24)
+            body_y, left, pane = body_y + 28, left + 12, pane - 24
+        body_cursor = window.get("bodyCursor", 0)
+        body_anchor = window.get("bodyAnchor", 0)
+        body_field = dict(window, cursor=body_cursor, anchor=body_anchor)
+        pitch = 22 * scale
+        max_lines = max(1, int((bottom - body_y - 3) / pitch))
+        lines = body.split("\n")
+        target_line = body.encode("utf-16-le")[:max(0, body_cursor) * 2].decode("utf-16-le", "ignore").count("\n")
+        first_line = max(0, target_line - max_lines + 1) if body_cursor != body_anchor else 0
+        offset = 0
+        for i, line in enumerate(lines):
+            if i >= first_line and body_y + pitch <= bottom - 3:
+                field(line, body_field, left, body_y, pane, 14 * scale, text_ink, offset=offset,
+                      focused=body_cursor != body_anchor)
+                body_y += pitch
+            offset += self.units(line) + 1
+        if entries:
+            row_h = min(34, 29 * scale)
+            selected = window.get("item", -1)
+            start_y = min(body_y + 7, bottom - row_h)
+            if selected >= 0:
+                start_y = min(start_y, max(content + 24, bottom - min(len(entries), selected + 1) * row_h))
+            visible = max(1, int((bottom - start_y + 1) / row_h))
+            start = max(0, selected - visible + 1)
+            if start_y < body_y + 2:
+                self.fill(page_bg, left - 3, start_y, pane + 6, bottom - start_y)
+            for i, entry in enumerate(entries[start:start + visible], start):
+                row_y = start_y + (i - start) * row_h
+                if selected == i and window.get("focus") == "body":
+                    self.fill("#d8e8ff", left - 4, row_y, pane + 5, row_h - 2, 5)
+                label("↓" if entry.get("kind") == "download" else "↗", left + 4, row_y + 2, 13, "#365d88")
+                label(entry["title"], left + 23, row_y + 2, 13 * scale, "#205496", width=pane - 25)
 
     def python_file_icon(self, x, y):
         """Two-tone Python badge at the Explorer's file-icon size."""

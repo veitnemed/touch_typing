@@ -262,6 +262,18 @@ namespace TouchTypingStudio
                 context.Pop(); context.Pop();
                 return;
             }
+            if (app == "files")
+            {
+                var width = bounds.Width;
+                Rectangle(0, 0, width, 29, window.B("active") ? "#F6F4F2" : "#ECEAE7");
+                DrawFilesCaption(window, width);
+                Text("−    □", width - 76, 5, 12, "#5D5C59");
+                Rounded(width - 25, 5, 18, 18, "#E3E0DD", 9);
+                Text("×", width - 21, 4, 14, "#454441");
+                DrawFiles(window, width, bounds.Height);
+                context.Pop(); context.Pop();
+                return;
+            }
             Rectangle(0, 0, bounds.Width, 29, app == "chrome" ? "#24213B" : window.B("active") ? "#303034" : "#28282C");
             if (app == "chrome") Icon("chrome", 13, 5, 19);
             Text(window.S("title", AppTitle(app)), app == "chrome" ? 38 : 14, 7, app == "chrome" ? 14 : 11, "#F6F1FF");
@@ -302,54 +314,32 @@ namespace TouchTypingStudio
                 Text(saved ? "★" : "☆", w - 41, 74, 14, saved ? "#BDA8FF" : "#D6DDE9");
             }
             Text("⋮", w - 24, 68, 21, "#D6DDE9");
-            double left = Math.Max(28, w * .065);
+            double pageTop = window.B("bookmarks") ? 126 : 102;
             double pageScale = window.N("zoom", 100) / 100;
-            string body = window.S("body");
             var active = tabs.ElementAtOrDefault(window.I("activeTab"));
+            string url = window.S("url");
+            string body = window.S("body");
             if (body.Length == 0 && active != null) body = active.S("body");
-            bool searchHome = window.S("url") == "https://www.google.com/";
-            bool searchResults = window.S("url").StartsWith("https://www.google.com/search?q=", StringComparison.Ordinal);
-            bool repository = window.S("url") == "https://github.com/veitnemed/touch_typing";
+            string title = active == null ? "Рабочие материалы" : active.S("title", "Рабочие материалы");
+            var entries = window.Items("entries").ToArray();
+            bool manager = url == "chrome://history" || url == "chrome://downloads" || url == "chrome://bookmarks";
+            bool searchHome = url == "https://www.google.com/";
+            bool searchResults = url.StartsWith("https://www.google.com/search?q=", StringComparison.Ordinal);
+            string status = window.S("status");
+            bool showStatus = status.Length > 0 && status != "Готово";
+            double bottom = h - (showStatus ? 24 : 8);
             if (searchHome || searchResults)
-            {
-                double searchLeft = searchHome ? Math.Max(left, (w - 435) / 2) : left;
-                double barWidth = Math.Min(435, w - searchLeft * 2);
-                Text("Google", searchHome ? w / 2 - 62 : searchLeft, 124, searchHome ? 36 : 25,
-                    "#4285F4", w - searchLeft * 2);
-                Rounded(searchLeft, 168, barWidth, 32, "#E4EDF8", 16);
-                Text(searchHome ? "⌕  Введите запрос в адресной строке" : "⌕  " + body,
-                    searchLeft + 13, 176, 14, "#234975", barWidth - 26);
-                body = "";
-            }
+                DrawSearchPage(window, w, pageTop, bottom, searchHome, body, entries, pageScale);
+            else if (manager)
+                DrawBrowserManager(window, w, pageTop, bottom, url, entries, pageScale);
             else
-            {
-                Text(active == null ? "Рабочие материалы" : active.S("title", "Рабочие материалы"), left, 124, 30 * pageScale, "#211B37", w - left * 2);
-                if (repository) Text("Code   ·   Issues   ·   README", left, 159, 12, "#205496", w - left * 2);
-            }
-            int offset = 0;
-            double lineY = searchHome || searchResults ? 207 : repository ? 182 : 172;
-            foreach (string line in body.Split('\n'))
-            {
-                Field(line, window, left, lineY, w - left * 2, 14 * pageScale, "#302745", offset,
-                    window.I("bodyAnchor") != window.I("bodyCursor"), true, face: regular);
-                lineY += 22 * pageScale; offset += line.Length + 1;
-            }
-            lineY += 15;
-            int index = 0;
-            foreach (var entry in window.Items("entries"))
-            {
-                if (lineY + 22 > h - 24) break;
-                if (index == window.I("item", -1) && window.S("focus") == "body")
-                    Rounded(left - 7, lineY - 4, Math.Min(440, w - left * 2), 28, "#D8E8FF", 5);
-                Text(entry.S("title"), left, lineY, 14 * pageScale, "#205496", w - left * 2);
-                lineY += 33 * pageScale; index++;
-            }
+                DrawBrowserDocument(window, w, pageTop, bottom, url, title, body, entries, pageScale);
             if (window.B("bookmarks"))
             {
                 Rectangle(0, 101, w, 25, "#E5EAF0");
                 var bookmarks = window.Items("savedBookmarks").Select(item => item.Value())
-                    .Where(url => !string.IsNullOrWhiteSpace(url)).OrderBy(url => url, StringComparer.Ordinal)
-                    .Select(url => BrowserBookmarkTitle(url, tabs, window.Items("entries"))).ToArray();
+                    .Where(bookmark => !string.IsNullOrWhiteSpace(bookmark)).OrderBy(bookmark => bookmark, StringComparer.Ordinal)
+                    .Select(bookmark => BrowserBookmarkTitle(bookmark, tabs, window.Items("entries"))).ToArray();
                 Text(bookmarks.Length == 0 ? "Нет сохранённых закладок" : string.Join("    ", bookmarks.Select(label => "☆  " + label)),
                     15, 107, 10, "#43566D", w - 30);
             }
@@ -362,10 +352,260 @@ namespace TouchTypingStudio
                     12, "#FFFFFF", 0, editingFind && window.B("active"), scrollKey: "find:" + window.S("id"), face: regular);
                 Text("↑  ↓  ×", w - 79, 115, 13, "#CFD7E8");
             }
-            if (window.S("status").Length > 0)
+            if (showStatus)
             {
                 Rectangle(0, h - 23, w, 23, "#ECF0F6");
-                Text(window.S("status"), 12, h - 18, 10, "#4B607B", w - 30);
+                Text(status, 12, h - 18, 10, "#4B607B", w - 30);
+            }
+        }
+
+        private void DrawSearchPage(Data window, double width, double top, double bottom, bool home,
+            string query, Data[] entries, double scale)
+        {
+            const string ink = "#202124", muted = "#5F6368";
+            Rectangle(0, top, width, bottom - top, "#FFFFFF");
+            double pad = Math.Min(36, width * .075);
+            if (home)
+            {
+                double logoSize = bottom - top < 300 ? 49 : 64;
+                Text("Учебный поиск", width - 124, top + 12, 11, muted, 110);
+                double logoY = top + Math.Max(22, Math.Min(74, (bottom - top - 133) * .35));
+                DrawGoogleWordmark(width / 2, logoY, logoSize * Math.Min(1.18, scale), true);
+                double barWidth = Math.Min(584, width - pad * 2);
+                double barX = (width - barWidth) / 2;
+                double barY = logoY + (logoSize + 20) * Math.Min(1.18, scale);
+                DrawSearchBar(barX, barY, barWidth, "Поиск в Google", false);
+                DrawBrowserCentered("Начните поиск в адресной строке: Ctrl+L", width / 2, barY + 54, 12, muted, barWidth);
+                if (bottom - barY > 106)
+                {
+                    Rectangle(0, bottom - 32, width, 32, "#F1F3F4");
+                    Text("Учебная копия · Интернет не используется", pad, bottom - 24, 11, muted, width - pad * 2);
+                }
+                return;
+            }
+
+            double left = width >= 700 ? 133 : pad;
+            double barWidthResults = Math.Min(612, width - left - pad);
+            if (width >= 700) DrawGoogleWordmark(pad, top + 14, 22, false);
+            DrawSearchBar(left, top + 9, barWidthResults, query, true);
+            Text("Все", left + 4, top + 55, 12, ink, 66);
+            Text("Учебный поиск", left + 45, top + 55, 11, muted, barWidthResults - 45);
+            Rectangle(0, top + 76, width, 1, "#EBEDF0");
+            Rectangle(left + 4, top + 74, 24, 2, ink);
+            double firstY = top + 86;
+            if (entries.Length == 0)
+            {
+                Text("По этому запросу ничего не найдено", left, firstY + 6, 16, ink, barWidthResults);
+                Text("Проверьте слова в запросе или попробуйте другой.", left, firstY + 34, 13, muted, barWidthResults);
+                return;
+            }
+
+            double pitch = Math.Min(84, Math.Max(46, (bottom - firstY) / Math.Min(3, entries.Length)));
+            int visible = Math.Max(1, (int)Math.Floor((bottom - firstY + 3) / pitch));
+            int selected = window.I("item", -1);
+            int start = Math.Max(0, selected - visible + 1);
+            for (int i = start; i < entries.Length && i < start + visible; i++)
+            {
+                Data entry = entries[i];
+                double rowY = firstY + (i - start) * pitch;
+                bool hasFocus = selected == i && window.S("focus") == "body";
+                if (hasFocus)
+                {
+                    Rounded(left - 8, rowY - 3, barWidthResults + 12, pitch - 2, "#E9F1FD", 8);
+                    Rectangle(left - 8, rowY + 3, 2, pitch - 14, "#1A73E8");
+                }
+                string path = entry.S("path");
+                string host = BrowserHost(path);
+                Rounded(left + 1, rowY + 2, 22, 22, "#E9EEF6", 11);
+                DrawBrowserCentered(host.Length > 0 ? host.Substring(0, 1).ToUpperInvariant() : "↗",
+                    left + 12, rowY + 5, 11, "#36567D", 20);
+                Text(BrowserShortAddress(path), left + 33, rowY + 3, 11, muted, barWidthResults - 33);
+                Text(entry.S("title"), left, rowY + 23, Math.Min(22, 18 * scale),
+                    "#1A0DAB", barWidthResults);
+                string detail = entry.S("detail");
+                if (detail.Length == 0)
+                    detail = host == "github.com" ? "Исходный код, документация и выпуски проекта." :
+                        host == "docs.python.org" ? "Руководство и справочные материалы по Python." :
+                        path == "https://practice.local/tutorials/touch-typing" ? "Советы и упражнения для слепой печати." : "";
+                if (pitch >= 64 && detail.Length > 0)
+                    Text(detail, left, rowY + 49, 12, "#4D5156", barWidthResults);
+            }
+        }
+
+        private void DrawSearchBar(double x, double y, double width, string value, bool active)
+        {
+            Rounded(x, y, width, 39, active ? "#DADCE0" : "#DFE1E5", 20);
+            Rounded(x + 1, y + 1, width - 2, 37, "#FFFFFF", 19);
+            Text("⌕", x + 14, y + 7, 18, "#70757A", 22);
+            Text(value, x + 43, y + 10, 14, active ? "#202124" : "#5F6368", width - 60);
+        }
+
+        private void DrawGoogleWordmark(double x, double y, double size, bool centered)
+        {
+            const string word = "Google";
+            string[] colors = { "#4285F4", "#EA4335", "#FBBC05", "#4285F4", "#34A853", "#EA4335" };
+            var wordmark = new FormattedText(word, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
+                new Typeface(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Medium,
+                    FontStretches.Normal), size, Ui.Brush(colors[0]), VisualTreeHelper.GetDpi(this).PixelsPerDip);
+            for (int i = 1; i < word.Length; i++)
+                wordmark.SetForegroundBrush(Ui.Brush(colors[i]), i, 1);
+            context.DrawText(wordmark, new Point(centered ? x - wordmark.Width / 2 : x, y));
+        }
+
+        private void DrawBrowserCentered(string value, double center, double y, double size, string color, double width)
+        {
+            if (width <= 0) return;
+            var formatted = new FormattedText(value, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+                regular, size, Ui.Brush(color), VisualTreeHelper.GetDpi(this).PixelsPerDip);
+            formatted.MaxTextWidth = width;
+            formatted.MaxLineCount = 1;
+            formatted.Trimming = TextTrimming.CharacterEllipsis;
+            formatted.TextAlignment = TextAlignment.Center;
+            context.DrawText(formatted, new Point(center - width / 2, y));
+        }
+
+        private static string BrowserHost(string value)
+        {
+            Uri uri;
+            return Uri.TryCreate(value, UriKind.Absolute, out uri) ? uri.Host : "";
+        }
+
+        private static string BrowserShortAddress(string value)
+        {
+            Uri uri;
+            if (!Uri.TryCreate(value, UriKind.Absolute, out uri) || uri.Host.Length == 0) return value;
+            string path = uri.AbsolutePath.Trim('/');
+            return path.Length == 0 ? uri.Host : uri.Host + "  ›  " + path.Replace("/", "  ›  ");
+        }
+
+        private void DrawBrowserManager(Data window, double width, double top, double bottom, string url,
+            Data[] entries, double scale)
+        {
+            string heading = url == "chrome://bookmarks" ? "Закладки" :
+                url == "chrome://downloads" ? "Загрузки" : "История";
+            Rectangle(0, top, width, bottom - top, "#F3F6FC");
+            Rectangle(0, top, width, 46, "#DCE7FC");
+            Text("☰", 18, top + 13, 16, "#29466B", 23);
+            Text(heading, 54, top + 12, 18, "#202124", 170);
+            double panelWidth = Math.Min(650, width - 38), panelLeft = (width - panelWidth) / 2;
+            double y = top + 58, pitch = Math.Min(55, Math.Max(38, 46 * scale));
+            if (entries.Length == 0)
+            {
+                Text("Пока ничего нет", panelLeft + 16, y + 11, 14, "#5F6368", panelWidth - 32);
+                return;
+            }
+            int visible = Math.Max(1, (int)((bottom - y) / pitch));
+            int selected = window.I("item", -1);
+            int start = Math.Max(0, selected - visible + 1);
+            Rounded(panelLeft, y, panelWidth, Math.Min(entries.Length, visible) * pitch, "#FFFFFF", 9);
+            for (int i = start; i < entries.Length && i < start + visible; i++)
+            {
+                Data entry = entries[i];
+                double rowY = y + (i - start) * pitch;
+                if (i == selected) Rounded(panelLeft + 4, rowY + 2, panelWidth - 8, pitch - 4, "#DEEAFD", 6);
+                Text(url == "chrome://bookmarks" ? "☆" : url == "chrome://downloads" ? "↓" : "◷",
+                    panelLeft + 13, rowY + 11, 16, "#4B6586");
+                Text(entry.S("title"), panelLeft + 42, rowY + 5, 14, "#202124", panelWidth - 58);
+                Text(BrowserShortAddress(entry.S("path")), panelLeft + 42, rowY + 23, 11, "#526274", panelWidth - 58);
+            }
+        }
+
+        private void DrawBrowserDocument(Data window, double width, double top, double bottom, string url, string title,
+            string body, Data[] entries, double scale)
+        {
+            string host = BrowserHost(url);
+            bool repository = host == "github.com", python = host == "docs.python.org";
+            Uri address;
+            Uri.TryCreate(url, UriKind.Absolute, out address);
+            bool release = repository && address != null && address.AbsolutePath.Contains("/releases");
+            string siteName = repository ? "◉  GitHub" : python ? "Python" : (host.Length > 0 ? host : "Материалы");
+            string pageBg = repository ? "#FFFFFF" : python ? "#F6F7F9" : "#FAFBFC";
+            string headerBg = repository ? "#F6F8FA" : python ? "#285273" : "#173640";
+            if (host == "practice.local" && address != null)
+            {
+                string path = address.AbsolutePath;
+                if (path.StartsWith("/workshop/", StringComparison.Ordinal))
+                { siteName = "Мастерская  /  Отчёты"; headerBg = "#25493D"; pageBg = "#FCFCF8"; }
+                else if (path.StartsWith("/handbook/", StringComparison.Ordinal))
+                { siteName = "Справочник  /  Рабочие инструкции"; headerBg = "#583F3B"; pageBg = "#FCF9F5"; }
+                else if (path.StartsWith("/releases/", StringComparison.Ordinal))
+                { siteName = "Версии  /  Журнал изменений"; headerBg = "#3F3B5C"; pageBg = "#FAF9FE"; }
+            }
+            string textInk = repository ? "#1F2328" : "#263342";
+            double left = Math.Min(64, width * .07);
+            Rectangle(0, top, width, bottom - top, pageBg);
+            Rectangle(0, top, width, 32, headerBg);
+            Text(siteName, left, top + 6, 15, repository ? "#1F2328" : "#FFFFFF", width - left * 2);
+            double content = top + 43, pane = width - left * 2;
+            if (python && width >= 680)
+            {
+                Rectangle(left, content, 145, Math.Max(0, bottom - content - 5), "#E8EEF3");
+                Text("Содержание", left + 12, content + 10, 13, "#234968", 121);
+                Text("Документация", left + 12, content + 39, 12, "#234968", 121);
+                Text("Версия Python 3", left + 12, content + 61, 11, "#536C7F", 121);
+                left += 166;
+                pane -= 166;
+            }
+            Text(title, left, content, Math.Min(31, 24 * scale), textInk, pane);
+            if (repository)
+            {
+                Text(release ? "Релизы" : "Код", left, content + 32, 12, "#1F2328", pane);
+                Rectangle(left, content + 51, pane, 1, "#D0D7DE");
+                Rectangle(left, content + 49, release ? 52 : 29, 2, "#FD8C73");
+                content += 20;
+            }
+            double bodyY = content + 39;
+            if (repository)
+            {
+                Rounded(left, bodyY, pane, Math.Max(0, bottom - bodyY - 7), "#D0D7DE", 6);
+                Rounded(left + 1, bodyY + 1, pane - 2, Math.Max(0, bottom - bodyY - 9), "#FFFFFF", 5);
+                Text(release ? "◇  Заметки к выпуску" : "▤  README", left + 12, bodyY + 7, 11, "#57606A", pane - 24);
+                bodyY += 28;
+                left += 12;
+                pane -= 24;
+            }
+            double lineHeight = 22 * scale;
+            var lines = body.Split('\n');
+            int target = window.I("bodyCursor"), offset = 0, firstLine = 0;
+            bool hasSelection = window.I("bodyAnchor") != target;
+            int maxLines = Math.Max(1, (int)Math.Floor((bottom - bodyY - 3) / lineHeight));
+            if (hasSelection)
+            {
+                int targetLine = body.Take(Math.Min(body.Length, Math.Max(0, target))).Count(c => c == '\n');
+                firstLine = Math.Max(0, targetLine - maxLines + 1);
+            }
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i];
+                if (i >= firstLine && bodyY + lineHeight <= bottom - 3)
+                {
+                    Field(line, window, left, bodyY, pane, 14 * scale, textInk, offset, hasSelection,
+                        true, face: regular);
+                    bodyY += lineHeight;
+                }
+                offset += line.Length + 1;
+            }
+
+            double rowHeight = Math.Min(34, 29 * scale);
+            int selected = window.I("item", -1);
+            if (entries.Length > 0)
+            {
+                // Keep the keyboard-selected link visible in shallow and
+                // zoomed windows rather than clipping it below the fold.
+                double startY = Math.Min(bodyY + 7, bottom - rowHeight);
+                if (selected >= 0)
+                    startY = Math.Min(startY, Math.Max(content + 24, bottom - Math.Min(entries.Length, selected + 1) * rowHeight));
+                int visible = Math.Max(1, (int)((bottom - startY + 1) / rowHeight));
+                int first = Math.Max(0, selected - visible + 1);
+                if (startY < bodyY + 2) Rectangle(left - 3, startY, pane + 6, bottom - startY, pageBg);
+                for (int i = first; i < entries.Length && i < first + visible; i++)
+                {
+                    double y = startY + (i - first) * rowHeight;
+                    if (selected == i && window.S("focus") == "body")
+                        Rounded(left - 4, y, pane + 5, rowHeight - 2, "#D8E8FF", 5);
+                    Text(entries[i].S("kind") == "download" ? "↓" : "↗", left + 4, y + 2, 13, "#365D88");
+                    Text(entries[i].S("title"), left + 23, y + 2, 13 * scale, "#205496", pane - 25);
+                }
             }
         }
 
@@ -605,37 +845,6 @@ namespace TouchTypingStudio
                 encoder.Save(stream);
                 return Convert.ToBase64String(stream.ToArray());
             }
-        }
-
-        private void DrawFiles(Data window, double w, double h)
-        {
-            if (window.S("focus") == "image-preview" && window.S("imagePreview").StartsWith("data:image/png;base64,"))
-            {
-                var bytes = Convert.FromBase64String(window.S("imagePreview").Substring("data:image/png;base64,".Length));
-                using (var stream = new MemoryStream(bytes))
-                {
-                    var bitmap = BitmapFrame.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
-                    double scale = Math.Min((w - 20) / bitmap.PixelWidth, (h - 48) / bitmap.PixelHeight);
-                    double iw = bitmap.PixelWidth * scale, ih = bitmap.PixelHeight * scale;
-                    context.DrawImage(bitmap, new Rect((w - iw) / 2, (h + 29 - ih) / 2, iw, ih));
-                }
-                return;
-            }
-            Rectangle(0, 29, w, h - 29, "#F7F7F8");
-            Rectangle(0, 29, 145, h - 29, "#E7E7EA");
-            Text("Недавние\nИзбранное\nДомашняя папка\nДокументы\nЗагрузки\nКорзина", 14, 57, 12, "#494B54", 126, 10);
-            Text(window.S("folder").Replace("/home/student", "Домашняя папка").Replace("/", "  ›  "), 164, 48, 13, "#424550", w - 179);
-            var entries = window.Items("entries").ToArray();
-            int visible = Math.Max(1, (int)((h - 90) / 35));
-            int first = Math.Max(0, window.I("item", -1) - visible + 1);
-            for (int i = first; i < Math.Min(first + visible, entries.Length); i++)
-            {
-                double y = 87 + (i - first) * 35;
-                if (i == window.I("item", -1)) Rounded(154, y - 4, w - 166, 31, "#F1D9C9", 5);
-                Rounded(166, y + 3, 22, 16, entries[i].S("kind") == "folder" ? "#D99A56" : "#9DADBD", 3);
-                Text(entries[i].S("title"), 200, y, 14, "#37302C", w - 212);
-            }
-            if (entries.Length == 0) Text("Папка пуста", 166, 90, 14, "#817872");
         }
 
         private void DrawOverview()

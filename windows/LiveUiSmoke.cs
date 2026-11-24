@@ -115,7 +115,8 @@ internal static class LiveUiSmoke
             if (browserClone)
             {
                 CheckBrowserClone();
-                Console.WriteLine("PASS: " + count + " WPF Chrome search, bookmark and offline VS Code clone checks");
+                CheckResearchHandoff();
+                Console.WriteLine("PASS: " + count + " WPF browser editing, search, bookmark, clone and report handoff checks");
                 return 0;
             }
             if (referenceBrowser)
@@ -681,6 +682,19 @@ internal static class LiveUiSmoke
             Check(ReadSolved() == solved, "Each action earns one credit");
             if (instruction.StartsWith("text:", StringComparison.Ordinal))
             {
+                if (!indexed)
+                {
+                    Check(BrowserWitness("LabDesktop")[2] == "url", "Browser has focused its address field");
+                    EnterCharacters("abcdefghij"); Key("Left");
+                    Stroke heldBackspace = Parse("Backspace").Single();
+                    // Three full native keydown messages with no key-up between
+                    // them, just as typematic enters the low-level WPF hook.
+                    Send(new[] { heldBackspace.Down(), heldBackspace.Down(), heldBackspace.Down(), heldBackspace.Up() });
+                    Until(delegate { return BrowserWitness("LabDesktop")[3] == "abcdefj"; }, "the address after held Backspace");
+                    Check(ReadSolved() == solved, "Held Backspace deletes 3 characters before the address caret without credit");
+                    CaptureReferenceFrame("browser-clone-01a-held-backspace");
+                    Chord("Ctrl+A");
+                }
                 EnterCharacters(instruction.Substring(5)); Key("Enter");
             }
             else
@@ -747,6 +761,58 @@ internal static class LiveUiSmoke
         Check(result[1] == "/home/student/projects/touch_typing/README.md" && Name("LabResult").Length > 0 &&
             Find("LabResult").Current.HelpText.Contains("Ошибки 0."), "Full route finishes at the virtual clone's README without errors");
         CaptureReferenceFrame("browser-clone-07-result");
+    }
+
+    private static void CheckResearchHandoff()
+    {
+        Invoke("LabChooseClass");
+        Until(delegate { return Visible("HomeDashboard"); }, "return to Live from clone result");
+        Invoke("LabDesktopProfile-windows");
+        Until(delegate { return Exists("HomeClass-windows"); }, "select the Windows 10 simulation");
+        OpenLiveConfiguration("workday");
+        Select("LabMode", 0); Select("LabLevel", 1); Select("LabDuration", 0); Select("LabTimer", 0);
+        SelectMissionByName("Windows 10: перенести проверенный отчёт в проект");
+        Key("F5");
+        Until(delegate { return Visible("LabDesktop") && Name("LabPause").StartsWith("Пауза"); }, "new Windows Workday");
+        bool search = false, report = false, files = false, opened = false, matched = false;
+        for (int step = 1; step <= 35 && !Visible("LabResult"); step++)
+        {
+            string prompt = Find("LabTask").Current.ItemStatus;
+            Console.WriteLine("RESEARCH " + step + " " + Name("LabTask") + " | " + prompt);
+            if (prompt.StartsWith("text:"))
+            {
+                EnterCharacters(prompt.Substring(5));
+                Key("Enter");
+            }
+            else
+            {
+                Check(prompt.StartsWith("keys:"), "Report prompt exposes a real key chord");
+                string keys = prompt.Substring(5);
+                for (int i = 0; i < (keys == "Tab" || keys == "Down" ? 15 : 1); i++)
+                {
+                    Chord(keys);
+                    if (Visible("LabResult") || ReadSolved() >= step) break;
+                }
+            }
+            int expected = step;
+            Until(delegate { return Visible("LabResult") || ReadSolved() == expected; }, "report handoff action " + prompt);
+            if (Visible("LabResult")) break;
+            var active = BrowserWitness("LabDesktop");
+            if (!search && active[1].StartsWith("https://www.google.com/search?q=", StringComparison.Ordinal))
+            { search = true; CaptureReferenceFrame("research-01-results"); }
+            if (!report && active[1].StartsWith("https://practice.local/workshop/", StringComparison.Ordinal))
+            { report = true; CaptureReferenceFrame("research-02-workshop"); }
+            if (!files && active[0] == "files" && active[6].Contains("/Downloads/") && active[6].Contains(".csv"))
+            { files = true; CaptureReferenceFrame("research-03-explorer"); }
+            if (!opened && active[0] == "code" && active[1].StartsWith("/home/student/project/", StringComparison.Ordinal) && active[1].EndsWith(".csv"))
+            { opened = true; CaptureReferenceFrame("research-04-opened-csv"); }
+            if (opened && prompt.StartsWith("text:") && active[2] == "find")
+            { matched = true; CaptureReferenceFrame("research-05-found-record"); }
+        }
+        Check(search && report && files && opened && matched && Visible("LabResult") &&
+            BrowserWitness("LabResult")[1].StartsWith("/home/student/project/", StringComparison.Ordinal),
+            "Report is searched, moved through Windows Explorer, and checked in the destination CSV");
+        CaptureReferenceFrame("research-06-result");
     }
 
     private static bool ProbeNumLock() { return (GetKeyState(0x90) & 1) != 0; }

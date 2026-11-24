@@ -381,6 +381,8 @@ internal static class LabCatalog
             if (!trigger || !chord.FitsModifiers(held) || !Available(task, scene)) return false;
             if (scene.DebugDay && task.Id.StartsWith("debug-", StringComparison.Ordinal)) return true;
             if (scene.ExactEdit && task.Id.StartsWith("exact-", StringComparison.Ordinal)) return true;
+            if (task.Id == "escape" && scene.BrowserResearchActive && context.Contains(task.Id))
+                return true; // Esc closes the app's find bar when no Windows overlay has focus.
             if (UbuntuIds.Contains(task.Id) || task.Id is "switch-group-next" or "switch-group-prev") return !scene.WindowsDesktop;
             return context.Contains(task.Id) || terminal && app == "code" && task.Id is "terminal-toggle" or "panel" or "escape";
         });

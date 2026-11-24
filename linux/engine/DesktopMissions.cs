@@ -88,6 +88,24 @@ internal static partial class LiveCourse
         list.Add(new("workday", 0, "workday-source-note", "Перенести методику из браузера в заметку",
             new[] { "note-source", "note-editor", "note-reopen", "note-check" }.Select(p => DesktopParts[p]).ToArray(), FinishAfterRoute: true));
         Add("workday",1,"analysis","Сопоставить отчёт с кодом проекта","desk","fetch","source","deliver","edit-report","present");
+        BrowserFileHandoff(list, windows: false);
         Add("workday",2,"handover","Подготовить передачу рабочего проекта","workspaces","fetch","deliver","edit-report","file","capture","present");
     }
+    private static void BrowserFileHandoff(List<LiveMission> list, bool windows)
+    {
+        string explorer = windows ? "win-explorer" : "open-files";
+        string parent = windows ? "win-explorer-parent" : "file-parent";
+        list.Add(new("workday", 1, windows ? "workday-windows-download-handoff" : "workday-download-handoff",
+            windows ? "Windows 10: перенести проверенный отчёт в проект" : "Ubuntu: перенести проверенный отчёт в проект",
+            [
+                new("Найдите и скачайте CSV из рабочего источника", "url browser-search pick:@target link-open pick:@download link-open"),
+                new("Перенесите файл из загрузок в проект", explorer + " pick:Downloads file-open pick:@download file-cut " + parent + " pick:project file-open file-paste"),
+                new("Откройте файл уже из проекта и найдите запись", "file-open find research-find escape")
+            ], FinishAfterRoute: true, Curated: true, Prepare: scene =>
+            {
+                if (windows) scene.PrepareWindowsDesktop();
+                scene.PrepareBrowserPractice("download");
+            }));
+    }
+
 }

@@ -124,13 +124,15 @@ namespace TouchTypingStudio
             else if (app == "terminal") DrawTerminal(window, bounds.Width, bounds.Height);
             else DrawFiles(window, bounds.Width, bounds.Height);
             Rectangle(0, 0, bounds.Width, 29, window.B("active") ? "#F4F8FC" : "#DCE4EE");
-            Icon(app, 10, 5, 18);
-            Text(window.S("title", AppTitle(app)), 36, 6, 13, "#152438", Math.Max(10, bounds.Width - 170));
+            if (app == "files") FilesGlyph("folder", 12, 8, true);
+            else Icon(app, 10, 5, 18);
+            Text(app == "files" ? FilesCaption(window, true) : window.S("title", AppTitle(app)),
+                36, 6, 13, "#152438", Math.Max(10, bounds.Width - 170));
             Text("—", bounds.Width - 104, 5, 14, "#152438");
             string state = window.S("state");
             Text(state == "maximized" || state == "max" ? "❐" : "□", bounds.Width - 72, 4, 14, "#152438");
-            Rectangle(bounds.Width - 36, 0, 36, 29, "#AD2336");
-            Text("×", bounds.Width - 23, 3, 17, "#FFFFFF");
+            if (app != "files") Rectangle(bounds.Width - 36, 0, 36, 29, "#AD2336");
+            Text("×", bounds.Width - 23, 3, 17, app == "files" ? "#152438" : "#FFFFFF");
             context.DrawRectangle(null, new Pen(Ui.Brush(window.B("active") ? "#42A5E2" : "#798B9F"), 1),
                 new Rect(.5, .5, bounds.Width - 1, bounds.Height - 1));
             context.Pop(); context.Pop();

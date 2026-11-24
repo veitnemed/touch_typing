@@ -117,6 +117,11 @@ class QA(LabWindowTest):
         self.live_os_choices['ubuntu'].emit('clicked')
         for _ in range(15): yield
         self.home_cards['chrome'].emit('clicked')
+        for _ in range(70):
+            if self.lab and self.lab.active: break
+            yield
+        assert self.lab.active and self.lab.state['mission']=='chrome-reader'
+        lab = self.starter('chrome', 'chrome-search-clone')
         # The isolated X11 server cannot offer a Wayland consent dialog.
         for _ in range(70):
             if self.lab and self.lab.active: break
@@ -145,6 +150,30 @@ class QA(LabWindowTest):
                 self.capture_widget_png(out/'05-result.png')
                 break
         assert not lab.active and lab.state['finished']
+        for name, app_id, mission, level in (
+            ("reference", "chrome", "chrome-docs-reference", 0),
+            ("handoff", "workday", "workday-download-handoff", 1),
+        ):
+            lab = self.starter(app_id, mission, level)
+            for _ in range(20): yield
+            observed = set()
+            for _ in range(40):
+                if not lab.active: break
+                task = lab.state["task"]["id"]
+                yield from self.advance_goal(lab)
+                window = next(w for w in lab.state["scene"]["windows"] if w["active"])
+                url = window.get("url", "")
+                kind = ("search-results" if url.startswith("https://www.google.com/search?q=") else
+                        "reference" if url.startswith("https://docs.python.org/3/library/") and "#" in url else
+                        "workshop" if "practice.local/workshop/" in url else
+                        "files" if window["app"] == "files" and window["folder"].endswith("/Downloads") else
+                        "csv-found" if task == "research-find" and url.startswith("/home/student/project/") else "")
+                if kind and kind not in observed:
+                    observed.add(kind)
+                    self.capture_widget_png(out / f"research-{name}-{kind}.png")
+            expected = {"search-results", "reference"} if name == "reference" else {"search-results", "workshop", "files", "csv-found"}
+            assert not lab.active and lab.state["finished"] and expected <= observed, (name, lab.state["status"], observed)
+            print("PASS GTK native", mission, sorted(observed), flush=True)
         for keypad in ('off','on','dedicated'):
             lab=self.starter('workday','workday-report')
             for _ in range(20): yield

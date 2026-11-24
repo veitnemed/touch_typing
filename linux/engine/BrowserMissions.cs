@@ -41,6 +41,33 @@ internal static partial class LiveCourse
     {
         void Add(int level, string id, string title, params string[] parts) =>
             list.Add(new("chrome", level, "chrome-" + id, title, parts.Select(p => BrowserParts[p]).ToArray()));
+        Add(0, "reader", "Подготовить справочник к чтению", "reference","method","download","present","organize");
+        Research(0, "docs-reference", "Найти нужный раздел справки", "reference",
+            new("Найдите инструкцию по теме в поиске", "url browser-search pick:@target link-open"),
+            new("Откройте нужный раздел и передайте его точный адрес", "pick:@section link-open url copy escape"));
+        Add(0, "sources", "Собрать адреса первоисточников", "repo","reference","method","docs","compare");
+        Add(0, "return", "Восстановить потерянный материал", "method","restore","history","download","organize");
+        Research(0, "download-verify", "Скачать и проверить рабочий отчёт", "download",
+            new("Найдите страницу отчёта, а не описание инструмента", "url browser-search pick:@target link-open"),
+            new("Скачайте файл и найдите его в списке загрузок", "pick:@download link-open downloads pick:@download"),
+            new("Откройте загруженный файл и найдите запись для сверки", "link-open find research-find escape"));
+        Add(0, "report", "Найти и сохранить отчёт проекта", "repo","download","reference","route","present");
+        Add(1, "library", "Собрать коллекцию проекта", "method","shelf","docs","reference","repo","organize");
+        Add(1, "handoff", "Передать исследование коллеге", "reference","repo","draft","method","download","organize");
+        Research(1, "release-compare", "Сверить изменение между двумя выпусками", "compare",
+            new("Найдите обзор последнего выпуска", "url browser-search pick:@target link-open"),
+            new("Перейдите к предыдущему выпуску и вернитесь к актуальному", "pick:@section link-open back"),
+            new("Сохраните проверенный выпуск и откройте его через менеджер закладок", "bookmark bookmark-manager pick:@target link-open"));
+        Add(1, "compare", "Сверить описание метода с исходниками", "index","method","reference","compare","download");
+        Add(1, "recovery", "Вернуть исследование после закрытия вкладки", "reference","repo","restore","route","history");
+        Add(2, "review", "Подготовить техническое ревью", "route","repo","download","history","compare","present");
+        Add(2, "audit", "Проверить происхождение материалов", "index","history","docs","route","download","organize");
+        Research(2, "restore-source", "Восстановить рабочий источник из истории", "recover",
+            new("Найдите первоисточник и откройте раздел с инструкцией", "url browser-search pick:@target link-open pick:@section link-open"),
+            new("Потеряйте вкладку и восстановите нужный раздел по истории", "close-tab history pick:@section link-open"),
+            new("Подготовьте ссылку на конкретную инструкцию для передачи", "url copy escape"));
+        Add(2, "briefing", "Провести показ и восстановить рабочее место", "repo","reference","method","present","restore","compare");
+        Add(2, "collection", "Проверить и восстановить подборку источников", "method","shelf","repo","docs","restore","download","compare");
         list.Add(new("chrome", 0, "chrome-search-clone", "Найти репозиторий и открыть учебную копию",
             [
                 new("Найдите исходники тренажёра в учебном Google",
@@ -52,17 +79,9 @@ internal static partial class LiveCourse
                 new("Проверьте, что README.md открыт из учебной копии",
                     "quick-open quick:README.md quick-choose")
             ], FinishAfterRoute: true, Curated: true, Prepare: scene => scene.PrepareBrowserPractice()));
-        Add(0, "reader", "Подготовить справочник к чтению", "reference","method","download","present","organize");
-        Add(0, "sources", "Собрать адреса первоисточников", "repo","reference","method","docs","compare");
-        Add(0, "return", "Восстановить потерянный материал", "method","restore","history","download","organize");
-        Add(0, "report", "Найти и сохранить отчёт проекта", "repo","download","reference","route","present");
-        Add(1, "library", "Собрать коллекцию проекта", "method","shelf","docs","reference","repo","organize");
-        Add(1, "handoff", "Передать исследование коллеге", "reference","repo","draft","method","download","organize");
-        Add(1, "compare", "Сверить описание метода с исходниками", "index","method","reference","compare","download");
-        Add(1, "recovery", "Вернуть исследование после закрытия вкладки", "reference","repo","restore","route","history");
-        Add(2, "review", "Подготовить техническое ревью", "route","repo","download","history","compare","present");
-        Add(2, "audit", "Проверить происхождение материалов", "index","history","docs","route","download","organize");
-        Add(2, "briefing", "Провести показ и восстановить рабочее место", "repo","reference","method","present","restore","compare");
-        Add(2, "collection", "Проверить и восстановить подборку источников", "method","shelf","repo","docs","restore","download","compare");
+
+        void Research(int level, string id, string title, string family, params LivePhase[] phases) =>
+            list.Add(new("chrome", level, "chrome-" + id, title, phases, FinishAfterRoute: true,
+                Curated: true, Prepare: scene => scene.PrepareBrowserPractice(family)));
     }
 }

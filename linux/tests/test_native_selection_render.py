@@ -100,16 +100,39 @@ def verify(window, view, output):
     view.update({"windows": [dict(browser, bodyAnchor=0, bodyCursor=0)]})
     ordinary = capture_frame("chrome-multiline-body")
     def body_ink(frame, top):
-        return sum(len(frame(y, bytes((51, 65, 84)), 12)) for y in range(top, top + 20))
-    assert body_ink(ordinary, 131) > 20
-    assert body_ink(ordinary, 154) > 20, "Chrome rendered shell but not the second paragraph"
+        return sum(len(frame(y, bytes((38, 51, 66)), 12)) for y in range(top, top + 20))
+    assert body_ink(ordinary, 145) > 20
+    assert body_ink(ordinary, 167) > 20, "Chrome rendered shell but not the second paragraph"
     assert ordinary(170, selection) == []
 
     view.update({"windows": [dict(browser, bodyAnchor=browser_offset,
                                  bodyCursor=browser_offset + view.units("Вторая"))]})
     selected = capture_frame("chrome-second-line-selection")
-    assert selected(147, selection) == [], "Chrome highlight leaked to the first paragraph"
-    assert len(selected(170, selection)) >= 10, "Chrome second-line selection was not rendered"
+    assert selected(151, selection) == [], "Chrome highlight leaked to the first paragraph"
+    assert len(selected(173, selection)) >= 10, "Chrome second-line selection was not rendered"
+    # Google, results, browser manager and a documentation page must use
+    # different surfaces rather than repaint the same generic article shell.
+    google = "https://www.google.com/"
+    query = google + "search?q=python"
+    def page_frame(name, address, body="", **state):
+        page = dict(browser, url=address, body=body, bodyAnchor=0, bodyCursor=0, **state)
+        view.update({"windows": [page]})
+        return capture_frame(name)
+    home = page_frame("chrome-search-home", google)
+    for color in ("4285f4", "ea4335", "fbbc05", "34a853"):
+        hue = bytes.fromhex(color)
+        assert sum(len(home(y, hue, 5)) for y in range(95, 190)) > 10, color
+    docs = {"title": "Документация Python", "path": "https://docs.python.org/3/", "kind": "page"}
+    repo = {"title": "Исходный репозиторий", "path": "https://github.com/veitnemed/touch_typing", "kind": "page"}
+    results = page_frame("chrome-search-results", query, "python", entries=[docs, repo], item=1)
+    assert len(results(246, bytes.fromhex("e9f1fd"))) > 300, "Second result lost its keyboard focus"
+    no_hits = page_frame("chrome-search-empty", query, "неизвестный запрос")
+    assert not no_hits(246, bytes.fromhex("e9f1fd"))
+    bookmarks = page_frame("chrome-bookmarks", "chrome://bookmarks", entries=[docs, repo], item=0)
+    assert len(bookmarks(71, bytes.fromhex("dce7fc"))) > 400, "Bookmark manager header did not render"
+    document = page_frame("chrome-python-document", docs["path"], "Наборы данных\nФайлы и кодировки")
+    assert len(document(72, bytes.fromhex("285273"))) > 400, "Python site chrome did not render"
+    page_frame("chrome-invalid-address", "https://[invalid")
     print(f"PASS real GTK editor and multi-line Chrome selection, combining mark and emoji offsets {after_cluster}/{after_emoji}px, "
           f"newline marker {len(first_row)}px; frames={output}", flush=True)
 

@@ -104,7 +104,7 @@ internal sealed class LabWindow(string app, int number, int workspace)
     internal LabTab Tab => Tabs.Count == 0 ? null : Tabs[Math.Clamp(ActiveTab, 0, Tabs.Count - 1)];
     internal string Body { get => Tab?.Body ?? ""; set { if (Tab != null) Tab.Body = value; } }
     internal string Url => Tab?.Url ?? "";
-    internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults, string projectName, string projectRelative, string windowsPath = null, bool browserPractice = false) => new { windowsPath, browserPractice, syntax = App == "code" ? PythonHighlight.For(Body, Url) : [], projectFiles, changedFiles, searchResults, projectName, projectRelative, ProjectSearchQuery, Id, App, Title, Workspace, State, NormalSlot, restoreState = MinimizedFrom, active, Folder, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(App == "code"), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
+    internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults, string projectName, string projectRelative, string windowsPath = null, bool browserPractice = false) => new { windowsPath, browserPractice, syntax = App == "code" ? PythonHighlight.For(Body, Url) : [], projectFiles, changedFiles, searchResults, projectName, projectRelative, ProjectSearchQuery, Id, App, Title, Workspace, State, NormalSlot, restoreState = MinimizedFrom, active, Folder, folderCanBack = FolderBack.Count != 0, folderCanForward = FolderForward.Count != 0, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(App == "code"), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
         tabs = Tabs.Select(tab => tab.Snapshot()), ActiveTab, Url, Body, Focus, Input, Find, Sidebar, Split, Status, Zoom, Selected, Cursor, Anchor, Panel, bodyCursor = Tab?.Position.Caret ?? 0, bodyAnchor = Tab?.Position.Anchor ?? 0, OptionIndex, Bookmarks, savedBookmarks = SavedBookmarks.ToArray() };
     internal LabWindow Clone()
     {
@@ -193,6 +193,7 @@ internal sealed partial class LabScene
     {
         NeutralWorkspace = source.NeutralWorkspace;
         BrowserPracticeActive = source.BrowserPracticeActive; RepoCloned = source.RepoCloned; BrowserPracticeQuery = source.BrowserPracticeQuery;
+        browserCaseVariant = source.browserCaseVariant; browserResearch = source.browserResearch;
         Terminal = source.Terminal.Clone(); captureImage = source.captureImage;
         CloneDebugDay(source);
         symbolWorkspace = source.symbolWorkspace;
@@ -634,12 +635,21 @@ internal sealed partial class LabScene
 
     internal bool CanRepeatEditing(string key)
     {
+        if (Switcher || Screenshot || DesktopOverlay.Length > 0 || ShowDesktop && WindowsDesktop) return false;
+        if (Overview) return key == "Backspace";
         var window = Active;
-        if (window == null || Overview || Switcher || Screenshot || DesktopOverlay.Length > 0 || ShowDesktop && WindowsDesktop || window.Focus == "reverse-search") return false;
+        if (window == null) return false;
+        if (window.Focus == "reverse-search") return key == "Backspace";
         bool editor = window.App == "code" && window.Focus == "body";
-        if (!editor && !IsTerminal(window)) return false;
-        return key is "Left" or "Right" or "Home" or "End" or "Delete" or "Backspace"
-            || editor && key is "Up" or "Down";
+        if (editor || IsTerminal(window))
+            return key is "Left" or "Right" or "Home" or "End" or "Delete" or "Backspace"
+                || editor && key is "Up" or "Down";
+        // Delete in a result list (or any other non-text surface) is not a
+        // text repeat. In an actual field use the same caret, selection and
+        // grapheme deletion as the first press, without another goal attempt.
+        return (key is "Backspace" or "Delete") && window.Focus is
+            "url" or "find" or "palette" or "clone-url" or "quick-open" or "goto-line" or "symbols"
+            or "symbol-rename" or "project-search" or "replace-find" or "replace-with";
     }
 
     internal bool Text(string key, string text, bool extend = false, bool word = false)

@@ -229,6 +229,19 @@ class LabWindowTest(Studio):
                         yield from chord('Ctrl+X')
                         assert self.lab.state['scene']['windows'][0]['input'] == before
                         assert self.lab.state['scene']['clipboard'] == clip
+                        # Real GDK autorepeat inside the Chrome field, not a
+                        # simulated series of separate press/release pairs.
+                        yield from chord('End')
+                        for _ in range(3):
+                            yield from chord('Left')
+                        cursor = self.lab.state['scene']['windows'][0]['cursor']
+                        solved = self.lab.state['solved']
+                        yield from hold('Backspace')
+                        after = self.lab.state['scene']['windows'][0]
+                        removed = len(before) - len(after['input'])
+                        assert removed >= 3 and after['cursor'] == cursor - removed, (before, after)
+                        assert after['input'] == before[:cursor-removed] + before[cursor:], (before, after)
+                        assert not after['selected'] and solved == self.lab.state['solved']
                         yield from chord('Ctrl+L' if self.lab.state['task']['id'] == 'copy' else 'Esc')
                     else:
                         yield from chord('Ctrl+J')

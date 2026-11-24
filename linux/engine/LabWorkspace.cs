@@ -40,7 +40,7 @@ internal sealed partial class LabScene
             "chrome://downloads" => downloads.Select(path => new LabEntry(NameOf(path), path, "file")).ToArray(),
             "chrome://bookmarks" => w.SavedBookmarks.Order().Select(PageEntry).ToArray(),
             _ when BrowserPracticeActive && IsSearchResult(w.Url) => PracticeSearchEntries(w.Url),
-            _ when BrowserPracticeActive => [],
+            _ when BrowserPracticeActive => BrowserResearchLinks(w.Url),
             _ => Links
         };
         if (w.Focus == "project-results") return ProjectMatchEntries(w);
@@ -125,6 +125,7 @@ internal sealed partial class LabScene
     internal void PrepareCase(int variant, string app)
     {
         string[] names = ["baseline", "experiment", "review"];
+        browserCaseVariant = variant;
         BrowserPracticeQuery = new[] { "touch_typing github", "veitnemed touch_typing", "github touch typing" }[variant];
         if (!NeutralWorkspace)
         {
@@ -250,8 +251,8 @@ internal sealed partial class LabScene
                     case "download":
                         string path = "/home/student/Downloads/" + entry.Path;
                         for (int copy = 1; Terminal.Exists(path); copy++)
-                            path = "/home/student/Downloads/" + System.IO.Path.GetFileNameWithoutExtension(Report) + " (" + copy + ").txt";
-                        Terminal.StoreFile(path, NeutralWorkspace ? NeutralProject.ReportBody : ReportBody); downloads.Insert(0, path);
+                            path = "/home/student/Downloads/" + System.IO.Path.GetFileNameWithoutExtension(entry.Path) + " (" + copy + ")" + System.IO.Path.GetExtension(entry.Path);
+                        Terminal.StoreFile(path, BrowserDownloadBody(entry.Path) ?? (NeutralWorkspace ? NeutralProject.ReportBody : ReportBody)); downloads.Insert(0, path);
                         w.Status = "Загружен " + entry.Path; break;
                     case "file":
                         string content = Terminal.ReadFile(entry.Path);

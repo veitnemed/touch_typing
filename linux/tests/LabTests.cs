@@ -259,6 +259,147 @@ internal static class LabTests
             "The full course ends only after opening the README of the actual in-memory copy");
     }
 
+    private static void TestBrowserResearchRotation()
+    {
+        (string Id, int Level, string FinalAction)[] cases = [
+            ("chrome-docs-reference", 0, "escape"),
+            ("chrome-download-verify", 0, "escape"),
+            ("chrome-release-compare", 1, "item-open"),
+            ("chrome-restore-source", 2, "escape")
+        ];
+        foreach (var item in cases)
+        {
+            var queries = new HashSet<string>();
+            var finals = new HashSet<string>();
+            foreach (int seed in new[] { 1, 0, 5 })
+            {
+                var run = new LabRun("chrome", "sandbox", item.Level, 0, "EN", [], new Random(seed),
+                    missionId: item.Id, neutralProject: true);
+                string query = run.Scene.BrowserPracticeQuery;
+                queries.Add(query);
+                run.Resume();
+                string lastAction = "";
+                for (int i = 0; i < 40 && !run.Finished; i++)
+                {
+                    var task = run.Task;
+                    lastAction = task.Action;
+                    int before = run.Solved;
+                    if (task.Id == "research-find")
+                    {
+                        Type(run, "NO-00"); Chord(run, "Enter");
+                        Check(run.Solved == before && run.Scene.Active.Status == "Совпадений нет", "A wrong report record is not credited");
+                        Chord(run, "Ctrl+A");
+                    }
+                    Complete(run);
+                    Check(run.Solved == before + 1, item.Id + ": must advance " + task.Id);
+                    if (task.Action == "navigate-pasted" && task.Keys.Length == 0)
+                        Check(run.Scene.Entries(run.Scene.Active).Length == 2, "Query has a relevant result and a readable distractor");
+                }
+                Check(run.Finished && lastAction == item.FinalAction, item.Id + ": final step uses the intended action");
+                var active = run.Scene.Active;
+                finals.Add(active.Url);
+                switch (item.Id)
+                {
+                    case "chrome-docs-reference":
+                    case "chrome-restore-source":
+                        Check(active.Url.Contains('#') && run.Scene.Clipboard == active.Url &&
+                            active.Body.Length > 40 && active.Focus == "body", item.Id + ": specific instruction restored/shared");
+                        break;
+                    case "chrome-download-verify":
+                        Check(active.App == "code" && active.Url.StartsWith("/home/student/Downloads/") && active.Url.EndsWith(".csv") &&
+                            active.Body == run.Scene.Terminal.ReadFile(active.Url) && active.Body.Split('\n').Length == 4 && active.Find == run.Scene.BrowserResearchNeedle,
+                            "Report comes from the simulated download and opens the actual downloaded CSV");
+                        break;
+                    default:
+                        Check(active.Url.Contains("/releases/") && active.SavedBookmarks.Contains(active.Url) &&
+                            active.Body.Contains("Связанные материалы"), "Latest release, not archive, restored from bookmarks");
+                        break;
+                }
+            }
+            Check(queries.Count == 3 && finals.Count == 3, item.Id + ": three distinct queries and destination artifacts");
+        }
+        foreach (bool windows in new[] { false, true })
+        {
+            string id = windows ? "workday-windows-download-handoff" : "workday-download-handoff";
+            var run = new LabRun("workday", "sandbox", 1, 0, "EN", [], new Random(5), missionId: id,
+                neutralProject: true, environment: windows ? "windows" : "ubuntu", windowsBindings: windows);
+            run.Resume();
+            for (int i = 0; i < 40 && !run.Finished; i++)
+            {
+                var task = run.Task;
+                int before = run.Solved;
+                Complete(run);
+                Check(run.Solved == before + 1, id + ": must advance " + task.Id);
+            }
+            var active = run.Scene.Active;
+            Check(run.Finished && active.Url.StartsWith("/home/student/project/") && active.Url.EndsWith(".csv") &&
+                !run.Scene.Terminal.Exists("/home/student/Downloads/" + active.Tab.Title) &&
+                active.Find == run.Scene.BrowserResearchNeedle && active.Body == run.Scene.Terminal.ReadFile(active.Url),
+                id + ": verify the actual CSV from the destination and not the download folder");
+        }
+        var rotation = new LabRun("chrome", "sandbox", 0, 180, "EN", [],
+            new Random(17), () => 10000, missionId: "chrome-docs-reference", neutralProject: true);
+        rotation.Resume();
+        var seen = new HashSet<string>();
+        for (int i = 0; i < 220 && seen.Count < 7; i++)
+        {
+            seen.Add(rotation.MissionId);
+            Complete(rotation);
+            Check(!rotation.Finished, "A completed research route must not end a timed Chrome practice block");
+        }
+        Check(seen.Contains("chrome-search-clone") && seen.Contains("chrome-reader") &&
+            seen.Contains("chrome-download-verify") && seen.Count == 7, "Research routes and original browser work mix in one rotation");
+    }
+
+    private static void TestHeldBackspaceInLiveFields()
+    {
+        var run = new LabRun("chrome", "sandbox", 0, 0, "EN", [], new Random(11),
+            missionId: "chrome-search-clone", neutralProject: true);
+        run.Resume();
+        Complete(run);
+        int score = run.Solved;
+        string task = run.Task.Id;
+        var field = run.Scene.Active;
+        Check(field.Focus == "url", "Search lesson focuses the Chrome omnibox");
+        Type(run, "abcdef");
+        Chord(run, "Left");
+        run.Input("Backspace", true, "");
+        run.Input("Backspace", true, "");
+        run.Input("Backspace", true, "");
+        run.Input("Backspace", false, "");
+        Check(field.Input == "abf" && field.Cursor == 2 && !field.Selected,
+            "Hold Backspace deletes repeatedly before the Chrome caret without touching the suffix");
+        Check(run.Solved == score && run.Task.Id == task,
+            "Chrome editing repeats never submit search or claim a goal");
+        var reopened = new LabRun("chrome", "sandbox", 0, 0, "EN", [], new Random(11), draft: run.Draft());
+        Check(reopened.Scene.Active.Input == "abf" && reopened.Scene.Active.Cursor == 2 &&
+            reopened.Solved == score,
+            "A draft replays the actual changes from a held Backspace in Chrome");
+        Chord(run, "Home");
+        run.Input("Delete", true, "");
+        run.Input("Delete", true, "");
+        run.Input("Delete", false, "");
+        Check(field.Input == "f" && field.Cursor == 0,
+            "Hold Delete removes forward without moving the Chrome caret");
+        Chord(run, "End");
+        Chord(run, "Shift+Left");
+        run.Input("Backspace", true, "");
+        run.Input("Backspace", true, "");
+        run.Input("Backspace", false, "");
+        Check(field.Input == "" && field.Cursor == 0 && !field.Selected,
+            "Repeat after deleting a selection stops at the start of an empty field");
+        Chord(run, "Esc");
+        Check(field.Focus == "body" && !run.Scene.CanRepeatEditing("Backspace"), "Page body is not an editable field");
+        Type(run, "xyz");
+        Chord(run, "Ctrl+F");
+        Type(run, "needle");
+        run.Input("Backspace", true, "");
+        run.Input("Backspace", true, "");
+        run.Input("Backspace", false, "");
+        Check(field.Focus == "find" && field.Input == "need" && field.Cursor == 4,
+            "Chrome find bar honors the same repeat behavior");
+    }
+
     private static void TestTerminalEssentialsTimedRotation()
     {
         var run = new LabRun("terminal", "sandbox", 0, 180, "EN", [], new Random(31),
@@ -311,6 +452,8 @@ internal static class LabTests
         TestOtherShortcutContexts();
         TestKeypadNavigation();
         TestBrowserSearchClone();
+        TestBrowserResearchRotation();
+        TestHeldBackspaceInLiveFields();
         TestCommandReviewWeighting();
         TestNativeEnglishTextAndRouteProgress();
         foreach (string app in LabCatalog.Apps)

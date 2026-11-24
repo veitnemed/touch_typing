@@ -18,7 +18,7 @@ class MissionTest(unittest.TestCase):
                 first = suggestion("terminal")
                 self.assertEqual(first, "terminal-essentials-locate")
                 self.assertEqual(suggestion("terminal"), first, "Read-only selectors do not consume practice")
-                self.assertEqual(suggestion("chrome"), "chrome-search-clone")
+                self.assertEqual(suggestion("chrome"), "chrome-reader")
                 options = dict(app="terminal", mode="sandbox", level=0, guidance="guided", seconds=0, seed=0)
                 engine.call("lab-start", **options, mission=first)
                 engine.call("lab-resume")

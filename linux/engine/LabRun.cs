@@ -92,9 +92,11 @@ internal sealed class LabRun
         ActionLimit > 0 && Solved >= ActionLimit ? "actions" : null);
     private bool ReachedLimit => LimitReached != null;
     private static bool IsEssentials(string missionId) => missionId?.StartsWith("terminal-essentials-", StringComparison.Ordinal) == true;
+    private static bool IsBrowserRotation(string missionId) => missionId?.StartsWith("chrome-", StringComparison.Ordinal) == true ||
+        missionId == "workday-download-handoff";
     private bool CompletedRoute => !restoring && mission != null && pending.Count == 0 &&
         (FinishingMission || softFinish && ReachedLimit ||
-            (finishSingleRoute || mission.Curated && (EnvironmentProfile != "windows" && !IsEssentials(mission.Id) || TimeLimit == 0 && ActionLimit == 0))
+            (finishSingleRoute || mission.Curated && (EnvironmentProfile != "windows" && !IsEssentials(mission.Id) && !IsBrowserRotation(mission.Id) || TimeLimit == 0 && ActionLimit == 0))
                 && mission.FinishAfterRoute);
     private bool PendingLimitChoice => softFinish && !restoring && ReachedLimit &&
         !limitAccepted && !FinishingMission && !CompletedRoute;
@@ -423,7 +425,7 @@ internal sealed class LabRun
             "project-search-submit" => window.Focus == "project-search",
             "project-search-repair" => window.App == "code" && window.Focus == "body",
             "code-rename-confirm" => window.Focus == "symbol-rename",
-            "exact-find-submit" => window.Focus == "find",
+            "exact-find-submit" or "research-find" => window.Focus == "find",
             "quick-choose" => Scene.ExactEdit && window.Focus == "quick-open" && Task.Text.Length > 0,
             "save" => Scene.ExactEdit && window.App == "code" && window.Focus == "body" && Task.Text.Length > 0,
             _ => false
@@ -574,12 +576,12 @@ internal sealed class LabRun
         if (mission == null || pending.Count == 0)
         {
             var last = mission?.Id;
-            // Standalone projects are selected from the catalog, not injected
-            // into a learner's existing continuous exercise rotation.
+            // Keep standalone projects out of other modes. Chrome research cases are part
+            // of the same rotation as the older browser routes.
             bool essentials = IsEssentials(last);
             var rotation = courses.Where(m => essentials
                 ? IsEssentials(m.Id)
-                : !m.FinishAfterRoute || EnvironmentProfile == "windows" && m.Curated).ToArray();
+                : !m.FinishAfterRoute || (EnvironmentProfile == "windows" || IsBrowserRotation(m.Id)) && m.Curated).ToArray();
             var available = rotation.Where(m => !used.Contains(m.Id)).ToArray();
             if (available.Length == 0) { used.Clear(); available = rotation.Where(m => m.Id != last || rotation.Length == 1).ToArray(); }
             var recent = past.Concat(Attempts).Where(a => a.Mission != null).Select(a => a.Mission).Reverse().Distinct().Take(2).ToHashSet();

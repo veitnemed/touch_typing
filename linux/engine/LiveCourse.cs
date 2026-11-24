@@ -40,7 +40,7 @@ internal static partial class LiveCourse
         {
             foreach (string token in RouteTokens(mission.Phases[phase]))
             {
-                if (!nativeEnglishInput && (IsCommandToken(token) || IsProjectSearchQuery(token) || token is "browser-search" or "code-clone-command" ||
+                if (!nativeEnglishInput && (IsCommandToken(token) || IsProjectSearchQuery(token) || token is "browser-search" or "code-clone-command" or "research-find" ||
                     token is "code-rename-confirm" or "debug-unit" or "debug-report-check"
                     or "debug-project-query" or "debug-doc-submit" or "debug-rewrite" or "exact-find-submit" or "python-edit-write" ||
                     trial.ExactEdit && token is "quick-choose" or "save") && trial.Layout == "RU")
@@ -110,6 +110,9 @@ internal static partial class LiveCourse
             return Actions["navigate-pasted"] with { Keys = "", Text = scene.BrowserPracticeQuery,
                 Title = "Введите «" + scene.BrowserPracticeQuery + "» и нажмите Enter",
                 Hint = "Ищем в учебной выдаче; откройте результат и вернитесь к тому же запросу." };
+        if (token == "research-find")
+            return new(token, "Найдите запись «" + scene.BrowserResearchNeedle + "» в открытом файле",
+                "", "Введите идентификатор записи и нажмите Enter.", scene.BrowserResearchNeedle, token);
         if (token == "code-clone-command")
             return Actions[token] with { Keys = "", Text = "Git: Clone",
                 Title = "Введите Git: Clone в палитре и нажмите Enter" };
@@ -128,7 +131,7 @@ internal static partial class LiveCourse
         if (IsPickerToken(token))
         {
             var w = scene.Active;
-            string raw = token[(token.IndexOf(':') + 1)..];
+            string raw = scene.ResolveBrowserRouteTarget(token[(token.IndexOf(':') + 1)..]);
             string query = raw.Replace('_', ' ');
             var entry = scene.Entries(w).FirstOrDefault(item => item.Path == raw || item.Path.EndsWith("/" + raw, StringComparison.Ordinal) ||
                 item.Path == query || item.Title == query || item.Path.EndsWith("/" + query, StringComparison.Ordinal));
@@ -195,6 +198,11 @@ internal static partial class LiveCourse
                 if (!trial.Text(ch.ToString().ToUpperInvariant(), ch.ToString())) return false;
             return trial.Text("Enter", "");
         }
+        if (task.Action == "research-find")
+        {
+            trial.Active.Input = task.Text;
+            return trial.Text("Enter", "");
+        }
         if (task.Action == "command")
         {
             trial.TerminalInput = task.Text;
@@ -224,7 +232,8 @@ internal static partial class LiveCourse
     {
         var w = scene.Active;
         string app = w?.App ?? "", action = task.Action;
-        if (scene.WindowsDesktop) return JsonSerializer.Serialize(scene.WindowsDesktopEvidence());
+        if (scene.WindowsDesktop && (!scene.BrowserResearchActive || action.StartsWith("win-", StringComparison.Ordinal)))
+            return JsonSerializer.Serialize(scene.WindowsDesktopEvidence());
         if (scene.PythonEditingExercise) return JsonSerializer.Serialize(scene.PythonEditEvidence());
         if (scene.GnomePractice is "workspaces" or "same-app")
             return JsonSerializer.Serialize(scene.GnomeScopeEvidence(task, equivalentCommand));
