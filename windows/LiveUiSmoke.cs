@@ -413,6 +413,13 @@ internal static class LiveUiSmoke
         Until(delegate { return FocusedLiveCard("chrome"); }, "result exits to focused source card");
         Invoke("ReferenceNav-learn");
         Key("F5");
+        Until(delegate
+        {
+            var stop = window.FindFirst(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.NameProperty, "ОСТАНОВИТЬ"));
+            return stop != null && stop.Current.ProcessId == app.Id && !stop.Current.IsOffscreen;
+        }, "actual Typing lesson active before capturing its result");
+        CaptureLiveUxFrame("live-ux-04b-active-typing");
         Key("Esc");
         Until(delegate { return Visible("PracticeResult") && Visible("TypingErrorReview"); }, "Typing creates its centered result with error review");
         Check(Visible("ResultMetric-speed") && Visible("ResultMetric-accuracy") && Visible("TypingRepeat"),
