@@ -198,8 +198,100 @@ internal static class LabTests
             "Verified final effect fills a complete route");
     }
 
+    private static void TestKeypadNavigation()
+    {
+        var run = new LabRun("workday", "sandbox", 0, 0, "EN", [], new Random(3), missionId: "workday-report");
+        run.Resume();
+        for (int i = 0; i < 60 && run.Task.Id != "file-home"; i++) Complete(run);
+        Check(run.Task.Id == "file-home", "Workday reaches the exact Alt+Home exercise");
+        int prior = run.Solved;
+        Chord(run, "Alt+7");
+        Chord(run, "Ctrl+Alt+NumPad7");
+        Check(run.Solved == prior, "Top-row digit and extra modifiers do not satisfy Alt+Home");
+        Chord(run, "Alt+NumPad7");
+        Check(run.Solved == prior + 1 && run.Scene.Active?.App == "files",
+            "Alt+keypad 7 runs the Home action and credits it exactly once");
+        Check(!Gesture.Parse("Ctrl+7").Chords[0].AcceptsNavigationKeypad("NumPad7", ["LCtrl"]),
+            "Numeric shortcuts never alias the keypad to the top row");
+        foreach (var pair in new[] { ("NumPad7", "Home"), ("NumPad1", "End"), ("NumPad9", "PageUp"),
+            ("NumPad3", "PageDown"), ("NumPad8", "Up"), ("NumPad2", "Down"), ("NumPad4", "Left"),
+            ("NumPad6", "Right"), ("NumPad0", "Insert"), ("NumDecimal", "Delete") })
+            Check(Gesture.Parse("LAlt+" + pair.Item2).Chords[0].AcceptsNavigationKeypad(pair.Item1, ["LAlt"]) &&
+                !Gesture.Parse("LAlt+" + pair.Item2).Chords[0].AcceptsNavigationKeypad(pair.Item1, ["RAlt"]),
+                pair.Item1 + " honors modifiers and sides");
+    }
+
+    private static void TestBrowserSearchClone()
+    {
+        var run = new LabRun("chrome", "sandbox", 0, 0, "EN", [], new Random(11),
+            missionId: "chrome-search-clone", neutralProject: true);
+        run.Resume();
+        Complete(run);
+        Check(run.Scene.Active.Url == LabScene.SearchHome && run.Task.Action == "navigate-pasted", "Course begins on authored Google page");
+        int before = run.Solved;
+        Type(run, "volcano");
+        Chord(run, "Enter");
+        Check(run.Solved == before && run.Scene.Entries(run.Scene.Active).Length == 0, "An unrelated query does not reveal the repo or earn credit");
+        Chord(run, "Ctrl+L");
+        string query = run.Task.Text;
+        Complete(run);
+        string results = run.Scene.Active.Url;
+        Check(LabScene.SearchQuery(results) == query && run.Scene.Entries(run.Scene.Active).Length == 2, "Search returns query-specific candidates");
+        Complete(run); Complete(run);
+        Check(run.Scene.Active.Url == LabScene.SearchDecoy, "Course opens the similarly named article first");
+        Complete(run);
+        Check(run.Scene.Active.Url == results && run.Scene.Entries(run.Scene.Active).Length == 2 && run.Scene.Active.Item == 0, "Alt+Left restores the exact previous query, results, and selected link");
+        for (int step = 0; step < 12 && run.Task.Id != "bookmark"; step++) Complete(run);
+        Check(run.Task.Id == "bookmark", "Only the requested repository leads to the required bookmark step");
+        Complete(run);
+        Check(run.Scene.Active.SavedBookmarks.Contains(LabScene.RepositoryPage), "Saved URL appears in the bookmark collection");
+        for (int step = 0; step < 15 && run.Task.Id != "code-clone-confirm"; step++) Complete(run);
+        Check(run.Task.Id == "code-clone-confirm" && run.Scene.Active.Focus == "clone-url" &&
+            run.Scene.Active.Input == LabScene.RepositoryPage && run.Scene.Clipboard == LabScene.RepositoryPage,
+            "After tab change and bookmark reopen, the exact repo URL transfers through the clipboard into VS Code");
+        before = run.Solved;
+        Chord(run, "Ctrl+A"); Type(run, "https://github.com/other/typing-demo"); Chord(run, "Enter");
+        Check(run.Solved == before && !run.Scene.Terminal.Exists(LabScene.CloneRoot), "An unrelated HTTPS link cannot create or credit a clone");
+        Chord(run, "Ctrl+A"); Chord(run, "Ctrl+V");
+        for (int step = 0; step < 12 && !run.Finished; step++) Complete(run);
+        Check(run.Finished && run.Scene.Active.Url == LabScene.CloneReadme &&
+            run.Scene.Terminal.ReadFile(LabScene.CloneReadme) == LabScene.CloneReadmeBody,
+            "The full course ends only after opening the README of the actual in-memory copy");
+    }
+
+    private static void TestOtherShortcutContexts()
+    {
+        static void Expect(string app, string gesture, string expectedId, Action<LabScene> setup, Func<LabScene, bool> outcome)
+        {
+            var scene = new LabScene(app, "EN");
+            setup(scene);
+            var chord = Gesture.Parse(gesture).Chords[0];
+            var held = chord.Modifiers.Select(x => x switch {
+                "Ctrl" => "RCtrl", "Alt" => "LAlt", "Shift" => "LShift", "Super" => "LSuper", _ => x
+            }).Append(chord.Trigger);
+            var actual = LabCatalog.Resolve(chord.Trigger, held, scene);
+            Check(actual != null && actual.Id == expectedId && scene.Apply(actual.Action) && outcome(scene),
+                app + " " + gesture + " must perform " + expectedId);
+        }
+        Expect("terminal", "Alt+B", "terminal-word-left", s => {s.TerminalInput="cd project"; s.Active.Cursor=10;}, s => s.Active.Cursor==3 && s.TerminalInput=="cd project");
+        Expect("terminal", "Alt+F", "terminal-word-right", s => {s.TerminalInput="cd project"; s.Active.Cursor=3;}, s => s.Active.Cursor==10 && s.TerminalInput=="cd project");
+        Expect("ubuntu", "Alt+Shift+Tab", "switch-prev", s => {s.Open("chrome"); s.Open("code");}, s => {string before=s.ActiveWindow; s.CommitSwitch(); return !s.Switcher && s.ActiveWindow!=before;});
+        Expect("chrome", "Ctrl+-", "zoom-out", s => s.Active.Zoom=100, s => s.Active.Zoom==90);
+        Expect("code", "Ctrl+2", "focus-second", s => {s.Apply("new-tab"); s.Apply("split"); s.Apply("focus-editor");}, s => s.Active.Split && s.Active.Group==1);
+        Expect("code", "Ctrl+G", "goto-line", s => {}, s => s.Active.Focus=="goto-line");
+        Expect("chrome", "Ctrl+G", "find-next", s => {s.Active.Tab.Body="draft text draft"; s.Active.Find="draft"; s.Active.Select(0,5);}, s => s.Active.Start==11 && s.Active.End==16);
+        Expect("terminal", "Ctrl+K", "terminal-kill", s => {s.TerminalInput="echo draft"; s.Active.Cursor=5;}, s => s.TerminalInput=="echo " && s.Active.Cursor==5);
+        Expect("terminal", "Ctrl+R", "terminal-search", s => {s.TerminalInput="pwd"; s.Text("Enter",""); s.TerminalInput="draft"; s.Active.Cursor=5;}, s => s.Active.Focus=="reverse-search" && s.TerminalInput=="pwd");
+        Expect("chrome", "Ctrl+Shift+B", "bookmarks", s => s.Active.Bookmarks=false, s => s.Active.Bookmarks);
+        Expect("terminal", "Ctrl+Shift+C", "terminal-copy", s => {s.TerminalInput="echo draft"; s.Active.Select(5,10);}, s => s.Clipboard=="draft" && s.TerminalInput=="echo draft");
+        Expect("code", "Ctrl+Shift+P", "palette", s => {}, s => s.Active.Focus=="palette");
+    }
+
     private static void Main()
     {
+        TestOtherShortcutContexts();
+        TestKeypadNavigation();
+        TestBrowserSearchClone();
         TestCommandReviewWeighting();
         TestNativeEnglishTextAndRouteProgress();
         foreach (string app in LabCatalog.Apps)

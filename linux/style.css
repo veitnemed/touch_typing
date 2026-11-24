@@ -522,3 +522,12 @@ window.reference-light button.reference-card:hover { background: #e7dcea; border
 .reference-settings-page .reference-config-dropdown popover > arrow { background: @graph_panel; }
 .reference-settings-page button.reference-primary { min-width: 108px; font-size: 15px; }
 .reference-settings-page button.reference-quiet { font-size: 14px; font-weight: 500; }
+
+/* Preview 2: the task owns its row, with gesture centered beneath. */
+.lab-page.reference-live .reference-goal { border-color: #77658b; padding: 6px 11px; }
+.lab-page.reference-live .reference-goal-title { font-size: 21px; }
+.lab-page.reference-live.compact-height .reference-goal-title { font-size: 20px; }
+.lab-page.reference-live .reference-keycap { font-size: 17px; }
+.reference-environment-choices button.selected {
+  background: @graph_cta; color: @graph_ink; border-color: #9c86aa;
+}

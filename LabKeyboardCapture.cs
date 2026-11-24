@@ -49,6 +49,8 @@ namespace TouchTypingStudio
             if (passive && down) return CallNextHookEx(handle, code, message, pointer);
             var stroke = (Stroke)Marshal.PtrToStructure(pointer, typeof(Stroke));
             int vk = (int)stroke.VirtualKey;
+            // Keep hardware Num Lock under the OS's control while practising.
+            if (vk == 0x90) return CallNextHookEx(handle, code, message, pointer);
             if (passive)
             {
                 held.Remove(vk);

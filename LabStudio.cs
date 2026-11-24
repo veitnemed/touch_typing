@@ -48,7 +48,7 @@ namespace TouchTypingStudio
         {
             var group = Stack();
             group.Margin = new Thickness(0, 0, 0, 14);
-            var title = ReferenceLabel("Система для практики", 17, ReferenceText, true);
+            var title = ReferenceLabel("Система для тренировки", 17, ReferenceText, true);
             AutomationProperties.SetAutomationId(title, "LabDesktopProfileHeading");
             group.Children.Add(title);
             var row = new WrapPanel { Margin = new Thickness(0, 5, 0, 1) };
@@ -151,11 +151,9 @@ namespace TouchTypingStudio
             string mission = "";
             if (!resume)
             {
-                var catalog = Request("lab-catalog", "desktopProfile", labDesktopProfile);
-                if (!catalog.Exists) return;
-                var visible = catalog.Items("missions").Where(item => UsesSelectedDesktop(item) &&
-                    item.S("app") == app && item.I("level") == labLevel).ToArray();
-                if (visible.Length > 0) mission = visible[0].S("id");
+                var selection = Request("lab-next-mission", "app", app, "level", labLevel, "desktopProfile", labDesktopProfile);
+                if (!selection.Exists) return;
+                mission = selection.S("mission");
             }
             StartLabAttempt(mission, resume);
         }
@@ -378,7 +376,8 @@ namespace TouchTypingStudio
             // Only targeted QA runs expose these physical navigation keys, never typed text.
             if (verifyMode && down &&
                 (labQaNavigationTrace == "workspace" && (vk == 0x21 || vk == 0x22) ||
-                 labQaNavigationTrace == "terminal" && (vk == 0x24 || vk == 0x27)))
+                 labQaNavigationTrace == "terminal" && (vk == 0x24 || vk == 0x27) ||
+                 labQaNavigationTrace == "workday-keypad" && scan == 0x47))
             {
                 var cachedModifiers = new[] { "LSuper", "RSuper", "LShift", "RShift", "LCtrl", "RCtrl", "LAlt", "RAlt" };
                 var label = "VK=" + vk.ToString("X2") + " scan=" + scan.ToString("X2") +

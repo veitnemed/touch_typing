@@ -720,6 +720,10 @@ class DesktopView(Gtk.Widget):
         address = window["input"] if editing else window["url"]
         field(address, window, x + (118 if purple else 94), y + 36,
                    w - (181 if purple else 144), 13, "#f6f0ff" if purple else "#e6e8ec", focused=editing)
+        if window.get("browserPractice"):
+            saved = window.get("url") in window.get("savedBookmarks", [])
+            self.fill("#222039" if purple else "#303134", x + w - 53, y + 33, 23, 22, 4)
+            label("★" if saved else "☆", x + w - 49, y + 35, 15, "#bda8ff" if saved else "#d6dde9")
         label("⋮", x + w - 21, y + 35, 16)
         body_top = 62
         if window.get("bookmarks"):
@@ -733,8 +737,25 @@ class DesktopView(Gtk.Widget):
         left = x + min(w * (.059 if purple else .075), 72)
         available = w - (left - x) * 2
         top = y + body_top + (15 if purple else 24)
-        label(tab.get("title", "Новая вкладка"), left, top, (26 if purple else 23) * scale,
-                   "#211834" if purple else "#222936", width=available, bold=True)
+        url = window.get("url", "")
+        search_home = url == "https://www.google.com/"
+        search_results = url.startswith("https://www.google.com/search?q=")
+        if search_home or search_results:
+            bar_width = min(435, available)
+            sx = x + (w - bar_width) / 2 if search_home else left
+            label("Google", x + w / 2 - 54 if search_home else sx, top, 32 if search_home else 24,
+                  "#4285f4", width=available, bold=True)
+            self.fill("#e4edf8", sx, top + 38, bar_width, 29, 14)
+            label("⌕  " + ("Введите запрос в адресной строке" if search_home else body),
+                  sx + 12, top + 45, 12, "#234975", width=bar_width - 24)
+            body = ""
+            top += 34
+        else:
+            label(tab.get("title", "Новая вкладка"), left, top, (26 if purple else 23) * scale,
+                  "#211834" if purple else "#222936", width=available, bold=True)
+            if url == "https://github.com/veitnemed/touch_typing":
+                label("Code   ·   Issues   ·   README", left, top + 31, 11, "#205496", width=available)
+                top += 10
         body_field = dict(window, cursor=window.get("bodyCursor", 0), anchor=window.get("bodyAnchor", 0))
         offset = 0
         top += (42 if purple else 45) * scale
@@ -775,6 +796,9 @@ class DesktopView(Gtk.Widget):
             self.fill("#303134", x + max(10, w - 300), y + 64, min(290, w - 20), 38, 5)
             label({"find": "Поиск", "downloads": "Загрузки", "history": "История", "bookmarks": "Закладки"}.get(window["focus"], "")
                        + "  " + window.get("input", ""), x + max(20, w - 290), y + 74, 11, width=min(270, w - 40))
+        if window.get("browserPractice") and window.get("status", "").startswith("Сохранено в закладки"):
+            self.fill("#e5edf8", x, y + h - 24, w, 24)
+            label(window["status"], x + 9, y + h - 19, 11, "#284571", width=w - 18)
 
     def python_file_icon(self, x, y):
         """Two-tone Python badge at the Explorer's file-icon size."""
@@ -967,14 +991,14 @@ class DesktopView(Gtk.Widget):
                 self.field(window.get("input", ""), window, px + 12, py + 30, pw - 24, 13, "#eef1f8")
                 tip = "Enter — переименовать   Esc — отменить"
             self.label(tip, px + 12, py + 55 + visible * 25, 10, "#b4bfcd", width=pw - 24)
-        elif focus in ("palette", "quick-open", "symbols", "find", "replace-find", "replace-with", "project-search", "goto-line"):
-            titles = {"palette": "Палитра команд", "quick-open": "Открыть файл", "symbols": "Символы файла",
+        elif focus in ("palette", "clone-url", "quick-open", "symbols", "find", "replace-find", "replace-with", "project-search", "goto-line"):
+            titles = {"palette": "Палитра команд", "clone-url": "Git: Clone · HTTPS-ссылка (учебная копия)", "quick-open": "Открыть файл", "symbols": "Символы файла",
                       "find": "Найти", "replace-find": "Найти для замены", "replace-with": "Заменить на",
                       "project-search": "Поиск по проекту", "goto-line": "Перейти к строке"}
             px, pw = x + w * .17, w * .66
             choices = [e["title"] for e in window.get("entries", [])] if focus in ("quick-open", "symbols") else []
             if focus == "palette":
-                choices = ["Форматировать документ", "Переключить боковую панель", "Разделить редактор"]
+                choices = ["Git: Clone"] if window.get("browserPractice") else ["Форматировать документ", "Переключить боковую панель", "Разделить редактор"]
             selected = window.get("optionIndex", 0)
             visible = min(6, len(choices), max(1, int((h - 72) / 25)))
             first = max(0, selected - visible + 1)

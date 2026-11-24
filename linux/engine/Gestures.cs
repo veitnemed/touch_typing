@@ -38,6 +38,19 @@ internal sealed record KeyChord(string[] Modifiers, string Trigger)
     internal static bool IsModifier(string key) => ModifierFamilies.ContainsKey(key);
     internal static bool Fits(string requested, string actual) => requested == actual || requested == Family(actual);
 
+    // Physical keypad positions remain distinct from the digit row. A
+    // navigation exercise may explicitly accept the same key's secondary
+    // legend, regardless of how Num Lock was delivered by the platform.
+    internal bool AcceptsNavigationKeypad(string physicalKey, IEnumerable<string> held) =>
+        Trigger != null && Trigger == (physicalKey switch
+        {
+            "NumPad7" => "Home", "NumPad1" => "End", "NumPad9" => "PageUp",
+            "NumPad3" => "PageDown", "NumPad8" => "Up", "NumPad2" => "Down",
+            "NumPad4" => "Left", "NumPad6" => "Right", "NumPad0" => "Insert",
+            "NumDecimal" => "Delete", _ => null
+        }) && FitsModifiers(held);
+
+
     internal static bool TryParse(string value, out KeyChord chord)
     {
         chord = null;

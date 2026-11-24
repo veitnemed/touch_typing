@@ -41,6 +41,17 @@ internal static partial class LiveCourse
     {
         void Add(int level, string id, string title, params string[] parts) =>
             list.Add(new("chrome", level, "chrome-" + id, title, parts.Select(p => BrowserParts[p]).ToArray()));
+        list.Add(new("chrome", 0, "chrome-search-clone", "Найти репозиторий и открыть учебную копию",
+            [
+                new("Найдите исходники тренажёра в учебном Google",
+                    "url browser-search pick:" + LabScene.SearchDecoy + " link-open back pick:" + LabScene.RepositoryPage + " link-open"),
+                new("Сохраните репозиторий и откройте его из закладок",
+                    "bookmark new-tab escape bookmark-manager pick:" + LabScene.RepositoryPage + " link-open"),
+                new("Перенесите ссылку из Chrome в VS Code",
+                    "url copy open-code palette code-clone-command paste code-clone-confirm"),
+                new("Проверьте, что README.md открыт из учебной копии",
+                    "quick-open quick:README.md quick-choose")
+            ], FinishAfterRoute: true, Curated: true, Prepare: scene => scene.PrepareBrowserPractice()));
         Add(0, "reader", "Подготовить справочник к чтению", "reference","method","download","present","organize");
         Add(0, "sources", "Собрать адреса первоисточников", "repo","reference","method","docs","compare");
         Add(0, "return", "Восстановить потерянный материал", "method","restore","history","download","organize");

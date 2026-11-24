@@ -275,6 +275,12 @@ internal static class TerminalRegression
         Check(equivalent.MatchesCommand("  echo   'training'  ", "echo training"), "Whitespace and quoting equivalent");
         Check(equivalent.MatchesCommand("cat /home/student/project/README.md", "cat ~/project/README.md"), "Absolute file spelling equivalent");
         Check(equivalent.Cwd == "/home/student" && equivalent.Version == 0 && equivalent.History.Length == 1, "Equivalence check does not mutate workspace/history");
+        equivalent.Execute("pwd");
+        equivalent.Execute("clear");
+        Check(equivalent.History.Length == 0, "clear removes scrollback only");
+        var restoredHistory = equivalent.Execute("history");
+        Check(restoredHistory.Success && restoredHistory.Output.Any(line => line.EndsWith("  pwd")) &&
+            restoredHistory.Output.Any(line => line.EndsWith("  clear")), "history survives screen clearing");
         Check(!equivalent.MatchesCommand("cd /tmp", "cd ~/project"), "Different destination rejected");
         Check(!equivalent.MatchesCommand("echo /home/student", "pwd"), "Matching output does not replace learned command family");
         Check(!equivalent.MatchesCommand("touch first", "touch second"), "Different file effect rejected");

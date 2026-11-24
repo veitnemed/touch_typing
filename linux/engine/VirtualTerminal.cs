@@ -17,6 +17,7 @@ internal sealed class VirtualTerminal
     private readonly Dictionary<string, string> modes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> owners = new(StringComparer.Ordinal);
     private readonly List<string> history = [];
+    private readonly List<string> commandHistory = [];
     private readonly Dictionary<string, Func<VirtualTerminal, string>> lessonUnitTests = new(StringComparer.Ordinal);
     private readonly HashSet<string> packages = new(StringComparer.Ordinal) { "bash", "coreutils" };
     private readonly Dictionary<int, string> processes = new() { [1] = "systemd", [120] = "bash", [245] = "python3 worker.py" };
@@ -203,6 +204,7 @@ internal sealed class VirtualTerminal
         foreach (var pair in branchLogs) copy.branchLogs[pair.Key] = new(pair.Value);
         foreach (var pair in lessonUnitTests) copy.lessonUnitTests[pair.Key] = pair.Value;
         copy.history.Clear(); copy.history.AddRange(history);
+        copy.commandHistory.AddRange(commandHistory);
         return copy;
     }
 
@@ -223,6 +225,11 @@ internal sealed class VirtualTerminal
         {
             LastSuccess = true;
             return new(true, []);
+        }
+        if (command.Length <= 32768 && !command.Contains('\0'))
+        {
+            commandHistory.Add(command);
+            if (commandHistory.Count > 160) commandHistory.RemoveAt(0);
         }
         try
         {
@@ -350,7 +357,7 @@ internal sealed class VirtualTerminal
                 bool newline = args.Length == 0 || args[0] != "-n";
                 return string.Join(" ", newline ? args : args[1..]) + (newline ? "\n" : "");
             case "clear": NoArgs(command, args); history.Clear(); return "";
-            case "history": NoArgs(command, args); return string.Join("\n", history.Where(line => line.StartsWith("student@ubuntu:"))) + "\n";
+            case "history": NoArgs(command, args); return string.Join("\n", commandHistory.Select((line, index) => $"{index + 1}  {line}")) + "\n";
             case "chmod": return Chmod(args);
             case "chown":
                 if (!elevated) throw Error("chown", "операция требует sudo");

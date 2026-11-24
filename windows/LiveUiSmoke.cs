@@ -22,6 +22,7 @@ internal static class LiveUiSmoke
     private static int count;
     private static string evidenceDirectory;
     private static Size? expectedCodeClient;
+    private static bool? originalNumLock;
 
     [STAThread]
     private static int Main(string[] arguments)
@@ -32,13 +33,15 @@ internal static class LiveUiSmoke
             bool liveUxSmall = arguments.Contains("--live-ux-small");
             bool liveUx = liveUxSmall || arguments.Contains("--live-ux");
             bool referenceBrowser = arguments.Contains("--reference-browser");
+            bool browserClone = arguments.Contains("--browser-clone");
+            string numLockMode = arguments.Contains("--workday-numlock-on") ? "on" : arguments.Contains("--workday-numlock-off") ? "off" : "";
             bool dailyUse = arguments.Contains("--daily-use");
             bool gnomeProfile = arguments.Contains("--gnome-profile");
             bool debugDay = arguments.Contains("--debug-day");
             bool codeTheme = arguments.Contains("--code-theme");
             bool pythonEditor = arguments.Contains("--python-editor");
             bool nativeLayout = arguments.Contains("--native-layout");
-            bool referenceEvidence = liveUx || nativeLayout || referenceBrowser || dailyUse || gnomeProfile || debugDay || codeTheme || pythonEditor || arguments.Contains("--reference-evidence");
+            bool referenceEvidence = liveUx || nativeLayout || referenceBrowser || browserClone || numLockMode.Length > 0 || dailyUse || gnomeProfile || debugDay || codeTheme || pythonEditor || arguments.Contains("--reference-evidence");
             if (referenceEvidence && SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
                 throw new InvalidOperationException("Per-monitor-aware evidence capture cannot be enabled.");
             string path = Path.GetFullPath(arguments[0]);
@@ -49,8 +52,9 @@ internal static class LiveUiSmoke
             if (arguments.Contains("--soft-finish"))
                 Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_SOFT_FINISH_SECONDS", "7");
             Console.WriteLine("UI test seed " + Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"));
-            Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_NAV_TRACE", gnomeProfile ? "workspace" :
-                referenceEvidence && !nativeLayout && !referenceBrowser && !dailyUse && !debugDay && !codeTheme && !pythonEditor ? "terminal" : null);
+            Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_NAV_TRACE", gnomeProfile ? "workspace" : numLockMode.Length > 0 ? "workday-keypad" :
+                referenceEvidence && !nativeLayout && !referenceBrowser && !dailyUse && !debugDay && !codeTheme && !pythonEditor && !browserClone ? "terminal" : null);
+            Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_BROWSER_CLONE", browserClone ? "1" : null);
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_PYTHON_EDITOR", pythonEditor ? "1" : null);
             app = Process.Start(new ProcessStartInfo(path, "--qa --live") { WorkingDirectory = Path.GetDirectoryName(path) });
             Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "trainer window", 12000);
@@ -106,6 +110,12 @@ internal static class LiveUiSmoke
                 Console.WriteLine("PASS: " + count + " native WPF layout assertions");
                 return 0;
             }
+            if (browserClone)
+            {
+                CheckBrowserClone();
+                Console.WriteLine("PASS: " + count + " WPF Chrome search, bookmark and offline VS Code clone checks");
+                return 0;
+            }
             if (referenceBrowser)
             {
                 CheckReferenceBrowser();
@@ -114,7 +124,7 @@ internal static class LiveUiSmoke
             }
             if (arguments.Contains("--workday-source-note"))
             {
-                CheckWorkdaySourceNote();
+                CheckWorkdaySourceNote(numLockMode);
                 Console.WriteLine("PASS: " + count + " native WPF Workday source-note assertions");
                 return 0;
             }
@@ -285,7 +295,20 @@ internal static class LiveUiSmoke
         }
         finally
         {
-            if (focusProbe != IntPtr.Zero) DestroyWindow(focusProbe);
+            if (focusProbe != IntPtr.Zero)
+            {
+                if (originalNumLock.HasValue && app != null && !app.HasExited)
+                {
+                    try
+                    {
+                        SetForegroundWindow(focusProbe);
+                        Until(delegate { return GetForegroundWindow() == focusProbe; }, "owned Num Lock restoration probe");
+                        SetProbeNumLock(originalNumLock.Value);
+                    }
+                    catch (Exception error) { Console.Error.WriteLine("Unable to restore runner Num Lock: " + error.Message); }
+                }
+                DestroyWindow(focusProbe);
+            }
             if (app != null)
             {
                 try { if (!app.HasExited) app.Kill(); }
@@ -355,11 +378,7 @@ internal static class LiveUiSmoke
         Until(delegate { return Visible("LabDesktop") && Exists("LabTask") && ReadSolved() == 0; },
             "Enter on one card loads a real first task");
         Check(!Exists("LabMission") && !Visible("LiveAidPanel"), "First task has no chooser or default keyboard or hands");
-        var task = Find("LabTask").Current.BoundingRectangle;
-        var keys = Find("LabKeys").Current.BoundingRectangle;
-        Check(task.Width > 0 && keys.Width > 0 && task.Right <= keys.Left + 1 &&
-            Math.Abs((task.Top + task.Height / 2) - (keys.Top + keys.Height / 2)) < 5,
-            "Guided instruction and keycaps share the same compact row, with the keycaps on the right");
+        CheckVerticalPrompt();
         CaptureLiveUxFrame("live-ux-03-active-lesson");
         Key("F4");
         Until(delegate { return Visible("LiveAidPanel") && Find("LiveAidPanel").Current.ItemStatus == "keyboard;no-hands"; },
@@ -578,8 +597,7 @@ internal static class LiveUiSmoke
         var range = (RangeValuePattern)Find("LabScenarioProgress").GetCurrentPattern(RangeValuePattern.Pattern);
         Check(range.Current.Value == 0 && range.Current.Maximum > 2,
             "A newly opened browser route has no completed goals");
-        Check(Find("LabTask").Current.BoundingRectangle.Right <= Find("LabKeys").Current.BoundingRectangle.Left + 1,
-            "Task and shortcut do not overlap; shortcut sits at the right");
+        CheckVerticalPrompt();
         CaptureReferenceFrame("07-chrome-python-docs-before-ctrl-l");
         RecordLessonChrome("browser-reference");
         Chord("Ctrl+L");
@@ -620,7 +638,129 @@ internal static class LiveUiSmoke
         }
     }
 
-    private static void CheckWorkdaySourceNote()
+    private static void CheckVerticalPrompt()
+    {
+        var task = Find("LabTask").Current.BoundingRectangle;
+        var keys = Find("LabKeys").Current.BoundingRectangle;
+        Check(task.Width > 0 && keys.Width > 0 && task.Bottom <= keys.Top + 1 &&
+            Math.Abs((task.Left + task.Width / 2) - (keys.Left + keys.Width / 2)) < 5,
+            "Keycaps are below the instruction, with the two rows horizontally centered.");
+    }
+
+    private static string[] BrowserWitness(string id)
+    {
+        var values = Find(id).Current.ItemType.Split('|');
+        Check(values.Length == 9, "Actual scene reports browser/clone state");
+        return values;
+    }
+
+    private static void CheckBrowserClone()
+    {
+        const string repo = "https://github.com/veitnemed/touch_typing";
+        const string decoy = "https://practice.local/tutorials/touch-typing";
+        uint owner;
+        uint thread = GetWindowThreadProcessId(trainer, out owner);
+        Check(owner == (uint)app.Id, "Set language only on the owned WPF lesson");
+        SetNativeLessonLayout(thread, "00000409", 0x0409);
+        OpenLiveConfiguration("chrome");
+        Select("LabMode", 1); Select("LabLevel", 0); Select("LabDuration", 0); Select("LabTimer", 0);
+        SelectMissionByName("Найти репозиторий и открыть учебную копию");
+        Key("F5");
+        Until(delegate { return Visible("LabTask") && Visible("LabDesktop"); }, "new standalone Chrome practice");
+        CheckVerticalPrompt();
+        Check(BrowserWitness("LabDesktop")[1] == "https://www.google.com/", "Authored Google home is visible");
+        CaptureReferenceFrame("browser-clone-01-google");
+        bool indexed = false, back = false, bookmarked = false, reopened = false, copied = false, pasted = false, cloned = false;
+        string search = null;
+        int solved = 0;
+        while (!Visible("LabResult") && solved < 35)
+        {
+            string instruction = Find("LabTask").Current.ItemStatus;
+            Check(ReadSolved() == solved, "Each action earns one credit");
+            if (instruction.StartsWith("text:", StringComparison.Ordinal))
+            {
+                EnterCharacters(instruction.Substring(5)); Key("Enter");
+            }
+            else
+            {
+                Check(instruction.StartsWith("keys:", StringComparison.Ordinal), "Lesson exposes physical chord");
+                string keys = instruction.Substring(5);
+                int tries = keys == "Tab" || keys == "Down" ? 10 : 1;
+                for (int attempt = 0; attempt < tries; attempt++)
+                {
+                    Chord(keys);
+                    if (Visible("LabResult") || ReadSolved() > solved) break;
+                }
+            }
+            int completed = solved + 1;
+            Until(delegate { return Visible("LabResult") || ReadSolved() == completed; }, "credit for " + instruction);
+            solved = completed;
+            if (Visible("LabResult")) break;
+            var scene = BrowserWitness("LabDesktop");
+            if (!indexed && scene[1].StartsWith("https://www.google.com/search?q=", StringComparison.Ordinal))
+            {
+                search = scene[1];
+                Check(scene[6].Contains(repo) && scene[6].Contains(decoy), "Query-specific results include the target and distractor");
+                indexed = true;
+                CaptureReferenceFrame("browser-clone-02-results");
+            }
+            if (instruction == "keys:Alt+Left")
+            {
+                Check(scene[1] == search && scene[8] == "0", "Back restores the prior precise query and selected result");
+                back = true;
+            }
+            if (instruction == "keys:Ctrl+D")
+            {
+                Check(scene[1] == repo && scene[7].Split(';').Contains(repo), "Actual repository is saved to bookmark store");
+                bookmarked = true;
+                CaptureReferenceFrame("browser-clone-03-bookmarked");
+            }
+            if (instruction == "keys:Ctrl+Shift+O")
+            {
+                Check(scene[1] == "chrome://bookmarks" && scene[6].Split(';').Contains(repo), "Bookmark manager lists saved repository");
+                CaptureReferenceFrame("browser-clone-04-bookmarks");
+            }
+            if (bookmarked && instruction == "keys:Enter" && scene[1] == repo)
+                reopened = true;
+            if (instruction == "keys:Ctrl+C")
+            {
+                Check(reopened && scene[4] == repo, "Reopened bookmark is copied as the original HTTPS URL");
+                copied = true;
+            }
+            if (instruction == "keys:Ctrl+V")
+            {
+                Check(copied && scene[0] == "code" && scene[2] == "clone-url" && scene[3] == repo, "Paste gives simulated Git: Clone the actual clipboard URL");
+                pasted = true;
+                CaptureReferenceFrame("browser-clone-05-clone-url");
+            }
+            if (scene[5] == "touch_typing" && !cloned)
+            {
+                Check(pasted, "Explorer displays the local copy only after the URL was pasted");
+                cloned = true;
+                CaptureReferenceFrame("browser-clone-06-project");
+            }
+        }
+        Check(indexed && back && bookmarked && reopened && copied && pasted && cloned, "All cross-app browser route stages observed");
+        var result = BrowserWitness("LabResult");
+        Check(result[1] == "/home/student/projects/touch_typing/README.md" && Name("LabResult").Length > 0 &&
+            Find("LabResult").Current.HelpText.Contains("Ошибки 0."), "Full route finishes at the virtual clone's README without errors");
+        CaptureReferenceFrame("browser-clone-07-result");
+    }
+
+    private static bool ProbeNumLock() { return (GetKeyState(0x90) & 1) != 0; }
+    private static void SetProbeNumLock(bool enabled)
+    {
+        Check(GetForegroundWindow() == focusProbe, "Num Lock changes occur only in the owned QA probe.");
+        if (ProbeNumLock() != enabled)
+        {
+            var key = Parse("NumLock").Single();
+            SendTo(focusProbe, new[] { key.Down(), key.Up() });
+        }
+        Until(delegate { return ProbeNumLock() == enabled; }, "Windows Num Lock state " + enabled);
+        Console.WriteLine("NUMLOCK=" + (enabled ? "ON" : "OFF"));
+    }
+
+    private static void CheckWorkdaySourceNote(string numLockMode)
     {
         string qaRoot = Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT");
         Check(!string.IsNullOrEmpty(qaRoot) && Path.IsPathRooted(qaRoot), "Use an explicit disposable QA profile");
@@ -637,10 +777,10 @@ internal static class LiveUiSmoke
         Until(delegate { return Exists("LabTask") && Exists("LabDesktop") && Name("LabPause").StartsWith("Пауза"); },
             "active standalone Workday source-note project");
 
-        var number = Regex.Match(Name("LabKeys"), @"шаг 1/([0-9]+)");
-        Check(number.Success, "The new project shows the full task count");
-        int total = int.Parse(number.Groups[1].Value);
-        Check(total == 25 || total == 26, "The exact route has 25 steps and at most one initial layout correction");
+        var range = (RangeValuePattern)Find("LabScenarioProgress").GetCurrentPattern(RangeValuePattern.Pattern);
+        int total = (int)range.Current.Maximum;
+        Check(total >= 20 && total <= 35, "Scenario exposes its full actionable route size");
+        bool testedKeypad = false;
         Check(Find("LabTask").Current.ItemType.Contains("Перенести методику из браузера в заметку"), "The selected project uses the correct route");
 
         bool foundSource = false, copied = false, pasted = false, saved = false, reopened = false, submitted = false;
@@ -651,7 +791,8 @@ internal static class LiveUiSmoke
             string title = task.Current.Name, instruction = task.Current.ItemStatus;
             Console.WriteLine("WORKDAY TASK " + step + " " + title + " | " + instruction);
             string activeBefore = Name("LabDesktop");
-            if (title == "Откройте «Методика расчёта спектра»")
+            bool opensSource = title == "Откройте «Методика расчёта спектра»" || title == "Откройте «Как вести список задач»";
+            if (opensSource)
                 Check(activeBefore.Contains("Chrome."), "The simulated browser is active before opening the source");
 
             int before = step - 1;
@@ -660,7 +801,16 @@ internal static class LiveUiSmoke
             if (instruction.StartsWith("keys:", StringComparison.Ordinal) && instruction.Length > 5)
             {
                 string gesture = instruction.Substring(5);
-                var scan = Parse(gesture);
+                bool keypad = gesture == "Alt+Home" && numLockMode.Length > 0;
+                if (keypad)
+                {
+                    CheckFocusLoss(delegate
+                    {
+                        if (!originalNumLock.HasValue) originalNumLock = ProbeNumLock();
+                        SetProbeNumLock(numLockMode == "on");
+                    });
+                }
+                var scan = Parse(keypad ? "Alt+NumPad7" : gesture);
                 var input = scan.Select(k => k.Down()).Concat(scan.Reverse().Select(k => k.Up())).ToArray();
                 int tries = gesture == "Tab" || gesture == "Down" ? 24 : 1;
                 for (int attempt = 0; attempt < tries; attempt++)
@@ -670,7 +820,17 @@ internal static class LiveUiSmoke
                     if (ReadSolved() > before) break;
                 }
                 Until(delegate { return ReadSolved() > before; }, "native " + gesture + " credit at step " + step);
-                if (title == "Откройте «Методика расчёта спектра»") foundSource = true;
+                if (keypad)
+                {
+                    string trace = Find("LabStatus").Current.ItemStatus;
+                    Console.WriteLine("WORKDAY KEYPAD NumLock=" + numLockMode + " " + trace);
+                    Check(trace.Contains("scan=47") && trace.Contains("extended=False") && trace.Contains("LAlt"),
+                        "Workday credit came from nonextended keypad scan 0x47 with actual Alt held");
+                    Check(ReadSolved() == before + 1, "Keypad Alt+7 credits exactly one Alt+Home action");
+                    testedKeypad = true;
+                    CaptureReferenceFrame("workday-keypad-numlock-" + numLockMode);
+                }
+                if (opensSource) foundSource = true;
                 if (gesture == "Ctrl+C")
                 {
                     Check(foundSource && activeBefore.Contains("Chrome."), "Ctrl+C copies from the opened browser document");
@@ -716,6 +876,7 @@ internal static class LiveUiSmoke
             }
             else throw new InvalidOperationException("Missing native input for Workday: " + title + " [" + instruction + "]");
         }
+        Check(numLockMode.Length == 0 || testedKeypad, "This Workday route actually exercised the keypad witness");
         Check(foundSource && copied && pasted && saved && reopened && submitted, "Browser, clipboard, editor, files and terminal all performed their part");
         string summary = Find("LabResult").Current.HelpText;
         Check(summary.Contains("Выполнено " + total + ".") && summary.Contains("Ошибки 0.") && summary.Contains("Цель занятия выполнена"),
@@ -2109,6 +2270,8 @@ internal static class LiveUiSmoke
                 case "PageUp": return new Stroke(0x49, true);
                 case "PageDown": return new Stroke(0x51, true);
                 case "Home": return new Stroke(0x47, true);
+                case "NumPad7": return new Stroke(0x47, false);
+                case "NumLock": return new Stroke(0x45, true);
                 case "End": return new Stroke(0x4f, true);
             }
             int number;
@@ -2204,6 +2367,7 @@ internal static class LiveUiSmoke
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] private static extern IntPtr GetKeyboardLayout(uint thread);
+    [DllImport("user32.dll")] private static extern short GetKeyState(int virtualKey);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr LoadKeyboardLayout(string layout, uint flags);
     [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr w, IntPtr l);

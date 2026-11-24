@@ -50,3 +50,17 @@
 - Since preview.4, the standalone module-title strip is intentionally absent during a lesson. Reclaim that height for the work surface; keep the goal, shortcut, accessible progress and scenario name, and lower controls. Home and the catalog keep their own navigation. This is an explicit exception to the practice-header landmark above.
 - In the editor, selecting a line break paints one cell after the last glyph of that row. A selection ending before the line break paints no such cell. Reversing the same selection changes the active caret end, not which characters are selected. Don't add a fake marker at end of file.
 - Check the editor as two layers: the engine's selection/replacement/clipboard offsets and the rendered visible range. The GTK selection-render check and WPF `--check-live-render` use controlled multiline states with Cyrillic, a combining mark and an emoji. LF/CRLF in those render fixtures validates drawing, not the Live editor's ability to import CRLF. Snapshot checks do not substitute for actual keyboard input, compositor behavior or client Windows DPI testing.
+
+## Preview 2: ввод, понятные результаты и разные маршруты
+
+- В активном Live задание в центре, сочетание акцентными клавишами сразу под ним.
+  Без подсказки в самостоятельном режиме ответ не показывается. Строка «шаг N из M» не возвращается.
+- На каталоге Live рядом видны «Ubuntu» и «Windows 10», это учебная система, а не выбор компьютера.
+- Быстрый старт предлагает наименее недавно практиковавшееся поручение подходящего уровня;
+  «Продолжить» и явный выбор поручения не подменяются.
+- Короткие задачи терминала знакомят с командами без аргументов и показывают, что изменилось.
+  Старые поручения и сохранения остаются доступны из «Настроить».
+- В Chrome пройти учебную выдачу, открыть другой результат, вернуться назад, сохранить нужную
+  страницу, открыть её именно из закладок, скопировать адрес и найти README учебного клона в VS Code.
+  Выдача и клонирование работают без сети, настоящие файлы за пределами симуляции не затрагиваются.
+- Доказательства и ограничения аудита клавиш: [LIVE_SHORTCUT_AUDIT.md](LIVE_SHORTCUT_AUDIT.md).

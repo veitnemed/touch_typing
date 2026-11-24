@@ -27,6 +27,28 @@ internal static partial class LiveCourse
     };
     private static void TerminalMissions(List<LiveMission> list)
     {
+        void Essentials(int level, string id, string title, params LivePhase[] phases) =>
+            list.Add(new("terminal", level, "terminal-essentials-" + id, title, phases,
+                FinishAfterRoute: true, Curated: true));
+        Essentials(0, "locate", "Где я и что лежит рядом?",
+            ShellPhase("Определите путь: pwd печатает текущую папку, ls показывает её содержимое", "pwd", "ls"),
+            ShellPhase("Вернитесь домой: cd без аргументов меняет папку, pwd проверяет результат", "cd", "pwd", "ls"),
+            ShellPhase("Узнайте пользователя и очистите экран, не затрагивая файлы", "whoami", "clear"));
+        Essentials(0, "inspect", "Кто запустил программу и что работает?",
+            ShellPhase("Сравните имя пользователя и его идентификатор", "whoami", "id"),
+            ShellPhase("Проверьте систему и список учебных процессов", "uname", "ps"),
+            ShellPhase("Откройте историю и очистите вывод", "history", "clear"));
+        Essentials(0, "restart", "Проверка системы после перезапуска",
+            ShellPhase("Запишите мысленно текущий путь и посмотрите процессы", "pwd", "ps"),
+            ShellPhase("Перезапустите только симуляцию и проверьте, где оказалось приглашение", "reboot", "pwd", "ls"),
+            ShellPhase("Убедитесь, что имя пользователя осталось прежним", "whoami"));
+        Essentials(1, "session", "Сравнить команду, вывод и историю",
+            ShellPhase("Проверьте пользователя и среду", "whoami", "id", "uname"),
+            ShellPhase("Посмотрите, что было выполнено, затем отделите старый вывод от нового", "history", "clear", "pwd", "ls"));
+        Essentials(2, "support", "Быстрая диагностика учебной системы",
+            ShellPhase("Снимите состояние до перезапуска: пользователь, система, процессы", "id", "uname", "ps"),
+            ShellPhase("Перезапустите симуляцию и сравните путь и список процессов", "reboot", "pwd", "ps"),
+            ShellPhase("Проверьте историю этой сессии", "history", "ls"));
         void Add(int level, string id, string title, params string[] parts) =>
             list.Add(new("terminal", level, "terminal-" + id, title, parts.Select(p => ShellParts[p]).ToArray()));
         Add(0,"explore","Разобраться в незнакомом проекте","inspect","history","find","notes");

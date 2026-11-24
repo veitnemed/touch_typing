@@ -42,6 +42,8 @@ internal static class LabCatalog
         T("debug-report-end", "Перейдите в конец учебного отчёта", "Ctrl+End", "debug-report-end"),
         T("screenshot-confirm", "Подтвердите снимок экрана", "Enter", "screenshot-confirm"),
         T("copy-shot", "Скопируйте учебный снимок", "Ctrl+C", "copy-shot"),
+        T("code-clone-command", "Выполните Git: Clone", "Enter", "code-clone-command"),
+        T("code-clone-confirm", "Подтвердите HTTPS-ссылку", "Enter", "code-clone-confirm"),
         T("code-definition", "Перейдите к определению функции", "F12", "code-definition"),
         T("code-back", "Вернитесь к исходному вызову", "Ctrl+Alt+-", "code-back"),
         T("code-references", "Покажите использования функции", "Shift+F12", "code-references"),
@@ -250,6 +252,8 @@ internal static class LabCatalog
         bool terminal = window != null && (window.App == "terminal" || window.Focus == "terminal");
         return task.Id switch
         {
+            "code-clone-command" => scene.BrowserPracticeActive && window?.Focus == "palette" && window.Input.Trim().Equals("Git: Clone", StringComparison.OrdinalIgnoreCase),
+            "code-clone-confirm" => scene.BrowserPracticeActive && window?.Focus == "clone-url",
             "code-problem-next" or "code-fix-open" or "code-fix-next" or "code-fix-prev" or
             "code-fix-apply" or "code-fix-cancel" => scene.DiagnosticActionAvailable(task.Action),
             "document-start" or "move-line-up" or "move-line-down" or "occurrence" => window?.App == "code" && window.Focus == "body",
@@ -364,7 +368,7 @@ internal static class LabCatalog
             if (alias != null)
             {
                 var task = Shortcuts.FirstOrDefault(task => task.Id == alias && Available(task, scene));
-                return task != null && alias == "url" ? task with { Keys = "Alt+D" } : task;
+                return task == null ? null : task with { Keys = alias == "url" ? "Alt+D" : "Ctrl+" + key };
             }
         }
         var ordered = Shortcuts.Select(scene.WithBinding).Where(task => task.Keys.Length > 0).Where(task => task.Id != "copy-shot" || scene.ScreenshotReady && !scene.ScreenshotCopied)

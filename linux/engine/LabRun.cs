@@ -24,6 +24,8 @@ internal sealed class LabRun
     private const string ClusterNavigationEvent = "@cluster-navigation";
     private const string LineEditingEvent = "@line-editing";
     private const string PythonEditingEvent = "@python-editing";
+    private const string StrictTriggersEvent = "@strict-triggers";
+    private bool replayLegacyTriggers;
     private bool replayLegacyLineEditing, replayLegacyPythonEditing;
     private readonly bool neutralProject, nativeEnglishInput;
     private int variant;
@@ -31,7 +33,7 @@ internal sealed class LabRun
     private bool initialVirtual;
     internal bool HasDraft => !CompletedRoute && !limitAccepted && (!ReachedLimit || softFinish || FinishingMission) &&
         (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 ||
-        trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent)));
+        trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or StrictTriggersEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask, inputAtActiveMilliseconds;
@@ -139,7 +141,8 @@ internal sealed class LabRun
         // New traces begin with format markers. Old ones acquire the line
         // marker only after the historic keystrokes have been replayed.
         var initialFormat = savedEvents.TakeWhile(e => e.Key is
-            ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent);
+            ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent or StrictTriggersEvent);
+        replayLegacyTriggers = draft != null;
         replayLegacyLineEditing = draft != null && !initialFormat.Any(e => e.Key == LineEditingEvent);
         replayLegacyPythonEditing = draft != null && !initialFormat.Any(e => e.Key == PythonEditingEvent);
         Scene = new LabScene(SceneApp, draft?.Layout ?? layout, this.neutralProject) { LayoutKey = layoutKey, LayoutIsVirtual = draft?.VirtualLayout ?? false };
@@ -160,6 +163,7 @@ internal sealed class LabRun
                 else if (e.Key == ClusterNavigationEvent) EndLegacyNavigation(e);
                 else if (e.Key == LineEditingEvent) EndLegacyLineEditing(e);
                 else if (e.Key == PythonEditingEvent) EndLegacyPythonEditing(e);
+                else if (e.Key == StrictTriggersEvent) { replayLegacyTriggers = false; trace.Add(e); }
                 else Input(e.Key, e.Down, e.Text, e.NativeEnglish ? "EN" : "");
             }
             if (replayLegacyUrl) trace.Add(new(ExactUrlEvent));
@@ -167,6 +171,7 @@ internal sealed class LabRun
             if (replayLegacyNavigation) EndLegacyNavigation(new(ClusterNavigationEvent));
             if (replayLegacyLineEditing) EndLegacyLineEditing(new(LineEditingEvent));
             if (replayLegacyPythonEditing) EndLegacyPythonEditing(new(PythonEditingEvent));
+            if (replayLegacyTriggers) { replayLegacyTriggers = false; trace.Add(new(StrictTriggersEvent)); }
             replayLegacyUrl = replayLegacyReport = false;
             Pause();
             // Trace describes the current mission, not the whole attempt. Its
@@ -344,6 +349,19 @@ internal sealed class LabRun
         if (Task.Id == "gnome-left-super" && key == "Z")
             return Miss(key, "Это клавиша Z (Я). Левый Super ⊞ находится ниже, левее Alt.");
         Watch();
+        // Keep the physical key in held and trace for release, repeats and
+        // saved-draft replay. Interpret its secondary legend only for a
+        // navigation goal eligible in the current scene.
+        var keypadGoal = replayLegacyTriggers ? null : watching?.Select(item => item.Goal.Task).FirstOrDefault(goal =>
+            Gesture.TryParse(goal.Keys, out var gesture) && gesture.Chords.Length == 1 &&
+            gesture.Chords[0].AcceptsNavigationKeypad(key, held));
+        if (keypadGoal != null && Gesture.TryParse(keypadGoal.Keys, out var keypadGesture))
+        {
+            key = keypadGesture.Chords[0].Trigger;
+            text = "";
+        }
+        // Lock toggles affect the physical keyboard, not progress in a lesson.
+        if (key is "NumLock" or "CapsLock" or "ScrollLock") return null;
         var pythonEdit = LiveCourse.ResolvePythonEdit(key, held, Scene);
         if (pythonEdit != null) return Perform(pythonEdit, key);
         var actual = Scene.Overview && !commandModifiers && key != "Esc" ? null : LabCatalog.Resolve(key, held, Scene);
@@ -397,6 +415,8 @@ internal sealed class LabRun
         return Task.Action switch
         {
             "command" => window.App == "terminal" || window.Focus is "terminal" or "reverse-search",
+            "navigate-pasted" => Scene.BrowserPracticeActive && Task.Text.Length > 0 && window.Focus == "url",
+            "code-clone-command" => Scene.BrowserPracticeActive && window.Focus == "palette",
             "python-edit-write" or "gnome-write" or "debug-rewrite" => window.App == "code" && window.Focus == "body",
             "debug-doc-submit" => window.App == "chrome" && window.Focus == "find",
             "project-search-submit" => window.Focus == "project-search",
@@ -442,6 +462,11 @@ internal sealed class LabRun
             }
             // Alt+D mirrors the browser behavior but does not demonstrate
             // the requested physical Ctrl+L shortcut.
+            if (!replayLegacyTriggers && actual.Id is ("next-tab" or "prev-tab") && actual.Keys is ("Ctrl+PageUp" or "Ctrl+PageDown"))
+            {
+                if (Task.Id == actual.Id) return Miss(key, "Вкладка изменилась. Это задание проверяет " + Task.Keys + ".");
+                return null;
+            }
             if (!replayLegacyUrl && actual.Id == "url" && actual.Keys == "Alt+D")
             {
                 if (Task.Id == "url") return Miss(key, "Адрес выделен. Это задание проверяет Ctrl+L.");
@@ -501,7 +526,20 @@ internal sealed class LabRun
         }
         var attempt = Record(true, key);
         Solved++; taskInBlock++;
-        string result = Task.Title + " — выполнено.";
+        string result = Task.Action == "command" ? Task.Text switch
+        {
+            "pwd" => "Текущая папка: " + Scene.Terminal.Cwd,
+            "cd" => "Вы перешли в домашнюю папку: " + Scene.Terminal.Cwd,
+            "ls" => "В выводе видно содержимое папки: " + Scene.Terminal.Cwd,
+            "whoami" => "Имя пользователя показано в выводе терминала.",
+            "id" => "Вывод показывает идентификатор пользователя и его группы.",
+            "uname" => "Вывод показывает имя операционной системы.",
+            "ps" => "Вывод показывает процессы симуляции и их PID.",
+            "history" => "В выводе видны команды этой сессии.",
+            "clear" => "Вывод очищен. Файлы и текущая папка не изменились.",
+            "reboot" => "Перезапущена только учебная система. Текущая папка: " + Scene.Terminal.Cwd,
+            _ => Task.Title + " — выполнено."
+        } : Task.Title + " — выполнено.";
         if (taskInBlock == 20) { Block++; taskInBlock = 0; }
         LastKey = "";
         Next(); Status = result; Feedback = "good";
@@ -594,6 +632,7 @@ internal sealed class LabRun
                 trace.Add(new(ClusterNavigationEvent));
                 trace.Add(new(LineEditingEvent));
                 trace.Add(new(PythonEditingEvent));
+                trace.Add(new(StrictTriggersEvent));
             }
             foreach (string key in held) trace.Add(new("@held/" + key, superUsed));
             missionLength = pending.Count;

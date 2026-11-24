@@ -39,6 +39,8 @@ internal sealed partial class LabScene
             "chrome://history" => recentUrls.Where(url => !url.StartsWith("chrome:")).Select(PageEntry).ToArray(),
             "chrome://downloads" => downloads.Select(path => new LabEntry(NameOf(path), path, "file")).ToArray(),
             "chrome://bookmarks" => w.SavedBookmarks.Order().Select(PageEntry).ToArray(),
+            _ when BrowserPracticeActive && IsSearchResult(w.Url) => PracticeSearchEntries(w.Url),
+            _ when BrowserPracticeActive => [],
             _ => Links
         };
         if (w.Focus == "project-results") return ProjectMatchEntries(w);
@@ -65,7 +67,7 @@ internal sealed partial class LabScene
     }
 
     private readonly Dictionary<string, string> originalFiles = [];
-    private string EditorProjectRoot => ExactEdit ? ExactRoot : PythonEditingExercise ? PythonEditRoot : DiagnosticWorkspace ? DiagnosticRoot : SearchProjectRoot ?? (symbolWorkspace ? SymbolProject : Project);
+    private string EditorProjectRoot => RepoCloned ? CloneRoot : ExactEdit ? ExactRoot : PythonEditingExercise ? PythonEditRoot : DiagnosticWorkspace ? DiagnosticRoot : SearchProjectRoot ?? (symbolWorkspace ? SymbolProject : Project);
     private IEnumerable<string> ProjectDocuments() => DebugDay ? DebugProjectDocuments() :
         DiagnosticWorkspace ? Terminal.Entries(DiagnosticRoot).Where(path => !Terminal.DirectoryExists(path)) :
         Terminal.Entries(EditorProjectRoot)
@@ -84,13 +86,14 @@ internal sealed partial class LabScene
             DebugDay && activePath.StartsWith(debugDay.Root + "/", StringComparison.Ordinal) ? DebugRelative(activePath) : activePath.StartsWith(EditorProjectRoot + "/", StringComparison.Ordinal)
                 ? Relative(activePath) : NameOf(activePath);
         return w.Snapshot(w.Id == ActiveWindow, Entries(w), paths.Select(Relative), changes, results, projectName, projectRelative,
-            WindowsDesktop && w.App == "files" ? WindowsPath(w.Folder) : null);
+            WindowsDesktop && w.App == "files" ? WindowsPath(w.Folder) : null, BrowserPracticeActive);
     }
 
     private static bool IsIdentifier(char c) => char.IsLetterOrDigit(c) || c == '_';
     private static string NameOf(string path) => path[(path.LastIndexOf('/') + 1)..];
     private static string EditorPath(LabTab tab) => tab.Url.StartsWith('/') ? tab.Url : Project + "/" + tab.Url;
-    private LabEntry PageEntry(string url) => Links.FirstOrDefault(item => item.Path == url) ?? new(url, url, "page");
+    private LabEntry PageEntry(string url) => BrowserPracticeActive && BrowserPracticePage(url) is { } page
+        ? new(page.Title, url, "page") : Links.FirstOrDefault(item => item.Path == url) ?? new(url, url, "page");
     private void OpenDocument(string path)
     {
         Ensure("code");
@@ -122,6 +125,7 @@ internal sealed partial class LabScene
     internal void PrepareCase(int variant, string app)
     {
         string[] names = ["baseline", "experiment", "review"];
+        BrowserPracticeQuery = new[] { "touch_typing github", "veitnemed touch_typing", "github touch typing" }[variant];
         if (!NeutralWorkspace)
         {
             Terminal.StoreFile(Project + "/" + names[variant] + ".md", "# " + names[variant] + "\n");

@@ -20,6 +20,7 @@ internal sealed class LabTab(string title, string url, string body)
     internal string Title = title, Url = url, Body = body, SavedBody = body, Origin;
     internal readonly List<string> History = [url];
     internal int HistoryIndex;
+    internal readonly Dictionary<int, int> PracticeHistoryItems = [];
     internal FieldPosition Position = new();
     internal readonly List<int> ExtraMatches = [];
     internal readonly Stack<EditRevision> Undo = [], Redo = [];
@@ -31,6 +32,7 @@ internal sealed class LabTab(string title, string url, string body)
         foreach (var item in Redo.Reverse()) copy.Redo.Push(item);
         copy.ExtraMatches.AddRange(ExtraMatches);
         copy.History.Clear(); copy.History.AddRange(History);
+        foreach (var item in PracticeHistoryItems) copy.PracticeHistoryItems.Add(item.Key, item.Value);
         return copy;
     }
 }
@@ -102,7 +104,7 @@ internal sealed class LabWindow(string app, int number, int workspace)
     internal LabTab Tab => Tabs.Count == 0 ? null : Tabs[Math.Clamp(ActiveTab, 0, Tabs.Count - 1)];
     internal string Body { get => Tab?.Body ?? ""; set { if (Tab != null) Tab.Body = value; } }
     internal string Url => Tab?.Url ?? "";
-    internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults, string projectName, string projectRelative, string windowsPath = null) => new { windowsPath, syntax = App == "code" ? PythonHighlight.For(Body, Url) : [], projectFiles, changedFiles, searchResults, projectName, projectRelative, ProjectSearchQuery, Id, App, Title, Workspace, State, NormalSlot, restoreState = MinimizedFrom, active, Folder, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(App == "code"), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
+    internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults, string projectName, string projectRelative, string windowsPath = null, bool browserPractice = false) => new { windowsPath, browserPractice, syntax = App == "code" ? PythonHighlight.For(Body, Url) : [], projectFiles, changedFiles, searchResults, projectName, projectRelative, ProjectSearchQuery, Id, App, Title, Workspace, State, NormalSlot, restoreState = MinimizedFrom, active, Folder, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(App == "code"), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
         tabs = Tabs.Select(tab => tab.Snapshot()), ActiveTab, Url, Body, Focus, Input, Find, Sidebar, Split, Status, Zoom, Selected, Cursor, Anchor, Panel, bodyCursor = Tab?.Position.Caret ?? 0, bodyAnchor = Tab?.Position.Anchor ?? 0, OptionIndex, Bookmarks, savedBookmarks = SavedBookmarks.ToArray() };
     internal LabWindow Clone()
     {
@@ -190,6 +192,7 @@ internal sealed partial class LabScene
     private LabScene(LabScene source)
     {
         NeutralWorkspace = source.NeutralWorkspace;
+        BrowserPracticeActive = source.BrowserPracticeActive; RepoCloned = source.RepoCloned; BrowserPracticeQuery = source.BrowserPracticeQuery;
         Terminal = source.Terminal.Clone(); captureImage = source.captureImage;
         CloneDebugDay(source);
         symbolWorkspace = source.symbolWorkspace;
@@ -330,7 +333,7 @@ internal sealed partial class LabScene
             case "terminal-submit":
                 if (window == null || window.App != "terminal" && window.Focus != "terminal" || string.IsNullOrWhiteSpace(TerminalInput)) return false;
                 return Text("Enter", "") && Terminal.LastSuccess;
-            default: changed = ApplyExactEdit(action, window) ?? ApplyProjectSearch(action, window) ?? ApplyDiagnostics(action, window) ?? ApplySymbols(action, window) ?? ApplyWorkspace(action, window) ?? ApplyWindow(action, window); break;
+            default: changed = ApplyBrowserPractice(action, window) ?? ApplyExactEdit(action, window) ?? ApplyProjectSearch(action, window) ?? ApplyDiagnostics(action, window) ?? ApplySymbols(action, window) ?? ApplyWorkspace(action, window) ?? ApplyWindow(action, window); break;
         }
         if (changed) Version++;
         return changed;
@@ -423,12 +426,21 @@ internal sealed partial class LabScene
                 if (!browser || window.Tab == null) return false;
                 int destination = window.Tab.HistoryIndex + (action == "back" ? -1 : 1);
                 if (destination < 0 || destination >= window.Tab.History.Count) return false;
-                window.Tab.HistoryIndex = destination; SetPage(window.Tab, window.Tab.History[destination]); break;
+                if (BrowserPracticeActive) window.Tab.PracticeHistoryItems[window.Tab.HistoryIndex] = window.Item;
+                window.Tab.HistoryIndex = destination; SetPage(window.Tab, window.Tab.History[destination]);
+                if (BrowserPracticeActive)
+                {
+                    window.Item = window.Tab.PracticeHistoryItems.GetValueOrDefault(destination, -1);
+                    window.Focus = "body";
+                }
+                break;
             case "fullscreen": window.State = window.State == "fullscreen" ? "normal" : "fullscreen"; break;
             case "zoom-in": window.Zoom = Math.Min(200, window.Zoom + 10); break;
             case "zoom-out": window.Zoom = Math.Max(50, window.Zoom - 10); break;
             case "zoom-reset": window.Zoom = 100; break;
-            case "bookmark": window.SavedBookmarks.Add(window.Url); window.Status = "Закладка сохранена"; break;
+            case "bookmark": window.SavedBookmarks.Add(window.Url); window.Status = BrowserPracticeActive
+                    ? "Сохранено в закладки: «" + window.Tab.Title + "». Открыть закладки: Ctrl+Shift+O."
+                    : "Закладка сохранена"; break;
             case "bookmarks": window.Bookmarks = !window.Bookmarks; break;
             case "sidebar": if (!code) return false; window.Sidebar = !window.Sidebar; if (!window.Sidebar) window.Focus = "body"; break;
             case "split":
@@ -675,8 +687,15 @@ internal sealed partial class LabScene
             else if (window.Focus == "url")
             {
                 string url = window.Input.Trim(); if (url.Length == 0) return false;
-                if (!url.Contains("://") && url != "about:blank") url = url.Contains('.') ? "https://" + url : "https://search.local/?q=" + Uri.EscapeDataString(url);
+                if (BrowserPracticeActive) url = PracticeAddress(url);
+                else if (!url.Contains("://") && url != "about:blank") url = url.Contains('.') ? "https://" + url : "https://search.local/?q=" + Uri.EscapeDataString(url);
                 var tab = window.Tab; tab.Position = new(); tab.History.RemoveRange(tab.HistoryIndex + 1, tab.History.Count - tab.HistoryIndex - 1);
+                if (BrowserPracticeActive)
+                {
+                    foreach (int entry in tab.PracticeHistoryItems.Keys.Where(index => index > tab.HistoryIndex).ToArray())
+                        tab.PracticeHistoryItems.Remove(entry);
+                    tab.PracticeHistoryItems[tab.HistoryIndex] = window.Item;
+                }
                 tab.History.Add(url); tab.HistoryIndex++; SetPage(tab, url); recentUrls.Remove(url); recentUrls.Insert(0, url); window.Item = -1; window.Focus = "body"; window.Input = "";
             }
             else if (window.Focus == "quick-open")
@@ -870,7 +889,7 @@ internal sealed partial class LabScene
     private static void SetPage(LabTab tab, string url)
     {
         tab.Url = url;
-        (tab.Title, tab.Body) = url switch
+        (tab.Title, tab.Body) = BrowserPracticePage(url) ?? (url switch
         {
             "about:blank" => ("Новая вкладка", ""),
             "chrome://downloads" => ("Загрузки", ""),
@@ -882,7 +901,7 @@ internal sealed partial class LabScene
             "https://github.com/veitnemed/piling-main" => ("Проект piling-main", "piling-main\nСигналы, спектр и направляющие векторы."),
             "https://practice.local/spectrum" => ("Методика расчёта спектра", "Спектр сигнала\nПрямое преобразование возвращает комплексный спектр.\nЦентрированный спектр позволяет сопоставить частоты.\nМатериалы и отчёт доступны ниже."),
             _ => ("Учебная страница", url)
-        };
+        });
         tab.Position = new();
     }
 

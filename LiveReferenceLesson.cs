@@ -56,27 +56,22 @@ namespace TouchTypingStudio
             var root = new Grid { Focusable = true, Background = ReferenceHomeSurface() };
             for (int row = 0; row < 6; row++)
                 root.RowDefinitions.Add(new RowDefinition { Height = row == 2 ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
-            var prompt = new Grid();
-            prompt.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) });
-            prompt.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
-            labTask = ReferenceLabel("", 17, ReferenceText, true);
-            labTask.VerticalAlignment = VerticalAlignment.Center;
+            var prompt = Stack();
+            labTask = ReferenceLabel("", 21, ReferenceText, true);
+            labTask.TextAlignment = TextAlignment.Center;
+            labTask.TextWrapping = TextWrapping.Wrap;
             AutomationProperties.SetAutomationId(labTask, "LabTask");
             prompt.Children.Add(labTask);
-            labKeys = ReferenceLabel("", 15, ReferenceText, true);
-            labKeys.TextAlignment = TextAlignment.Right;
-            labKeys.VerticalAlignment = VerticalAlignment.Center;
+            labKeys = ReferenceLabel("", 17, ReferenceText, true);
+            labKeys.TextAlignment = TextAlignment.Center;
+            labKeys.TextWrapping = TextWrapping.Wrap;
             AutomationProperties.SetAutomationId(labKeys, "LabKeys");
-            referenceKeysFrame = new Border { Child = labKeys, Margin = new Thickness(12, 0, 0, 0),
-                HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(referenceKeysFrame, 1);
+            referenceKeysFrame = new Border { Child = labKeys, Margin = new Thickness(0, 4, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Center };
             prompt.Children.Add(referenceKeysFrame);
-            referenceKeysFrame.IsVisibleChanged += delegate
-            {
-                Grid.SetColumnSpan(labTask, referenceKeysFrame.Visibility == Visibility.Collapsed ? 2 : 1);
-            };
 
-            var taskBox = ReferenceLessonPanel(prompt, new Thickness(14, 6, 14, 6), 11);
+            var taskBox = ReferenceLessonPanel(prompt, new Thickness(14, 8, 14, 8), 11);
+            taskBox.BorderBrush = Ui.Brush("#77658B");
             taskBox.Margin = new Thickness(16, 8, 16, 0);
             root.Children.Add(taskBox);
 
@@ -282,7 +277,7 @@ namespace TouchTypingStudio
             for (int index = 0; index < parts.Length; index++)
             {
                 if (index > 0) labKeys.Inlines.Add(new Run(" + "));
-                var chip = new Border { Child = ReferenceLabel(parts[index], 15, ReferenceText, true),
+                var chip = new Border { Child = ReferenceLabel(parts[index], 17, ReferenceText, true),
                     Padding = new Thickness(9, 2, 9, 2), CornerRadius = new CornerRadius(6),
                     BorderThickness = new Thickness(1), BorderBrush = Ui.Brush("#8F819D"),
                     Background = ReferenceGradient("#64556E", "#48414F", 70) };
@@ -386,6 +381,9 @@ namespace TouchTypingStudio
                 AutomationProperties.SetItemType(titleLabel, result.I("solved").ToString(System.Globalization.CultureInfo.InvariantCulture) +
                     ":" + labDesktop.PythonEditorWitness(snapshot, selected));
             }
+            if (!pausedPreview && verifyMode && labDesktop != null &&
+                Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_BROWSER_CLONE") == "1")
+                AutomationProperties.SetItemType(titleLabel, labDesktop.BrowserPracticeWitness(state.D("scene")));
             AutomationProperties.SetHelpText(titleLabel, "Выполнено " + count + ". Ошибки " + errors + ". Рекорд " +
                 result.I("record") + ". " + (pausedPreview ? "Занятие на паузе." : complete ? "Цель занятия выполнена." : "Занятие сохранено."));
             headingText.Children.Add(titleLabel);

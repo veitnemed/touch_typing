@@ -106,6 +106,7 @@ internal static class NeutralProject
     // Preserve the exact old mission definitions for legacy draft replay.
     internal static LiveMission Mission(LiveMission mission)
     {
+        if (mission.Id == "chrome-search-clone") return mission;
         var phases = mission.Phases.Select(phase => phase with {
             Title = NeutralPhaseTitles.GetValueOrDefault(phase.Title, phase.Title),
             Route = string.Join(" ", phase.Route

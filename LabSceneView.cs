@@ -59,6 +59,17 @@ namespace TouchTypingStudio
                 ";" + tabState;
         }
 
+        internal string BrowserPracticeWitness(Data snapshot)
+        {
+            var active = snapshot.Items("windows").FirstOrDefault(item => item.B("active"));
+            if (active == null || !active.B("browserPractice")) return "";
+            return string.Join("|", new[] { active.S("app"), active.S("url"), active.S("focus"), active.S("input"),
+                snapshot.S("clipboard"), active.S("projectName"),
+                string.Join(";", active.Items("entries").Select(item => item.S("path"))),
+                string.Join(";", active.Items("savedBookmarks").Select(item => item.Value())),
+                active.I("item", -1).ToString(CultureInfo.InvariantCulture) });
+        }
+
         internal void Update(Data next, string app = "ubuntu")
         {
             scene = next;
@@ -100,6 +111,8 @@ namespace TouchTypingStudio
             }
             if (WitnessPythonEditor)
                 System.Windows.Automation.AutomationProperties.SetItemType(this, PythonEditorWitness(scene, editor));
+            else if (Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_BROWSER_CLONE") == "1")
+                System.Windows.Automation.AutomationProperties.SetItemType(this, BrowserPracticeWitness(scene));
             InvalidateVisual();
         }
 
@@ -283,15 +296,38 @@ namespace TouchTypingStudio
             Field(window.S("focus") == "url" ? window.S("input") : window.S("url"), window, 109, 76, w - 180, 12,
                 window.S("focus") == "url" ? "#1F3E5F" : "#D4DCEB", 0, window.S("focus") == "url",
                 scrollKey: "address:" + window.S("id"), face: regular);
+            if (window.B("browserPractice"))
+            {
+                bool saved = window.Items("savedBookmarks").Any(item => item.Value() == window.S("url"));
+                Text(saved ? "★" : "☆", w - 41, 74, 14, saved ? "#BDA8FF" : "#D6DDE9");
+            }
             Text("⋮", w - 24, 68, 21, "#D6DDE9");
             double left = Math.Max(28, w * .065);
             double pageScale = window.N("zoom", 100) / 100;
             string body = window.S("body");
             var active = tabs.ElementAtOrDefault(window.I("activeTab"));
             if (body.Length == 0 && active != null) body = active.S("body");
-            Text(active == null ? "Рабочие материалы" : active.S("title", "Рабочие материалы"), left, 124, 30 * pageScale, "#211B37", w - left * 2);
+            bool searchHome = window.S("url") == "https://www.google.com/";
+            bool searchResults = window.S("url").StartsWith("https://www.google.com/search?q=", StringComparison.Ordinal);
+            bool repository = window.S("url") == "https://github.com/veitnemed/touch_typing";
+            if (searchHome || searchResults)
+            {
+                double searchLeft = searchHome ? Math.Max(left, (w - 435) / 2) : left;
+                double barWidth = Math.Min(435, w - searchLeft * 2);
+                Text("Google", searchHome ? w / 2 - 62 : searchLeft, 124, searchHome ? 36 : 25,
+                    "#4285F4", w - searchLeft * 2);
+                Rounded(searchLeft, 168, barWidth, 32, "#E4EDF8", 16);
+                Text(searchHome ? "⌕  Введите запрос в адресной строке" : "⌕  " + body,
+                    searchLeft + 13, 176, 14, "#234975", barWidth - 26);
+                body = "";
+            }
+            else
+            {
+                Text(active == null ? "Рабочие материалы" : active.S("title", "Рабочие материалы"), left, 124, 30 * pageScale, "#211B37", w - left * 2);
+                if (repository) Text("Code   ·   Issues   ·   README", left, 159, 12, "#205496", w - left * 2);
+            }
             int offset = 0;
-            double lineY = 172;
+            double lineY = searchHome || searchResults ? 207 : repository ? 182 : 172;
             foreach (string line in body.Split('\n'))
             {
                 Field(line, window, left, lineY, w - left * 2, 14 * pageScale, "#302745", offset,
@@ -492,14 +528,15 @@ namespace TouchTypingStudio
                 Text(references ? "↑↓ — выбрать   Enter — открыть   Esc — закрыть" : "Enter — переименовать   Esc — отменить",
                     px + 13, py + 57 + shown * 25, 11, "#B4BFCD", pw - 26);
             }
-            else if (new[] { "palette", "quick-open", "goto-line", "symbols", "find", "project-search", "replace-find", "replace-with" }.Contains(focus))
+            else if (new[] { "palette", "clone-url", "quick-open", "goto-line", "symbols", "find", "project-search", "replace-find", "replace-with" }.Contains(focus))
             {
-                string title = focus == "palette" ? "Палитра команд" : focus == "symbols" ? "Символы файла" :
+                string title = focus == "clone-url" ? "Git: Clone · введите HTTPS-ссылку (учебная копия)" : focus == "palette" ? "Палитра команд" : focus == "symbols" ? "Символы файла" :
                     focus == "replace-find" ? "Найти для замены" : focus == "replace-with" ? "Заменить на" :
                     focus == "quick-open" ? "Открыть файл" : focus == "goto-line" ? "Перейти к строке" : "Поиск";
                 if (focus == "find" && window.S("status").StartsWith("Совпадение ", StringComparison.Ordinal))
                     title += " · " + window.S("status");
-                string[] options = focus == "palette" ? new[] { "Форматировать документ", "Переключить боковую панель", "Разделить редактор" } :
+                string[] options = focus == "palette" && window.B("browserPractice") ? new[] { "Git: Clone" } :
+                    focus == "palette" ? new[] { "Форматировать документ", "Переключить боковую панель", "Разделить редактор" } :
                     window.Items("entries").Select(item => item.S("title")).ToArray();
                 int index = window.I("optionIndex"), shown = Math.Min(options.Length, Math.Min(6, Math.Max(1, (int)((h - 115) / 25))));
                 int start = Math.Max(0, index - shown + 1);

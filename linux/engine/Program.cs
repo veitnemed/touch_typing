@@ -98,6 +98,19 @@ internal sealed class PracticeService
                     dock = pinned.EnumerateArray().Take(9).Select(item => item.GetString() ?? "").ToArray();
                 return Library();
             case "lab-catalog": return LabCatalog.Catalog(profile.LiveDrafts, profile.ShortcutHistory, layout, neutralProject, RequestedDesktop(message));
+            case "lab-next-mission":
+                string suggestApp = Text(message, "app");
+                string suggestEnvironment = RequestedDesktop(message, suggestApp);
+                int suggestLevel = Math.Clamp(Number(message, "level"), 0, 2);
+                var routes = (neutralProject ? NeutralProject.MissionCatalog : LiveCourse.Missions)
+                    .Where(m => m.App == suggestApp && m.Level == suggestLevel &&
+                        (LabScene.MissionEnvironment(m) is null || LabScene.MissionEnvironment(m) == suggestEnvironment)).ToArray();
+                var preferred = routes.Where(m => m.Id.StartsWith("terminal-essentials-", StringComparison.Ordinal)).ToArray();
+                if (preferred.Length > 0) routes = preferred;
+                var lastUsed = profile.ShortcutHistory.Where(a => a.Correct && a.Mission != null)
+                    .GroupBy(a => a.Mission).ToDictionary(g => g.Key, g => g.Max(a => a.Date));
+                return new { mission = routes.OrderBy(m => lastUsed.GetValueOrDefault(m.Id)).FirstOrDefault()?.Id ?? "" };
+
             case "lab-start":
                 string chosenEnvironment = RequestedDesktop(message, Text(message, "app"));
                 string chosenApp = Text(message, "app");

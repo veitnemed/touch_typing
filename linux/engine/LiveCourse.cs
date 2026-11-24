@@ -40,7 +40,7 @@ internal static partial class LiveCourse
         {
             foreach (string token in RouteTokens(mission.Phases[phase]))
             {
-                if (!nativeEnglishInput && (IsCommandToken(token) || IsProjectSearchQuery(token) ||
+                if (!nativeEnglishInput && (IsCommandToken(token) || IsProjectSearchQuery(token) || token is "browser-search" or "code-clone-command" ||
                     token is "code-rename-confirm" or "debug-unit" or "debug-report-check"
                     or "debug-project-query" or "debug-doc-submit" or "debug-rewrite" or "exact-find-submit" or "python-edit-write" ||
                     trial.ExactEdit && token is "quick-choose" or "save") && trial.Layout == "RU")
@@ -106,6 +106,15 @@ internal static partial class LiveCourse
     private static LabTask MakeTask(string token, LabScene scene)
     {
         if (PythonEditTask(token) is LabTask edit) return edit;
+        if (token == "browser-search")
+            return Actions["navigate-pasted"] with { Keys = "", Text = scene.BrowserPracticeQuery,
+                Title = "Введите «" + scene.BrowserPracticeQuery + "» и нажмите Enter",
+                Hint = "Ищем в учебной выдаче; откройте результат и вернитесь к тому же запросу." };
+        if (token == "code-clone-command")
+            return Actions[token] with { Keys = "", Text = "Git: Clone",
+                Title = "Введите Git: Clone в палитре и нажмите Enter" };
+        if (scene.BrowserPracticeActive && token == "paste" && scene.Active?.Focus == "clone-url")
+            return Actions[token] with { Title = "Вставьте скопированную HTTPS-ссылку репозитория" };
         if (scene.DebugDay)
         {
             if (token == "debug-project-query") token = "search-query:" + scene.DebugCallQuery;
@@ -119,8 +128,10 @@ internal static partial class LiveCourse
         if (IsPickerToken(token))
         {
             var w = scene.Active;
-            string query = token[(token.IndexOf(':') + 1)..].Replace('_', ' ');
-            var entry = scene.Entries(w).FirstOrDefault(item => item.Path == query || item.Title == query || item.Path.EndsWith("/" + query, StringComparison.Ordinal));
+            string raw = token[(token.IndexOf(':') + 1)..];
+            string query = raw.Replace('_', ' ');
+            var entry = scene.Entries(w).FirstOrDefault(item => item.Path == raw || item.Path.EndsWith("/" + raw, StringComparison.Ordinal) ||
+                item.Path == query || item.Title == query || item.Path.EndsWith("/" + query, StringComparison.Ordinal));
             if (entry == null) throw new InvalidOperationException("Не найден объект: " + query + " в " + w.Url + w.Folder);
             var picker = Actions[w.Focus == "quick-open" ? "quick-next" : w.Focus == "symbols" ? "symbol-next" : w.App == "files" ? "file-next" : "link-next"];
             return picker with { Title = "Выберите «" + entry.Title + "»", Text = entry.Title };
@@ -175,6 +186,8 @@ internal static partial class LiveCourse
             trial.TerminalInput = task.Text;
             return trial.Text("Enter", "") && trial.Terminal.LastSuccess;
         }
+        if (trial.BrowserPracticeActive && (task.Action is "navigate-pasted" or "code-clone-command") && task.Text.Length > 0)
+            trial.Active.Input = task.Text;
         if (trial.ExactEdit && task.Action is "quick-choose" or "exact-find-submit")
             trial.Active.Input = task.Text;
         if (trial.ExactEdit && task.Action == "save") trial.Insert(trial.Active, task.Text);
@@ -218,7 +231,7 @@ internal static partial class LiveCourse
                     saved = v.App == "code" ? v.Tab?.SavedBody : null
                 }).ToArray()
             });
-        object value = scene.ExactEditEvidence(task) ?? scene.DebugEvidence(action) ?? (action switch
+        object value = scene.BrowserPracticeEvidence(task, w) ?? scene.ExactEditEvidence(task) ?? scene.DebugEvidence(action) ?? (action switch
         {
             _ when action.StartsWith("project-search-", StringComparison.Ordinal) => scene.ProjectSearchEvidence(action),
             _ when action == "code-problem-next" || action.StartsWith("code-fix-", StringComparison.Ordinal) => scene.DiagnosticEvidence(),

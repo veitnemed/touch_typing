@@ -7,6 +7,31 @@ from platform_linux import Engine
 
 
 class MissionTest(unittest.TestCase):
+    def test_quick_start_rotates_missions_without_consuming_saved_drafts(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+            engine = Engine(verify=True)
+            try:
+                def suggestion(app, level=0):
+                    return engine.call("lab-next-mission", app=app, level=level)["mission"]
+                first = suggestion("terminal")
+                self.assertEqual(first, "terminal-essentials-locate")
+                self.assertEqual(suggestion("terminal"), first, "Read-only selectors do not consume practice")
+                self.assertEqual(suggestion("chrome"), "chrome-search-clone")
+                options = dict(app="terminal", mode="sandbox", level=0, guidance="guided", seconds=0, seed=0)
+                engine.call("lab-start", **options, mission=first)
+                engine.call("lab-resume")
+                for key, char in [("P", "p"), ("W", "w"), ("D", "d"), ("Enter", "")]:
+                    engine.call("lab-key", key=key, pressed=True, text=char)
+                    engine.call("lab-key", key=key, pressed=False)
+                engine.call("lab-stop")
+                self.assertEqual(suggestion("terminal"), "terminal-essentials-inspect")
+                resumed = engine.call("lab-start", **options, **{"continue": True})
+                self.assertEqual((resumed["mission"], resumed["solved"]), (first, 1))
+            finally:
+                engine.close()
+
     def test_starting_recommendations_are_advisory_and_never_select_a_draft(self):
         from pathlib import Path
         from unittest.mock import patch

@@ -737,7 +737,8 @@ class Studio(Gtk.Application):
                                  ("actions", lab.limit), ("time", lab.time_limit)):
                 picker.set_selected(defaults.get(name, 0))
             level = lab.level.get_selected()
-            target = defaults.get("mission") or next((m["id"] for m in lab.missions if m["app"] == module and m["level"] == level), "")
+            choice = self.call("lab-next-mission", app=module, level=level, desktopProfile=environment) or {}
+            target = defaults.get("mission") or choice.get("mission", "")
         selected = next((i for i, (k, _) in enumerate(lab.choices) if k == target), None)
         if selected is None:
             self.return_live_catalog(module)
@@ -761,28 +762,33 @@ class Studio(Gtk.Application):
             self.return_live_catalog(module)
 
     def live_environment_selector(self):
-        selector = bind_name(dropdown(["Ubuntu", "Windows 10"]), "Учебная операционная система")
-        selector.add_css_class("reference-config-dropdown")
-        selector.add_css_class("reference-environment-select")
-        selector.set_tooltip_text("Учебная система: Ubuntu или Windows 10")
-        selector.set_selected(int(self.lab_desktop_profile() == "windows"))
-        def environment_changed(*_):
-            selected = selector.get_selected()
-            if selected not in (0, 1):
-                return
-            previous = self.lab_desktop_profile()
-            chosen = ("ubuntu", "windows")[selected]
-            if chosen == previous:
+        active = self.lab_desktop_profile()
+        selector = box(gap=3)
+        title = text("Система для тренировки", "reference-config-caption")
+        title.set_halign(Gtk.Align.START)
+        selector.append(title)
+        choices = row(4, "reference-environment-choices")
+        selector.append(choices)
+        controls = {}
+        self.live_os_choices = controls
+
+        def choose(chosen):
+            if chosen == self.lab_desktop_profile():
                 return
             updated = self.call("settings", desktopProfile=chosen)
             if updated and updated.get("desktopProfile") == chosen:
                 self.library = updated
                 self.navigate("home", manual=False)
-                self.live_os_selector.grab_focus()
-            else:
-                selector.set_selected(int(previous == "windows"))
-        selector.connect("notify::selected", environment_changed)
-        self.live_os_selector = selector
+                self.live_os_choices[chosen].grab_focus()
+
+        for key, title in (("ubuntu", "Ubuntu"), ("windows", "Windows 10")):
+            control = button(title, lambda profile=key: choose(profile), "reference-config-button")
+            bind_name(control, title + (", выбрано" if key == active else ", выбрать для тренировки"))
+            if key == active:
+                control.add_css_class("selected")
+            control.set_tooltip_text("Учебная система; настройки компьютера не меняются.")
+            choices.append(control)
+            controls[key] = control
         return selector
 
     def configure_live(self):
@@ -2567,16 +2573,14 @@ class LabPage(Gtk.Box):
         for selector in (self.mode, self.picker, self.level):
             selector.connect("notify::selected", lambda *_: self.describe())
         self.content.append(self.prep)
-        self.toolbar = row(10)
-        self.toolbar.add_css_class("reference-goal")
         self.action_icon = ReferenceGlyph("practice", 30)
         self.action_icon.add_css_class("reference-practice-icon")
         self.task = text("", "reference-goal-title", wrap=True)
         self.task.set_max_width_chars(94)
         self.task.set_hexpand(True)
         self.task.set_valign(Gtk.Align.CENTER)
-        self.task.set_lines(2)
-        self.task.set_ellipsize(Pango.EllipsizeMode.END)
+        self.task.set_justify(Gtk.Justification.CENTER)
+        self.task.set_xalign(0.5)
         self.gesture = row(5, "reference-gesture")
         self.gesture.set_valign(Gtk.Align.CENTER)
         self.gesture.set_halign(Gtk.Align.CENTER)
@@ -2635,7 +2639,20 @@ class LabPage(Gtk.Box):
         bind_name(self.settings_menu, "Параметры занятия")
         self.settings_menu.set_tooltip_text("Подсказки и параметры занятия")
         self.hint_button.set_valign(Gtk.Align.CENTER)
-        add(self.toolbar, self.task, self.gesture, self.hint_button)
+        goal = add(box(gap=4), self.task, self.gesture)
+        goal.set_hexpand(True)
+        # Put equal side columns around the central task; the help button
+        # should not pull the title or shortcut off the scene centre.
+        self.toolbar = Gtk.CenterBox()
+        self.toolbar.add_css_class("reference-goal")
+        self.toolbar.set_center_widget(goal)
+        self.toolbar.set_end_widget(self.hint_button)
+        spacer = Gtk.Box()
+        mirrored_width = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        mirrored_width.add_widget(spacer)
+        mirrored_width.add_widget(self.hint_button)
+        self.toolbar.set_start_widget(spacer)
+        self.goal_side_width = mirrored_width
         self.content.append(self.toolbar)
         self.content.append(self.details)
         self.desktop = DesktopView()
