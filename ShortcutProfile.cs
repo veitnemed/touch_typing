@@ -15,6 +15,8 @@ namespace TouchTypingStudio
         public string[] Dock, DesktopProfile;
         public int Level, Variant;
         public bool VirtualLayout;
+        // Older drafts continue replaying their original virtual prerequisite goals.
+        public bool NativeEnglishInput;
         // Absent in older drafts, including explicit unlimited sessions.
         public LiveDraftProgress Progress;
     }

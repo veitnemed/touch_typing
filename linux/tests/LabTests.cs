@@ -132,9 +132,76 @@ internal static class LabTests
             "Novelty still excludes the recently practiced route; another route practicing pwd gains priority");
     }
 
+    private static void TestNativeEnglishTextAndRouteProgress()
+    {
+        var freshRussian = new LabRun("terminal", "sandbox", 0, 0, "RU", [], new Random(3),
+            missionId: "terminal-explore", nativeEnglishInput: true);
+        Check(freshRussian.Task.Action == "command", "A lesson launched in RU requests real EN, not a virtual layout prerequisite");
+        var nativeDraft = new LabRun("terminal", "sandbox", 0, 0, "RU", [], draft: freshRussian.Draft());
+        Check(nativeDraft.Task.Id == freshRussian.Task.Id, "New native input draft replays without synthetic steps");
+        var oldRussian = new LabRun("terminal", "sandbox", 0, 0, "RU", [], new Random(3), missionId: "terminal-explore");
+        var oldDraft = new LabRun("terminal", "sandbox", 0, 0, "EN", [], draft: oldRussian.Draft(), nativeEnglishInput: true);
+        Check(oldRussian.Task.Id == "layout" && oldDraft.Task.Id == "layout", "Existing virtual layout drafts are not reinterpreted");
+        var layoutDrill = new LabRun("ubuntu", "sandbox", 1, 0, "RU", [], new Random(3),
+            missionId: "ubuntu-matebook-layout", nativeEnglishInput: true);
+        var virtualGoals = LiveCourse.Compile(LiveCourse.Missions.Single(m => m.Id == layoutDrill.MissionId),
+            new LabScene("ubuntu", "RU"), nativeEnglishInput: true);
+        Check(virtualGoals.Count(goal => goal.Task.Id == "layout") == 2, "Dedicated virtual layout training retains its required keys");
+
+        var run = new LabRun("terminal", "sandbox", 0, 0, "EN", [], new Random(3), missionId: "terminal-explore");
+        run.Resume();
+        Check(run.ScenarioCompletedGoals == 0 && run.ScenarioStep == 1, "A new route has zero completed goals");
+        for (int i = 0; i < 10 && run.Task.Id != "command/pwd"; i++) Complete(run);
+        Check(run.Task.Id == "command/pwd", "The native layout check exercises the real pwd mission");
+        var before = (run.Solved, run.Errors, run.Scene.Version, run.Scene.TerminalInput, run.Scene.Active.Cursor, run.Draft().Trace);
+        run.Input("P", true, "з", "RU");
+        run.Input("P", true, "з", "RU");
+        run.Input("P", false, "", "RU");
+        Check(run.Feedback == "layout" && run.Status == "Переключи раскладку на EN" &&
+              before == (run.Solved, run.Errors, run.Scene.Version, run.Scene.TerminalInput, run.Scene.Active.Cursor, run.Draft().Trace),
+            "Wrong native layout leaves text, caret, progress, accuracy and replay intact");
+        void Key(string key, string text, string layout = "EN")
+        {
+            run.Input(key, true, text, layout);
+            run.Input(key, false, "", layout);
+        }
+        // Change only the host input source; do not synthesize a virtual desktop layout gesture.
+        Key("P", "p");
+        Key("W", "w");
+        Key("D", "d");
+        var saved = run.Draft();
+        var restored = new LabRun("terminal", "sandbox", 0, 0, "RU", [], draft: saved);
+        Check(restored.Task.Id == "command/pwd" && restored.Scene.TerminalInput == "pwd" &&
+              restored.ScenarioCompletedGoals == run.ScenarioCompletedGoals, "EN text survives draft replay and a new host layout");
+        Key("Left", "", "RU");
+        Check(run.Scene.TerminalInput == "pwd" && run.Scene.Active.Cursor == 2,
+            "Navigation is still available while native RU is active");
+        Key("Enter", "", "RU");
+        Check(run.Solved == before.Solved + 1 && run.Errors == before.Errors,
+            "An actual EN command earns one credit; Enter does not require the US layout");
+        var route = new LabRun("terminal", "sandbox", 1, 0, "EN", [], new Random(3), actionLimit: 1,
+            missionId: "terminal-access", softFinish: true);
+        route.Resume();
+        for (int i = 0; !route.Finished && i < route.ScenarioLength; i++)
+        {
+            Check(route.ScenarioCompletedGoals == i && i < route.ScenarioLength,
+                "A standalone route's displayed progress measures effects, not current instructions");
+            Complete(route);
+            if (i == 0)
+            {
+                Check(route.AwaitingLimitChoice && route.ScenarioCompletedGoals == 1, "Action cap remains separate from route completion");
+                Check(route.ChooseLimit("continue"), "Continue explicit route after reaching action cap");
+                route.Resume();
+            }
+        }
+        Check(route.Finished && route.ScenarioCompletedGoals == route.ScenarioLength,
+            "Verified final effect fills a complete route");
+    }
+
     private static void Main()
     {
         TestCommandReviewWeighting();
+        TestNativeEnglishTextAndRouteProgress();
         foreach (string app in LabCatalog.Apps)
         foreach (int level in new[] { 0, 1, 2 })
         {

@@ -15,9 +15,13 @@ namespace TouchTypingStudio
 {
     internal sealed partial class LiveStudio
     {
-        private static readonly Brush ReferenceText = Ui.Brush("#FAF8FF");
-        private static readonly Brush ReferenceMuted = Ui.Brush("#CBC2E5");
-        private static readonly Brush ReferenceEdge = Ui.Brush("#3A305A");
+        private static readonly Brush ReferenceText = Ui.Brush("#F1EDF5");
+        private static readonly Brush ReferenceMuted = Ui.Brush("#C6BFCC");
+        private static readonly Brush ReferenceEdge = Ui.Brush("#504C58");
+        private static readonly Brush ReferencePrimary = Ui.Brush("#64556E");
+        private static readonly Brush ReferenceAccent = Ui.Brush("#A89BB9");
+        private static readonly Brush ReferencePanel = Ui.Brush("#28272E");
+        private static readonly Brush ReferenceField = Ui.Brush("#303039");
         private readonly bool customLiveChrome;
         private bool quietLiveAppearance = SystemParameters.HighContrast;
         private Border referenceHeader;
@@ -48,7 +52,7 @@ namespace TouchTypingStudio
 
             var brand = Stack(true);
             brand.VerticalAlignment = VerticalAlignment.Center;
-            var emblem = new Border { Width = 44, Height = 44, Background = ReferenceGradient("#7652DE", "#4D2AAD", 85),
+            var emblem = new Border { Width = 44, Height = 44, Background = ReferenceGradient("#75667E", "#64556E", 85),
                 CornerRadius = new CornerRadius(12), Child = ReferenceIcon("brand", 28) };
             brand.Children.Add(emblem);
             var brandText = ReferenceLabel("КОД ВСЛЕПУЮ", 22, ReferenceText, true);
@@ -103,7 +107,7 @@ namespace TouchTypingStudio
                 }
             }
             grid.Children.Add(trailing);
-            referenceHeader = new Border { Height = 73, BorderBrush = Ui.Brush("#2C2446"), BorderThickness = new Thickness(0, 0, 0, 1),
+            referenceHeader = new Border { Height = 73, BorderBrush = Ui.Brush("#3A3740"), BorderThickness = new Thickness(0, 0, 0, 1),
                 Padding = new Thickness(27, 0, 14, 0), Child = grid };
             referenceHeader.SizeChanged += delegate
             {
@@ -155,7 +159,7 @@ namespace TouchTypingStudio
                 button.Margin = new Thickness(0, 0, 2, 0);
                 button.BorderThickness = new Thickness(0);
                 bool selected = target == page || target == LivePage && page == ConfigurePage;
-                button.Background = selected ? ReferenceGradient("#8C72FA", "#693FE6", 90) : Brushes.Transparent;
+                button.Background = selected ? ReferenceGradient("#71617B", "#64556E", 90) : Brushes.Transparent;
                 if (selected && !quietLiveAppearance)
                     button.Effect = new DropShadowEffect { Color = (Color)ColorConverter.ConvertFromString("#8050FD"), BlurRadius = 16,
                         ShadowDepth = 0, Opacity = .35 };
@@ -169,8 +173,8 @@ namespace TouchTypingStudio
                 top.Children.Add(button);
             }
             bool russian = CurrentLayout() == "RU";
-            referenceEnChip.Background = !russian ? ReferenceGradient("#856AF6", "#603ADE", 90) : Brushes.Transparent;
-            referenceRuChip.Background = russian ? ReferenceGradient("#856AF6", "#603ADE", 90) : Brushes.Transparent;
+            referenceEnChip.Background = !russian ? ReferenceGradient("#71617B", "#64556E", 90) : Brushes.Transparent;
+            referenceRuChip.Background = russian ? ReferenceGradient("#71617B", "#64556E", 90) : Brushes.Transparent;
             referenceLayoutEn.FontWeight = !russian ? FontWeights.Medium : FontWeights.Normal;
             referenceLayoutEn.FontFamily = LiveUiFont.ForWeight(referenceLayoutEn.FontWeight);
             referenceLayoutRu.FontWeight = russian ? FontWeights.Medium : FontWeights.Normal;
@@ -182,9 +186,9 @@ namespace TouchTypingStudio
         private void ApplyReferenceAppearance()
         {
             if (referenceHeader != null)
-                referenceHeader.Background = quietLiveAppearance ? Ui.Brush("#17132D") : ReferenceGradient("#1C1737", "#15122B", 90);
+                referenceHeader.Background = quietLiveAppearance ? Ui.Brush("#25242B") : ReferenceGradient("#26242C", "#1C1B23", 90);
             if (referenceHome != null)
-                referenceHome.Background = quietLiveAppearance ? Ui.Brush("#141121") : ReferenceHomeSurface();
+                referenceHome.Background = quietLiveAppearance ? Ui.Brush("#191820") : ReferenceHomeSurface();
             if (referenceWave != null)
                 referenceWave.Visibility = quietLiveAppearance ? Visibility.Collapsed : Visibility.Visible;
             if (referenceTheme != null)
@@ -269,7 +273,7 @@ namespace TouchTypingStudio
                 configure.Padding = new Thickness(12, 7, 12, 7);
                 configure.Margin = new Thickness(0, 0, 7, 0);
                 configure.Foreground = ReferenceText;
-                configure.Background = Ui.Brush("#30254D");
+                configure.Background = Ui.Brush("#303039");
                 AutomationProperties.SetName(configure, "Настроить: " + item.S("title"));
                 AutomationProperties.SetAutomationId(configure, "LiveConfigure-" + app);
                 actions.Children.Add(configure);
@@ -280,7 +284,7 @@ namespace TouchTypingStudio
                     resume.Margin = new Thickness(0);
                     resume.Padding = new Thickness(12, 7, 12, 7);
                     resume.HorizontalAlignment = HorizontalAlignment.Left;
-                    resume.Background = Ui.Brush("#382A62");
+                    resume.Background = Ui.Brush("#48414F");
                     resume.Foreground = ReferenceText;
                     AutomationProperties.SetName(resume, "Продолжить: " + item.S("title"));
                     AutomationProperties.SetAutomationId(resume, "LiveResume-" + app);
@@ -476,9 +480,9 @@ namespace TouchTypingStudio
             button.VerticalContentAlignment = VerticalAlignment.Top;
             button.Padding = new Thickness(30, 18, 26, compactCard ? 16 : 19);
             button.BorderThickness = new Thickness(selected ? 2 : 1);
-            button.BorderBrush = selected ? Ui.Brush("#A37AFA") : Ui.Brush("#39305F");
-            button.Background = selected ? ReferenceGradient("#453089", "#292050", 60) :
-                ReferenceGradient("#251E45", "#1B1833", 80);
+            button.BorderBrush = selected ? Ui.Brush("#A89BB9") : Ui.Brush("#504C58");
+            button.Background = selected ? ReferenceGradient("#403849", "#2D2934", 60) :
+                ReferenceGradient("#25242C", "#222129", 80);
             AutomationProperties.SetName(button, title + ". " + summary + " Прогресс: " + percent + "%.");
             AutomationProperties.SetAutomationId(button, "HomeClass-" + app);
             button.ToolTip = "Подтверждено сочетаний в текущей раскладке: " + completed + " из " + total +
@@ -491,10 +495,10 @@ namespace TouchTypingStudio
             var meter = new Grid { Height = 12 };
             meter.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(percent, GridUnitType.Star) });
             meter.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100 - percent, GridUnitType.Star) });
-            var track = new Border { Background = Ui.Brush("#48416D"), CornerRadius = new CornerRadius(6) };
+            var track = new Border { Background = Ui.Brush("#413D48"), CornerRadius = new CornerRadius(6) };
             Grid.SetColumnSpan(track, 2);
             meter.Children.Add(track);
-            if (percent > 0) meter.Children.Add(new Border { Background = ReferenceGradient("#A786FA", "#7D56F3", 90), CornerRadius = new CornerRadius(6) });
+            if (percent > 0) meter.Children.Add(new Border { Background = ReferenceGradient("#A89BB9", "#887993", 90), CornerRadius = new CornerRadius(6) });
             return meter;
         }
 
@@ -514,14 +518,14 @@ namespace TouchTypingStudio
 
         private static Brush ReferenceHomeSurface()
         {
-            return ReferenceGradient("#19142D", "#1C1534", 60);
+            return ReferenceGradient("#191820", "#201D26", 60);
         }
 
         private static FrameworkElement ReferenceHeroWave()
         {
             var surface = new Grid { IsHitTestVisible = false, Height = 245, VerticalAlignment = VerticalAlignment.Top, ClipToBounds = true };
             var glow = new Rectangle { Fill = new RadialGradientBrush(
-                (Color)ColorConverter.ConvertFromString("#78401FC0"), Colors.Transparent)
+                (Color)ColorConverter.ConvertFromString("#305B486B"), Colors.Transparent)
             { Center = new Point(.83, .37), GradientOrigin = new Point(.83, .37), RadiusX = .49, RadiusY = .77 } };
             surface.Children.Add(glow);
             var wave = new Path
@@ -531,9 +535,9 @@ namespace TouchTypingStudio
             };
             wave.Fill = new LinearGradientBrush(new GradientStopCollection
             {
-                new GradientStop((Color)ColorConverter.ConvertFromString("#0C442587"), 0),
-                new GradientStop((Color)ColorConverter.ConvertFromString("#CE713CFC"), .29),
-                new GradientStop((Color)ColorConverter.ConvertFromString("#592F156D"), .65),
+                new GradientStop((Color)ColorConverter.ConvertFromString("#0C5B486B"), 0),
+                new GradientStop((Color)ColorConverter.ConvertFromString("#505F516D"), .29),
+                new GradientStop((Color)ColorConverter.ConvertFromString("#3550445B"), .65),
                 new GradientStop(Colors.Transparent, 1)
             }, new Point(.82, 0), new Point(.35, .94));
             surface.Children.Add(wave);
@@ -559,11 +563,11 @@ namespace TouchTypingStudio
             frame.AppendChild(presenter);
             template.VisualTree = frame;
             var over = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
-            over.Setters.Add(new Setter(Border.BorderBrushProperty, Ui.Brush("#B19AFF"), "ReferenceFocusFrame"));
+            over.Setters.Add(new Setter(Border.BorderBrushProperty, Ui.Brush("#A89BB9"), "ReferenceFocusFrame"));
             over.Setters.Add(new Setter(Border.BorderThicknessProperty, new Thickness(2), "ReferenceFocusFrame"));
             template.Triggers.Add(over);
             var focus = new Trigger { Property = UIElement.IsKeyboardFocusedProperty, Value = true };
-            focus.Setters.Add(new Setter(Border.BorderBrushProperty, Ui.Brush("#D1C2FF"), "ReferenceFocusFrame"));
+            focus.Setters.Add(new Setter(Border.BorderBrushProperty, Ui.Brush("#D4C8DE"), "ReferenceFocusFrame"));
             focus.Setters.Add(new Setter(Border.BorderThicknessProperty, new Thickness(2), "ReferenceFocusFrame"));
             template.Triggers.Add(focus);
             b.Template = template;

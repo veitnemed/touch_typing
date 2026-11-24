@@ -69,7 +69,7 @@ namespace TouchTypingStudio
             controls.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var right = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
             Grid.SetColumn(right, 1);
-            start = Ui.Button("Начать · Пробел", Start, true);
+            start = Ui.Button("Начать", Start, true);
             start.Background = Ui.Brush("#B5DECD");
             start.BorderBrush = start.Background;
             start.MinHeight = 32;
@@ -719,7 +719,7 @@ namespace TouchTypingStudio
             progress.Value = attempt.Position;
             clock.Visibility = progress.Visibility = Adaptive == null ? Visibility.Visible : Visibility.Collapsed;
             start.Content = attempt.Running ? (Adaptive == null ? "Пауза · Esc" : "Результат · Esc") :
-                Done ? "Повторить · Пробел" : attempt.Position > 0 ? "Продолжить · Пробел" : "Начать · Пробел";
+                Done ? "Повторить" : attempt.Position > 0 ? "Продолжить" : "Начать";
             start.Focusable = Adaptive == null || !attempt.Running;
             keyboardToggle.Focusable = Adaptive == null || !attempt.Running;
             next.IsEnabled = reviewMode || (Done && (exercise != null || lesson != null && TrainingProgress.Pass(profile, attempt.Accuracy)));

@@ -26,11 +26,11 @@ namespace TouchTypingStudio
         private const string EditorPage = "Редактор";
         private const string ProgressPage = "Прогресс";
 
-        private static readonly Brush Ink = Ui.Brush("#F4F4F6");
-        private static readonly Brush Dim = Ui.Brush("#B6BCC6");
-        private static readonly Brush Accent = Ui.Brush("#9CC5E6");
-        private static readonly Brush Card = Ui.Brush("#292D36");
-        private static readonly Brush Edge = Ui.Brush("#373D48");
+        private static readonly Brush Ink = Ui.Brush("#F1EDF5");
+        private static readonly Brush Dim = Ui.Brush("#C6BFCC");
+        private static readonly Brush Accent = Ui.Brush("#A89BB9");
+        private static readonly Brush Card = Ui.Brush("#28272E");
+        private static readonly Brush Edge = Ui.Brush("#504C58");
         private static readonly Brush Night = Ui.Brush("#232833");
         private static readonly Brush Error = Ui.Brush("#F18991");
 
@@ -74,7 +74,7 @@ namespace TouchTypingStudio
             MinWidth = 748;
             MinHeight = 540;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            Background = new LinearGradientBrush(Color.FromRgb(28,34,45), Color.FromRgb(44,49,61), 0);
+            Background = ReferenceHomeSurface();
             WindowState = captureHome ? WindowState.Normal : WindowState.Maximized;
             FontFamily = LiveUiFont.Sans;
             customLiveChrome = !verify || captureHome;
@@ -329,7 +329,7 @@ namespace TouchTypingStudio
             Action describe = delegate
             {
                 var chosen = groupSkills.FirstOrDefault(skill => skill.S("id") == Get(taskSelect));
-                keys.Text = chosen == null ? "Выберите задание для серии" : "Пробел — СТАРТ";
+                keys.Text = chosen == null ? "Выберите задание для серии" : "";
                 details.Text = chosen == null ? "" : chosen.S("title");
                 var mode = kindSelect.SelectedIndex;
                 taskSelect.IsEnabled = mode == 0;
@@ -415,7 +415,7 @@ namespace TouchTypingStudio
             pressed.Clear();
             UpdateHeader();
             var root = Stack();
-            root.Margin = new Thickness(24, ActualHeight < 680 ? 14 : 37, 24, 10);
+            root.Margin = new Thickness(24, ActualHeight < 680 ? 14 : 31, 24, 10);
             root.VerticalAlignment = VerticalAlignment.Top;
             timerLabel = Label("00:00", 17, Ink, true);
             timerLabel.FontFamily = new FontFamily("Courier New");
@@ -448,12 +448,12 @@ namespace TouchTypingStudio
             stopControl.FontSize = 11;
             stopControl.Padding = new Thickness(5, 0, 5, 0);
             stopControl.Margin = new Thickness(6, 0, 0, 0);
-            stopControl.Background = Ui.Brush("#B80924");
+            stopControl.Background = ReferenceField;
             toolbar.Children.Add(stopControl);
             tape = new FocusTape { Margin = new Thickness(0, 4, 0, 0) };
             root.Children.Add(tape);
-            lessonProgress = new ProgressBar { Height = 5, Minimum = 0, Maximum = 1, Background = Ui.Brush("#191D25"),
-                Foreground = Ui.Brush("#8296A8"), BorderThickness = new Thickness(0),
+            lessonProgress = new ProgressBar { Height = 5, Minimum = 0, Maximum = 1, Background = ReferenceField,
+                Foreground = ReferenceAccent, BorderThickness = new Thickness(0),
                 Margin = new Thickness(ActualWidth * .09, 13, ActualWidth * .09, 0) };
             root.Children.Add(lessonProgress);
             feedback = Label("", 13, Dim);
@@ -468,8 +468,16 @@ namespace TouchTypingStudio
             sceneLabel.TextTrimming = TextTrimming.CharacterEllipsis;
             sceneLabel.Height = 24;
             root.Children.Add(sceneLabel);
-            keyboard = new LiveKeyboard { Margin = new Thickness(0, ActualHeight < 680 ? 12 : 42, 0, 0), IsHitTestVisible = false };
-            root.Children.Add(keyboard);
+            keyboard = new LiveKeyboard { Width = 950, IsHitTestVisible = false };
+            var typingAid = new Viewbox { Child = keyboard, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Stretch };
+            Action sizeAid = delegate
+            {
+                typingAid.Margin = new Thickness(0, ActualHeight < 680 ? 9 : 22, 0, 0);
+                typingAid.MaxHeight = Math.Max(115, Math.Min(248, ActualHeight - 360));
+            };
+            root.SizeChanged += delegate { sizeAid(); };
+            sizeAid();
+            root.Children.Add(typingAid);
             keyHints = Label("", 12, Dim);
             keyHints.TextAlignment = TextAlignment.Center;
             keyHints.Margin = new Thickness(0, 4, 0, 0);
@@ -615,7 +623,7 @@ namespace TouchTypingStudio
             var keys = LayoutStep && state.S("activity") != "layout-after" ? new[] { Target("A", 0) } :
                 targets == null ? new Data[0] : targets.Items().ToArray();
             if (state.I("tier") == 2 && !LayoutStep && !substitute) keys = new Data[0];
-            keyboard.Update(library.Items("keyboard"), CurrentLayout(), keys, state.Items("held").Select(key => key.Value()),
+            keyboard.Update(library.Items("keyboard"), "EN", keys, state.Items("held").Select(key => key.Value()),
                 library.B("showMistakeKey", true) ? state.S("mistakeKey") : "",
                 library.B("showKeys", true), library.B("showHands", true), true,
                 library.S("keyboardProfile", "matebook-d16"), library.S("fnMode", "hotkeys"));
@@ -753,15 +761,75 @@ namespace TouchTypingStudio
                     return (double)difference;
                 }).ToArray();
             }
-            var panel = BuildStaminaResult(backdrop, "Результат", live ? "Сочетания" : score.S("title"),
-                seconds, live ? "ВЫПОЛНЕНО" : "НАБРАНО", count.ToString(),
-                Format(speed), live ? "действий/м" : "зн/м", Format(score.N("accuracy")) + "%",
-                tempo, errors, live ? "Промахи " + Math.Max(0, score.I("count") - score.I("correct")) :
-                    "Промахи " + score.I("errors"), "PracticeResult",
-                "Выполнено " + count + ". Ошибки " + (live ? Math.Max(0, score.I("count") - score.I("correct")) : score.I("errors")) + ".",
-                delegate { ShowPage(page); if (live) StartLive(); else StartTyping(); },
+            if (!live) return BuildTypingResult(backdrop, score, seconds, count, speed, tempo, errors);
+            int misses = Math.Max(0, score.I("count") - score.I("correct"));
+            var panel = BuildStaminaResult(backdrop, "Результат", "Сочетания",
+                seconds, "ВЫПОЛНЕНО", count.ToString(), Format(speed), "действий/м", Format(score.N("accuracy")) + "%",
+                tempo, errors, "Промахи " + misses, "PracticeResult", "Выполнено " + count + ". Ошибки " + misses + ".",
+                delegate { ShowPage(page); StartLive(); },
                 delegate { ShowPage(page); }, delegate { ShowPage(ProgressPage); });
             return panel;
+        }
+
+        private FrameworkElement BuildTypingResult(FrameworkElement backdrop, Data score, int seconds, int count,
+            double speed, double?[] tempo, double[] errors)
+        {
+            var root = new Grid { Background = ReferenceHomeSurface() };
+            if (backdrop != null)
+            {
+                backdrop.IsHitTestVisible = false;
+                backdrop.IsEnabled = false;
+                root.Children.Add(backdrop);
+                root.Children.Add(new Border { Background = Ui.Brush("#B5100F15") });
+            }
+            var card = Stack();
+            var heading = ReferenceLabel("Результат", 29, ReferenceText, true);
+            AutomationProperties.SetAutomationId(heading, "PracticeResult");
+            AutomationProperties.SetHelpText(heading, "Набрано " + count + ". Ошибки " + score.I("errors") + ".");
+            card.Children.Add(heading);
+            var subtitle = ReferenceLabel(score.S("title", TypingPage), 15, ReferenceMuted, false);
+            subtitle.Margin = new Thickness(0, 3, 0, 14);
+            card.Children.Add(subtitle);
+            var metrics = new UniformGrid { Columns = 4, Margin = new Thickness(0, 0, -9, 14) };
+            metrics.Children.Add(ReferenceResultMetric("time", "Время", (seconds / 60).ToString("00") + ":" +
+                (seconds % 60).ToString("00"), ""));
+            metrics.Children.Add(ReferenceResultMetric("count", "Набрано", count.ToString(), "зн."));
+            metrics.Children.Add(ReferenceResultMetric("speed", "Скорость", Format(speed), "зн/мин"));
+            metrics.Children.Add(ReferenceResultMetric("accuracy", "Точность", Format(score.N("accuracy")) + "%", ""));
+            card.Children.Add(metrics);
+            var details = new Expander { Header = ReferenceLabel("Работа над ошибками", 15, ReferenceText, true),
+                Foreground = ReferenceText, Focusable = true };
+            referenceErrorReview = details;
+            AutomationProperties.SetAutomationId(details, "TypingErrorReview");
+            AutomationProperties.SetName(details, "Работа над ошибками");
+            var review = Stack();
+            review.Children.Add(ReferenceLabel("Промахи: " + score.I("errors"), 14, ReferenceMuted, false));
+            if (tempo.Length > 0)
+            {
+                review.Children.Add(new LiveResultChart(tempo, errors) { Height = 130, Margin = new Thickness(0, 4, 0, 0) });
+                review.Children.Add(ReferenceLabel("Скорость и ошибки по ходу занятия", 12, ReferenceMuted, false));
+            }
+            details.Expanded += delegate { details.Content = review; };
+            details.Collapsed += delegate { details.Content = null; };
+            var reviewFrame = ReferenceLessonPanel(details, new Thickness(10), 10);
+            reviewFrame.Margin = new Thickness(0, 0, 0, 14);
+            card.Children.Add(reviewFrame);
+            var actions = new UniformGrid { Columns = 3, Margin = new Thickness(0, 0, -8, 0) };
+            actions.Children.Add(ReferenceResultAction("К урокам", delegate { ShowPage(TypingPage); }, "TypingChoose", 0));
+            var repeat = ReferenceResultAction("Начать сначала", delegate { ShowPage(TypingPage); StartTyping(); }, "TypingRepeat", 2);
+            actions.Children.Add(repeat);
+            actions.Children.Add(ReferenceResultAction("К прогрессу", delegate { ShowPage(ProgressPage); }, "TypingProgress", 1));
+            card.Children.Add(actions);
+            beginControl = repeat;
+            var scroll = new ScrollViewer { Content = ReferenceLessonPanel(card, new Thickness(20), 17),
+                MaxWidth = 735, Margin = new Thickness(16), VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Stretch, Focusable = false,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+            ApplyLiveScrollStyle(scroll);
+            root.Children.Add(scroll);
+            Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(delegate
+            { if (ReferenceEquals(center.Content, root)) repeat.Focus(); }));
+            return root;
         }
 
         private FrameworkElement BuildStaminaResult(FrameworkElement backdrop, string title, string summary,
@@ -1237,8 +1305,8 @@ namespace TouchTypingStudio
         private static Button ActionButton(string text, Action handler, bool primary = false)
         {
             var button = Ui.Button(text, handler, primary);
-            button.Background = primary ? Accent : Card;
-            button.Foreground = primary ? Night : Ink;
+            button.Background = primary ? ReferencePrimary : Card;
+            button.Foreground = Ink;
             button.BorderBrush = primary ? Accent : Edge;
             button.MinHeight = 32;
             button.FontSize = 13;
@@ -1278,7 +1346,8 @@ namespace TouchTypingStudio
             {
                 Width = width, Height = 34, Margin = new Thickness(0, 0, 7, 0), ItemsSource = options,
                 SelectedIndex = Pick(options, value), FontSize = 13, VerticalContentAlignment = VerticalAlignment.Center,
-                Background = Ui.Brush("#E2E4E9"), Foreground = Night, BorderBrush = Edge
+                FontFamily = LiveUiFont.Sans, Background = ReferenceField, Foreground = ReferenceText, BorderBrush = Edge,
+                Template = LiveSelectTemplate(), ItemContainerStyle = LiveSelectItemStyle(), MaxDropDownHeight = 216
             };
             AutomationProperties.SetName(combo, name);
             return combo;

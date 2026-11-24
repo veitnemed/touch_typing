@@ -50,12 +50,13 @@ namespace TouchTypingStudio
             }
             var previous = Make(Left, size, Previous);
             var next = Make(Right, size, Ink);
-            double y = (ActualHeight - active.Height) / 2;
+            // Place all three segments on one baseline even when their glyphs have different bounds.
+            double baseline = (ActualHeight - active.Height) / 2 + active.Baseline;
             dc.PushClip(new RectangleGeometry(new Rect(6, 6, ActualWidth - 12, ActualHeight - 12), 6, 6));
             dc.DrawRectangle(Ui.Brush("#1F2125"), null, new Rect(6, 6, center - 6, ActualHeight - 12));
-            dc.DrawText(previous, new Point(center - previous.WidthIncludingTrailingWhitespace, y));
-            dc.DrawText(active, new Point(center, y));
-            dc.DrawText(next, new Point(center + active.WidthIncludingTrailingWhitespace, y));
+            dc.DrawText(previous, new Point(center - previous.WidthIncludingTrailingWhitespace, baseline - previous.Baseline));
+            dc.DrawText(active, new Point(center, baseline - active.Baseline));
+            dc.DrawText(next, new Point(center + active.WidthIncludingTrailingWhitespace, baseline - next.Baseline));
             dc.Pop();
         }
 

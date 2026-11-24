@@ -132,8 +132,8 @@ class PracticeLine(Gtk.Widget):
         if width <= 0 or height <= 0:
             return
         pivot = width / 2
-        font = Pango.FontDescription.from_string("Courier New, Liberation Mono, monospace")
-        font.set_absolute_size(min(54, max(41, width / 19)) * Pango.SCALE)
+        font = Pango.FontDescription.from_string("Roboto")
+        font.set_absolute_size(min(49, max(35, width / 22)) * Pango.SCALE)
 
         def rect(x, y, w, h):
             value = Graphene.Rect()
@@ -149,23 +149,32 @@ class PracticeLine(Gtk.Widget):
             snapshot.restore()
 
         snapshot.push_clip(rect(0, 0, width, height))
-        snapshot.append_color(rgba("#1f2125"), rect(0, 0, pivot, height))
-        snapshot.append_color(rgba("#292d36"), rect(pivot, 0, width - pivot, height))
+        snapshot.append_color(rgba("#1e1d25"), rect(0, 0, pivot, height))
+        snapshot.append_color(rgba("#28272e"), rect(pivot, 0, width - pivot, height))
         if not self.before and not self.after:
-            font.set_absolute_size(15 * Pango.SCALE)
-            hint = self.layout(self.placeholder, font)
-            hint_width, hint_height = hint.get_pixel_size()
-            draw(hint, (width - hint_width) / 2, (height - hint_height) / 2, "#cac9cf")
+            if self.placeholder:
+                font.set_absolute_size(15 * Pango.SCALE)
+                hint = self.layout(self.placeholder, font)
+                hint_width, hint_height = hint.get_pixel_size()
+                draw(hint, (width - hint_width) / 2, (height - hint_height) / 2, "#cac9cf")
         else:
-            left = self.layout(self.printable(self.before), font)
-            current = self.layout(self.printable(self.after[:1], current=True), font)
-            ahead = self.layout(self.printable(self.after[1:]), font)
-            current_width, line_height = current.get_pixel_size()
-            y = (height - line_height) / 2
-            draw(left, pivot - left.get_pixel_size()[0], y, "#898b94")
-            if self.after:
-                draw(current, pivot, y, "#cac9cf" if self.correct else "#ff5366")
-            draw(ahead, pivot + current_width, y, "#cac9cf")
+            # Shape one layout so the caret, surrounding glyphs and baseline
+            # all use the same kerning and fallback font metrics.
+            before, after = self.printable(self.before), self.printable(self.after)
+            layout = self.layout(before + after, font)
+            before_end = len(before.encode("utf-8"))
+            caret, _ = layout.get_cursor_pos(before_end)
+            attrs = Pango.AttrList()
+            ranges = [(0, before_end, (0x9696, 0x9191, 0x9e9e))]
+            if not self.correct and after:
+                ranges.append((before_end, before_end + len(after[0].encode("utf-8")), (0xffff, 0x6868, 0x7b7b)))
+            for start_index, end_index, (red, green, blue) in ranges:
+                attr = Pango.attr_foreground_new(red, green, blue)
+                attr.start_index, attr.end_index = start_index, end_index
+                attrs.insert(attr)
+            layout.set_attributes(attrs)
+            _, line_height = layout.get_pixel_size()
+            draw(layout, pivot - caret.x / Pango.SCALE, (height - line_height) / 2, "#e4e0e8")
         snapshot.pop()
 
 

@@ -15,7 +15,7 @@ namespace TouchTypingStudio
 {
     internal sealed partial class LiveStudio
     {
-        private TextBlock referenceTaskStep, referenceProgressLabel, referenceHelpText;
+        private TextBlock referenceHelpText;
         private string referenceKeySignature;
         private ProgressBar referenceScenarioProgress;
         private Border referenceHintPanel, referenceKeysFrame;
@@ -48,36 +48,31 @@ namespace TouchTypingStudio
             referenceErrorReview = null;
             referenceKeySignature = null;
 
-            var root = new Grid { Focusable = true, Background = ReferenceGradient("#18132F", "#21183D", 80) };
+            var root = new Grid { Focusable = true, Background = ReferenceHomeSurface() };
             for (int row = 0; row < 6; row++)
                 root.RowDefinitions.Add(new RowDefinition { Height = row == 2 ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
-            var prompt = Stack();
-            labCounter = referenceTaskStep = ReferenceLabel("", 12, ReferenceMuted, false);
-            labCounter.TextAlignment = TextAlignment.Center;
-            AutomationProperties.SetAutomationId(labCounter, "LabCounter");
-            prompt.Children.Add(referenceTaskStep);
-            labTask = ReferenceLabel("", 21, ReferenceText, true);
-            labTask.Margin = new Thickness(0, 3, 0, 0);
-            labTask.TextAlignment = TextAlignment.Center;
-            labTask.MaxWidth = 820;
+            var prompt = new Grid();
+            prompt.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) });
+            prompt.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+            labTask = ReferenceLabel("", 17, ReferenceText, true);
+            labTask.VerticalAlignment = VerticalAlignment.Center;
             AutomationProperties.SetAutomationId(labTask, "LabTask");
             prompt.Children.Add(labTask);
-            labKeys = ReferenceLabel("", 18, ReferenceText, true);
-            labKeys.MaxWidth = 640;
-            labKeys.TextAlignment = TextAlignment.Center;
+            labKeys = ReferenceLabel("", 15, ReferenceText, true);
+            labKeys.TextAlignment = TextAlignment.Right;
+            labKeys.VerticalAlignment = VerticalAlignment.Center;
             AutomationProperties.SetAutomationId(labKeys, "LabKeys");
-            referenceKeysFrame = new Border { Child = labKeys, Margin = new Thickness(0, 5, 0, 0),
-                HorizontalAlignment = HorizontalAlignment.Center };
+            referenceKeysFrame = new Border { Child = labKeys, Margin = new Thickness(12, 0, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(referenceKeysFrame, 1);
             prompt.Children.Add(referenceKeysFrame);
-
-            var taskBox = ReferenceLessonPanel(prompt, new Thickness(12, 7, 12, 8), 14);
-            taskBox.Margin = new Thickness(16, 9, 16, 0);
-            taskBox.SizeChanged += delegate
+            referenceKeysFrame.IsVisibleChanged += delegate
             {
-                var compact = taskBox.ActualWidth < 700;
-                labTask.FontSize = compact ? 19 : 21;
-                labTask.LineHeight = labTask.FontSize * 1.22;
+                Grid.SetColumnSpan(labTask, referenceKeysFrame.Visibility == Visibility.Collapsed ? 2 : 1);
             };
+
+            var taskBox = ReferenceLessonPanel(prompt, new Thickness(14, 6, 14, 6), 11);
+            taskBox.Margin = new Thickness(16, 8, 16, 0);
             root.Children.Add(taskBox);
 
             referenceHelpText = ReferenceLabel("", 13, ReferenceMuted, false);
@@ -94,7 +89,7 @@ namespace TouchTypingStudio
                 Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_PYTHON_EDITOR") == "1" };
             AutomationProperties.SetAutomationId(labDesktop, "LabDesktop");
             var sceneFrame = ReferenceLessonPanel(labDesktop, new Thickness(4), 13);
-            sceneFrame.Margin = new Thickness(16, 15, 16, 0);
+            sceneFrame.Margin = new Thickness(16, 8, 16, 0);
             Grid.SetRow(sceneFrame, 2);
             root.Children.Add(sceneFrame);
 
@@ -110,11 +105,6 @@ namespace TouchTypingStudio
             DockPanel.SetDock(actionCluster, Dock.Right);
             footer.Children.Add(actionCluster);
             var progress = new DockPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0, 16, 0) };
-            referenceProgressLabel = ReferenceLabel("", 14, ReferenceMuted, false);
-            referenceProgressLabel.Margin = new Thickness(0, 0, 16, 0);
-            referenceProgressLabel.VerticalAlignment = VerticalAlignment.Center;
-            DockPanel.SetDock(referenceProgressLabel, Dock.Left);
-            progress.Children.Add(referenceProgressLabel);
             timerLabel = ReferenceLabel("", 13, ReferenceText, true);
             timerLabel.Margin = new Thickness(0, 0, 12, 0);
             timerLabel.VerticalAlignment = VerticalAlignment.Center;
@@ -122,14 +112,14 @@ namespace TouchTypingStudio
             DockPanel.SetDock(timerLabel, Dock.Left);
             progress.Children.Add(timerLabel);
             referenceScenarioProgress = new ProgressBar { Minimum = 0, Maximum = 1, Height = 12,
-                VerticalAlignment = VerticalAlignment.Center, Focusable = false, Foreground = Ui.Brush("#805CF2"),
-                Background = Ui.Brush("#463C64"), Template = ReferenceProgressTemplate() };
+                VerticalAlignment = VerticalAlignment.Center, Focusable = false, Foreground = Ui.Brush("#A89BB9"),
+                Background = Ui.Brush("#47424D"), Template = ReferenceProgressTemplate() };
             AutomationProperties.SetAutomationId(referenceScenarioProgress, "LabScenarioProgress");
             progress.Children.Add(referenceScenarioProgress);
             footer.Children.Add(progress);
             var footerFrame = ReferenceLessonPanel(footer, new Thickness(13, 6, 6, 6), 13);
-            footerFrame.Margin = new Thickness(16, 10, 16, 0);
-            footerFrame.MinHeight = 61;
+            footerFrame.Margin = new Thickness(16, 7, 16, 0);
+            footerFrame.MinHeight = 39;
             Grid.SetRow(footerFrame, 3);
             root.Children.Add(footerFrame);
 
@@ -166,7 +156,7 @@ namespace TouchTypingStudio
 
             keyboard = new LiveKeyboard { IsHitTestVisible = false, Width = 1050 };
             labGuide = new LiveAidViewbox { Child = keyboard, Stretch = Stretch.Uniform,
-                StretchDirection = StretchDirection.DownOnly, MaxHeight = 142, Margin = new Thickness(16, 0, 16, 5) };
+                StretchDirection = StretchDirection.Both, MaxHeight = 166, Margin = new Thickness(16, 0, 16, 5) };
             AutomationProperties.SetAutomationId(labGuide, "LiveAidPanel");
             Grid.SetRow(labGuide, 5);
             root.Children.Add(labGuide);
@@ -215,17 +205,17 @@ namespace TouchTypingStudio
         {
             return new Border { Child = child, Padding = inset, CornerRadius = new CornerRadius(radius),
                 BorderThickness = new Thickness(1), BorderBrush = ReferenceEdge,
-                Background = ReferenceGradient("#27204A", "#1D1737", 75) };
+                Background = ReferencePanel };
         }
 
         private static Button ReferenceLessonButton(string glyph, string name, Action action, string id, double width)
         {
             var b = ReferenceButton(action, 10);
             b.Content = ReferenceLabel(glyph, width > 40 ? 25 : 16, ReferenceText, true);
-            b.Width = width; b.Height = width > 40 ? 45 : 29;
+            b.Width = width; b.Height = width > 40 ? 32 : 29;
             b.Margin = new Thickness(6, 0, 0, 0); b.VerticalAlignment = VerticalAlignment.Center;
-            b.Background = ReferenceGradient("#3D345E", "#30264E", 90);
-            b.BorderBrush = Ui.Brush("#4B3E71"); b.BorderThickness = new Thickness(1);
+            b.Background = ReferenceGradient("#3C3642", "#303039", 90);
+            b.BorderBrush = Ui.Brush("#56515D"); b.BorderThickness = new Thickness(1);
             AutomationProperties.SetAutomationId(b, id);
             SetReferenceLessonAction(b, name);
             return b;
@@ -247,7 +237,7 @@ namespace TouchTypingStudio
             grid.AppendChild(track);
             var fill = new FrameworkElementFactory(typeof(Border), "PART_Indicator");
             fill.SetValue(Border.CornerRadiusProperty, new CornerRadius(6));
-            fill.SetValue(Border.BackgroundProperty, ReferenceGradient("#A287FA", "#754EF2", 90));
+            fill.SetValue(Border.BackgroundProperty, ReferenceGradient("#B0A3BF", "#887993", 90));
             fill.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Left);
             grid.AppendChild(fill);
             template.VisualTree = grid;
@@ -257,12 +247,11 @@ namespace TouchTypingStudio
         private void UpdateReferenceLesson(Data task)
         {
             int count = state.I("scenarioLength"), step = state.I("scenarioStep");
-            referenceTaskStep.Text = count > 0 ? "Задание " + step + " из " + count : "Задание";
-            referenceProgressLabel.Text = count > 0 ? "Шаг " + step + " из " + count : "Выполнено " + state.I("solved");
+            int completed = Math.Max(0, Math.Min(count, state.I("scenarioCompletedGoals")));
             referenceScenarioProgress.Maximum = Math.Max(1, count);
-            referenceScenarioProgress.Value = Math.Max(0, Math.Min(step, count));
+            referenceScenarioProgress.Value = completed;
             referenceScenarioProgress.Visibility = count > 0 ? Visibility.Visible : Visibility.Collapsed;
-            AutomationProperties.SetName(referenceScenarioProgress, referenceProgressLabel.Text);
+            AutomationProperties.SetName(referenceScenarioProgress, "Прогресс задания: " + completed + " из " + count);
             UpdateReferenceKeycaps(task, count, step);
             if (referenceHelpOpen) DrawReferenceLessonHelp(task);
         }
@@ -273,7 +262,7 @@ namespace TouchTypingStudio
             string raw = task.S("keys"), text = task.S("text");
             string shown = !guided ? "" : raw.Length > 0 ? DisplayLabGesture(raw) :
                 task.S("id").StartsWith("open-") ? "⊞  →  " + text + "  →  Enter" :
-                text.Length > 12 ? "Ctrl+R  ·  найдите фрагмент  →  Enter" : text;
+                task.S("id").StartsWith("command/") && text.Length > 12 ? "Ctrl + R  →  Enter" : text;
             string signature = (guided ? "guided:" : "independent:") + shown + "|" + raw + "|" + step + "/" + count;
             if (signature == referenceKeySignature) return; // Input and timer ticks should not rebuild visual children.
             referenceKeySignature = signature;
@@ -289,10 +278,10 @@ namespace TouchTypingStudio
             for (int index = 0; index < parts.Length; index++)
             {
                 if (index > 0) labKeys.Inlines.Add(new Run(" + "));
-                var chip = new Border { Child = ReferenceLabel(parts[index], 18, ReferenceText, true),
+                var chip = new Border { Child = ReferenceLabel(parts[index], 15, ReferenceText, true),
                     Padding = new Thickness(9, 2, 9, 2), CornerRadius = new CornerRadius(6),
-                    BorderThickness = new Thickness(1), BorderBrush = Ui.Brush("#9D73F4"),
-                    Background = ReferenceGradient("#563888", "#3F286A", 70) };
+                    BorderThickness = new Thickness(1), BorderBrush = Ui.Brush("#8F819D"),
+                    Background = ReferenceGradient("#64556E", "#48414F", 70) };
                 labKeys.Inlines.Add(new InlineUIContainer(chip) { BaselineAlignment = BaselineAlignment.Center });
             }
         }
@@ -308,7 +297,7 @@ namespace TouchTypingStudio
                 keys ? "Клавиатура" : hands ? "Положение рук" : "Учебные подсказки скрыты");
             AutomationProperties.SetItemStatus(labGuide, (keys ? "keyboard" : "no-keyboard") +
                 ";" + (hands ? "hands" : "no-hands"));
-            labGuide.MaxHeight = room ? 142 : 86;
+            labGuide.MaxHeight = room ? 166 : 105;
         }
 
         private void OpenReferenceLessonHelp()
@@ -354,12 +343,12 @@ namespace TouchTypingStudio
 
         private FrameworkElement MakeReferenceLabResult(Data result, FrameworkElement backdrop, bool pausedPreview)
         {
-            var outer = new Grid { Background = Ui.Brush("#17122F") };
+            var outer = new Grid { Background = Ui.Brush("#191820") };
             if (backdrop != null)
             {
                 backdrop.IsHitTestVisible = false;
                 outer.Children.Add(backdrop);
-                outer.Children.Add(new Border { Background = Ui.Brush("#D1100B22") });
+                outer.Children.Add(new Border { Background = Ui.Brush("#B5100F15") });
             }
             bool complete = result.B("completed");
             int count = result.I("solved"), seconds = result.I("seconds"), errors = result.I("errors");
@@ -371,9 +360,9 @@ namespace TouchTypingStudio
 
             var heading = new DockPanel { Margin = new Thickness(0, 0, 0, 17) };
             var badge = new Border { Width = 56, Height = 56, CornerRadius = new CornerRadius(15),
-                Background = Ui.Brush(pausedPreview ? "#3E335E" : "#21403B"), Margin = new Thickness(0, 0, 17, 0),
+                Background = Ui.Brush(pausedPreview ? "#413849" : "#21403B"), Margin = new Thickness(0, 0, 17, 0),
                 VerticalAlignment = VerticalAlignment.Center };
-            var badgeText = ReferenceLabel(pausedPreview ? "Ⅱ" : "✓", 30, Ui.Brush(pausedPreview ? "#C7B4FF" : "#60FA83"), true);
+            var badgeText = ReferenceLabel(pausedPreview ? "Ⅱ" : "✓", 30, Ui.Brush(pausedPreview ? "#D4C8DE" : "#A9D9AE"), true);
             badgeText.HorizontalAlignment = HorizontalAlignment.Center;
             badgeText.VerticalAlignment = VerticalAlignment.Center;
             badge.Child = badgeText;
@@ -477,9 +466,9 @@ namespace TouchTypingStudio
             button.Margin = new Thickness(0, 0, 8, 0);
             button.Padding = new Thickness(6, 6, 6, 6);
             button.MinHeight = 51;
-            button.Background = role == 2 ? ReferenceGradient("#8B69FC", "#663BE4", 90) :
-                role == 1 ? Ui.Brush("#241C3E") : Ui.Brush("#3B3259");
-            button.BorderBrush = role == 1 ? Ui.Brush("#B1A2D1") : ReferenceEdge;
+            button.Background = role == 2 ? ReferenceGradient("#71617B", "#64556E", 90) :
+                role == 1 ? Ui.Brush("#28272E") : Ui.Brush("#3C3642");
+            button.BorderBrush = role == 1 ? Ui.Brush("#A89BB9") : ReferenceEdge;
             button.BorderThickness = new Thickness(role == 1 ? 1.5 : 1);
             AutomationProperties.SetAutomationId(button, id);
             AutomationProperties.SetName(button, title);

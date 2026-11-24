@@ -14,7 +14,7 @@ namespace TouchTypingStudio
     {
         private readonly IntPtr window;
         private readonly Dispatcher dispatcher;
-        private readonly Action<int, int, bool, bool, bool, string> receive;
+        private readonly Action<int, int, bool, bool, bool, string, IntPtr> receive;
         private readonly Hook callback;
         private readonly byte[] keys = new byte[256];
         private readonly HashSet<int> held = new HashSet<int>();
@@ -23,7 +23,7 @@ namespace TouchTypingStudio
         private bool disposed, suspended;
         private int generation;
 
-        internal LabKeyboardCapture(IntPtr window, Dispatcher dispatcher, Action<int, int, bool, bool, bool, string> receive)
+        internal LabKeyboardCapture(IntPtr window, Dispatcher dispatcher, Action<int, int, bool, bool, bool, string, IntPtr> receive)
         {
             this.window = window;
             this.dispatcher = dispatcher;
@@ -67,10 +67,11 @@ namespace TouchTypingStudio
             keys[0x11] = (byte)(keys[0xa2] | keys[0xa3]);
             keys[0x12] = (byte)(keys[0xa4] | keys[0xa5]);
             string text = "";
+            IntPtr inputLayout = GetKeyboardLayout(0);
             if (down)
             {
                 var output = new StringBuilder(8);
-                int count = ToUnicodeEx(stroke.VirtualKey, stroke.ScanCode, keys, output, output.Capacity, 4, GetKeyboardLayout(0));
+                int count = ToUnicodeEx(stroke.VirtualKey, stroke.ScanCode, keys, output, output.Capacity, 4, inputLayout);
                 if (count > 0 && count <= output.Length) text = output.ToString(0, count);
             }
             int scan = (int)stroke.ScanCode;
@@ -78,7 +79,7 @@ namespace TouchTypingStudio
             int receivedIn = generation;
             dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(delegate
             {
-                if (!disposed && !suspended && receivedIn == generation && GetForegroundWindow() == window) receive(vk, scan, extended, down, repeat, text);
+                if (!disposed && !suspended && receivedIn == generation && GetForegroundWindow() == window) receive(vk, scan, extended, down, repeat, text, inputLayout);
             }));
             return new IntPtr(1);
         }

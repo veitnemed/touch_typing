@@ -31,7 +31,7 @@ internal static partial class LiveCourse
     }
 
     // The same case has a reproducible starting desk. The user's live desk is never used for rehearsal.
-    internal static List<LiveGoal> Compile(LiveMission mission, LabScene initial, bool prepared = false)
+    internal static List<LiveGoal> Compile(LiveMission mission, LabScene initial, bool prepared = false, bool nativeEnglishInput = false)
     {
         var trial = initial.Clone();
         if (!prepared) mission.Prepare?.Invoke(trial);
@@ -40,7 +40,7 @@ internal static partial class LiveCourse
         {
             foreach (string token in RouteTokens(mission.Phases[phase]))
             {
-                if ((IsCommandToken(token) || IsProjectSearchQuery(token) ||
+                if (!nativeEnglishInput && (IsCommandToken(token) || IsProjectSearchQuery(token) ||
                     token is "code-rename-confirm" or "debug-unit" or "debug-report-check"
                     or "debug-project-query" or "debug-doc-submit" or "debug-rewrite" or "exact-find-submit" or "python-edit-write" ||
                     trial.ExactEdit && token is "quick-choose" or "save") && trial.Layout == "RU")

@@ -5,7 +5,7 @@ using System.Text.Json;
 
 namespace TouchTypingStudio;
 
-internal sealed record LiveEvent(string Key, bool Down = false, string Text = "");
+internal sealed record LiveEvent(string Key, bool Down = false, string Text = "", bool NativeEnglish = false);
 
 internal sealed record LabPoint(int Second, bool Correct, string Key, string Task, int Milliseconds);
 
@@ -14,6 +14,7 @@ internal sealed class LabRun
     private readonly Func<double> clock;
     private readonly Random random;
     private readonly HashSet<string> held = [];
+    private readonly HashSet<string> layoutBlockedKeys = [];
     private readonly List<LabPoint> points = [];
     private readonly List<LiveEvent> trace = [];
     private bool restoring, replayLegacyUrl, replayLegacyReport, replayLegacyNavigation;
@@ -24,7 +25,7 @@ internal sealed class LabRun
     private const string LineEditingEvent = "@line-editing";
     private const string PythonEditingEvent = "@python-editing";
     private bool replayLegacyLineEditing, replayLegacyPythonEditing;
-    private readonly bool neutralProject;
+    private readonly bool neutralProject, nativeEnglishInput;
     private int variant;
     private string initialLayout, attemptLayout;
     private bool initialVirtual;
@@ -83,6 +84,7 @@ internal sealed class LabRun
     internal string ScenarioTitle => mission?.Title ?? "";
     internal int ScenarioStep => Math.Min(missionLength, missionLength - pending.Count + 1);
     internal int ScenarioLength => missionLength;
+    internal int ScenarioCompletedGoals => Math.Max(0, missionLength - (pending?.Count ?? 0));
     internal int Seconds => TimeLimit > 0 && !FinishingMission ? Math.Min(Elapsed, TimeLimit) : Elapsed;
     internal string LimitReached => latchedLimit ?? (TimeLimit > 0 && Elapsed >= TimeLimit ? "timer" :
         ActionLimit > 0 && Solved >= ActionLimit ? "actions" : null);
@@ -102,12 +104,13 @@ internal sealed class LabRun
     internal string[] Held => held.ToArray();
 
     internal LabRun(string app, string mode, int level, int seconds, string layout, IEnumerable<ShortcutAttempt> history,
-        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null, bool softFinish = false, bool combinedLimits = false, bool windowsBindings = false, string[] desktopProfile = null, bool neutralProject = false, string environment = "ubuntu")
+        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null, bool softFinish = false, bool combinedLimits = false, bool windowsBindings = false, string[] desktopProfile = null, bool neutralProject = false, string environment = "ubuntu", bool nativeEnglishInput = false)
     {
         if (!LabCatalog.Apps.Contains(app)) throw new ArgumentException("Выберите Ubuntu, Chrome, VS Code или Терминал.");
         if (mode is not ("drill" or "sandbox")) throw new ArgumentException("Выберите тренировку или учебный рабочий стол.");
         var progress = draft?.Progress;
         this.neutralProject = draft == null ? neutralProject : draft.ProjectFixture == NeutralProject.FixtureId;
+        this.nativeEnglishInput = draft?.NativeEnglishInput ?? nativeEnglishInput;
         this.softFinish = softFinish;
         this.windowsBindings = windowsBindings;
         EnvironmentProfile = app == "windows" ? "windows" : app == "workday" ? LabScene.DesktopEnvironment(draft?.DesktopEnvironment ?? environment) : "ubuntu";
@@ -157,7 +160,7 @@ internal sealed class LabRun
                 else if (e.Key == ClusterNavigationEvent) EndLegacyNavigation(e);
                 else if (e.Key == LineEditingEvent) EndLegacyLineEditing(e);
                 else if (e.Key == PythonEditingEvent) EndLegacyPythonEditing(e);
-                else Input(e.Key, e.Down, e.Text);
+                else Input(e.Key, e.Down, e.Text, e.NativeEnglish ? "EN" : "");
             }
             if (replayLegacyUrl) trace.Add(new(ExactUrlEvent));
             if (replayLegacyReport) trace.Add(new(StrictReportEvent));
@@ -208,7 +211,7 @@ internal sealed class LabRun
     }
 
     internal LiveDraft Draft() => new() { App = App, DesktopEnvironment = EnvironmentProfile, Level = Level, Mission = MissionId, Layout = initialLayout, Guidance = Guidance,
-        Dock = Scene.Dock, ProjectFixture = neutralProject ? NeutralProject.FixtureId : null, DesktopProfile = Scene.GnomePractice.Length == 0 ? null : Scene.DesktopProfile, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, Trace = JsonSerializer.Serialize(trace),
+        Dock = Scene.Dock, ProjectFixture = neutralProject ? NeutralProject.FixtureId : null, DesktopProfile = Scene.GnomePractice.Length == 0 ? null : Scene.DesktopProfile, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, NativeEnglishInput = nativeEnglishInput, Trace = JsonSerializer.Serialize(trace),
         Progress = new() { Session = Session, Mode = Mode, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Solved = Solved,
             Errors = Errors, ActiveMilliseconds = ActiveMilliseconds, Series = JsonSerializer.Serialize(points),
             LimitDecisionPending = PendingLimitChoice, LimitReached = LimitReached,
@@ -219,7 +222,7 @@ internal sealed class LabRun
         if (activeSince is double since) activeMilliseconds += Math.Max(0, clock() - since);
         if (!Paused && held.Count > 0) trace.Add(new("@release"));
         Scene.Switcher = false; Scene.SwitchTarget = null; Scene.SwitchChoices = []; switchReleaseKey = switchEvidenceId = null;
-        activeSince = null; Paused = true; held.Clear(); superUsed = false;
+        activeSince = null; Paused = true; held.Clear(); layoutBlockedKeys.Clear(); superUsed = false;
     }
     internal void Resume()
     {
@@ -272,13 +275,23 @@ internal sealed class LabRun
         trace.Add(new(NativeLayoutEvent, Text: value));
     }
 
-    internal ShortcutAttempt Input(string key, bool pressed, string text)
+    internal ShortcutAttempt Input(string key, bool pressed, string text, string nativeLayout = "")
     {
         if (Finished || AwaitingLimitChoice || Paused || string.IsNullOrEmpty(key)) return null;
         if (!restoring && !FinishingMission && TimeLimit > 0 && ActionLimit > 0)
         {
             inputAtActiveMilliseconds = ActiveMilliseconds;
             if (inputAtActiveMilliseconds >= TimeLimit * 1000.0) return null;
+        }
+        if (!pressed && layoutBlockedKeys.Remove(key)) return null;
+        bool targetedText = pressed && (nativeLayout is "EN" or "RU") && RequiresEnglishText(key, text);
+        if (pressed && (layoutBlockedKeys.Contains(key) || targetedText && nativeLayout == "RU"))
+        {
+            layoutBlockedKeys.Add(key);
+            LastKey = "";
+            Feedback = "layout";
+            Status = "Переключи раскладку на EN";
+            return null;
         }
         if (pressed && held.Contains(key))
         {
@@ -293,8 +306,9 @@ internal sealed class LabRun
         }
         if (!pressed && !held.Contains(key)) return null;
         // Capture before a layout switch or other action can modify the scene.
-        attemptLayout = Scene.Layout;
-        trace.Add(new(key, pressed, text));
+        bool useNativeEnglish = targetedText && nativeLayout == "EN";
+        attemptLayout = useNativeEnglish ? "EN" : Scene.Layout;
+        trace.Add(new(key, pressed, text, useNativeEnglish));
         if (!pressed)
         {
             if (!held.Remove(key)) return null;
@@ -352,7 +366,7 @@ internal sealed class LabRun
             if (word && key == "X" && Scene.Active?.Focus == "url") return null;
             return Miss(key, WrongKeyMessage(key));
         }
-        bool changed = Scene.Text(key, VirtualText(key, text), shift, word);
+        bool changed = Scene.Text(key, useNativeEnglish ? text : VirtualText(key, text), shift, word);
         bool typedEdit = changed && Task.Action == "python-edit-write" &&
             key is not ("Left" or "Right" or "Up" or "Down" or "Home" or "End" or "Enter" or "Backspace" or "Delete") &&
             !string.IsNullOrEmpty(text) && !text.Any(char.IsControl);
@@ -366,6 +380,33 @@ internal sealed class LabRun
             return Miss(key, "Сохранённая заметка отличается от исходника. Вернитесь в редактор, вставьте скопированный текст целиком и сохраните файл.");
         if (!changed) return Miss(key, "Здесь эта клавиша не выполняет действие.");
         Feedback = "ready"; LastKey = ""; Status = ""; return null;
+    }
+
+    // The virtual keyboard/switching mission and the actual input source are
+    // different things. Require EN for known English text goals only; ordinary
+    // shortcuts, edits, virtual layout switching and free Unicode input still work.
+    private bool RequiresEnglishText(string key, string text)
+    {
+        if (KeyChord.IsModifier(key) ||
+            string.IsNullOrEmpty(text) || text.Any(char.IsControl) ||
+            held.Any(item => KeyChord.Family(item) is "Ctrl" or "Alt" or "Super"))
+            return false;
+        var window = Scene.Active;
+        if (Scene.Overview) return Task.Action == "launch" && Task.Text.All(char.IsAscii);
+        if (window == null || Scene.Switcher) return false;
+        return Task.Action switch
+        {
+            "command" => window.App == "terminal" || window.Focus is "terminal" or "reverse-search",
+            "python-edit-write" or "gnome-write" or "debug-rewrite" => window.App == "code" && window.Focus == "body",
+            "debug-doc-submit" => window.App == "chrome" && window.Focus == "find",
+            "project-search-submit" => window.Focus == "project-search",
+            "project-search-repair" => window.App == "code" && window.Focus == "body",
+            "code-rename-confirm" => window.Focus == "symbol-rename",
+            "exact-find-submit" => window.Focus == "find",
+            "quick-choose" => Scene.ExactEdit && window.Focus == "quick-open" && Task.Text.Length > 0,
+            "save" => Scene.ExactEdit && window.App == "code" && window.Focus == "body" && Task.Text.Length > 0,
+            _ => false
+        };
     }
 
     private string WrongKeyMessage(string key) =>
@@ -517,7 +558,7 @@ internal sealed class LabRun
                 if (weak.Count == 0 || draws.Length == 1)
                 {
                     mission = draws.OrderBy(item => item.Draw).First().Mission;
-                    pending = LiveCourse.Compile(mission, startingScene);
+                    pending = LiveCourse.Compile(mission, startingScene, nativeEnglishInput: nativeEnglishInput);
                 }
                 else
                 {
@@ -528,11 +569,11 @@ internal sealed class LabRun
                     {
                         if (!LiveCourse.CouldPracticeAny(item.Mission, weakTasks))
                             return (item.Mission, Goals: (List<LiveGoal>)null, Score: item.Draw);
-                        var goals = LiveCourse.Compile(item.Mission, startingScene);
+                        var goals = LiveCourse.Compile(item.Mission, startingScene, nativeEnglishInput: nativeEnglishInput);
                         return (item.Mission, Goals: goals, Score: item.Draw / (1 + LiveCourse.CountWeakGoals(goals, weak)));
                     }).OrderBy(item => item.Score).First();
                     mission = selected.Mission;
-                    pending = selected.Goals ?? LiveCourse.Compile(mission, startingScene);
+                    pending = selected.Goals ?? LiveCourse.Compile(mission, startingScene, nativeEnglishInput: nativeEnglishInput);
                 }
                 Scene = startingScene;
             }
@@ -542,7 +583,7 @@ internal sealed class LabRun
                 if (!restoring) variant = random.Next(3);
                 Scene = PrepareMissionScene();
                 mission.Prepare?.Invoke(Scene);
-                pending = LiveCourse.Compile(mission, Scene, prepared: true);
+                pending = LiveCourse.Compile(mission, Scene, prepared: true, nativeEnglishInput: nativeEnglishInput);
             }
             requestedMission = null; used.Add(mission.Id); trace.Clear();
             verifiedReport = null;

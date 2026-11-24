@@ -118,13 +118,13 @@ internal static class LiveUiSmoke
                 return 0;
             }
             Chord("Ctrl+F5");
-            Check(Exists("HomeDashboard") && !Exists("LabClock"), "Modified F5 keeps the Live catalog open");
+            Check(Exists("HomeDashboard") && !Exists("LabTask"), "Modified F5 keeps the Live catalog open");
             // Keep key/cursor evidence independent of later window-close assertions.
             OpenLiveConfiguration("terminal");
             Select("LabMode", 0);
             Select("LabTimer", 1);
             Key("F5");
-            Until(delegate { return Exists("LabClock") && Name("LabPause").StartsWith("Пауза"); }, "focused terminal lesson");
+            Until(delegate { return Exists("LabTask") && Name("LabPause").StartsWith("Пауза"); }, "focused terminal lesson");
             CheckPasteLayouts();
             CheckReferenceTerminalCursor();
             CheckTerminalCursorRepeat();
@@ -143,7 +143,7 @@ internal static class LiveUiSmoke
                     Select("LabTimer", 1);
                     var started = Stopwatch.StartNew();
                     Key("F5");
-                    Until(delegate { return Exists("LabClock") && Name("LabPause").StartsWith("Пауза"); }, "active " + name + " lesson");
+                    Until(delegate { return Exists("LabTask") && Name("LabPause").StartsWith("Пауза"); }, "active " + name + " lesson");
                     CheckFresh180sCountdown(started, name + "/" + mode);
                     Check(Visible("LabScenarioProgress") && !Visible("ResultMetric-accuracy"), "Active lesson shows scenario progress, not accuracy");
                     Check(Name("LabTask").Length > 0 && Exists("LabDesktop"), "Task and Ubuntu scene are accessible");
@@ -161,7 +161,7 @@ internal static class LiveUiSmoke
                     if (name == "ubuntu" && mode == 0) CaptureReferenceFrame("04-pause");
                     string frozen = Name("LabClock");
                     Chord("Ctrl+F10");
-                    Check(Exists("LabClock") && Exists("LabPauseResult"), "Modified F10 keeps the paused lesson open");
+                    Check(Exists("LabTask") && Exists("LabPauseResult"), "Modified F10 keeps the paused lesson open");
                     Wait(1100);
                     Check(Name("LabClock") == frozen, "The clock stops during a pause");
                     Find("LabPauseRestart").SetFocus();
@@ -187,7 +187,7 @@ internal static class LiveUiSmoke
                         Find("LabPauseRestart").SetFocus();
                         var restarted = Stopwatch.StartNew();
                         Key("Enter");
-                        Until(delegate { return !Exists("LabPauseResult") && Exists("LabClock"); },
+                        Until(delegate { return !Exists("LabPauseResult") && Exists("LabTask"); },
                             "Enter restarts through the focused pause button");
                         CheckFresh180sCountdown(restarted, name + "/" + mode + " restart");
                     }
@@ -215,7 +215,7 @@ internal static class LiveUiSmoke
                     {
                         Find("LabRepeat").SetFocus();
                         Key("Space");
-                        Until(delegate { return !Exists("LabResult") && Exists("LabClock"); }, "Space replays from the result");
+                        Until(delegate { return !Exists("LabResult") && Exists("LabTask"); }, "Space replays from the result");
                         Key("F10");
                         Until(delegate { return Exists("LabResult"); }, "result after Space replay");
                     }
@@ -228,7 +228,7 @@ internal static class LiveUiSmoke
                 Select("LabMode", 1);
                 Select("LabTimer", 1);
                 Key("F5");
-                Until(delegate { return Exists("LabClock"); }, "full timed session");
+                Until(delegate { return Exists("LabTask"); }, "full timed session");
                 VirtualEnglish();
                 Solve(int.MaxValue, true);
                 Until(delegate { return Exists("LabResult"); }, "three-minute completion", 10000);
@@ -241,7 +241,7 @@ internal static class LiveUiSmoke
             OpenLiveConfiguration("terminal");
             Select("LabTimer", 1);
             Key("F5");
-            Until(delegate { return Exists("LabClock"); }, "lesson before stop storage failure");
+            Until(delegate { return Exists("LabTask"); }, "lesson before stop storage failure");
             Send(Character('a')); // Record an attempt so Finish must save even with no completed action.
             WithBlockedProfile(delegate
             {
@@ -259,7 +259,7 @@ internal static class LiveUiSmoke
             OpenLiveConfiguration("ubuntu");
             Select("LabTimer", 1);
             Key("F5");
-            Until(delegate { return Exists("LabClock"); }, "lesson before save-and-close");
+            Until(delegate { return Exists("LabTask"); }, "lesson before save-and-close");
             Send(Character('a'));
             RequestClose();
             Until(delegate { return ExitDialog() != null; }, "save-and-close dialog");
@@ -305,6 +305,13 @@ internal static class LiveUiSmoke
         Invoke("LiveConfigure-chrome");
         Until(delegate { return Visible("LiveConfigurePanel") && Visible("LabMission") && Exists("LabStart"); }, "separate Chrome Configure opens");
         Check(!Exists("HomeClass-chrome") && Name("LiveConfigureHeading").Contains("Chrome"), "Configure has no embedded second catalog");
+        var missionBounds = Find("LabMission").Current.BoundingRectangle;
+        var modeBounds = Find("LabMode").Current.BoundingRectangle;
+        var actionBounds = Find("LabDuration").Current.BoundingRectangle;
+        var timerBounds = Find("LabTimer").Current.BoundingRectangle;
+        Check(missionBounds.Right < modeBounds.Left && Math.Abs(missionBounds.Top - modeBounds.Top) < 3 &&
+            actionBounds.Right < timerBounds.Left && Math.Abs(actionBounds.Top - timerBounds.Top) < 3 &&
+            IsWithinLiveClient("LabStart"), "The settings form uses both columns and keeps its Start in view");
         var level = Find("LabLevel");
         level.SetFocus();
         Chord("Alt+Down");
@@ -323,6 +330,8 @@ internal static class LiveUiSmoke
                 Chord("Alt+Down");
                 var options = (ExpandCollapsePattern)picker.GetCurrentPattern(ExpandCollapsePattern.Pattern);
                 Check(options.Current.ExpandCollapseState == ExpandCollapseState.Expanded, id + " opens with the same native dark popup template");
+                if (id == "LabTimer")
+                    Check(IsWithinLiveClient("LabStart"), "Opening the timer on the right keeps Start in view on the left");
                 CaptureLiveUxFrame("live-ux-small-dropdown-" + id);
                 Key("Esc");
                 Check(options.Current.ExpandCollapseState == ExpandCollapseState.Collapsed, id + " closes with Escape");
@@ -336,8 +345,9 @@ internal static class LiveUiSmoke
         Check(!Exists("LabMission") && !Visible("LiveAidPanel"), "First task has no chooser or default keyboard or hands");
         var task = Find("LabTask").Current.BoundingRectangle;
         var keys = Find("LabKeys").Current.BoundingRectangle;
-        Check(task.Width > 0 && keys.Width > 0 && Math.Abs((task.Left + task.Width / 2) - (keys.Left + keys.Width / 2)) < 6,
-            "Guided instruction and keycaps share a centerline");
+        Check(task.Width > 0 && keys.Width > 0 && task.Right <= keys.Left + 1 &&
+            Math.Abs((task.Top + task.Height / 2) - (keys.Top + keys.Height / 2)) < 5,
+            "Guided instruction and keycaps share the same compact row, with the keycaps on the right");
         CaptureLiveUxFrame("live-ux-03-active-lesson");
         Key("F4");
         Until(delegate { return Visible("LiveAidPanel") && Find("LiveAidPanel").Current.ItemStatus == "keyboard;no-hands"; },
@@ -371,6 +381,19 @@ internal static class LiveUiSmoke
         CaptureLiveUxFrame("live-ux-04-result");
         Invoke("LabChooseClass");
         Until(delegate { return FocusedLiveCard("chrome"); }, "result exits to focused source card");
+        Invoke("ReferenceNav-learn");
+        Key("F5");
+        Key("Esc");
+        Until(delegate { return Visible("PracticeResult") && Visible("TypingErrorReview"); }, "Typing creates its centered result with error review");
+        Check(Visible("ResultMetric-speed") && Visible("ResultMetric-accuracy") && Visible("TypingRepeat"),
+            "Typing preserves its own speed, accuracy and repeat action");
+        CaptureLiveUxFrame("live-ux-05-typing-result");
+        var review = Find("TypingErrorReview");
+        review.SetFocus();
+        Key("Space");
+        var reviewPattern = (ExpandCollapsePattern)review.GetCurrentPattern(ExpandCollapsePattern.Pattern);
+        Check(reviewPattern.Current.ExpandCollapseState == ExpandCollapseState.Expanded, "Typing error review expands from keyboard");
+        CaptureLiveUxFrame("live-ux-06-typing-review");
     }
 
     private static void CheckCompactLiveCatalog()
@@ -471,18 +494,24 @@ internal static class LiveUiSmoke
         Key("F5");
         Until(delegate { return Exists("LabTask") && Exists("LabDesktop") && Name("LabPause").StartsWith("Пауза"); },
             "active Chrome reading mission");
-        Check(Name("LabCounter").Contains("Подготовить справочник к чтению") &&
+        Check(Find("LabTask").Current.ItemType.Contains("Подготовить справочник к чтению") &&
             Name("LabDesktop").StartsWith("Учебный Chrome") && Name("LabDesktop").Contains("Chrome."),
             "The actual training window is the selected Chrome mission");
         Check(Find("LabTask").Current.ItemStatus == "keys:Ctrl+L" && ReadSolved() == 0,
             "The initial visible task is Ctrl+L with no credit yet");
-        Check(Visible("LabScenarioProgress") && !Visible("ResultMetric-accuracy"),
-            "Activity shows progress and no accuracy");
+        Check(Visible("LabScenarioProgress") && !Exists("LabCounter") && !Visible("ResultMetric-accuracy"),
+            "Activity shows one progress bar without text counters or accuracy");
+        var range = (RangeValuePattern)Find("LabScenarioProgress").GetCurrentPattern(RangeValuePattern.Pattern);
+        Check(range.Current.Value == 0 && range.Current.Maximum > 2,
+            "A newly opened browser route has no completed goals");
+        Check(Find("LabTask").Current.BoundingRectangle.Right <= Find("LabKeys").Current.BoundingRectangle.Left + 1,
+            "Task and shortcut do not overlap; shortcut sits at the right");
         CaptureReferenceFrame("07-chrome-python-docs-before-ctrl-l");
         RecordLessonChrome("browser-reference");
         Chord("Ctrl+L");
         Until(delegate { return ReadSolved() == 1 && Find("LabTask").Current.ItemStatus == "keys:Ctrl+C"; },
             "native Ctrl+L earns exactly one credit and advances to copy");
+        Check(range.Current.Value == 1, "A visual progress increment requires one completed goal");
         CaptureReferenceFrame("08-chrome-python-docs-address-selected");
         Chord("Ctrl+C");
         Until(delegate { return ReadSolved() == 2 && Find("LabTask").Current.ItemStatus == "keys:Ctrl+T"; },
@@ -511,7 +540,7 @@ internal static class LiveUiSmoke
             Chord("Ctrl+L");
             Until(delegate { return ReadSolved() == 1; }, "first browser action before Back");
             Invoke("LabBack");
-            Until(delegate { return FocusedLiveCard("chrome") && Visible("LiveResume-chrome") && !Exists("LabClock"); },
+            Until(delegate { return FocusedLiveCard("chrome") && Visible("LiveResume-chrome") && !Exists("LabTask"); },
                 "footer Back saves the draft and returns focus to its Live catalog card");
             Check(true, "Footer Back retains the actual lesson exit action");
         }
@@ -538,7 +567,7 @@ internal static class LiveUiSmoke
         Check(number.Success, "The new project shows the full task count");
         int total = int.Parse(number.Groups[1].Value);
         Check(total == 25 || total == 26, "The exact route has 25 steps and at most one initial layout correction");
-        Check(Name("LabCounter").Contains("Перенести методику из браузера в заметку"), "The selected project uses the correct route");
+        Check(Find("LabTask").Current.ItemType.Contains("Перенести методику из браузера в заметку"), "The selected project uses the correct route");
 
         bool foundSource = false, copied = false, pasted = false, saved = false, reopened = false, submitted = false;
         for (int step = 1; step <= total; step++)
@@ -642,14 +671,15 @@ internal static class LiveUiSmoke
         Select("LabTimer", 1); // QA-only seven-second clock cap.
         Key("F5");
         Until(delegate { return Exists("LabDesktop") && Name("LabPause").StartsWith("Пауза"); }, "active terminal lesson");
-        Check(Regex.IsMatch(Name("LabClock"), @"^0/100 · 00:0[0-7]$"), "Both selected budgets have live values");
+        Check(Regex.IsMatch(Name("LabClock"), @"^00:0[0-7]$") &&
+            Find("LabClock").Current.HelpText.Contains("0 из 100"), "Only the timer is visual; the action cap remains accessible");
         VirtualEnglish();
         Chord("Ctrl+U");
         foreach (var character in "abcde") Send(Character(character));
         Key("Home"); Key("Right"); Key("Right");
         CheckTerminalState("abcde", 2);
         Until(delegate { return Visible("LabLimitChoice"); }, "actual engine deadline", 14000);
-        Check(Name("LabLimitChoice") == "Время вышло" && Name("LabClock") == "0/100 · 00:00",
+        Check(Name("LabLimitChoice") == "Время вышло" && Name("LabClock") == "00:00",
             "Timer wins and both budgets remain visible at the choice");
         Check(!Visible("LabResult"), "Deadline offers a choice, not a result");
         CheckTerminalState("abcde", 2);
@@ -681,7 +711,7 @@ internal static class LiveUiSmoke
             "A resumed attempt does not offer to overwrite its budgets");
         Key("F5");
         Until(delegate { return Visible("LabLimitChoice"); }, "recovered deadline decision");
-        Check(Name("LabLimitChoice") == "Время вышло" && Name("LabClock") == "0/100 · 00:00",
+        Check(Name("LabLimitChoice") == "Время вышло" && Name("LabClock") == "00:00",
             "Recovered attempt displays its saved pair and trigger, not default selectors");
         CheckTerminalState("abcde", 2);
         Until(delegate { return AutomationElement.FocusedElement.Current.AutomationId == "LabLimitChoice"; }, "limit dialog starts with neither choice selected");
@@ -1429,13 +1459,13 @@ internal static class LiveUiSmoke
     {
         var timeout = Stopwatch.StartNew();
         int initial = ReadSolved();
-        for (int i = 0; i < attempts && Exists("LabClock"); i++)
+        for (int i = 0; i < attempts && Exists("LabTask"); i++)
         {
             if (timeout.Elapsed.TotalSeconds > (full ? 195 : 25)) break;
             var task = Find("LabTask");
             string instruction = task.Current.ItemStatus;
             string title = task.Current.Name;
-            Console.WriteLine("TASK " + title + " | " + instruction + " | " + Name("LabCounter"));
+            Console.WriteLine("TASK " + title + " | " + instruction + " | " + Find("LabTask").Current.ItemType);
             if (instruction.StartsWith("text:", StringComparison.Ordinal) && instruction.Length > 5)
             {
                 string text = instruction.Substring(5);
@@ -1443,9 +1473,9 @@ internal static class LiveUiSmoke
                 {
                     Stroke[] strokes = Character(character);
                     Send(strokes);
-                    if (!Exists("LabClock") || Name("LabTask") != title) break;
+                    if (!Exists("LabTask") || Name("LabTask") != title) break;
                 }
-                if (Exists("LabClock") && Name("LabTask") == title) Key("Enter");
+                if (Exists("LabTask") && Name("LabTask") == title) Key("Enter");
             }
             else if (instruction.StartsWith("keys:", StringComparison.Ordinal) && instruction.Length > 5)
             {
@@ -1455,7 +1485,7 @@ internal static class LiveUiSmoke
                 Send(strokes.Select(stroke => stroke.Down()).ToArray());
                 if (chord == "Ctrl+Shift+V")
                 {
-                    Until(delegate { return !Exists("LabClock") || ReadSolved() != before; }, "Ctrl+Shift+V counts on keydown");
+                    Until(delegate { return !Exists("LabTask") || ReadSolved() != before; }, "Ctrl+Shift+V counts on keydown");
                     Check(true, "Ctrl+Shift+V counts while modifiers remain held");
                 }
                 Send(strokes.Reverse().Select(stroke => stroke.Up()).ToArray());
@@ -1466,14 +1496,14 @@ internal static class LiveUiSmoke
         }
         if (!full)
         {
-            Check(Exists("LabClock"), "The short exercise remains active until completion is requested");
+            Check(Exists("LabTask"), "The short exercise remains active until completion is requested");
             Check(ReadSolved() > initial, "Physical input completes the requested tasks");
         }
     }
 
     private static int ReadSolved()
     {
-        var value = Regex.Match(Find("LabCounter").Current.HelpText, "Выполнено ([0-9]+)");
+        var value = Regex.Match(Find("LabTask").Current.ItemType, "Выполнено ([0-9]+)");
         return value.Success ? int.Parse(value.Groups[1].Value) : 0;
     }
 
@@ -1496,8 +1526,11 @@ internal static class LiveUiSmoke
         {
             SetNativeLessonLayout(thread, "00000409", 0x0409);
             OpenLiveConfiguration("terminal");
-            Select("LabMode", 0);
+            Select("LabLevel", 1);
+            SelectMissionByName("Сопоставить журнал и процессы");
+            Select("LabMode", 1);
             Select("LabDuration", 0);
+            Select("LabTimer", 0);
             Key("F5");
             Until(delegate { return Exists("LabDesktop") && Name("LabPause").StartsWith("Пауза"); },
                 "active terminal lesson with real EN layout");
@@ -1520,6 +1553,29 @@ internal static class LiveUiSmoke
             CheckTerminalState("отчёт v", 7);
             Chord("RCtrl+U");
             CheckTerminalState("", 0);
+
+            // This terminal route begins with unrestricted rehearsal. Paste
+            // and submit once to reach its first explicitly English command.
+            Chord("Ctrl+Shift+V");
+            Key("Enter");
+            Until(delegate { return Find("LabTask").Current.ItemStatus == "text:whoami"; },
+                "the explicitly English whoami step is active");
+            int before = ReadSolved();
+            Key("F4");
+            Until(delegate { return Visible("LiveAidPanel"); }, "onscreen keyboard enabled for layout evidence");
+            SetNativeLessonLayout(thread, "00000419", 0x0419);
+            Send(PhysicalText("W H O A M I"));
+            Until(delegate { return Visible("LabStatus") && Name("LabStatus") == "Переключи раскладку на EN"; },
+                "English-only text receives a non-error native layout instruction");
+            CheckTerminalState("", 0);
+            Check(ReadSolved() == before, "RU physical input earned no credit");
+            CaptureLiveUxFrame("native-layout-ru-qwerty");
+            SetNativeLessonLayout(thread, "00000409", 0x0409);
+            Send(PhysicalText("W H O A M I"));
+            CheckTerminalState("whoami", 6);
+            CaptureLiveUxFrame("native-layout-en-qwerty");
+            Key("Enter");
+            Until(delegate { return ReadSolved() == before + 1; }, "switching the real source resumes English entry");
         }
         finally { if (!app.HasExited) SendMessage(trainer, 0x50, IntPtr.Zero, previous); }
         if (failures.Count != 0) throw new InvalidOperationException(string.Join(Environment.NewLine, failures));
@@ -1915,7 +1971,7 @@ internal static class LiveUiSmoke
                 " visible=" + IsWindowVisible(handle) + " enabled=" + IsWindowEnabled(handle) +
                 " title=" + WindowTitle(handle));
         if (window != null)
-            Console.Error.WriteLine("QA lesson clock=" + Exists("LabClock") + "; paused=" + Exists("LabPauseResult"));
+            Console.Error.WriteLine("QA lesson clock=" + Exists("LabTask") + "; paused=" + Exists("LabPauseResult"));
     }
     private static void InvokeDialog(string id)
     {

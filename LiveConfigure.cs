@@ -26,37 +26,58 @@ namespace TouchTypingStudio
             var course = catalog.Items("classes").FirstOrDefault(item => item.S("id") == labApp);
             string title = course != null ? course.S("title") : ReferenceAppTitle();
             var stack = Stack();
-            stack.MaxWidth = 590;
-            stack.Margin = new Thickness(16, 17, 16, 20);
+            stack.MaxWidth = 1440;
+            stack.Margin = new Thickness(34, 17, 34, 20);
             var back = ReferenceButton(ReturnToLiveCatalog, 8);
             back.Content = "‹  К списку Live";
             back.Padding = new Thickness(10, 6, 10, 6);
             back.Foreground = ReferenceText;
-            back.Background = Ui.Brush("#322650");
+            back.Background = Ui.Brush("#303039");
             back.HorizontalAlignment = HorizontalAlignment.Left;
             AutomationProperties.SetAutomationId(back, "LiveConfigureBack");
             stack.Children.Add(back);
             var heading = ReferenceLabel("Настроить · " + title, 25, ReferenceText, true);
-            heading.Margin = new Thickness(0, 12, 0, 10);
+            heading.Margin = new Thickness(0, 12, 0, 16);
             AutomationProperties.SetAutomationId(heading, "LiveConfigureHeading");
             stack.Children.Add(heading);
 
             var form = Stack();
-            var choiceGroup = ConfigureGroup(form, "Упражнение");
+            var fields = new Grid { MinHeight = 260 };
+            fields.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            fields.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            fields.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var choice = Stack();
+            var guide = Stack();
+            Grid.SetColumn(guide, 2);
+            var divider = new Border { Width = 1, Background = ReferenceEdge, Margin = new Thickness(22, 0, 22, 0) };
+            Grid.SetColumn(divider, 1);
+            fields.Children.Add(choice);
+            fields.Children.Add(divider);
+            fields.Children.Add(guide);
+            form.Children.Add(fields);
+            var choiceGroup = ConfigureGroup(choice, "Упражнение");
             var mission = LiveSelect("Поручение", "LabMission", new string[0], -1);
             var level = LiveSelect("Сложность", "LabLevel", new[] { "Базовый", "Средний", "Сложный" }, labLevel);
             ConfigureField(choiceGroup, "Поручение", mission);
             ConfigureField(choiceGroup, "Сложность", level);
-            var guideGroup = ConfigureGroup(form, "Как тренироваться");
+            var guideGroup = ConfigureGroup(guide, "Как тренироваться");
             var mode = LiveSelect("Режим подсказок", "LabMode", new[] { "Самостоятельно", "По шагам" }, labMode == "sandbox" ? 1 : 0);
             ConfigureField(guideGroup, "Подсказки", mode);
-            var durationGroup = ConfigureGroup(form, "Длительность");
+            var durationGroup = ConfigureGroup(guide, "Длительность");
             var actions = LiveSelect("Лимит действий", "LabDuration",
-                new[] { "Без лимита действий", "20 действий", "40 действий", "60 действий", "100 действий" }, lastLabLimit);
+                new[] { "Без лимита", "20 действий", "40 действий", "60 действий", "100 действий" }, lastLabLimit);
             var timer = LiveSelect("Таймер", "LabTimer", new[] { "Без таймера", "3 минуты", "10 минут" }, lastLabTimer);
-            ConfigureField(durationGroup, "Действия", actions);
-            ConfigureField(durationGroup, "Таймер", timer);
-            stack.Children.Add(ReferenceLessonPanel(form, new Thickness(17, 8, 17, 13), 14));
+            var durations = new UniformGrid { Columns = 2 };
+            var actionField = Stack();
+            actionField.Margin = new Thickness(0, 0, 7, 0);
+            var timerField = Stack();
+            timerField.Margin = new Thickness(7, 0, 0, 0);
+            ConfigureField(actionField, "Действия", actions);
+            ConfigureField(timerField, "Таймер", timer);
+            durations.Children.Add(actionField);
+            durations.Children.Add(timerField);
+            durationGroup.Children.Add(durations);
+            stack.Children.Add(ReferenceLessonPanel(form, new Thickness(22, 16, 22, 16), 14));
             Option[] missions = new Option[0];
             Action refresh = delegate
             {
@@ -80,15 +101,17 @@ namespace TouchTypingStudio
             }, 10);
             start.Content = "Начать";
             start.IsDefault = true;
+            start.FontFamily = LiveUiFont.ForWeight(FontWeights.Bold);
+            start.FontWeight = FontWeights.Bold;
             start.IsEnabled = course != null;
             start.Padding = new Thickness(25, 10, 25, 10);
             start.Margin = new Thickness(0, 13, 0, 0);
-            start.HorizontalAlignment = HorizontalAlignment.Right;
-            start.Background = ReferenceGradient("#9070FA", "#7149DF", 70);
+            start.HorizontalAlignment = HorizontalAlignment.Left;
+            start.Background = ReferencePrimary;
             start.Foreground = ReferenceText;
             AutomationProperties.SetAutomationId(start, "LabStart");
             beginControl = start;
-            stack.Children.Add(start);
+            form.Children.Add(start);
 
             var utility = new Expander { Header = "Клавиатура, Fn и дополнительные упражнения", Foreground = ReferenceMuted,
                 Margin = new Thickness(0, 10, 0, 0) };
@@ -144,7 +167,7 @@ namespace TouchTypingStudio
             var box = new ComboBox
             {
                 Style = null, FontFamily = LiveUiFont.Sans, FontSize = 14,
-                Foreground = ReferenceText, Background = Ui.Brush("#27203E"), BorderBrush = Ui.Brush("#544474"),
+                Foreground = ReferenceText, Background = Ui.Brush("#303039"), BorderBrush = Ui.Brush("#544F5C"),
                 MinHeight = 34, MaxDropDownHeight = 216, HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 ItemsSource = options.Select((value, i) => new Option(i.ToString(), value)).ToArray(),
                 SelectedIndex = index, Template = LiveSelectTemplate(), ItemContainerStyle = LiveSelectItemStyle()
@@ -170,14 +193,14 @@ namespace TouchTypingStudio
             toggle.SetBinding(ToggleButton.IsCheckedProperty, open);
             var buttonTemplate = new ControlTemplate(typeof(ToggleButton));
             var tint = new FrameworkElementFactory(typeof(Border), "LivePickerEdge");
-            tint.SetValue(Border.BackgroundProperty, Ui.Brush("#292041"));
-            tint.SetValue(Border.BorderBrushProperty, Ui.Brush("#594679"));
+            tint.SetValue(Border.BackgroundProperty, Ui.Brush("#303039"));
+            tint.SetValue(Border.BorderBrushProperty, Ui.Brush("#5A5461"));
             tint.SetValue(Border.BorderThicknessProperty, new Thickness(1));
             tint.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));
             var arrow = new FrameworkElementFactory(typeof(TextBlock));
             arrow.SetValue(TextBlock.TextProperty, "⌄");
             arrow.SetValue(TextBlock.FontSizeProperty, 17.0);
-            arrow.SetValue(TextBlock.ForegroundProperty, Ui.Brush("#EBDEFF"));
+            arrow.SetValue(TextBlock.ForegroundProperty, Ui.Brush("#F0ECF4"));
             arrow.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Right);
             arrow.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
             arrow.SetValue(FrameworkElement.MarginProperty, new Thickness(0, 0, 10, 0));
@@ -186,8 +209,8 @@ namespace TouchTypingStudio
             foreach (DependencyProperty property in new[] { UIElement.IsMouseOverProperty, ToggleButton.IsCheckedProperty })
             {
                 var over = new Trigger { Property = property, Value = true };
-                over.Setters.Add(new Setter(Border.BackgroundProperty, Ui.Brush("#352852"), "LivePickerEdge"));
-                over.Setters.Add(new Setter(Border.BorderBrushProperty, Ui.Brush("#AD86FF"), "LivePickerEdge"));
+                over.Setters.Add(new Setter(Border.BackgroundProperty, Ui.Brush("#393640"), "LivePickerEdge"));
+                over.Setters.Add(new Setter(Border.BorderBrushProperty, Ui.Brush("#A89BB9"), "LivePickerEdge"));
                 buttonTemplate.Triggers.Add(over);
             }
             toggle.SetValue(Control.TemplateProperty, buttonTemplate);
@@ -213,8 +236,8 @@ namespace TouchTypingStudio
             var panel = new FrameworkElementFactory(typeof(Border));
             panel.SetBinding(FrameworkElement.MinWidthProperty, LiveSelectBind("ActualWidth"));
             panel.SetBinding(FrameworkElement.MaxHeightProperty, LiveSelectBind("MaxDropDownHeight"));
-            panel.SetValue(Border.BackgroundProperty, Ui.Brush("#231A39"));
-            panel.SetValue(Border.BorderBrushProperty, Ui.Brush("#9D72F2"));
+            panel.SetValue(Border.BackgroundProperty, Ui.Brush("#28272E"));
+            panel.SetValue(Border.BorderBrushProperty, Ui.Brush("#6F6677"));
             panel.SetValue(Border.BorderThicknessProperty, new Thickness(1));
             panel.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));
             panel.SetValue(Border.PaddingProperty, new Thickness(3));
@@ -227,7 +250,7 @@ namespace TouchTypingStudio
             panel.AppendChild(scroll); popup.AppendChild(panel); grid.AppendChild(popup);
             template.VisualTree = grid;
             var focus = new Trigger { Property = UIElement.IsKeyboardFocusWithinProperty, Value = true };
-            focus.Setters.Add(new Setter(Border.BorderBrushProperty, Ui.Brush("#DCC7FF"), "LivePickerKeyboardFocus"));
+            focus.Setters.Add(new Setter(Border.BorderBrushProperty, Ui.Brush("#D4C8DE"), "LivePickerKeyboardFocus"));
             template.Triggers.Add(focus);
             return template;
         }
@@ -243,18 +266,29 @@ namespace TouchTypingStudio
             box.SetValue(Border.PaddingProperty, new Thickness(8, 4, 8, 4));
             var item = new FrameworkElementFactory(typeof(ContentPresenter));
             item.SetValue(ContentPresenter.ContentSourceProperty, "Content");
-            box.AppendChild(item); template.VisualTree = box;
+            var row = new FrameworkElementFactory(typeof(DockPanel));
+            var indicator = new FrameworkElementFactory(typeof(TextBlock), "SelectedIndicator");
+            indicator.SetValue(TextBlock.TextProperty, "✓");
+            indicator.SetValue(TextBlock.ForegroundProperty, ReferenceText);
+            indicator.SetValue(TextBlock.MarginProperty, new Thickness(8, 0, 0, 0));
+            indicator.SetValue(DockPanel.DockProperty, Dock.Right);
+            indicator.SetValue(UIElement.VisibilityProperty, Visibility.Hidden);
+            row.AppendChild(indicator);
+            row.AppendChild(item);
+            box.AppendChild(row);
+            template.VisualTree = box;
             var chosen = new Trigger { Property = ComboBoxItem.IsSelectedProperty, Value = true };
-            chosen.Setters.Add(new Setter(Border.BackgroundProperty, Ui.Brush("#523675"), "ItemEdge"));
+            chosen.Setters.Add(new Setter(Border.BackgroundProperty, Ui.Brush("#64556E"), "ItemEdge"));
+            chosen.Setters.Add(new Setter(UIElement.VisibilityProperty, Visibility.Visible, "SelectedIndicator"));
             template.Triggers.Add(chosen);
             var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
-            hover.Setters.Add(new Setter(Border.BorderBrushProperty, Ui.Brush("#986ADB"), "ItemEdge"));
+            hover.Setters.Add(new Setter(Border.BorderBrushProperty, Ui.Brush("#A89BB9"), "ItemEdge"));
             template.Triggers.Add(hover);
             var focus = new Trigger { Property = ComboBoxItem.IsHighlightedProperty, Value = true };
-            focus.Setters.Add(new Setter(Border.BorderBrushProperty, Ui.Brush("#E3D4FF"), "ItemEdge"));
+            focus.Setters.Add(new Setter(Border.BorderBrushProperty, Ui.Brush("#DED4E7"), "ItemEdge"));
             template.Triggers.Add(focus);
             var keyboard = new Trigger { Property = UIElement.IsKeyboardFocusedProperty, Value = true };
-            keyboard.Setters.Add(new Setter(Border.BorderBrushProperty, Ui.Brush("#F4E6FF"), "ItemEdge"));
+            keyboard.Setters.Add(new Setter(Border.BorderBrushProperty, Ui.Brush("#F0ECF4"), "ItemEdge"));
             template.Triggers.Add(keyboard);
             var style = new Style(typeof(ComboBoxItem));
             style.Setters.Add(new Setter(Control.TemplateProperty, template));

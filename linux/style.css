@@ -381,3 +381,144 @@ button.reference-quiet:focus-visible, .reference-config-button > button:focus-vi
 .reference-home.compact-catalog .reference-environment-select > button {
   min-height: 23px; padding: 2px 7px;
 }
+
+/* Shared graphite/plum shell. This intentionally leaves simulated Chrome,
+   VS Code, desktops and the finger-coded caps on their original palettes. */
+@define-color graph_base #191820;
+@define-color graph_card #222129;
+@define-color graph_panel #28272e;
+@define-color graph_field #303039;
+@define-color graph_edge #514c59;
+@define-color graph_accent #a89bb9;
+@define-color graph_cta #64556e;
+@define-color graph_ink #f2eff5;
+@define-color graph_muted #c6bfcc;
+
+window.reference-window, window.reference-window .shell,
+window.reference-window > .titlebar, .reference-header,
+.reference-home, .lab-page.reference-live {
+  background: @graph_base; color: @graph_ink;
+}
+.reference-header { border-color: @graph_edge; }
+.reference-header .reference-mark,
+.reference-header button.reference-nav.active,
+.reference-layout.active { background: @graph_cta; border-color: @graph_cta; box-shadow: none; }
+.reference-header button.reference-nav:hover,
+.reference-header button.reference-icon-control:hover,
+.reference-header .reference-window-controls button:hover,
+.reference-header .reference-icon-control button:hover { background: @graph_field; }
+.reference-header button.reference-icon-control, .reference-layout,
+.reference-header .reference-icon-control button,
+.reference-progress, .reference-hero-subtitle, .reference-card-description,
+.reference-progress-label { color: @graph_muted; }
+button.reference-card {
+  background: @graph_card; border-color: @graph_edge; color: @graph_ink; box-shadow: none;
+}
+button.reference-card.reference-selected { background: #2a2730; border-color: @graph_accent; box-shadow: none; }
+button.reference-card:hover { background: @graph_panel; border-color: @graph_accent; }
+.reference-meter trough, .reference-lesson-footer .reference-meter trough { background: #3d3944; }
+.reference-meter progress, .reference-lesson-footer .reference-meter progress { background: @graph_accent; }
+button.reference-quiet, .reference-config-button > button, .reference-resume > button,
+button.reference-round-control, .reference-modal-actions button {
+  color: @graph_ink; background: @graph_field; border: 1px solid @graph_edge; box-shadow: none;
+}
+button.reference-quiet:hover, .reference-config-button > button:hover,
+.reference-resume > button:hover, button.reference-round-control:hover,
+button.reference-round-control:focus-visible, .reference-modal-actions button:hover {
+  color: @graph_ink; background: #42394a; border-color: @graph_accent;
+}
+button.reference-primary, .reference-modal-actions button.reference-primary {
+  background: @graph_cta; border-color: @graph_cta; color: #fff; box-shadow: none;
+}
+button.reference-primary:hover, .reference-modal-actions button.reference-primary:hover { background: #76657f; }
+button.reference-primary:disabled { background: @graph_field; color: #ada6b1; border-color: @graph_edge; }
+.reference-config-popover > contents, .reference-config-popover > arrow,
+.reference-config-dropdown popover > contents, .reference-config-dropdown popover > arrow,
+.reference-config-dropdown popover listview {
+  color: @graph_ink; background: @graph_panel; border-color: @graph_edge;
+}
+.reference-config-dropdown > button,
+.reference-config-dropdown row { background: @graph_field; color: @graph_ink; border-color: @graph_edge; }
+.reference-config-dropdown row:selected { background: @graph_cta; color: #fff; }
+.reference-config-dropdown row:hover,
+.reference-config-dropdown > button:hover { background: #453d4c; color: @graph_ink; }
+.reference-config-dropdown:focus-visible > button, .reference-config-dropdown > button:focus-visible,
+.reference-settings-page button.reference-quiet:focus-visible,
+.reference-settings-page button.reference-primary:focus-visible {
+  outline: 2px solid @graph_accent; outline-offset: -3px;
+}
+.reference-settings-page {
+  background: @graph_base; color: @graph_ink;
+  font-family: "Roboto", "Noto Sans", sans-serif;
+}
+.reference-settings-inner { padding: 19px 4.2em 21px; }
+.reference-settings-panel { padding: 17px 22px 16px; border: 1px solid @graph_edge; border-radius: 14px; background: @graph_panel; }
+.reference-settings-title { font-size: 27px; font-weight: 700; color: @graph_ink; }
+.reference-settings-section { font-size: 18px; font-weight: 700; color: @graph_ink; }
+.reference-config-caption, .reference-config-group { color: @graph_muted; }
+.reference-settings-secondary { border-left: 1px solid @graph_edge; padding-left: 19px; }
+.reference-settings-page .reference-config-dropdown > button { min-height: 29px; padding: 3px 9px; }
+.reference-settings-page .reference-config-dropdown row { min-height: 27px; padding: 3px 8px; }
+.reference-settings-page button.reference-primary { min-width: 100px; }
+.lab-page.reference-live .reference-goal {
+  background: @graph_panel; border-color: @graph_edge;
+  min-height: 32px; padding: 4px 11px; margin-bottom: 6px;
+}
+.reference-live .reference-goal-title, .lab-page.compact-height .reference-goal-title {
+  color: @graph_ink; font-size: 17px;
+}
+.lab-page.reference-live .reference-keycap, .lab-page.compact-height .reference-keycap {
+  background: @graph_cta; border-color: #8b7b96; min-height: 22px; padding: 0 7px;
+  color: #fff; font-size: 15px;
+}
+.reference-key-join { color: @graph_muted; }
+.reference-live .reference-workspace { background: @graph_card; border-color: @graph_edge; }
+.reference-live .reference-lesson-footer {
+  background: @graph_panel; border: 1px solid @graph_edge;
+  min-height: 35px; margin-top: 6px; padding: 3px 7px;
+}
+.reference-lesson-footer .reference-meter trough, .reference-lesson-footer .reference-meter progress { min-height: 5px; min-width: 0; padding: 0; margin: 0; }
+.reference-footer-settings > button, button.reference-footer-control { color: @graph_ink; }
+.reference-footer-settings > button:hover, .reference-footer-settings > button:focus-visible,
+button.reference-footer-control:hover, button.reference-footer-control:focus-visible { background: @graph_field; }
+.reference-live-feedback, .reference-long-help, button.reference-hint { background: @graph_card; color: @graph_ink; border-color: @graph_edge; }
+.reference-live .lab-modal-layer, .lab-modal-layer { background: alpha(#15141c, .82); }
+.reference-modal-panel {
+  padding: 17px; background: @graph_panel; color: @graph_ink; border: 1px solid @graph_edge;
+  box-shadow: 0 12px 26px alpha(black, .31);
+}
+.reference-modal-title, .reference-stat-value { color: @graph_ink; }
+.reference-modal-subtitle, .reference-stat-label, .stamina-summary { color: @graph_muted; }
+.reference-result-details, .reference-stat { background: @graph_card; border-color: @graph_edge; }
+.reference-stat-icon { background: @graph_field; }
+.reference-stat-accuracy { color: @graph_accent; }
+.reference-window .lesson-page, .reference-window .page,
+.reference-window .lesson-page button, .reference-window .lesson-page dropdown {
+  font-family: "Roboto", "Noto Sans", sans-serif;
+}
+.reference-window .lesson-page button.primary { background: @graph_cta; border-color: @graph_cta; }
+.reference-window .lesson-page button.primary:hover { background: #76657f; }
+.reference-window .lesson-page dropdown > button,
+.reference-window .lesson-page dropdown popover > contents { background: @graph_field; border-color: @graph_edge; }
+.reference-window .lesson-page .tape-frame { background: @graph_card; border-color: @graph_field; }
+.reference-window .lesson-page .lesson-timer { background: @graph_card; border-color: @graph_edge; }
+window.reference-light .reference-home { background: #f6f3f8; color: #2b2430; }
+window.reference-light .reference-header { background: #eee9f0; color: #2b2430; }
+window.reference-light .reference-hero-subtitle,
+window.reference-light .reference-card-description,
+window.reference-light .reference-progress-label { color: #4b4055; }
+window.reference-light button.reference-card { background: #faf7fc; border-color: #cbbfd2; }
+window.reference-light button.reference-card.reference-selected { background: #eee7f0; border-color: @graph_cta; }
+window.reference-light button.reference-card:hover { background: #e7dcea; border-color: @graph_cta; }
+.reference-settings-page .reference-config-caption { font-size: 13px; }
+.reference-settings-page .reference-config-dropdown > button {
+  font-size: 15px; font-weight: 500;
+}
+.reference-settings-page .reference-config-dropdown popover > contents { padding: 4px; }
+.reference-settings-page .reference-config-dropdown listview { font-size: 14px; }
+.reference-settings-page .reference-config-dropdown listview row:not(:selected):not(:hover) {
+  background: @graph_panel;
+}
+.reference-settings-page .reference-config-dropdown popover > arrow { background: @graph_panel; }
+.reference-settings-page button.reference-primary { min-width: 108px; font-size: 15px; }
+.reference-settings-page button.reference-quiet { font-size: 14px; font-weight: 500; }

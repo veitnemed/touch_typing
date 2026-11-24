@@ -121,7 +121,7 @@ internal sealed class PracticeService
                 bool combinedLimits = Flag(message, "combinedLimits");
                 lab = new LabRun(chosenApp, Text(message, "mode"), Number(message, "level"),
                     Number(message, "seconds", combinedLimits ? 0 : 180), layout, profile.ShortcutHistory,
-                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit"), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: Text(message, "mission"), draft: draft, softFinish: Flag(message, "softFinish"), combinedLimits: combinedLimits, windowsBindings: windows, desktopProfile: windows ? null : desktopProfile, neutralProject: neutralProject, environment: chosenEnvironment);
+                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit"), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: Text(message, "mission"), draft: draft, softFinish: Flag(message, "softFinish"), combinedLimits: combinedLimits, windowsBindings: windows, desktopProfile: windows ? null : desktopProfile, neutralProject: neutralProject, environment: chosenEnvironment, nativeEnglishInput: Flag(message, "nativeEnglishInput"));
                 persistedLabAttempts = 0;
                 labCheckpoint = draft;
                 preservePreviousLabDraft = !continuing && Flag(message, "preserveDraft");
@@ -139,7 +139,7 @@ internal sealed class PracticeService
                 return LabState();
             case "lab-key":
                 if (lab == null) throw new InvalidOperationException("Сначала выберите учебный класс.");
-                var labAttempt = lab.Input(Text(message, "key"), Flag(message, "pressed"), Text(message, "text"));
+                var labAttempt = lab.Input(Text(message, "key"), Flag(message, "pressed"), Text(message, "text"), Text(message, "nativeLayout"));
                 if (lab.Finished) FinishLabAutomatically();
                 else if (lab.AwaitingLimitChoice) CheckLabLimit();
                 else if (labAttempt != null) SaveLabCheckpoint();
@@ -236,7 +236,7 @@ internal sealed class PracticeService
             lab.Seconds, lab.Remaining, lab.TimeLimit, lab.ActionLimit, lab.Guidance, lab.ShowGuide, lab.Finished, lab.Paused, lab.Saved, startBlocked, saveError = labSaveError, needsCapture = true,
             limitDecisionPending = lab.AwaitingLimitChoice, finishingMission = lab.FinishingMission, limitReached = lab.LimitReached,
             reportArtifact = lab.ReportArtifact,
-            mission = lab.MissionId, phase = lab.PhaseTitle, objectives = lab.Objectives, scenario = lab.ScenarioTitle, scenarioStep = lab.ScenarioStep, scenarioLength = lab.ScenarioLength,
+            mission = lab.MissionId, phase = lab.PhaseTitle, objectives = lab.Objectives, scenario = lab.ScenarioTitle, scenarioStep = lab.ScenarioStep, scenarioLength = lab.ScenarioLength, scenarioCompletedGoals = lab.ScenarioCompletedGoals,
             guide = !lab.ShowGuide || lab.Task.Keys.Length == 0 ? null : Describe(Gesture.Parse(lab.Task.Keys), "") };
     }
 
