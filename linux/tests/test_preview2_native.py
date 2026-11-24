@@ -41,7 +41,7 @@ class CaptureConsent:
 class QA(LabWindowTest):
     def __init__(self):
         super().__init__()
-        self.smoke_size = (1024,600)
+        self.window_size = (1024, 600)
         self.witness = []
     def focus_window(self):
         surface = self.window.get_surface()
@@ -104,6 +104,7 @@ class QA(LabWindowTest):
         self.navigate('home')
         for _ in range(35): yield
         self.focus_window()
+        assert (self.window.get_width(), self.window.get_height()) == (1024, 600)
         self.capture_widget_png(out/'01-live-ubuntu.png')
         self.live_os_choices['windows'].emit('clicked')
         for _ in range(15): yield

@@ -259,6 +259,24 @@ internal static class LabTests
             "The full course ends only after opening the README of the actual in-memory copy");
     }
 
+    private static void TestTerminalEssentialsTimedRotation()
+    {
+        var run = new LabRun("terminal", "sandbox", 0, 180, "EN", [], new Random(31),
+            () => 5000, missionId: "terminal-essentials-locate", neutralProject: true);
+        run.Resume();
+        Check(run.Scene.Terminal.Cwd == "/home/student/project", "Starter starts inside a real project");
+        string first = run.MissionId;
+        for (int i = 0; i < 20 && run.MissionId == first; i++)
+        {
+            Check(!run.Task.Text.Contains(' '), "Starter does not require multiword commands");
+            bool home = run.Task.Text == "cd";
+            Complete(run);
+            if (home) Check(run.Scene.Terminal.Cwd == "/home/student", "cd demonstrably changes directory");
+        }
+        Check(run.MissionId != first && run.MissionId.StartsWith("terminal-essentials-") &&
+            run.Scene.Terminal.Cwd == "/home/student/project", "Timed starter rotates without falling back to complex commands");
+    }
+
     private static void TestOtherShortcutContexts()
     {
         static void Expect(string app, string gesture, string expectedId, Action<LabScene> setup, Func<LabScene, bool> outcome)
@@ -289,6 +307,7 @@ internal static class LabTests
 
     private static void Main()
     {
+        TestTerminalEssentialsTimedRotation();
         TestOtherShortcutContexts();
         TestKeypadNavigation();
         TestBrowserSearchClone();

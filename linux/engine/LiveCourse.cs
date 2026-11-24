@@ -139,7 +139,21 @@ internal static partial class LiveCourse
         if (IsCommandToken(token))
         {
             string value = DecodeCommand(token);
-            return new(CommandId(value), "Выполните «" + value + "»", "", value.Length > 12 ? "Ctrl+R — найти команду по фрагменту. Enter — выполнить, стрелка — перейти к правке." : "Введите команду и нажмите Enter.", value, "command");
+            string objective = value switch
+            {
+                "pwd" => "Узнайте, в какой папке вы находитесь",
+                "ls" => "Посмотрите, что лежит в текущей папке",
+                "cd" => "Перейдите в домашнюю папку",
+                "whoami" => "Узнайте имя текущего пользователя",
+                "id" => "Узнайте идентификатор пользователя и его группы",
+                "uname" => "Узнайте имя операционной системы",
+                "ps" => "Посмотрите процессы и их номера PID",
+                "history" => "Посмотрите, какие команды уже выполнялись",
+                "clear" => "Очистите экран, не удаляя файлы и историю",
+                "reboot" => "Перезапустите только учебную систему",
+                _ => "Выполните «" + value + "»"
+            };
+            return new(CommandId(value), objective, "", value.Length > 12 ? "Ctrl+R — найти команду по фрагменту. Enter — выполнить, стрелка — перейти к правке." : "Введите команду и нажмите Enter.", value, "command");
         }
         if (token == "gnome-write")
             return new(token, "Дописать комментарий: «" + LabScene.GnomeNoteText + "»", "",

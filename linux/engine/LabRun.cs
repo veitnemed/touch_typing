@@ -91,9 +91,10 @@ internal sealed class LabRun
     internal string LimitReached => latchedLimit ?? (TimeLimit > 0 && Elapsed >= TimeLimit ? "timer" :
         ActionLimit > 0 && Solved >= ActionLimit ? "actions" : null);
     private bool ReachedLimit => LimitReached != null;
+    private static bool IsEssentials(string missionId) => missionId?.StartsWith("terminal-essentials-", StringComparison.Ordinal) == true;
     private bool CompletedRoute => !restoring && mission != null && pending.Count == 0 &&
         (FinishingMission || softFinish && ReachedLimit ||
-            (finishSingleRoute || mission.Curated && (EnvironmentProfile != "windows" || TimeLimit == 0 && ActionLimit == 0))
+            (finishSingleRoute || mission.Curated && (EnvironmentProfile != "windows" && !IsEssentials(mission.Id) || TimeLimit == 0 && ActionLimit == 0))
                 && mission.FinishAfterRoute);
     private bool PendingLimitChoice => softFinish && !restoring && ReachedLimit &&
         !limitAccepted && !FinishingMission && !CompletedRoute;
@@ -575,7 +576,10 @@ internal sealed class LabRun
             var last = mission?.Id;
             // Standalone projects are selected from the catalog, not injected
             // into a learner's existing continuous exercise rotation.
-            var rotation = courses.Where(m => !m.FinishAfterRoute || EnvironmentProfile == "windows" && m.Curated).ToArray();
+            bool essentials = IsEssentials(last);
+            var rotation = courses.Where(m => essentials
+                ? IsEssentials(m.Id)
+                : !m.FinishAfterRoute || EnvironmentProfile == "windows" && m.Curated).ToArray();
             var available = rotation.Where(m => !used.Contains(m.Id)).ToArray();
             if (available.Length == 0) { used.Clear(); available = rotation.Where(m => m.Id != last || rotation.Length == 1).ToArray(); }
             var recent = past.Concat(Attempts).Where(a => a.Mission != null).Select(a => a.Mission).Reverse().Distinct().Take(2).ToHashSet();
@@ -613,6 +617,7 @@ internal sealed class LabRun
                     mission = selected.Mission;
                     pending = selected.Goals ?? LiveCourse.Compile(mission, startingScene, nativeEnglishInput: nativeEnglishInput);
                 }
+                mission.Prepare?.Invoke(startingScene);
                 Scene = startingScene;
             }
             else

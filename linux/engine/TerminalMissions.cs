@@ -29,7 +29,7 @@ internal static partial class LiveCourse
     {
         void Essentials(int level, string id, string title, params LivePhase[] phases) =>
             list.Add(new("terminal", level, "terminal-essentials-" + id, title, phases,
-                FinishAfterRoute: true, Curated: true));
+                FinishAfterRoute: true, Curated: true, Prepare: scene => scene.Terminal.StartInsideProject()));
         Essentials(0, "locate", "Где я и что лежит рядом?",
             ShellPhase("Определите путь: pwd печатает текущую папку, ls показывает её содержимое", "pwd", "ls"),
             ShellPhase("Вернитесь домой: cd без аргументов меняет папку, pwd проверяет результат", "cd", "pwd", "ls"),

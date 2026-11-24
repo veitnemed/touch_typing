@@ -34,7 +34,9 @@ internal static class LiveUiSmoke
             bool liveUx = liveUxSmall || arguments.Contains("--live-ux");
             bool referenceBrowser = arguments.Contains("--reference-browser");
             bool browserClone = arguments.Contains("--browser-clone");
-            string numLockMode = arguments.Contains("--workday-numlock-on") ? "on" : arguments.Contains("--workday-numlock-off") ? "off" : "";
+            string numLockMode = arguments.Contains("--workday-numlock-on") ? "on" :
+                arguments.Contains("--workday-numlock-off") ? "off" :
+                arguments.Contains("--workday-numlock-dedicated") ? "dedicated" : "";
             bool dailyUse = arguments.Contains("--daily-use");
             bool gnomeProfile = arguments.Contains("--gnome-profile");
             bool debugDay = arguments.Contains("--debug-day");
@@ -772,16 +774,17 @@ internal static class LiveUiSmoke
         Select("LabLevel", 0);
         Select("LabDuration", 0);
         Select("LabTimer", 0);
-        SelectMissionByName("Перенести методику из браузера в заметку");
+        string expectedMission = numLockMode.Length > 0 ? "Доставить отчёт и проверить правку" :
+            "Перенести методику из браузера в заметку";
+        SelectMissionByName(expectedMission);
         Key("F5");
         Until(delegate { return Exists("LabTask") && Exists("LabDesktop") && Name("LabPause").StartsWith("Пауза"); },
             "active standalone Workday source-note project");
 
         var range = (RangeValuePattern)Find("LabScenarioProgress").GetCurrentPattern(RangeValuePattern.Pattern);
         int total = (int)range.Current.Maximum;
-        Check(total >= 20 && total <= 35, "Scenario exposes its full actionable route size");
-        bool testedKeypad = false;
-        Check(Find("LabTask").Current.ItemType.Contains("Перенести методику из браузера в заметку"), "The selected project uses the correct route");
+        Check(total >= 20 && total <= 65, "Scenario exposes its full actionable route size");
+        Check(Find("LabTask").Current.ItemType.Contains(expectedMission), "The selected project uses the correct route");
 
         bool foundSource = false, copied = false, pasted = false, saved = false, reopened = false, submitted = false;
         for (int step = 1; step <= total; step++)
@@ -802,7 +805,7 @@ internal static class LiveUiSmoke
             {
                 string gesture = instruction.Substring(5);
                 bool keypad = gesture == "Alt+Home" && numLockMode.Length > 0;
-                if (keypad)
+                if (keypad && numLockMode != "dedicated")
                 {
                     CheckFocusLoss(delegate
                     {
@@ -810,7 +813,12 @@ internal static class LiveUiSmoke
                         SetProbeNumLock(numLockMode == "on");
                     });
                 }
-                var scan = Parse(keypad ? "Alt+NumPad7" : gesture);
+                if (keypad)
+                {
+                    Chord("Alt+7");
+                    Check(ReadSolved() == before, "Top-row Alt+7 does not satisfy Alt+Home");
+                }
+                var scan = Parse(keypad && numLockMode != "dedicated" ? "Alt+NumPad7" : gesture);
                 var input = scan.Select(k => k.Down()).Concat(scan.Reverse().Select(k => k.Up())).ToArray();
                 int tries = gesture == "Tab" || gesture == "Down" ? 24 : 1;
                 for (int attempt = 0; attempt < tries; attempt++)
@@ -824,12 +832,14 @@ internal static class LiveUiSmoke
                 {
                     string trace = Find("LabStatus").Current.ItemStatus;
                     Console.WriteLine("WORKDAY KEYPAD NumLock=" + numLockMode + " " + trace);
-                    Check(trace.Contains("scan=47") && trace.Contains("extended=False") && trace.Contains("LAlt"),
-                        "Workday credit came from nonextended keypad scan 0x47 with actual Alt held");
-                    Check(ReadSolved() == before + 1, "Keypad Alt+7 credits exactly one Alt+Home action");
-                    testedKeypad = true;
+                    bool dedicated = numLockMode == "dedicated";
+                    Check(trace.Contains("scan=47") && trace.Contains("extended=" + dedicated) && trace.Contains("LAlt"),
+                        "Workday credit came from the targeted 0x47 scan with actual Alt held");
+                    Check(ReadSolved() == before + 1, "Alt+Home earns exactly one credit");
                     CaptureReferenceFrame("workday-keypad-numlock-" + numLockMode);
+                    return;
                 }
+                if (numLockMode.Length > 0) continue;
                 if (opensSource) foundSource = true;
                 if (gesture == "Ctrl+C")
                 {
@@ -876,7 +886,7 @@ internal static class LiveUiSmoke
             }
             else throw new InvalidOperationException("Missing native input for Workday: " + title + " [" + instruction + "]");
         }
-        Check(numLockMode.Length == 0 || testedKeypad, "This Workday route actually exercised the keypad witness");
+        Check(numLockMode.Length == 0, "The Workday route must actually reach Alt+Home for the keypad witness");
         Check(foundSource && copied && pasted && saved && reopened && submitted, "Browser, clipboard, editor, files and terminal all performed their part");
         string summary = Find("LabResult").Current.HelpText;
         Check(summary.Contains("Выполнено " + total + ".") && summary.Contains("Ошибки 0.") && summary.Contains("Цель занятия выполнена"),

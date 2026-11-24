@@ -57,6 +57,10 @@ internal sealed class VirtualTerminal
         history.Add("Учебный Ubuntu Terminal. Проект находится в ~/project.");
     }
 
+    // Starter exercises begin inside a project so cd and reboot
+    // can be verified by a real transition back to the home folder.
+    internal void StartInsideProject() => Cwd = Home + "/project";
+
     internal string[] Entries(string path) => Children(Resolve(path)).OrderByDescending(directories.Contains).ThenBy(Name, StringComparer.OrdinalIgnoreCase).ToArray();
     internal void StoreFile(string path, string body) => Write(Resolve(path), body);
     internal void Transfer(string source, string destination, bool move) => CopyMove(move ? [source, destination] : ["-r", source, destination], move);

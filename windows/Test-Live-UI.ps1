@@ -5,7 +5,7 @@ param(
     [string]$Application,
     [switch]$FullSession,
     [switch]$WorkdaySourceNote,
-    [ValidateSet('on', 'off')][string]$WorkdayNumLock,
+    [ValidateSet('on', 'off', 'dedicated')][string]$WorkdayNumLock,
     [switch]$BrowserClone,
     [switch]$ReferenceEvidence,
     [switch]$ReferenceBrowser,
