@@ -22,20 +22,25 @@ namespace TouchTypingStudio
         private Expander referenceErrorReview;
         private bool referenceHelpOpen;
 
-        // Viewbox does not expose a control peer on its own. The visible guide
+        // The aid rail does not expose a control peer on its own. The visible guide
         // needs an accessible identity, actual bounds and a readable state.
-        private sealed class LiveAidViewbox : Viewbox
+        private sealed class LiveAidRail : Border
         {
-            protected override AutomationPeer OnCreateAutomationPeer() { return new LiveAidViewboxPeer(this); }
+            protected override AutomationPeer OnCreateAutomationPeer() { return new LiveAidRailPeer(this); }
         }
 
-        private sealed class LiveAidViewboxPeer : FrameworkElementAutomationPeer
+        private sealed class LiveAidRailPeer : FrameworkElementAutomationPeer
         {
-            internal LiveAidViewboxPeer(LiveAidViewbox owner) : base(owner) { }
+            internal LiveAidRailPeer(LiveAidRail owner) : base(owner) { }
             protected override string GetClassNameCore() { return "LiveAidPanel"; }
             protected override AutomationControlType GetAutomationControlTypeCore() { return AutomationControlType.Group; }
             protected override bool IsControlElementCore() { return true; }
             protected override bool IsContentElementCore() { return true; }
+            protected override string GetHelpTextCore()
+            {
+                var guide = ((LiveAidRail)Owner).Child as LiveKeyboard;
+                return guide == null ? base.GetHelpTextCore() : guide.ReferenceAidExtent;
+            }
         }
 
         private FrameworkElement MakeReferenceLesson()
@@ -154,9 +159,8 @@ namespace TouchTypingStudio
             Grid.SetRow(feedbackStrip, 4);
             root.Children.Add(feedbackStrip);
 
-            keyboard = new LiveKeyboard { IsHitTestVisible = false, Width = 1050 };
-            labGuide = new LiveAidViewbox { Child = keyboard, Stretch = Stretch.Uniform,
-                StretchDirection = StretchDirection.Both, MaxHeight = 166, Margin = new Thickness(16, 0, 16, 5) };
+            keyboard = new LiveKeyboard { IsHitTestVisible = false, ReferenceAidRail = true };
+            labGuide = new LiveAidRail { Child = keyboard, Height = 148, Margin = new Thickness(16, 0, 16, 5) };
             AutomationProperties.SetAutomationId(labGuide, "LiveAidPanel");
             Grid.SetRow(labGuide, 5);
             root.Children.Add(labGuide);
@@ -291,13 +295,16 @@ namespace TouchTypingStudio
             if (labGuide == null) return;
             bool keys = library.B("liveShowKeys"), hands = library.B("liveShowHands");
             bool allows = keys || hands;
-            bool room = ActualWidth >= 800 && ActualHeight >= 650;
             labGuide.Visibility = allows && !referenceHelpOpen ? Visibility.Visible : Visibility.Collapsed;
             AutomationProperties.SetName(labGuide, keys && hands ? "Клавиатура и положение рук" :
                 keys ? "Клавиатура" : hands ? "Положение рук" : "Учебные подсказки скрыты");
             AutomationProperties.SetItemStatus(labGuide, (keys ? "keyboard" : "no-keyboard") +
                 ";" + (hands ? "hands" : "no-hands"));
-            labGuide.MaxHeight = room ? 166 : 105;
+            // Keep the work surface primary. A short but intrinsically wide rail
+            // lays out keycaps at native size instead of shrinking a 1050-DIP canvas.
+            var lesson = center.Content as FrameworkElement;
+            double lessonHeight = lesson != null ? lesson.ActualHeight : ActualHeight;
+            labGuide.Height = Math.Max(100, Math.Min(keys ? 180 : 165, lessonHeight * (keys ? .26 : .23)));
         }
 
         private void OpenReferenceLessonHelp()

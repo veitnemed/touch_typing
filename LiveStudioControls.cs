@@ -104,6 +104,29 @@ namespace TouchTypingStudio
         private int[] fingers = new int[0];
         private string layout = "EN", incorrect = "", keyboardProfile = "", fnMode = "";
         private bool keys = true, hands = true, functionRow;
+        internal bool ReferenceAidRail { get; set; }
+
+        private double ReferenceHandScale
+        {
+            get { return Math.Max(.42, Math.Min(1, Math.Min((ActualHeight - 22) / 148, ActualWidth * .13 / 136))); }
+        }
+        private Rect ReferenceKeyboardBounds()
+        {
+            double side = hands ? 2 * (136 * ReferenceHandScale + 14) : 0;
+            double width = Math.Max(1, Math.Min(940, ActualWidth - side - 14));
+            double height = Math.Max(1, ActualHeight - (hands ? 22 : 4));
+            return new Rect((ActualWidth - width) / 2, 1, width, height);
+        }
+        internal string ReferenceAidExtent
+        {
+            get
+            {
+                var bounds = ReferenceKeyboardBounds();
+                return string.Format(CultureInfo.InvariantCulture, "keys:{0:F0}x{1:F0};hands:{2:F0}x{3:F0}",
+                    keys ? bounds.Width : 0, keys ? bounds.Height : 0,
+                    hands ? 136 * ReferenceHandScale : 0, hands ? 148 * ReferenceHandScale : 0);
+            }
+        }
 
         public void Update(IEnumerable<Data> rows, string layout, IEnumerable<Data> targets, IEnumerable<string> held,
             string incorrect, bool keys, bool hands, bool functionRow, string keyboardProfile = "", string fnMode = "")
@@ -131,17 +154,20 @@ namespace TouchTypingStudio
         {
             double width = double.IsInfinity(available.Width) ? 960 : available.Width;
             if (!keys && !hands) return new Size(width, 0);
+            if (ReferenceAidRail) return new Size(width, double.IsInfinity(available.Height) ? 148 : available.Height);
             return new Size(width, (keys ? (functionRow ? 212 : 184) : 146) + (hands ? 25 : 0));
         }
 
         protected override void OnRender(DrawingContext dc)
         {
             if (ActualWidth < 20 || (!keys && !hands)) return;
-            double keyHeight = functionRow ? 212 : 184;
-            double keyWidth = Math.Min(636, ActualWidth - (hands ? 280 : 10));
+            var bounds = ReferenceAidRail ? ReferenceKeyboardBounds() :
+                new Rect((ActualWidth - Math.Min(636, ActualWidth - (hands ? 280 : 10))) / 2, 1,
+                    Math.Max(1, Math.Min(636, ActualWidth - (hands ? 280 : 10))), functionRow ? 212 : 184);
+            double keyHeight = bounds.Height;
+            double keyWidth = bounds.Width;
             if (keys)
             {
-                var bounds = new Rect((ActualWidth - keyWidth) / 2, 1, keyWidth, keyHeight);
                 dc.DrawRoundedRectangle(Shell, new Pen(Edge, 1), bounds, 9, 9);
                 double height = (bounds.Height - 14) / (functionRow ? 6 : 5);
                 double y = bounds.Y + 7;
@@ -183,10 +209,11 @@ namespace TouchTypingStudio
                 }
             }
             if (!hands) return;
-            double handScale = Math.Min(1, Math.Max(.6, (ActualWidth - keyWidth - 40) / 272));
-            double yHands = keys ? (keyHeight - 148 * handScale) / 2 : 0;
-            double left = keys ? (ActualWidth - keyWidth) / 2 - 18 - 136 * handScale : ActualWidth / 2 - 150 * handScale;
-            double right = keys ? (ActualWidth + keyWidth) / 2 + 18 : ActualWidth / 2 + 14 * handScale;
+            double handScale = ReferenceAidRail ? ReferenceHandScale : Math.Min(1, Math.Max(.6, (ActualWidth - keyWidth - 40) / 272));
+            double yHands = keys ? Math.Max(0, (keyHeight - 148 * handScale) / 2) : 0;
+            double gap = ReferenceAidRail ? 12 : 18;
+            double left = keys ? bounds.Left - gap - 136 * handScale : ActualWidth / 2 - 150 * handScale;
+            double right = keys ? bounds.Right + gap : ActualWidth / 2 + 14 * handScale;
             DrawHand(dc, left, yHands, handScale, false);
             DrawHand(dc, right, yHands, handScale, true);
             if (fingers.Length > 0)
@@ -214,7 +241,11 @@ namespace TouchTypingStudio
             var pen = new Pen(pressed ? Brushes.White : target != null ? Ui.Brush("#CE0D29") : Edge,
                 pressed || target != null ? 2.5 : 1);
             dc.DrawRoundedRectangle(fill, pen, rectangle, 4, 4);
-            var primary = Make(label, id == "LSuper" ? 18 : label.Contains("\n") ? 9 : special ? 11 : 19, text);
+            bool twoLines = label.Contains("\n");
+            double textSize = id == "LSuper" ? 18 : twoLines ? 9 : special ? 11 : 19;
+            if (ReferenceAidRail)
+                textSize = Math.Min(textSize, (rectangle.Height - 1) * (twoLines ? .39 : .8));
+            var primary = Make(label, textSize, text);
             var offset = new Point(Math.Max(rectangle.X + 2, rectangle.X + (rectangle.Width - primary.Width) / 2),
                 rectangle.Y + (rectangle.Height - primary.Height) / 2);
             dc.PushClip(new RectangleGeometry(rectangle));
