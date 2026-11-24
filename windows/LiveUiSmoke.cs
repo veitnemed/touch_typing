@@ -302,7 +302,18 @@ internal static class LiveUiSmoke
             !Exists("ReferenceNav-home") && !Exists("ReferenceNav-progress"), "Only Live and typing are top-level sections");
         Check(!Exists("LabStart") && !Exists("LabMission"), "No duplicate chooser or permanent Start controls");
         CaptureLiveUxFrame("live-ux-01-catalog");
-        if (small) CheckCompactLiveCatalog();
+        if (small)
+        {
+            CheckCompactLiveCatalog();
+            foreach (string id in new[] { "ubuntu", "code", "terminal", "workday" })
+                CheckSharedSettings(id, "ubuntu");
+            Invoke("LabDesktopProfile-windows");
+            Until(delegate { return Exists("HomeClass-windows"); }, "actual catalog switches to Windows 10");
+            foreach (string id in new[] { "windows", "workday" })
+                CheckSharedSettings(id, "windows");
+            Invoke("LabDesktopProfile-ubuntu");
+            Until(delegate { return Exists("HomeClass-ubuntu"); }, "restore the first catalog for the Chrome resume probe");
+        }
         Invoke("LiveConfigure-chrome");
         Until(delegate { return Visible("LiveConfigurePanel") && Visible("LabMission") && Exists("LabStart"); }, "separate Chrome Configure opens");
         Check(!Exists("HomeClass-chrome") && Name("LiveConfigureHeading").Contains("Chrome"), "Configure has no embedded second catalog");
@@ -355,6 +366,24 @@ internal static class LiveUiSmoke
             "Keyboard appears independently without enabling hands");
         Check(Name("LiveAidPanel") == "Клавиатура", "Live keyboard has a real accessibility name");
         CaptureLiveUxFrame("live-ux-03b-keyboard-only");
+        if (small)
+        {
+            CheckAidGeometry(700, 120, 0, 250);
+            Key("F7");
+            Until(delegate { return Find("LiveAidPanel").Current.ItemStatus == "keyboard;hands"; },
+                "Explicit hand preference adds hands without removing keys");
+            CheckAidGeometry(630, 108, 90, 250);
+            CaptureLiveUxFrame("live-ux-03c-both-aids");
+            Key("F4");
+            Until(delegate { return Find("LiveAidPanel").Current.ItemStatus == "no-keyboard;hands"; },
+                "Hands remain visible when only the keyboard is switched off");
+            CheckAidGeometry(0, 0, 80, 250);
+            Key("F7");
+            Until(delegate { return !Visible("LiveAidPanel"); }, "Disabling both aids restores the whole workspace");
+            Key("F4");
+            Until(delegate { return Visible("LiveAidPanel") && Find("LiveAidPanel").Current.ItemStatus == "keyboard;no-hands"; },
+                "Restore keyboard-only persistence probe");
+        }
         if (Find("LabTask").Current.ItemStatus == "keys:Ctrl+L") Chord("Ctrl+L");
         else
         {
@@ -395,6 +424,43 @@ internal static class LiveUiSmoke
         var reviewPattern = (ExpandCollapsePattern)review.GetCurrentPattern(ExpandCollapsePattern.Pattern);
         Check(reviewPattern.Current.ExpandCollapseState == ExpandCollapseState.Expanded, "Typing error review expands from keyboard");
         CaptureLiveUxFrame("live-ux-06-typing-review");
+    }
+
+    private static void CheckSharedSettings(string appId, string profile)
+    {
+        Find("LiveConfigure-" + appId).SetFocus();
+        OpenLiveConfiguration(appId);
+        Check(IsWithinLiveClient("LabStart") && IsWithinLiveClient("LabMode") &&
+            !Exists("HomeClass-" + appId), "Same full-width Configure shell for " + appId + " under " + profile);
+        var mission = Find("LabMission").Current.BoundingRectangle;
+        var timer = Find("LabTimer").Current.BoundingRectangle;
+        Check(mission.Right < timer.Left && mission.Width > 180 && timer.Width > 80,
+            "Exercise and timer occupy distinct columns for " + appId + " under " + profile);
+        var timerControl = Find("LabTimer");
+        timerControl.SetFocus();
+        Chord("Alt+Down");
+        var list = (ExpandCollapsePattern)timerControl.GetCurrentPattern(ExpandCollapsePattern.Pattern);
+        Check(list.Current.ExpandCollapseState == ExpandCollapseState.Expanded && IsWithinLiveClient("LabStart"),
+            "Settings timer opens without hiding Start for " + appId + " under " + profile);
+        CaptureLiveUxFrame("live-ux-shared-settings-" + profile + "-" + appId);
+        Key("Esc");
+        Invoke("LiveConfigureBack");
+        Until(delegate { return FocusedLiveCard(appId); }, "Configure returns focus to " + appId);
+    }
+
+    private static void CheckAidGeometry(int keyWidth, int keyHeight, int handWidth, int sceneHeight)
+    {
+        string extent = Find("LiveAidPanel").Current.HelpText;
+        var match = Regex.Match(extent, @"^keys:(\d+)x(\d+);hands:(\d+)x(\d+)$");
+        Check(match.Success, "Aid rail reports actual drawn keybed and hand bounds: " + extent);
+        int measuredKeyWidth = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+        int measuredKeyHeight = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+        int measuredHandWidth = int.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture);
+        Check((keyWidth == 0 ? measuredKeyWidth == 0 : measuredKeyWidth >= keyWidth && measuredKeyHeight >= keyHeight) &&
+            (handWidth == 0 ? measuredHandWidth == 0 : measuredHandWidth >= handWidth),
+            "Rendered keyboard and hands have usable native size: " + extent);
+        double sceneDips = Find("LabDesktop").Current.BoundingRectangle.Height * 96 / GetDpiForWindow(trainer);
+        Check(sceneDips >= sceneHeight, "Aid rail leaves the simulation usable: " + sceneDips.ToString("F0") + " DIPs");
     }
 
     private static void CheckCompactLiveCatalog()

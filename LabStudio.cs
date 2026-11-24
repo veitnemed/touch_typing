@@ -124,7 +124,7 @@ namespace TouchTypingStudio
             return target.Length == 0 || target == labDesktopProfile;
         }
         private LabSceneView labDesktop;
-        private Viewbox labGuide;
+        private Border labGuide;
         private FrameworkElement pausedLabView;
         private LabKeyboardCapture labCapture;
         private readonly string labQaNavigationTrace = Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_NAV_TRACE");

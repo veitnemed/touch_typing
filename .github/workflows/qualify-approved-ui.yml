@@ -5,7 +5,7 @@ on:
 permissions:
   contents: read
 env:
-  PRODUCT_SHA: 9d24e6ed2e02ad16fa362400c19b1a62dfc36e75
+  PRODUCT_SHA: 2468a40069f5306faa70ecb0a0f910893dc1dca0
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 9d24e6ed2e02ad16fa362400c19b1a62dfc36e75
+          ref: 2468a40069f5306faa70ecb0a0f910893dc1dca0
           persist-credentials: false
       - uses: actions/setup-dotnet@v4
         with:
