@@ -37,7 +37,8 @@ internal static class LiveUiSmoke
             bool debugDay = arguments.Contains("--debug-day");
             bool codeTheme = arguments.Contains("--code-theme");
             bool pythonEditor = arguments.Contains("--python-editor");
-            bool referenceEvidence = liveUx || referenceBrowser || dailyUse || gnomeProfile || debugDay || codeTheme || pythonEditor || arguments.Contains("--reference-evidence");
+            bool nativeLayout = arguments.Contains("--native-layout");
+            bool referenceEvidence = liveUx || nativeLayout || referenceBrowser || dailyUse || gnomeProfile || debugDay || codeTheme || pythonEditor || arguments.Contains("--reference-evidence");
             if (referenceEvidence && SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
                 throw new InvalidOperationException("Per-monitor-aware evidence capture cannot be enabled.");
             string path = Path.GetFullPath(arguments[0]);
@@ -49,7 +50,7 @@ internal static class LiveUiSmoke
                 Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_SOFT_FINISH_SECONDS", "7");
             Console.WriteLine("UI test seed " + Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"));
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_NAV_TRACE", gnomeProfile ? "workspace" :
-                referenceEvidence && !referenceBrowser && !dailyUse && !debugDay && !codeTheme && !pythonEditor ? "terminal" : null);
+                referenceEvidence && !nativeLayout && !referenceBrowser && !dailyUse && !debugDay && !codeTheme && !pythonEditor ? "terminal" : null);
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_PYTHON_EDITOR", pythonEditor ? "1" : null);
             app = Process.Start(new ProcessStartInfo(path, "--qa --live") { WorkingDirectory = Path.GetDirectoryName(path) });
             Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "trainer window", 12000);
@@ -99,7 +100,7 @@ internal static class LiveUiSmoke
                 Console.WriteLine("PASS: " + count + " native WPF soft finish assertions");
                 return 0;
             }
-            if (arguments.Contains("--native-layout"))
+            if (nativeLayout)
             {
                 CheckNativeLessonLayouts();
                 Console.WriteLine("PASS: " + count + " native WPF layout assertions");
