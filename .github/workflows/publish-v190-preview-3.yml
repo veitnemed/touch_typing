@@ -1,0 +1,80 @@
+name: Publish TouchTyping 1.9.0 preview 3
+on:
+  push:
+    branches: [release/v1.9.0-preview.3]
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: touchtyping-v190-preview-3
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: veitnemed/touch_typing
+      TAG: v1.9.0-preview.3
+      RUN: '45472975573'
+      QUALIFICATION_SHA: 4c94d245e9885d6ef88e31b98b3dca148835f32d
+      SOURCE_SHA: 4c94d245e9885d6ef88e31b98b3dca148835f32d
+      LINUX_SHA: d428e74829bf23fcd30e1c14b2dccc60a3dbb973714177dc96e7cb76376a2ee2
+      WINDOWS_SHA: 7883209dba601865d1bfa2ec62dead6a136cb66aba3c4d8f504cf3c30a8839c9
+    steps:
+      - name: Verify qualification, publish exact archives, and check public metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/actions/runs/$RUN" | jq -e --arg sha "$QUALIFICATION_SHA" '
+            .head_sha == $sha and .head_branch == "feature/live-ux-acceptance" and .conclusion == "success"' >/dev/null
+          gh api "repos/$REPO/actions/runs/$RUN/jobs?per_page=50" | jq -e '
+            .jobs as $j | ["build","linux-native","windows-native"] |
+            all(. as $name | any($j[]; .name == $name and .conclusion == "success"))' >/dev/null
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Refusing to overwrite existing release"; exit 1
+          fi
+          if gh api "repos/$REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "Refusing to reuse existing tag"; exit 1
+          fi
+          cd "$(mktemp -d)"
+          gh run download "$RUN" --repo "$REPO" --name preview3-verified-archives --dir .
+          test "$(cat SOURCE-SHA.txt)" = "$SOURCE_SHA"
+          printf '%s  %s\n%s  %s\n' "$LINUX_SHA" touch-typing-v1.9.0-preview.3-linux-x64.tar.gz "$WINDOWS_SHA" touch-typing-v1.9.0-preview.3-windows-x64.zip | sha256sum -c
+          linux="touch-typing-$TAG-linux-x64.tar.gz"
+          windows="touch-typing-$TAG-windows-x64.zip"
+          tar -tzf "$linux" > linux-files.txt
+          unzip -Z1 "$windows" > windows-files.txt
+          grep -Fx touch-typing-linux-x64/install.sh linux-files.txt
+          grep -Fx TouchTyping.exe windows-files.txt
+          grep -Fx Start-Live.cmd windows-files.txt
+          sha256sum "$linux" "$windows" > SHA256SUMS.txt
+          cat > notes.md <<'NOTES'
+          Предварительный выпуск TouchTyping для Windows и Linux (x86-64). Стабильная версия не заменяется.
+
+          - Удержание Backspace и Delete редактирует поле от текущей каретки, без ложного зачёта. Это относится в том числе к адресной строке и поиску Chrome.
+          - Окна Проводника Windows 10 и «Файлов» Ubuntu теперь различаются: видны путь, выбранный объект, типы файлов и доступность переходов по истории.
+          - В учебном Chrome есть отдельные страницы поиска, выдачи, документации, загрузок, истории и закладок. Всё работает без сети и не затрагивает пользовательские файлы.
+          - Дополнили существующий цикл разными рабочими задачами: найти раздел справки, сравнить выпуски, восстановить источник из истории, скачать CSV и проверить запись. В «Рабочем дне» есть путь из браузера через Проводник в папку проекта на обеих симулируемых ОС. У каждого нового сценария три набора материалов; пример с клонированием доступен отдельно и перемешивается с другими задачами.
+
+          **Windows:** распакуйте весь ZIP, запустите `TouchTyping.exe` или `Start-Live.cmd`.
+          **Ubuntu/Linux:** распакуйте TAR.GZ, откройте терминал в распакованной папке и выполните `bash install.sh`. Без установки: `./touch_typing.py`. Нужны GTK 4, PyGObject, Cairo.
+
+          Приёмка: GTK/X11 при 1024×600 и WPF на Windows Server, архивы распакованы в чистые папки. Физическая Windows 10/11 не проверялась.
+          NOTES
+          printf '\nКоммит приложения: `%s`. [Проверки GitHub Actions](https://github.com/%s/actions/runs/%s).\n' "$SOURCE_SHA" "$REPO" "$RUN" >> notes.md
+          gh release create "$TAG" --repo "$REPO" --target "$SOURCE_SHA" --draft --prerelease --latest=false \
+            --title "TouchTyping $TAG: вариативный Live и обновлённые симуляции" --notes-file notes.md \
+            "$linux" "$windows" SHA256SUMS.txt SOURCE-SHA.txt
+          mkdir draft-download
+          gh release download "$TAG" --repo "$REPO" --dir draft-download
+          (cd draft-download && sha256sum -c ../SHA256SUMS.txt && cmp SOURCE-SHA.txt ../SOURCE-SHA.txt && cmp SHA256SUMS.txt ../SHA256SUMS.txt)
+          gh release edit "$TAG" --repo "$REPO" --draft=false --prerelease --latest=false
+          gh api "repos/$REPO/git/ref/tags/$TAG" | jq -e --arg sha "$SOURCE_SHA" '.object.type=="commit" and .object.sha==$sha' >/dev/null
+          gh release view "$TAG" --repo "$REPO" --json url,isDraft,isPrerelease,assets | jq -e --arg l "$linux" --arg w "$windows" '
+            .isDraft == false and .isPrerelease == true and
+            ([.assets[].name] | sort) == ([$l,$w,"SHA256SUMS.txt","SOURCE-SHA.txt"] | sort)' >/dev/null
+          mkdir published-download
+          gh release download "$TAG" --repo "$REPO" --dir published-download
+          (cd published-download && sha256sum -c ../SHA256SUMS.txt && cmp SOURCE-SHA.txt ../SOURCE-SHA.txt && cmp SHA256SUMS.txt ../SHA256SUMS.txt)
+          gh release view "$TAG" --repo "$REPO" --json url --jq .url
