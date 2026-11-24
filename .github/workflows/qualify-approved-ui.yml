@@ -124,7 +124,7 @@ jobs:
         run: |
           $dir = "$env:RUNNER_TEMP/TouchTyping Stock Extract"
           $report = "$env:RUNNER_TEMP/live-ux-native-proof/NativeLayout"
-          & "$dir/Test-Live-UI.ps1" -Application "$dir/TouchTyping.exe" -NativeLayout -OutputDirectory $report
+          & "$dir/Test-Live-UI.ps1" -Application "$dir/TouchTyping.exe" -NativeLayout -ReferenceEvidence -OutputDirectory $report
           if ((Get-Content -LiteralPath "$report/report.json" -Raw | ConvertFrom-Json).status -ne 'passed') {
             throw 'NativeLayout did not pass.'
           }
