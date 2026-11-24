@@ -755,8 +755,15 @@ internal static class LiveUiSmoke
         Check(GetForegroundWindow() == focusProbe, "Num Lock changes occur only in the owned QA probe.");
         if (ProbeNumLock() != enabled)
         {
-            var key = Parse("NumLock").Single();
-            SendTo(focusProbe, new[] { key.Down(), key.Up() });
+            // Toggle the lock with its VK (the keyboard state action), not
+            // a raw E0 scan. The navigation stroke under test remains scan-based.
+            var input = new[] {
+                new Input { Type = 1, Data = new InputData { Keyboard = new KeyboardInput { Key = 0x90 } } },
+                new Input { Type = 1, Data = new InputData { Keyboard = new KeyboardInput { Key = 0x90, Flags = 2 } } }
+            };
+            if (SendInput((uint)input.Length, input, Marshal.SizeOf(typeof(Input))) != input.Length)
+                throw new InvalidOperationException("Cannot toggle Num Lock in the owned QA probe.");
+            Wait(150);
         }
         Until(delegate { return ProbeNumLock() == enabled; }, "Windows Num Lock state " + enabled);
         Console.WriteLine("NUMLOCK=" + (enabled ? "ON" : "OFF"));
