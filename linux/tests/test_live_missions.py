@@ -7,6 +7,104 @@ from platform_linux import Engine
 
 
 class MissionTest(unittest.TestCase):
+    def test_ubuntu_window_demo_is_an_outcome_without_a_shortcut_credit(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        import xml.etree.ElementTree as ET
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+            e = Engine(verify=True)
+            options = dict(app="ubuntu", mode="sandbox", level=0, routeKind="course",
+                           guidance="guided", actionLimit=40, seconds=0, nativeEnglishInput=True, seed=1)
+
+            def chord(*keys):
+                for k in keys:
+                    s = e.call("lab-key", key=k, pressed=True)
+                for k in reversed(keys):
+                    s = e.call("lab-key", key=k, pressed=False)
+                return s
+
+            def active(s):
+                return next(w["app"] for w in s["scene"]["windows"] if w["active"])
+
+            try:
+                e.call("configure", platform="linux", layout="EN")
+                s = e.call("lab-start", **options)
+                blank = e.call("lab-switch-demonstration")
+                self.assertEqual((blank["solved"], blank["task"]), (0, s["task"]))
+                e.call("lab-resume")
+                for number, keys in enumerate((("LSuper", "1"), ("LSuper", "Left"),
+                                               ("LSuper", "2"), ("LSuper", "Right")), 1):
+                    s = chord(*keys)
+                    self.assertEqual(s["solved"], number, s["task"])
+                self.assertEqual((s["mission"], s["task"]["keys"], active(s)), ("ubuntu-start", "Alt+Tab", "code"))
+                self.assertTrue(s["canSimulateWindowSwitch"])
+                # A bare Tab or a held modifier must not count as either action.
+                tab = chord("Tab")
+                self.assertEqual(tab["solved"], 4)
+                e.call("lab-key", key="LAlt", pressed=True)
+                blocked = e.call("lab-switch-demonstration")
+                self.assertEqual((blocked["task"]["id"], blocked["simulatedWindowSwitches"]), ("switch-next", 0))
+                s = e.call("lab-pause")  # the host took focus; only LAlt was received
+                self.assertFalse(s["held"])
+                demo = e.call("lab-switch-demonstration")
+                self.assertTrue(demo["paused"])
+                self.assertEqual((demo["solved"], demo["scenarioCompletedGoals"], active(demo)), (4, 5, "chrome"))
+                self.assertEqual(demo["simulatedWindowSwitches"], 1)
+                self.assertIn("Alt+Tab не зачтено", demo["status"])
+                self.assertNotEqual(demo["task"]["id"], "switch-next")
+                e.call("lab-switch-demonstration")
+                receipt = e.call("lab-result")
+                self.assertEqual((receipt["solved"], receipt["simulatedWindowSwitches"]), (4, 1))
+                self.assertFalse(any(p["task"] == "switch-next" for p in receipt["series"]))
+                e.close()
+                persisted = ET.parse(Path(directory) / "TouchTypingStudio-QA" / "progress.xml")
+                self.assertFalse(any(node.findtext("Skill") == "lab/ubuntu/switch-next" and node.findtext("Correct") == "true"
+                                     for node in persisted.findall(".//ShortcutAttempt")))
+                e = Engine(verify=True)
+                e.call("configure", platform="linux", layout="EN")
+                restored = e.call("lab-start", **options, **{"continue": True})
+                self.assertEqual((restored["scenarioCompletedGoals"], restored["solved"],
+                                  restored["simulatedWindowSwitches"], active(restored)), (5, 4, 1, "chrome"))
+                self.assertEqual(restored["task"], demo["task"])
+                self.assertTrue(restored["paused"])
+                e.call("lab-resume")
+                s = chord("LSuper", "4")
+                self.assertEqual((s["solved"], active(s)), (5, "files"))
+            finally:
+                e.close()
+
+    def test_gnome_two_window_demo_restores_editor_caret_without_credit(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": directory}):
+            e = Engine(verify=True)
+            try:
+                e.call("configure", platform="linux", layout="EN")
+                e.call("lab-start", app="ubuntu", mode="sandbox", level=1, mission="ubuntu-gnome-windows",
+                       routeKind="mission", guidance="independent", actionLimit=0, seconds=0, nativeEnglishInput=True, seed=1)
+                e.call("lab-resume")
+                for count, suffix in enumerate(("Left", "2", "Right", "Right", "Right",
+                                               "Up", "Down", "Right", "H"), 1):
+                    for key, pressed in (("LSuper", True), (suffix, True), (suffix, False), ("LSuper", False)):
+                        s = e.call("lab-key", key=key, pressed=pressed)
+                    self.assertEqual(s["solved"], count)
+                self.assertEqual(s["task"]["id"], "switch-next")
+                def code(state):
+                    return next(w for w in state["scene"]["windows"] if w["app"] == "code")
+                before = code(s)
+                self.assertEqual((before["active"], before["state"], before["restoreState"]), (False, "minimized", "right"))
+                demo = e.call("lab-switch-demonstration")
+                after = code(demo)
+                self.assertEqual((after["active"], after["state"], demo["task"]["id"]), (True, "right", "gnome-write"))
+                self.assertEqual((demo["solved"], demo["scenarioCompletedGoals"]), (9, 10))
+                for key in ("url", "activeTab", "body", "bodyCursor", "bodyAnchor"):
+                    self.assertEqual(after[key], before[key], key)
+                self.assertIn("Сочетание не проверялось", demo["status"])
+                self.assertNotIn("Alt+Tab", demo["status"])
+            finally:
+                e.close()
+
     def test_quick_start_rotates_missions_without_consuming_saved_drafts(self):
         from unittest.mock import patch
 

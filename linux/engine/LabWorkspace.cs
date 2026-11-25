@@ -163,14 +163,74 @@ internal sealed partial class LabScene
         return true;
     }
 
+    private bool FindTerminalHistory(LabWindow w, bool older = false)
+    {
+        int previous = w.SearchIndex;
+        int end = older ? Math.Clamp(previous, 0, commands.Count) : commands.Count;
+        int match = -1;
+        if (w.Query.Length > 0)
+            for (int i = end - 1; i >= 0; --i)
+                if (commands[i].Contains(w.Query, StringComparison.Ordinal)) { match = i; break; }
+        if (match < 0 && older && previous >= 0) match = previous;
+        w.SearchIndex = match;
+        TerminalInput = match >= 0 ? commands[match] : "";
+        w.Cursor = w.Query.Length;
+        w.Status = w.Query.Length == 0 ? "Введите часть команды из истории." :
+            match < 0 ? "В истории нет совпадений. Измените запрос или нажмите Esc." : "";
+        Version++;
+        return true;
+    }
+
+    private bool HasTerminalHistoryMatch(LabWindow w) =>
+        w.Query.Length > 0 && w.SearchIndex >= 0 && w.SearchIndex < commands.Count &&
+        string.Equals(TerminalInput, commands[w.SearchIndex], StringComparison.Ordinal) &&
+        TerminalInput.Contains(w.Query, StringComparison.Ordinal);
+
+    internal bool CanExecuteHistoryMatch => Active is LabWindow w && HasTerminalHistoryMatch(w);
+
+    private bool SearchTerminalInput(LabWindow w, string key, string text)
+    {
+        if (key is "Enter" or "Esc" or "Left" or "Right")
+        {
+            bool match = HasTerminalHistoryMatch(w);
+            if (key == "Enter" && !match) return FindTerminalHistory(w);
+            w.Focus = w.SearchFrom == "terminal" || w.App != "terminal" ? "terminal" : "body";
+            if (key == "Esc" || !match)
+            {
+                TerminalInput = w.SearchDraft;
+                w.Select(w.SearchAnchor, w.SearchCaret);
+            }
+            else
+            {
+                w.Cursor = TerminalInput.Length;
+                if (key == "Left") w.Cursor = PreviousBoundary(TerminalInput, w.Cursor);
+            }
+            w.Query = ""; w.SearchIndex = -1; w.Status = "";
+            Version++;
+            return key != "Enter" || Text("Enter", "");
+        }
+        if (key == "Backspace" && w.Query.Length > 0) w.Query = w.Query[..PreviousBoundary(w.Query, w.Query.Length)];
+        else if (text.Length > 0 && !text.Any(char.IsControl) && key != "Backspace") w.Query += text;
+        else return key == "Backspace";
+        return FindTerminalHistory(w);
+    }
+
     private bool? ApplyWorkspace(string action, LabWindow w)
     {
         if (w == null) return null;
         switch (action)
         {
             case "terminal-search":
-                if (w.Focus != "reverse-search") { historyDraft = TerminalInput; w.Query = ""; w.SearchIndex = commands.Count; w.Focus = "reverse-search"; }
-                return ReverseSearch(w);
+                bool alreadySearching = w.Focus == "reverse-search";
+                if (!alreadySearching)
+                {
+                    w.SearchFrom = w.Focus; w.SearchDraft = TerminalInput;
+                    w.SearchAnchor = w.Anchor; w.SearchCaret = w.Cursor;
+                    historyDraft = TerminalInput;
+                    w.Query = ""; w.SearchIndex = commands.Count; w.Focus = "reverse-search";
+                }
+                if (ReplayLegacyTerminalSearch) return ReverseSearch(w);
+                return FindTerminalHistory(w, alreadySearching && w.SearchIndex >= 0);
             case "word-left": case "word-right":
                 return Text(action == "word-left" ? "Left" : "Right", "", word: true);
             case "move-line-up": case "move-line-down":

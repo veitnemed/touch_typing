@@ -19,7 +19,7 @@ from gi.repository import Gdk, Gio, GLib, Graphene, Gtk, Pango, PangoCairo
 
 from platform_linux import (
     APP_ID, ROOT, Engine, EngineError, FINGERS, InputSources, MODIFIERS, PhysicalKeyboard,
-    active_keyboard_layout, chord_label, key_label, layout_for_group,
+    active_keyboard_layout, chord_label, key_label, keyboard_layout_for_event,
 )
 from lab_view import DesktopView
 from visuals import PracticeLine, fingers as paint_fingers, hand_picture, series_chart
@@ -643,10 +643,12 @@ class Studio(Gtk.Application):
             return
         self.engine = Engine(bool(self.smoke))
         self.sources = InputSources(Gio)
+        self.physical_keyboard = PhysicalKeyboard(Gdk, Gdk.Display.get_default())
         self.layout = self.sources.guess()
         forward, backward = self.sources.bindings()
         self.library = self.engine.call("configure", layout=self.layout, forward=forward, backward=backward,
-                                        dock=self.sources.dock(), desktopBindings=self.sources.desktop_bindings())
+                                        dock=self.sources.dock(), desktopBindings=self.sources.desktop_bindings(),
+                                        rightAltMode=self.physical_keyboard.right_alt_mode())
         provider = Gtk.CssProvider()
         provider.load_from_path(str(ROOT / "style.css"))
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
@@ -656,7 +658,6 @@ class Studio(Gtk.Application):
         self.window.set_size_request(960, 600)
         self.build_header()
         self.window.connect("close-request", self.close_request)
-        self.physical_keyboard = PhysicalKeyboard(Gdk, self.window.get_display())
         self.physical_keyboard.watch_x11()
         self.window.connect("notify::is-active", self.focus_changed)
         controller = Gtk.EventControllerKey()
@@ -1055,8 +1056,6 @@ class Studio(Gtk.Application):
                 module, title = "windows", "Windows 10"
                 description = "Работа в Windows: Пуск,\nокна, рабочие столы."
             tile = button("", lambda dest=module: self.open_reference_module(dest), "reference-card", "module-" + module)
-            if index == 0:
-                tile.add_css_class("reference-selected")
             if index > 2:
                 tile.add_css_class("reference-card-lower")
             tile.set_tooltip_text(f"Открыть «{title}». Если нет черновика: 40 действий без таймера.")
@@ -1150,6 +1149,9 @@ class Studio(Gtk.Application):
 
     def call(self, operation, **payload):
         try:
+            if operation in ("configure", "inspect", "shortcut-start", "lab-start", "typing-start", "typing-continue",
+                             "typing-review-start") or operation in ("lab-key", "typing-physical") and payload.get("key") == "RAlt":
+                payload["rightAltMode"] = self.physical_keyboard.right_alt_mode()
             result = self.engine.call(operation, **payload)
             if self.engine.storage_error:
                 self.message(self.engine.storage_error)
@@ -1378,7 +1380,10 @@ class Studio(Gtk.Application):
                 self.tiles.append(text(key_label(item["token"]), "keytile"))
         targets = {} if blind or waiting else {item["key"]: item["finger"] for item in actions}
         hints = "   ·   ".join(f'{key_label(item["key"])} — {FINGERS[item["finger"]]}' for item in actions
-                             if item["key"] in targets)
+                             if item["key"] in targets and 0 <= item["finger"] < len(FINGERS))
+        if guide and not blind and not waiting and guide.get("note"):
+            self.detail.set_label(" ".join(filter(None, [skill["note"], guide["note"]])))
+            self.detail.set_visible(True)
         self.guide.paint(self.library, self.layout, targets, held, miss, hints, targets.values())
         self.technique.set_visible(preview and skill["id"] in ("terminal-copy", "terminal-paste", "terminal-cut", "terminal-right-paste"))
 
@@ -1784,16 +1789,9 @@ class Studio(Gtk.Application):
         return ("F9" if "F4" in tokens else "F4", "F10" if "F7" in tokens else "F7", "F11" if "F8" in tokens else "F8")
 
     def update_layout(self, controller, character):
-        candidate = None
-        if character and character.isascii() and character.isalpha():
-            candidate = "EN"
-        elif character and ("а" <= character.lower() <= "я" or character.lower() == "ё"):
-            candidate = "RU"
-        elif controller is not None:
-            # GNOME can replace the Wayland keymap when switching sources. Ask GDK
-            # how it translates physical A in this event, independent of source-list order.
-            candidate = layout_for_group(Gdk, self.window.get_display(), controller.get_group(),
-                                         self.physical_keyboard.layout_probe)
+        candidate = keyboard_layout_for_event(
+            Gdk, self.window.get_display(), character,
+            controller.get_group() if controller is not None else None, self.physical_keyboard.layout_probe)
         if candidate and candidate != self.layout:
             self.layout = candidate
             self.show_layout()
@@ -2196,6 +2194,8 @@ class Studio(Gtk.Application):
             detail = "Смените раскладку на " + state["wantedLayout"]
         if not detail and state["weak"]:
             detail = "Повтор промаха: " + state["weak"]
+        if not detail and command:
+            detail = state.get("expectedNote", "")
         self.typing_detail.set_label(detail)
         self.typing_detail.set_visible(bool(detail))
         self.pause_button.set_label("▶" if self.paused else "Ⅱ")
@@ -2210,7 +2210,8 @@ class Studio(Gtk.Application):
         if state["modifier"]:
             targets[state["modifier"]] = 0 if state["modifier"] == "LShift" else 7
         for key, finger in targets.items():
-            hints.append(f"{key_label(key)} — {FINGERS[finger]}")
+            if 0 <= finger < len(FINGERS):
+                hints.append(f"{key_label(key)} — {FINGERS[finger]}")
         self.guide.paint(self.library, state["wantedLayout"], targets, state.get("held", ()),
                          notes="  ·  ".join(hints), chosen=targets.values())
 
@@ -2745,6 +2746,9 @@ class Studio(Gtk.Application):
 
 class LabPage(Gtk.Box):
     """Three-minute classes and a keyboard-operated simulated desktop."""
+
+    arrow_names = {"Up": "Стрелка вверх", "Down": "Стрелка вниз",
+                   "Left": "Стрелка влево", "Right": "Стрелка вправо"}
     def __init__(self, host):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.host = host
@@ -2766,6 +2770,9 @@ class LabPage(Gtk.Box):
         self.limit_modal_signature = None
         self.limit_resume_wait = False
         self.limit_actions = ()
+        self.pause_actions = ()
+        self.pause_switch_notice = ""
+        self.window_switch_reason = ""
         self.result = False
         self.show_diagnostic = False
         self.last_physical = ("", None)
@@ -2882,6 +2889,11 @@ class LabPage(Gtk.Box):
             aids_menu.append(control)
         self.hint_button = button("Подсказка · F1", lambda: self.render(self.host.call("lab-hint")), "reference-hint")
         self.diagnostic_button = button("Показать коды клавиш", self.toggle_diagnostic)
+        self.details_mode = "goal"
+        self.theory_button = button("Теория", self.toggle_terminal_theory, "reference-footer-settings")
+        self.theory_button.set_tooltip_text("Теория терминала · " + physical_key_hint("F2", host.library))
+        bind_name(self.theory_button, "Теория терминала")
+        self.theory_button.set_visible(False)
         self.details = Gtk.Revealer()
         self.details.set_transition_type(Gtk.RevealerTransitionType.NONE)
         self.details_text = text("", "reference-long-help", wrap=True)
@@ -2959,8 +2971,12 @@ class LabPage(Gtk.Box):
             bind_name(control, name)
             control.set_tooltip_text(name)
         self.settings_menu.add_css_class("reference-footer-settings")
+        self.window_switch_demo = button("Учебное переключение", self.demonstrate_window_switch, "reference-hint")
+        self.window_switch_demo.set_tooltip_text("Переключить только учебное окно. Сочетание не будет засчитано.")
+        self.window_switch_demo.set_visible(False)
         self.footer = add(row(8, "reference-lesson-footer"), back, progress,
-                          self.timer, self.pause, self.restart, self.settings_menu, close)
+                          self.window_switch_demo, self.timer, self.pause, self.restart,
+                          self.theory_button, self.settings_menu, close)
         self.content.append(self.footer)
         self.guide = LessonGuide(host.library["keyboard"])
         self.guide.add_css_class("lab-guide")
@@ -3016,8 +3032,20 @@ class LabPage(Gtk.Box):
 
     def toggle_goal_details(self, options):
         options.popdown()
-        self.details.set_reveal_child(not self.details.get_reveal_child())
-        self.details.set_visible(self.details.get_reveal_child())
+        self.toggle_details("goal")
+
+    def toggle_terminal_theory(self):
+        if (self.active and self.state and self.state["app"] == "terminal" and not self.state["paused"]
+                and not self.save_pending and not self.state.get("limitDecisionPending")):
+            self.toggle_details("theory")
+
+    def toggle_details(self, mode):
+        opened = not (self.details.get_reveal_child() and self.details_mode == mode)
+        self.details_mode = mode
+        self.details.set_reveal_child(opened)
+        self.details.set_visible(opened)
+        if opened and self.state:
+            self.render(self.state)
         self.desktop.grab_focus()
 
     def live_guide_profile(self):
@@ -3120,6 +3148,9 @@ class LabPage(Gtk.Box):
                 add(line, image, expand(add(box(gap=2), text(name, "reference-stat-label"), unit)))
                 metrics.attach(line, i, 0, 1, 1)
             panel.append(metrics)
+            if demonstrations := result.get("simulatedWindowSwitches", 0):
+                panel.append(text(f"Учебные переключения без зачёта клавиш: {demonstrations}.",
+                                  "reference-modal-subtitle", wrap=True))
         return panel
 
     def add_reference_modal(self, panel):
@@ -3158,6 +3189,15 @@ class LabPage(Gtk.Box):
         panel.append(legend)
 
     def show_pause_modal(self):
+        can_demo = bool((self.state or {}).get("canSimulateWindowSwitch"))
+        notice = ((self.window_switch_reason or "Система может перехватить сочетание.") +
+                  " Можно переключить только учебное окно, без зачёта клавиш.") if can_demo else ""
+        if self.pause_actions and self.modal_layer.get_visible() and notice == self.pause_switch_notice:
+            if self.host.window.get_focus() not in self.pause_actions:
+                self.pause_actions[0].grab_focus()
+            return  # A normal state refresh must not reset the selected modal action.
+        self.settings_menu.popdown()
+        self.content.set_can_focus(False)
         clear(self.modal_layer)
         result = self.host.call("lab-result") or self.state or {}
         panel = self.reference_lesson_panel("Пауза", "Пробел — продолжить занятие", result)
@@ -3165,12 +3205,36 @@ class LabPage(Gtk.Box):
         controls.set_halign(Gtk.Align.CENTER)
         resume = button("Продолжить", self.acquire, "reference-primary")
         resume.set_tooltip_text("Продолжить · Пробел")
-        add(controls, resume, button("Начать сначала", self.replay),
-            button("Завершить", self.stop))
-        panel.append(controls)
+        self.pause_switch_notice = notice
+        secondary = (button("Начать сначала", self.replay), button("Завершить", self.stop))
+        if can_demo:
+            panel.append(text(notice, "reference-modal-subtitle", wrap=True))
+            demo = button("Учебное переключение", self.demonstrate_window_switch)
+            self.pause_actions = (resume, demo, *secondary)
+            panel.append(add(controls, resume, demo))
+            other = add(row(8, "reference-modal-actions"), *secondary)
+            other.set_halign(Gtk.Align.CENTER)
+            panel.append(other)
+        else:
+            self.pause_actions = (resume, *secondary)
+            panel.append(add(controls, *self.pause_actions))
         self.add_reference_modal(panel)
-        if not self.host.window.get_focus() or self.host.window.get_focus() == self.desktop:
-            resume.grab_focus()
+        resume.grab_focus()
+
+    def leave_pause_modal(self):
+        if self.pause_actions:
+            self.pause_actions = ()
+            self.content.set_can_focus(True)
+
+    def step_pause_focus(self, backwards):
+        focus = self.host.window.get_focus()
+        actions = self.pause_actions
+        if focus in actions:
+            index = (actions.index(focus) + (-1 if backwards else 1)) % len(actions)
+        else:
+            index = 0
+        self.host.window.set_focus_visible(True)
+        actions[index].grab_focus()
 
     def show_limit_choice(self, error=""):
         reason = (self.state or {}).get("limitReached")
@@ -3180,6 +3244,7 @@ class LabPage(Gtk.Box):
         self.limit_modal_signature = signature
         self.waiting_capture = False
         self.release_capture()
+        self.leave_pause_modal()
         self.content.set_sensitive(False)
         clear(self.modal_layer)
         explanation = "Можно остановиться здесь или закончить текущую миссию без дополнительного лимита."
@@ -3320,6 +3385,7 @@ class LabPage(Gtk.Box):
         return GLib.SOURCE_REMOVE
 
     def resume_with_capture(self):
+        self.window_switch_reason = ""
         self.waiting_capture = False
         self.clear_capture_timers()
         state = self.host.call("lab-resume")
@@ -3339,6 +3405,8 @@ class LabPage(Gtk.Box):
         if self.active and self.waiting_capture and self.host.window.is_active() and self.surface and not self.surface.get_property("shortcuts-inhibited"):
             self.waiting_capture = False
             self.release_capture()
+            if (self.state or {}).get("canSimulateWindowSwitch"):
+                self.window_switch_reason = "Передача системных клавиш не разрешена."
             self.status.set_label("Захват клавиш отклонён. Нажмите «Разрешить клавиши», чтобы повторить.")
             self.status.set_visible(True)
             self.show_pause_modal()
@@ -3351,6 +3419,8 @@ class LabPage(Gtk.Box):
         if self.waiting_capture and self.host.window.is_active():
             self.waiting_capture = False
             self.release_capture()
+            if (self.state or {}).get("canSimulateWindowSwitch"):
+                self.window_switch_reason = "Передача системных клавиш не разрешена."
             self.status.set_label("Захват клавиш не разрешён. Нажмите «Разрешить клавиши» для продолжения.")
             self.status.set_visible(True)
             self.show_pause_modal()
@@ -3387,10 +3457,12 @@ class LabPage(Gtk.Box):
             if self.state.get("limitDecisionPending") or not self.active:
                 return
         self.status.set_label(message)
-        self.pause.grab_focus()
 
     def focus(self, active):
         if not active:
+            if (self.active and (self.state or {}).get("canSimulateWindowSwitch") and
+                    self.pressed & {"LAlt", "RAlt", "LSuper", "RSuper"}):
+                self.window_switch_reason = "Тренажёр потерял фокус, не получив сочетание."
             self.physical_down.clear()
             if self.active and self.limit_resume_wait:
                 # We cannot observe releases while another window owns input.
@@ -3422,6 +3494,17 @@ class LabPage(Gtk.Box):
         tokens = task.get("keys", "").replace(" → ", "+").split("+")
         reserve_f8 = (self.state or {}).get("scene", {}).get("diagnosticWorkspace")
         return ("F6" if reserve_f8 or "F8" in tokens else "F8", "F9" if "F10" in tokens else "F10")
+
+    def demonstrate_window_switch(self):
+        if (not self.active or not self.state.get("canSimulateWindowSwitch") or not self.host.window.is_active()
+                or self.save_pending or self.waiting_capture or self.limit_resume_wait
+                or self.state.get("limitDecisionPending")):
+            return
+        response = self.host.call("lab-switch-demonstration")
+        if response:
+            self.render(response)
+        if self.active and not self.state["paused"]:
+            self.desktop.grab_focus()
 
     def apply_notebook_command(self, action, cell, offset=-1):
         if (not self.active or self.state["paused"] or self.limit_resume_wait or self.save_pending
@@ -3479,6 +3562,10 @@ class LabPage(Gtk.Box):
             focused = self.host.window.get_focus()
             return not (key in ("Space", "Enter") and not has_modifiers
                         and self.physical_down <= {key} and focused in self.limit_actions)
+        if (key == "F2" and not has_modifiers and not self.state["paused"] and self.state["app"] == "terminal"
+                and "F2" not in self.state.get("task", {}).get("keys", "").split("+")):
+            self.toggle_terminal_theory()
+            return True
         if key == "F1" and not has_modifiers and not self.state.get("showGuide", True) and not self.state["paused"]:
             self.render(self.host.call("lab-hint"))
             return True
@@ -3489,18 +3576,25 @@ class LabPage(Gtk.Box):
             self.stop()
             return True
         if self.state["paused"]:
+            if self.pause_actions and self.modal_layer.get_visible() and key == "Tab":
+                if not modifiers & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SUPER_MASK):
+                    self.step_pause_focus(bool(modifiers & Gdk.ModifierType.SHIFT_MASK))
+                return True
             if key == "Space" and not has_modifiers:
                 if inside_widget(self.host.window.get_focus(), self.modal_layer):
                     return False
                 self.acquire()
             if key == "Enter":
-                focused = self.host.window.get_focus()
-                return not (inside_widget(focused, self.modal_layer) and isinstance(focused, Gtk.Button) and
-                            not focused.get_label().startswith("Продолжить"))
+                # Enter is common in exercises. Only explicit secondary actions
+                # use it on pause; Resume intentionally uses Space or the pause key.
+                return self.host.window.get_focus() not in self.pause_actions[1:]
             return key in ("Space", pause_key, finish_key)
         if not self.window_only_keys and (not self.surface or not self.surface.get_property("shortcuts-inhibited")):
             self.pause_run("Захват клавиш прерван. Разрешите его, чтобы продолжить.")
             return True
+        if key in ("Enter", "Space") and not has_modifiers and self.window_switch_demo.get_mapped() and (
+                self.host.window.get_focus() == self.window_switch_demo):
+            return False
         notebook_modifiers = Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SUPER_MASK
         if not (modifiers & notebook_modifiers) and self.desktop.notebook_viewport_key(
                 key, shift=bool(modifiers & Gdk.ModifierType.SHIFT_MASK)):
@@ -3533,6 +3627,13 @@ class LabPage(Gtk.Box):
             if self.state:
                 self.render(self.state)
 
+    @staticmethod
+    def gesture_pieces(gesture):
+        # Positions, not glyphs, distinguish the right-arrow key from a
+        # sequence separator. Keep the canonical token for AT and matching.
+        return tuple((part, bool(index % 2)) for index, part in
+                     enumerate(re.split(r" (\+|→) ", gesture))) if gesture else ()
+
     def render(self, state):
         self.state = state
         if self.save_pending or self.limit_resume_wait:
@@ -3549,31 +3650,47 @@ class LabPage(Gtk.Box):
         guided = state.get("showGuide", True)
         coach_prompt = state.get("coachPrompt") or ""
         self.task.set_label(task.get("title", "") if guided else coach_prompt or state.get("phase", ""))
-        hints = [task.get("hint", "")] if guided else []
+        hints = [task.get("hint", ""), (state.get("guide") or {}).get("note", "")] if guided else []
         raw_keys = task.get("keys", "")
         gesture = raw_keys.replace("+", " + ") or task.get("text", "")
         if guided and not task.get("keys") and task.get("id", "").startswith("open-"):
             gesture = "⊞ → " + task["text"] + " → Enter"
         elif guided and task.get("id", "").startswith("command/") and len(task.get("text", "")) > 12:
-            gesture = "Ctrl + R → Enter"
-            hints.append("Ctrl+R: найдите команду по фрагменту и нажмите Enter.")
+            gesture = "Ctrl + R → фрагмент → Enter"
         if not guided:
             gesture = ""
         coach_reason = state.get("coachReason") or ""
         notes = [coach_reason] if coach_prompt else [*state.get("objectives", []), *hints, coach_reason]
         details = "\n".join(filter(None, [state.get("scenario", ""), *notes]))
         self.task.set_tooltip_text(details)
-        self.details_text.set_label(details)
+        theory_text = ("↑ возвращает прошлую команду, но не запускает её. Ctrl+R ищет по истории: "
+                       "наберите фрагмент, сверьте найденную строку и нажмите Enter. "
+                       "←/→ переносят её в командную строку для правки, Esc возвращает ваш черновик."
+                       if guided else "История хранит уже выполненные команды. Можно вернуть прошлую строку "
+                       "для правки или найти нужную по фрагменту. Перед запуском сверьте, что нашлось.")
+        show_theory = state["app"] == "terminal"
+        self.theory_button.set_visible(show_theory)
+        self.theory_button.set_sensitive(not state["paused"])
+        if not show_theory and self.details_mode == "theory":
+            self.details.set_reveal_child(False)
+            self.details.set_visible(False)
+            self.details_mode = "goal"
+        self.details_text.set_label(theory_text if self.details_mode == "theory" else details)
         self.hint_button.set_visible(not guided)
-        tokens = tuple(re.split(r" (\+|→) ", gesture)) if gesture else ()
-        if tokens != getattr(self, "gesture_tokens", ()):
-            self.gesture_tokens = tokens
+        tokens = self.gesture_pieces(gesture)
+        if tokens != getattr(self, "gesture_signature", ()):
+            self.gesture_signature = tokens
+            self.gesture_tokens = tuple(token for token, _ in tokens)
             clear(self.gesture)
-            for token in tokens:
-                tile = text(token, "reference-key-join" if token in ("+", "→") else "reference-keycap")
+            for token, connector in tokens:
+                label = key_label(token) if token in self.arrow_names else token
+                tile = text(label, "reference-key-join" if connector else "reference-keycap")
                 tile.set_ellipsize(Pango.EllipsizeMode.END)
                 tile.set_max_width_chars(25 if len(tokens) == 1 else 11)
-                tile.set_tooltip_text(display_chord(raw_keys, self.host.library) if raw_keys else token)
+                explanation = self.arrow_names.get(token)
+                if explanation:
+                    bind_name(tile, explanation)
+                tile.set_tooltip_text(explanation or (display_chord(raw_keys, self.host.library) if raw_keys else token))
                 tile.set_xalign(.5)
                 self.gesture.append(tile)
         self.gesture.set_visible(bool(tokens))
@@ -3589,20 +3706,21 @@ class LabPage(Gtk.Box):
         self.timer.set_label(" · ".join(budget))
         self.timer.set_tooltip_text(
             "Оставшееся активное время" if state.get("timeLimit") and not state.get("finishingMission") else None)
-        status = state.get("status", "") or task.get("hint", "")
+        status = state.get("status", "") or (task.get("hint", "") if guided else "")
         if state["held"]:
             status += "  ·  Нажато " + " + ".join(key_label(k) for k in state["held"])
         self.status.set_label(status.replace("LSuper", "⊞").replace("RSuper", "⊞ прав.").replace("Super", "⊞"))
-        # Mention potentially reserved keys without revealing the answer in
-        # independent practice. An OS-reserved key that wasn't delivered never
-        # earns credit; the user can choose another mission or adjust their WM.
+        # A global shortcut not delivered by X11 must never earn key credit.
+        # The explicit demonstration has its own control and no key record.
+        demo_available = self.window_only_keys and state.get("canSimulateWindowSwitch") and not state["paused"]
+        self.window_switch_demo.set_visible(bool(demo_available))
         x11_reserved = self.window_only_keys and guided and (
             "Super" in raw_keys or raw_keys in ("Alt+Tab", "Alt+Shift+Tab", "Alt+F4", "Print", "Alt+Print")
             or task.get("id", "").startswith("open-"))
-        important = state["paused"] or state.get("feedback") in ("error", "layout")
-        if x11_reserved and not important:
-            self.status.set_label("X11: системные клавиши может перехватить диспетчер окон.")
-        self.status.set_visible(important or x11_reserved)
+        important = state["paused"] or state.get("feedback") in ("error", "layout", "simulation")
+        if not important and (x11_reserved or demo_available):
+            self.status.set_label("X11: сочетание может перехватить система.")
+        self.status.set_visible(important or x11_reserved or demo_available)
         self.status.remove_css_class("bad")
         self.status.remove_css_class("good")
         if state.get("feedback") in ("error", "good"):
@@ -3622,7 +3740,7 @@ class LabPage(Gtk.Box):
         steps = guide.get("steps") or [[]]
         actions = steps[0]
         targets = {item["key"]: item["finger"] for item in actions}
-        notes = "  ·  ".join(f'{key_label(k)} — {FINGERS[f]}' for k, f in targets.items())
+        notes = "  ·  ".join(f'{key_label(k)} — {FINGERS[f]}' for k, f in targets.items() if 0 <= f < len(FINGERS))
         miss = (state.get("lastKey") if state.get("feedback") == "error" and
                 self.host.library.get("showMistakeKey", True) else None)
         scene = state["scene"]
@@ -3635,6 +3753,8 @@ class LabPage(Gtk.Box):
         elif state["paused"] and not self.waiting_capture:
             self.show_pause_modal()
         elif self.active:
+            if not state["paused"]:
+                self.leave_pause_modal()
             self.modal_layer.set_visible(False)
 
     def tick(self):
@@ -3655,6 +3775,7 @@ class LabPage(Gtk.Box):
                                             finish_limit=finish_limit)
         self.status.set_label("Не удалось сохранить занятие. Повторите сохранение.")
         self.status.set_visible(True)
+        self.leave_pause_modal()
         clear(self.modal_layer)
         details = "Занятие осталось на паузе. Закройте другое окно тренажёра или проверьте доступ к папке профиля."
         panel = self.reference_lesson_panel("Прогресс не сохранён", details)
@@ -3686,10 +3807,15 @@ class LabPage(Gtk.Box):
         self.state = state
         self.limit_modal_signature = None
         self.limit_actions = ()
+        self.leave_pause_modal()
         self.content.set_sensitive(True)
         self.save_pending = False
         self.retry_save = None
         self.active = False
+        self.theory_button.set_visible(False)
+        self.details.set_reveal_child(False)
+        self.details.set_visible(False)
+        self.details_mode = "goal"
         self.host.message()
         if on_saved:
             on_saved()

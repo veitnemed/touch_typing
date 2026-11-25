@@ -148,8 +148,8 @@ def _x11_library():
 
 def _x11_active_group(display_name):
     # On GTK < 4.18 a Tab, Space or number event's effective group need not
-    # be the actual XKB group. Read the same already-open app display without
-    # changing its layout. Only queried at session start, not per keystroke.
+    # be the actual XKB group. Read the server behind the app's display
+    # without changing its layout; alphabetic input doesn't need this call.
     if not display_name or (x11 := _x11_library()) is None:
         return None
     connection = x11.XOpenDisplay(os.fsencode(display_name))
@@ -220,6 +220,32 @@ class PhysicalKeyboard:
             return "RAlt"  # PC AltGr for evdev and XFree86
         return _X11_SERVICE_KEYS.get(keysym, _X11_FALLBACK_TEXT.get(keycode, ""))
 
+    def right_alt_mode(self):
+        """Describe the installed on-screen position without changing the OS map."""
+        code = next((code for code, key in (self.codes or {}).items() if key == "RAlt"), None)
+        if code is None or self.display is None:
+            return "unknown"
+        found, entries, keyvals = self.display.map_keycode(code)
+        if not found:
+            return "unknown"
+        # A neutral key may report the effective group 0 even with another
+        # group active. Ask the device/XKB only if this position varies.
+        groups = {entry.group for entry in entries}
+        group = None
+        if len(groups) > 1:
+            seat = self.display.get_default_seat()
+            keyboard = seat.get_keyboard() if seat else None
+            index = getattr(keyboard, "get_active_layout_index", None)
+            group = index() if index else None
+            if group not in groups and self.x11:
+                group = _x11_active_group(self.display.get_name())
+        names = [(entry.level, self.gdk.keyval_name(value)) for entry, value in zip(entries, keyvals)
+                 if group not in groups or group == entry.group]
+        if any(name and (name.startswith(("ISO_Level3", "ISO_Level5")) or name == "Mode_switch") for _, name in names):
+            return "altgr"
+        base = {name for level, name in names if level == 0 and name}
+        return "alt" if base and base <= {"Alt_R", "Alt_L"} else "unknown"
+
     def press(self, keyval, keycode):
         if keycode not in self.down:
             self.down[keycode] = self._resolve(keyval, keycode)
@@ -267,6 +293,22 @@ def active_keyboard_layout(Gdk, display, probe=_LAYOUT_PROBE):
         if len(groups) == 1:
             return layout_for_group(Gdk, display, groups.pop(), probe)
     return None
+
+
+def keyboard_layout_for_event(Gdk, display, character, effective_group, probe=_LAYOUT_PROBE):
+    """Resolve physical input language, not a shared glyph's effective group."""
+    if character and character.isascii() and character.isalpha():
+        return "EN"
+    if character and ("а" <= character.lower() <= "я" or character.lower() == "ё"):
+        return "RU"
+    # X11 Space, digits, navigation and modifiers may all be rendered from
+    # group zero while the active group remains Russian. If active state
+    # can't be read, keep the prior layout instead of guessing from the key.
+    active = active_keyboard_layout(Gdk, display, probe)
+    if active or display is None or display.__gtype__.name == "GdkX11Display":
+        return active
+    # A legacy Wayland compositor may expose the group only on the event.
+    return layout_for_group(Gdk, display, effective_group, probe)
 
 
 class EngineError(Exception):

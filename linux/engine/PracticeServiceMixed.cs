@@ -14,8 +14,9 @@ internal sealed partial class PracticeService
         if (!MixedTypingRun.Modes.ContainsKey(mode)) return false;
         mixedTyping = MixedTypingRun.Create(mode, Text(m, "layout") is "RU" or "EN" ? Text(m, "layout") : layout,
             Number(m, "level"), Number(m, "seconds"), Number(m, "cycles", 1), Flag(m, "infinite"),
-            verifyInputs && m.TryGetProperty("seed", out _) ? new Random(Number(m, "seed")) : Random.Shared);
+            verifyInputs && m.TryGetProperty("seed", out _) ? new Random(Number(m, "seed")) : Random.Shared, rightAltMode);
         mixedTyping.SetLayoutBindings(forward, backward);
+        mixedTyping.SetGuide(profile.RightHandChord, rightAltMode);
         BeginTypingOwnership(profile.ClassicTypingDraft, false);
         typing = null;
         return true;
@@ -27,6 +28,7 @@ internal sealed partial class PracticeService
         if (restored == null) return false;
         mixedTyping = restored;
         mixedTyping.SetLayoutBindings(forward, backward);
+        mixedTyping.SetGuide(profile.RightHandChord, rightAltMode);
         BeginTypingOwnership(profile.ClassicTypingDraft, true);
         typing = null;
         return true;

@@ -79,6 +79,7 @@ internal sealed partial class PracticeService
             if (store.Error != null) throw new InvalidOperationException(store.Error);
             review = opened;
             review.Run.SetLayoutBindings(forward, backward);
+            review.Run.SetGuide(profile.RightHandChord, rightAltMode);
             typing = null;
             mixedTyping = null;
             response = review.State(lang);

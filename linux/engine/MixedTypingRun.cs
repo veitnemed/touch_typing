@@ -49,6 +49,8 @@ internal sealed partial class MixedTypingRun
     private int cycleIndex, cycleStart, absoluteOffset;
     private string carry = "";
     private KeyChord[] layoutBindings = [];
+    private string rightAltMode = "alt";
+    private bool paired = true;
     private bool saved;
     internal string AttemptId { get; } = Guid.NewGuid().ToString("N");
     internal int Position { get; private set; }
@@ -87,12 +89,12 @@ internal sealed partial class MixedTypingRun
         if (!Finished) watch.Start();
     }
 
-    internal static MixedTypingRun Create(string mode, string layout, int level, int seconds, int cycles, bool infinite, Random random)
+    internal static MixedTypingRun Create(string mode, string layout, int level, int seconds, int cycles, bool infinite, Random random, string rightAltMode = "alt")
     {
         if (!Modes.TryGetValue(mode, out string title)) throw new ArgumentException("Выберите режим практики.");
         layout = layout == "RU" ? "RU" : "EN"; level = Math.Clamp(level, 0, 2);
         var plans = Enumerable.Range(0, infinite ? 1 : Math.Clamp(cycles, 1, 5))
-            .Select(_ => (IReadOnlyList<TypingAtom>)Generate(mode, layout, level, random)).ToArray();
+            .Select(_ => (IReadOnlyList<TypingAtom>)Generate(mode, layout, level, random, rightAltMode == "alt")).ToArray();
         return new(mode, title, layout, level, seconds, infinite, plans, random);
     }
 
@@ -100,11 +102,20 @@ internal sealed partial class MixedTypingRun
         int position = 0, int errors = 0, double activeSeconds = 0, IReadOnlyDictionary<TypingAtom,int> mistakes = null, string attemptId = null)
         => new(mode, title, units.FirstOrDefault()?.Layout, 0, 0, false, [units], null, position, errors, activeSeconds, mistakes, attemptId);
 
-    private static List<TypingAtom> Generate(string mode, string firstLayout, int level, Random random)
+    private static List<TypingAtom> Generate(string mode, string firstLayout, int level, Random random, bool rightAltAvailable)
     {
         int goal = random.Next(350, 551);
         var atoms = new List<TypingAtom>(goal);
         string[] commands = (level == 0 ? BasicCommands : [.. BasicCommands, .. MoreCommands]).OrderBy(_ => random.Next()).ToArray();
+        // The usual visit through «Печать → Горячие клавиши» adds hands-on
+        // navigation practice. Keep every original key and its early coverage;
+        // a host with AltGr retains left-Alt practice instead of an impossible step.
+        string[] navigation = mode != "Hotkeys" ? [] : rightAltAvailable ? ["LAlt+Right", "RAlt+D"] : ["LAlt+Right", "LAlt+Left"];
+        string Command(int index)
+        {
+            int offset = index % (2 * commands.Length + navigation.Length);
+            return offset < 2 * commands.Length ? commands[offset % commands.Length] : navigation[offset - 2 * commands.Length];
+        }
         void Text(string text, string lang)
         {
             foreach (char c in text)
@@ -137,12 +148,15 @@ internal sealed partial class MixedTypingRun
                     Text(" ", lang);
                 }
                 if (mode != "WordsDigits" && atoms.Count < goal)
-                    atoms.Add(new("command", commands[i % commands.Length], lang));
+                    atoms.Add(new("command", Command(i), lang));
             }
             i++;
         }
         return atoms;
     }
+
+    internal void SetGuide(bool usePairedTechnique, string actualRightAltMode)
+    { paired = usePairedTechnique; rightAltMode = actualRightAltMode; }
 
     internal void SetLayoutBindings(params string[] bindings) => layoutBindings = bindings
         .Where(b => Gesture.TryParse(b, out var g) && g.Chords.Length == 1)
@@ -194,8 +208,9 @@ internal sealed partial class MixedTypingRun
         if (chord != null)
         {
             if (!modifier) consumedTriggers.Add(key);
-            if (matches) Advance();
-            else if (!modifier) Miss();
+            bool unavailable = matches && rightAltMode != "alt" && chord.Trigger != null && chord.Modifiers.Contains("RAlt");
+            if (matches && !unavailable) Advance();
+            else if (!modifier && !unavailable) Miss();
         }
         else if (blockedText && !modifier) Miss(); // Ctrl+V over a text unit is not text input
         return ConsumePhysical;
@@ -215,7 +230,7 @@ internal sealed partial class MixedTypingRun
         {
             carry = string.Concat(plan.TakeLast(9).Select(a=>a.Display));
             absoluteOffset += plan.Count; cycleIndex++;
-            plan.Clear(); plan.AddRange(Generate(Mode, StartLayout, Level, random));
+            plan.Clear(); plan.AddRange(Generate(Mode, StartLayout, Level, random, rightAltMode == "alt"));
         }
         else if (!IsInfinite && Position == cycleStart + lengths[cycleIndex]) cycleStart += lengths[cycleIndex++];
     }
@@ -227,15 +242,23 @@ internal sealed partial class MixedTypingRun
         KeyHint hint = atom != null && !atom.Command ? TypingKeyboard.Hint(atom.Value[0], preferred) : null;
         string key = atom == null ? "" : atom.Command ? atom.Chord.Trigger ?? "" : hint == null ? "" : ShortcutCatalog.KeyName(hint.Cap);
         string modifier = hint?.Modifier switch { LinuxKey.LeftShift => "LShift", LinuxKey.RightShift => "RShift", _ => "" };
-        string[] targets = atom == null ? [] : atom.Command ? atom.Chord.Tokens.Select(t =>
-            KeyChord.Families.Contains(t) ? "L" + t : t).ToArray() : modifier == "" ? [key] : [modifier, key];
+        GuideKey[] targets = atom == null ? [] : atom.Command ? ShortcutCatalog.Guide(atom.Chord, null, paired, rightAltMode == "alt") :
+            (modifier == "" ? new[] { key } : [modifier, key]).Select(k => new GuideKey(k, k, ShortcutCatalog.Finger(k))).ToArray();
+        string expectedNote = atom?.Value switch
+        {
+            "LAlt+Right" => "Вперёд по истории: левый Alt большим пальцем, правая рука на стрелке.",
+            "LAlt+Left" => "Назад по истории: левый Alt большим пальцем, правая рука на стрелке.",
+            "RAlt+D" when rightAltMode == "alt" => "В адресную строку: правый Alt большим пальцем, D левым средним.",
+            "RAlt+D" => "Правый Alt этой раскладки не подтверждён как обычный Alt. Выберите стандартную раскладку EN или RU.",
+            _ => atom?.Command == true ? ShortcutCatalog.AltGuideNote(atom.Chord, rightAltMode) : ""
+        };
         int visibleIndex = Position - absoluteOffset;
         string before = (IsInfinite && visibleIndex < 9 ? carry : "") + string.Concat(plan.Take(visibleIndex).TakeLast(18).Select(a => a.Display));
         string after = string.Concat(plan.Skip(visibleIndex).Take(75).Select(a => a.Display));
         var errors = Mistakes.GroupBy(kv => kv.Key.Value).Select(g => new { key = g.Key, count = g.Sum(kv => kv.Value) }).OrderByDescending(a => a.count).ThenBy(a => a.key).ToArray();
         return new {
-            id = AttemptId, infinite = IsInfinite, completedPlan = Completed, title = Title, source = "", mode = Mode, typedActions = true, expectedKind = atom?.Kind ?? "", expectedKeys = targets,
-            expectedTargets = targets.Select(k => new { key = k, finger = ShortcutCatalog.Finger(k) }).ToArray(),
+            id = AttemptId, infinite = IsInfinite, completedPlan = Completed, title = Title, source = "", mode = Mode, typedActions = true, expectedKind = atom?.Kind ?? "", expectedKeys = targets.Select(k => k.Key).ToArray(),
+            expectedTargets = targets.Select(k => new { key = k.Key, finger = k.Finger }).ToArray(), expectedNote,
             expected = atom == null ? "" : atom.Command ? atom.Value : CodeText.Display(atom.Value[0]),
             // Ribbon: command label is an atomic unit, not the sequence of characters C,t,r,l,+,...
             expectedDisplay = atom?.Display ?? "", before, after,

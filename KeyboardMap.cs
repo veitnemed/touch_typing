@@ -101,7 +101,7 @@ namespace TouchTypingStudio
             new[] {
                 Control(Key.LeftCtrl,1.3,0,"Ctrl"), Control(Key.LWin,1.25,0,"Win"),
                 Control(Key.LeftAlt,1.3,8,"Alt"), Control(Key.Space,6.5,8,"Пробел"),
-                Control(Key.RightAlt,1.3,8,"Alt"), Control(Key.RightCtrl,1.3,7,"Ctrl"),
+                Control(Key.RightAlt,1.3,9,"Alt"), Control(Key.RightCtrl,1.3,7,"Ctrl"),
                 Control(Key.Left,.67,7,"←"), Control(Key.Down,.69,7,"↓"), Control(Key.Up,.69,7,"↑"),
                 Control(Key.Right,.67,7,"→")
             }
@@ -179,7 +179,7 @@ namespace TouchTypingStudio
         public static bool Supports(char c) { return c != CodeText.Erase && (English.ContainsKey(c) || Russian.ContainsKey(c)); }
 
         private static readonly string[] Fingers = { "Левый мизинец", "Левый безымянный", "Левый средний", "Левый указательный",
-            "Правый указательный", "Правый средний", "Правый безымянный", "Правый мизинец", "Большой палец" };
+            "Правый указательный", "Правый средний", "Правый безымянный", "Правый мизинец", "Левый большой", "Правый большой" };
 
         public static string Finger(int finger) { return Fingers[finger]; }
     }

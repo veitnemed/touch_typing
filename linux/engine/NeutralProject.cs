@@ -103,8 +103,11 @@ internal static class NeutralProject
         return "УЧЕБНЫЙ ТЕСТ · test_tasks\nRan 2 tests\nOK";
     }
 
-    // Preserve the exact old mission definitions for legacy draft replay.
-    internal static LiveMission Mission(LiveMission mission)
+    internal static LiveMission Mission(LiveMission mission) => mission.Id == "code-guide"
+        ? LiveCourse.GuideNoteMission(mission) : LegacyMission(mission);
+
+    // Keep the exact old neutral and legacy-project mappings for draft replay.
+    internal static LiveMission LegacyMission(LiveMission mission)
     {
         if (mission.Id == "chrome-search-clone") return mission;
         var phases = mission.Phases.Select(phase => phase with {

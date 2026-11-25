@@ -11,6 +11,8 @@ internal sealed record Skill(string Id, string Group, string Title, string Keys,
     internal Gesture Gesture => Keys.Length == 0 ? null : Gesture.Parse(Keys);
 }
 
+internal sealed record GuideKey(string Token, string Key, int Finger);
+
 internal static class ShortcutCatalog
 {
     internal const string Terminal = "Терминал";
@@ -100,22 +102,92 @@ internal static class ShortcutCatalog
         LinuxKey.Up => "Up", LinuxKey.Down => "Down", _ => cap.English.ToUpperInvariant()
     };
 
-    internal static string SuggestedSide(string token, KeyChord chord, Dictionary<string, int> overrides, bool paired)
+    // Suggestions do not change the authored gesture or its recognition. Pick
+    // the whole chord together so two simultaneous keys never share a finger.
+    internal static GuideKey[] Guide(KeyChord chord, Dictionary<string, int> overrides, bool paired, bool rightAltAvailable)
     {
-        if (!KeyChord.Families.Contains(token)) return token;
-        var options = KeyChord.ModifierFamilies.Where(pair => pair.Value == token).Select(pair => pair.Key).ToArray();
-        if (options.Count(overrides.ContainsKey) == 1) return options.Single(overrides.ContainsKey);
-        int finger = chord.Trigger == null ? 3 : Finger(chord.Trigger);
-        // Keep the modifier and the main key on different hands where convenient.
-        return token switch
+        overrides ??= [];
+        var tokens = chord.Tokens.ToArray();
+        int triggerFinger = chord.Trigger == null ? 3 : overrides.GetValueOrDefault(chord.Trigger, Finger(chord.Trigger));
+        bool onRight = PairOnRight(chord, overrides, paired);
+        var choices = tokens.Select(token => Options(token).ToArray()).ToArray();
+        var chosen = new GuideKey[tokens.Length];
+        GuideKey[] winner = null;
+        int best = int.MaxValue;
+        // First reserve the main key's normal typing finger, then choose fingers
+        // and sides for modifiers. A fallback finger is only needed on conflict.
+        int[] order = chord.Trigger == null ? Enumerable.Range(0, tokens.Length).ToArray() :
+            [tokens.Length - 1, .. Enumerable.Range(0, tokens.Length - 1)];
+        Pick(0, 0, 0);
+        return winner;
+
+        void Pick(int at, int used, int cost)
         {
-            "Ctrl" when chord.Modifiers.Any(item => KeyChord.Family(item) == "Shift") && finger < 4 => "RCtrl",
-            "Shift" when chord.Modifiers.Any(item => KeyChord.Family(item) == "Ctrl") && finger < 4 =>
-                PairOnRight(chord, overrides, paired) ? "RShift" : "LShift",
-            "Shift" => finger < 4 ? "RShift" : "LShift",
-            _ => options[0]
-        };
+            if (cost >= best) return;
+            if (at == order.Length) { best = cost; winner = (GuideKey[])chosen.Clone(); return; }
+            int slot = order[at];
+            foreach (var (key, finger, penalty) in choices[slot])
+            {
+                int bit = finger < 0 ? 0 : (1 << finger);
+                if ((used & bit) != 0) continue;
+                chosen[slot] = new(tokens[slot], key, finger);
+                Pick(at + 1, used | bit, cost + penalty);
+            }
+        }
+
+        IEnumerable<(string Key, int Finger, int Cost)> Options(string token)
+        {
+            string[] sides;
+            if (!KeyChord.Families.Contains(token)) sides = [token];
+            else
+            {
+                sides = KeyChord.ModifierFamilies.Where(pair => pair.Value == token &&
+                    (pair.Key != "RAlt" || rightAltAvailable)).Select(pair => pair.Key).ToArray();
+                string preferred = token switch
+                {
+                    "Ctrl" when triggerFinger == 0 || chord.Modifiers.Any(item => KeyChord.Family(item) == "Shift") && LeftHand(triggerFinger) => "RCtrl",
+                    "Alt" when rightAltAvailable && chord.Trigger != null && LeftHand(triggerFinger) => "RAlt",
+                    "Shift" when chord.Modifiers.Any(item => KeyChord.Family(item) == "Ctrl") && LeftHand(triggerFinger) => onRight ? "RShift" : "LShift",
+                    "Shift" => LeftHand(triggerFinger) ? "RShift" : "LShift",
+                    _ => sides[0]
+                };
+                // A custom side remains explicit whenever it is physically possible.
+                if (sides.Count(overrides.ContainsKey) == 1) preferred = sides.Single(overrides.ContainsKey);
+                sides = sides.OrderBy(side => side == preferred ? 0 : 1).ToArray();
+                if (token == "Super" && sides[0] != "RSuper") sides = [sides[0]];
+            }
+            int sidePenalty = 0;
+            foreach (string key in sides)
+            {
+                int primary = key == "RCtrl" && onRight ? 6 : Finger(key);
+                int[] alternate = key switch {
+                    "LCtrl" or "LShift" => [0, 1, 2], "RCtrl" or "RShift" => [7, 6, 5],
+                    "LSuper" => [8, 1, 0], "RSuper" => [7, 9, 6], "Space" => [8, 9], _ => [primary]
+                };
+                int[] fingers = [overrides.GetValueOrDefault(key, primary), primary, .. alternate];
+                int fingerPenalty = 0;
+                foreach (int finger in fingers.Distinct())
+                {
+                    yield return (key, finger, sidePenalty + fingerPenalty);
+                    fingerPenalty += overrides.ContainsKey(key) ? 10 : 3;
+                }
+                sidePenalty += 2;
+            }
+            // An overconstrained custom chord may still be rehearsed, but it
+            // must not display two assignments for an impossible finger.
+            yield return (sides[0], -1, chord.Trigger == token ? 2000 : 1000);
+        }
     }
+
+    private static bool LeftHand(int finger) => finger < 4 || finger == 8;
+    internal static string AltGuideNote(KeyChord chord, string rightAltMode) =>
+        rightAltMode == "alt" || !chord.Modifiers.Any(token => KeyChord.Family(token) == "Alt") ? "" :
+        chord.Modifiers.Contains("RAlt") ? chord.Trigger == null ?
+            "Здесь проверяется только физическое положение. Правый Alt может быть подписан AltGr." :
+            "Правый Alt не подтверждён как обычный Alt. Для этого сочетания выберите раскладку с обычным правым Alt." :
+        chord.Modifiers.Contains("Alt") ? rightAltMode == "altgr" ?
+            "Справа AltGr: он вводит дополнительные символы, а не заменяет Alt. Для команды используйте левый Alt." :
+            "Роль правого Alt в этой раскладке не подтверждена. Для команды используйте левый Alt." : "";
 
     internal static bool PairOnRight(KeyChord chord, Dictionary<string, int> overrides, bool paired) =>
         paired && chord.Trigger is ("C" or "V" or "X") && chord.Modifiers.Contains("Shift") &&
@@ -124,7 +196,6 @@ internal static class ShortcutCatalog
 
     internal static int Finger(string key)
     {
-        if (key == "RAlt") return 9;
         if (key == "RSuper") return 7;
         if (key is "LSuper" or "LAlt" or "Space") return 8;
         var cap = TypingKeyboard.Rows.SelectMany(row => row).FirstOrDefault(candidate => KeyName(candidate) == key);

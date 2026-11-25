@@ -246,7 +246,11 @@ class NotebookSurface:
     def _nb_paint_tool(self, caption, action, tip, cell, x, y, width, enabled, clip=None):
         if width < 17:
             return
-        self.label(caption, x+5, y+3, 12, NB_FG if enabled else NB_MUTED, width=width-7)
+        color = NB_FG if enabled else NB_MUTED
+        if action == "copy-cell":
+            self.workbench_mark("copy", x+(width-14)/2, y+5, 14, color)
+        else:
+            self.label(caption, x+5, y+3, 12, color, width=width-7)
         if enabled:
             bounds = (x, y, width, 24)
             self._nb_hit(bounds if clip is None else overlap(bounds, clip), action, tip, cell)
@@ -433,7 +437,7 @@ class NotebookSurface:
         for icon, action, tip, enabled in (
             ("↑","move-up","Переместить ячейку выше",cell>0),
             ("↓","move-down","Переместить ячейку ниже",cell+1<total),
-            ("⧉","copy-cell","Скопировать ячейку",True),
+            ("","copy-cell","Скопировать ячейку",True),
             ("M" if code else "<>","markdown" if code else "code",
              "Преобразовать ячейку в Markdown" if code else "Преобразовать ячейку в код",True),
             ("×","delete-cell","Удалить выбранную ячейку",True)):

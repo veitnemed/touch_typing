@@ -20,7 +20,30 @@ namespace TouchTypingStudio
         private ProgressBar referenceScenarioProgress;
         private Border referenceHintPanel, referenceKeysFrame;
         private Expander referenceErrorReview;
-        private bool referenceHelpOpen;
+        private bool referenceHelpOpen, referenceTheoryOpen;
+        private Button referenceTheory;
+        private static string ArrowName(string token)
+        {
+            switch (token)
+            {
+                case "Up": return "Стрелка вверх";
+                case "Down": return "Стрелка вниз";
+                case "Left": return "Стрелка влево";
+                case "Right": return "Стрелка вправо";
+                default: return null;
+            }
+        }
+        private static string LessonCap(string token)
+        {
+            switch (token)
+            {
+                case "Up": return "↑";
+                case "Down": return "↓";
+                case "Left": return "←";
+                case "Right": return "→";
+                default: return token;
+            }
+        }
 
         // The aid rail does not expose a control peer on its own. The visible guide
         // needs an accessible identity, actual bounds and a readable state.
@@ -50,7 +73,7 @@ namespace TouchTypingStudio
             SetReferenceLessonCaption(true);
             MinWidth = 600;
             MinHeight = 415;
-            referenceHelpOpen = false;
+            referenceHelpOpen = referenceTheoryOpen = false;
             referenceErrorReview = null;
             referenceKeySignature = null;
 
@@ -83,6 +106,7 @@ namespace TouchTypingStudio
             referenceHintPanel.Margin = new Thickness(16, 8, 16, 0);
             referenceHintPanel.Visibility = Visibility.Collapsed;
             AutomationProperties.SetAutomationId(referenceHintPanel, "LabHelpPanel");
+            AutomationProperties.SetAutomationId(referenceHelpText, "LabHelpText");
             Grid.SetRow(referenceHintPanel, 1);
             root.Children.Add(referenceHintPanel);
 
@@ -133,13 +157,17 @@ namespace TouchTypingStudio
             back.Background = Brushes.Transparent;
             KeyboardNavigation.SetTabIndex(back, 0);
             aids.Children.Add(back);
+            referenceTheory = ReferenceLessonButton("Теория", "Теория терминала · " + DisplayLabGesture("F2"),
+                ToggleReferenceTerminalTheory, "LabTerminalTheory", 70);
+            referenceTheory.Content = ReferenceLabel("Теория", 13, ReferenceText, true);
+            referenceTheory.Visibility = labApp == "terminal" ? Visibility.Visible : Visibility.Collapsed;
             labHint = ReferenceLessonButton("?", "Подсказка · F1", OpenReferenceLessonHelp, "LabHint", 26);
             labKeyAid = ReferenceLessonButton("⌨", "Показать или скрыть клавиатуру", delegate { ToggleLabAid(true); }, "LabKeyboardAid", 28);
             labHandAid = ReferenceLessonButton("👐", "Показать или скрыть руки", delegate { ToggleLabAid(false); }, "LabHandAid", 28);
             labMistakeAid = ReferenceLessonButton("✕", "Подсветка ошибочной клавиши", ToggleLabMistake, "LabMistakeHighlight", 26);
             labFinish = ReferenceLessonButton("■", "Результат", FinishLab, "LabFinish", 26);
             int tabIndex = 6;
-            foreach (var button in new[] { labHint, labKeyAid, labHandAid, labMistakeAid, labFinish })
+            foreach (var button in new[] { referenceTheory, labHint, labKeyAid, labHandAid, labMistakeAid, labFinish })
             {
                 button.Height = 27;
                 button.Margin = new Thickness(3, 0, 0, 0);
@@ -259,37 +287,46 @@ namespace TouchTypingStudio
             AutomationProperties.SetName(referenceScenarioProgress,
                 (boundedCourse ? "Прогресс занятия: " : "Прогресс задания: ") + completed + " из " + total);
             UpdateReferenceKeycaps(task, count, step);
-            if (referenceHelpOpen) DrawReferenceLessonHelp(task);
+            if (referenceTheoryOpen) DrawReferenceTerminalTheory();
+            else if (referenceHelpOpen) DrawReferenceLessonHelp(task);
         }
 
         private void UpdateReferenceKeycaps(Data task, int count, int step)
         {
             bool guided = state.B("showGuide", true) || referenceHelpOpen;
             string raw = task.S("keys"), text = task.S("text");
-            string shown = !guided ? "" : raw.Length > 0 ? raw.Replace("+", " + ") :
+            var steps = raw.Split(new[] { " → " }, StringSplitOptions.None);
+            string shown = !guided ? "" : raw.Length > 0 ? string.Join(" → ", steps.Select(chord =>
+                string.Join(" + ", chord.Split('+').Select(LessonCap)))) :
                 task.S("id").StartsWith("open-") ? "⊞  →  " + text + "  →  Enter" :
-                task.S("id").StartsWith("command/") && text.Length > 12 ? "Ctrl + R  →  Enter" : text;
+                task.S("id").StartsWith("command/") && text.Length > 12 ? "Ctrl + R  →  фрагмент  →  Enter" : text;
             string signature = (guided ? "guided:" : "independent:") + shown + "|" + raw + "|" + step + "/" + count;
             if (signature == referenceKeySignature) return; // Input and timer ticks should not rebuild visual children.
             referenceKeySignature = signature;
             labKeys.ToolTip = guided && raw.Length > 0 && DisplayLabGesture(raw) != shown ? DisplayLabGesture(raw) : null;
-            AutomationProperties.SetName(labKeys, shown + (count > 0 ? "   ·   шаг " + step + "/" + count : ""));
+            string accessible = raw.Length == 0 || !guided ? shown : string.Join(" → ", steps.Select(chord =>
+                string.Join(" + ", chord.Split('+').Select(token => ArrowName(token) ?? token))));
+            AutomationProperties.SetName(labKeys, accessible + (count > 0 ? "   ·   шаг " + step + "/" + count : ""));
             referenceKeysFrame.Visibility = guided && shown.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             if (!guided || raw.Length == 0)
             {
                 labKeys.Text = shown;
                 return;
             }
-            var parts = shown.Split(new[] { " + " }, StringSplitOptions.None);
             labKeys.Inlines.Clear();
-            for (int index = 0; index < parts.Length; index++)
+            for (int stepIndex = 0; stepIndex < steps.Length; stepIndex++)
             {
-                if (index > 0) labKeys.Inlines.Add(new Run(" + "));
-                var chip = new Border { Child = ReferenceLabel(parts[index], 17, ReferenceText, true),
-                    Padding = new Thickness(9, 2, 9, 2), CornerRadius = new CornerRadius(6),
-                    BorderThickness = new Thickness(1), BorderBrush = Ui.Brush("#8F819D"),
-                    Background = ReferenceGradient("#64556E", "#48414F", 70) };
-                labKeys.Inlines.Add(new InlineUIContainer(chip) { BaselineAlignment = BaselineAlignment.Center });
+                if (stepIndex > 0) labKeys.Inlines.Add(new Run(" → "));
+                string[] keys = steps[stepIndex].Split('+');
+                for (int i = 0; i < keys.Length; i++)
+                {
+                    if (i > 0) labKeys.Inlines.Add(new Run(" + "));
+                    var chip = new Border { Child = ReferenceLabel(LessonCap(keys[i]), 17, ReferenceText, true),
+                        ToolTip = ArrowName(keys[i]), Padding = new Thickness(9, 2, 9, 2), CornerRadius = new CornerRadius(6),
+                        BorderThickness = new Thickness(1), BorderBrush = Ui.Brush("#8F819D"),
+                        Background = ReferenceGradient("#64556E", "#48414F", 70) };
+                    labKeys.Inlines.Add(new InlineUIContainer(chip) { BaselineAlignment = BaselineAlignment.Center });
+                }
             }
         }
 
@@ -313,10 +350,31 @@ namespace TouchTypingStudio
             labGuide.Height = Math.Max(100, Math.Min(keys ? 180 : 165, lessonHeight * (keys ? .26 : .23)));
         }
 
+        private void ToggleReferenceTerminalTheory()
+        {
+            if (labApp != "terminal" || !labActive || paused || labSavePending || state.B("limitDecisionPending")) return;
+            if (referenceTheoryOpen) { CloseReferenceLessonHelp(); return; }
+            referenceTheoryOpen = true; referenceHelpOpen = false;
+            DrawReferenceTerminalTheory();
+            UpdateReferenceGuideVisibility();
+            labDesktop.Focus();
+        }
+
+        private void DrawReferenceTerminalTheory()
+        {
+            referenceHelpText.Text = state.B("showGuide", true)
+                ? "↑ возвращает прошлую команду, но не запускает её. Ctrl+R ищет по истории: наберите фрагмент, сверьте найденную строку и нажмите Enter. " +
+                  "←/→ переносят её в командную строку для правки, Esc возвращает ваш черновик."
+                : "История хранит уже выполненные команды. Можно вернуть прошлую строку для правки или найти нужную по фрагменту. " +
+                  "Перед запуском сверьте, что нашлось.";
+            referenceHintPanel.Visibility = Visibility.Visible;
+        }
+
         private void OpenReferenceLessonHelp()
         {
             if (!labActive || paused || labSavePending) return;
             if (referenceHelpOpen) { CloseReferenceLessonHelp(); return; }
+            referenceTheoryOpen = false;
             referenceHelpOpen = true;
             if (!state.B("showGuide", true))
             {
@@ -332,13 +390,14 @@ namespace TouchTypingStudio
         {
             const string noHelp = "Выполните текущее действие в рабочей области.";
             referenceHelpText.Text = "Подсказка · " + (state.B("showGuide", true) ? task.S("hint", noHelp) : state.S("phase", noHelp)) +
-                "\n" + string.Join(" · ", state.Items("objectives").Select(value => value.Value()));
+                "\n" + string.Join(" · ", state.Items("objectives").Select(value => value.Value())) +
+                (state.D("guide").S("note").Length == 0 ? "" : "\n" + state.D("guide").S("note"));
             referenceHintPanel.Visibility = Visibility.Visible;
         }
 
         private void CloseReferenceLessonHelp()
         {
-            referenceHelpOpen = false;
+            referenceHelpOpen = referenceTheoryOpen = false;
             referenceHintPanel.Visibility = Visibility.Collapsed;
             UpdateReferenceKeycaps(state.D("task"), state.I("scenarioLength"), state.I("scenarioStep"));
             UpdateReferenceGuideVisibility();

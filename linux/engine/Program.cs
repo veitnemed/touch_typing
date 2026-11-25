@@ -39,6 +39,7 @@ internal sealed partial class PracticeService
     private readonly ProfileStore store;
     private StudioProfile profile;
     private bool windows = OperatingSystem.IsWindows();
+    private string rightAltMode = "alt";
     private string layout = "EN", forward = DefaultLayoutBinding, backward = "Super+Shift+Space";
     private ShortcutRun run;
     private TypingRun typing;
@@ -74,6 +75,13 @@ internal sealed partial class PracticeService
     internal object Handle(JsonElement message)
     {
         typingConflictNotice = null;
+        string alt = Text(message, "rightAltMode");
+        if (alt is "alt" or "altgr" or "unknown")
+        {
+            rightAltMode = alt;
+            mixedTyping?.SetGuide(profile.RightHandChord, alt);
+            review?.Run.SetGuide(profile.RightHandChord, alt);
+        }
         if (TryReviewCommand(message, out var reviewResponse)) return reviewResponse;
         bool verifyProfile = false;
         switch (Text(message, "command"))
@@ -167,6 +175,14 @@ internal sealed partial class PracticeService
                 if (lab.Finished) FinishLabAutomatically();
                 else if (lab.AwaitingLimitChoice) CheckLabLimit();
                 else if (labAttempt != null) SaveLabCheckpoint();
+                return LabState();
+            case "lab-switch-demonstration":
+                CheckLabLimit();
+                if (lab?.SimulateWindowSwitch() == true)
+                {
+                    if (lab.Finished) FinishLabAutomatically();
+                    else SaveLabCheckpoint();
+                }
                 return LabState();
             case "lab-explorer-action":
                 CheckLabLimit();
@@ -297,7 +313,7 @@ internal sealed partial class PracticeService
             // A time cap may be crossed between polling and serialization.
             // Never show its decision until capture actually paused.
             limitDecisionPending = lab.Paused && lab.AwaitingLimitChoice, finishingMission = lab.FinishingMission, limitReached = lab.LimitReached,
-            reportArtifact = lab.ReportArtifact, lab.EditorCourse, lab.RouteKind, lab.AdaptiveGuide, lab.CoachStage, lab.CoachReason, lab.CoachPrompt,
+            lab.CanSimulateWindowSwitch, lab.SimulatedWindowSwitches, reportArtifact = lab.ReportArtifact, lab.EditorCourse, lab.RouteKind, lab.AdaptiveGuide, lab.CoachStage, lab.CoachReason, lab.CoachPrompt,
             mission = lab.MissionId, phase = lab.PhaseTitle, objectives = lab.Objectives, scenario = lab.ScenarioTitle, scenarioStep = lab.ScenarioStep, scenarioLength = lab.ScenarioLength, scenarioCompletedGoals = lab.ScenarioCompletedGoals,
             guide = !lab.ShowGuide || lab.Task.Keys.Length == 0 ? null : Describe(Gesture.Parse(lab.Task.Keys), "") };
     }
@@ -381,7 +397,7 @@ internal sealed partial class PracticeService
         var history = profile.ShortcutHistory.ToLookup(item => item.Skill);
         return new
         {
-            layout, forward, backward,
+            layout, forward, backward, rightAltMode,
             skills = Skills().Select(skill => new { skill, editable = !skill.BuiltIn, score = ShortcutScore.From(history[skill.Id]) }),
             keyboard = TypingKeyboard.Rows.Select(row => row.Select(cap => new
             {
@@ -512,13 +528,9 @@ internal sealed partial class PracticeService
         return new
         {
             keys = gesture.Label,
-            steps = gesture.Chords.Select(chord => chord.Tokens.Select(token =>
-            {
-                string key = ShortcutCatalog.SuggestedSide(token, chord, overrides, profile.RightHandChord);
-                int finger = key == "RCtrl" && ShortcutCatalog.PairOnRight(chord, overrides, profile.RightHandChord)
-                    ? 6 : ShortcutCatalog.Finger(key);
-                return new { token, key, finger = overrides.GetValueOrDefault(key, finger) };
-            })),
+            steps = gesture.Chords.Select(chord => ShortcutCatalog.Guide(chord, overrides, profile.RightHandChord, rightAltMode == "alt")),
+            note = string.Join(" ", gesture.Chords.Select(chord => ShortcutCatalog.AltGuideNote(chord, rightAltMode))
+                .Where(note => note.Length > 0).Distinct()),
             choices = choices.SelectMany(choice => choice).Distinct().Select(key => new
                 { key, finger = overrides.GetValueOrDefault(key, ShortcutCatalog.Finger(key)), custom = overrides.ContainsKey(key) })
         };

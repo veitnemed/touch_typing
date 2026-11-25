@@ -19,7 +19,8 @@ internal sealed class LabRun
     private readonly List<LiveEvent> trace = [];
     private bool restoring, replayLegacyUrl, replayLegacyReport, replayLegacyNavigation;
     private const string NativeLayoutEvent = "@native-layout";
-    private const string ExactUrlEvent = "@exact-url";
+    private const string SimulatedWindowSwitchEvent = "@simulated-window-switch", TerminalHistoryEvent = "@terminal-reverse-search";
+    private const string ExactUrlEvent = "@exact-url", ExactQuickOpenEvent = "@exact-quick-open";
     private const string StrictReportEvent = "@strict-report";
     private const string ClusterNavigationEvent = "@cluster-navigation";
     private const string LineEditingEvent = "@line-editing";
@@ -28,17 +29,18 @@ internal sealed class LabRun
     private const string NotebookActionsEvent = "@notebook-actions-v2";
     private const string NotebookPointerEvent = "@notebook-pointer", NotebookKernelStepEvent = "@notebook-kernel-step",
         ExplorerPointerEvent = "@explorer-pointer";
-    private bool replayLegacyNotebookWordErase;
+    private bool replayLegacyNotebookWordErase, replayLegacyCsvExplorer;
+    private const string CsvExplorerScopeEvent = "@csv-explorer-scope";
     private const string StrictTriggersEvent = "@strict-triggers";
     private bool replayLegacyTriggers;
     private bool replayLegacyLineEditing, replayLegacyPythonEditing;
-    private readonly bool neutralProject, nativeEnglishInput;
+    private readonly bool neutralProject, nativeEnglishInput, restoreOriginalGuide;
     private int variant;
     private string initialLayout, attemptLayout;
     private bool initialVirtual;
     internal bool HasDraft => !CompletedRoute && !limitAccepted && (!ReachedLimit || softFinish || FinishingMission) &&
         (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 ||
-        trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent)));
+        trace.Any(item => item.Key is not (TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask, inputAtActiveMilliseconds;
@@ -93,6 +95,11 @@ internal sealed class LabRun
     internal string Feedback { get; private set; } = "ready";
     internal string LastKey { get; private set; } = "";
     internal int Solved { get; private set; }
+    internal int SimulatedWindowSwitches { get; private set; }
+    internal bool CanSimulateWindowSwitch => App == "ubuntu" && mission != null && !Finished && !AwaitingLimitChoice &&
+        pending?.Count > 0 && Task == pending[0].Task &&
+        Task.Action is ("switch-next" or "switch-prev" or "switch-group-next" or "switch-group-prev") &&
+        !Scene.Switcher && !Scene.Overview && !Scene.Screenshot && LabCatalog.Available(Task, Scene);
     internal int Errors { get; private set; }
     internal int Block { get; private set; } = 1;
     internal string EnvironmentProfile { get; }
@@ -132,6 +139,8 @@ internal sealed class LabRun
         var progress = draft?.Progress;
         this.neutralProject = draft == null ? neutralProject : draft.ProjectFixture == NeutralProject.FixtureId;
         this.nativeEnglishInput = draft?.NativeEnglishInput ?? nativeEnglishInput;
+        restoreOriginalGuide = this.neutralProject && draft?.Mission == "code-guide" &&
+            draft.MissionRevision != LabScene.GuideNoteRevision;
         RouteKind = LiveRoutePolicy.Resolve(routeKind, missionId, editorCourse, app, draft);
         AdaptiveGuide = RouteKind is LiveRoutePolicy.Course or LiveRoutePolicy.Mission && (draft?.AdaptiveGuide ?? adaptiveGuide);
         this.softFinish = softFinish;
@@ -166,9 +175,9 @@ internal sealed class LabRun
         // New traces begin with format markers. Old ones acquire the line
         // marker only after the historic keystrokes have been replayed.
         var initialFormat = savedEvents.TakeWhile(e => e.Key is
-            ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent);
+            TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent);
         replayLegacyNotebookWordErase = draft != null && !initialFormat.Any(e => e.Key == NotebookWordEraseEvent);
-        replayLegacyTriggers = draft != null;
+        replayLegacyTriggers = replayLegacyCsvExplorer = draft != null;
         replayLegacyLineEditing = draft != null && !initialFormat.Any(e => e.Key == LineEditingEvent);
         replayLegacyPythonEditing = draft != null && !initialFormat.Any(e => e.Key == PythonEditingEvent);
         Scene = new LabScene(SceneApp, draft?.Layout ?? layout, this.neutralProject) { LayoutKey = layoutKey, LayoutIsVirtual = draft?.VirtualLayout ?? false };
@@ -178,6 +187,8 @@ internal sealed class LabRun
         // Next creates the mission's prepared scene. Only historical input,
         // not the route definitions used by its compiler, has legacy semantics.
         Scene.ReplayLegacyNotebookActions = legacyNotebookActions;
+        Scene.ReplayLegacyQuickOpen = draft != null && !initialFormat.Any(e => e.Key == ExactQuickOpenEvent);
+        Scene.ReplayLegacyTerminalSearch = draft != null && !initialFormat.Any(e => e.Key == TerminalHistoryEvent);
         if (draft != null)
         {
             Resume();
@@ -194,6 +205,7 @@ internal sealed class LabRun
                         NotebookPointer(parts[0], index, parts.Length == 3 && int.TryParse(parts[2], out int offset) ? offset : -1);
                 }
                 else if (e.Key == NotebookKernelStepEvent) TickNotebook();
+                else if (e.Key == SimulatedWindowSwitchEvent) SimulateWindowSwitch();
                 else if (e.Key == ExplorerPointerEvent)
                 {
                     int cut = e.Text.IndexOf(':');
@@ -201,6 +213,8 @@ internal sealed class LabRun
                 }
                 else if (e.Key == NativeLayoutEvent) ApplyNativeLayout(e.Text, true);
                 else if (e.Key == ExactUrlEvent) { replayLegacyUrl = false; trace.Add(e); }
+                else if (e.Key == ExactQuickOpenEvent) { Scene.ReplayLegacyQuickOpen = false; trace.Add(e); }
+                else if (e.Key == TerminalHistoryEvent) EndLegacyTerminalSearch(e);
                 else if (e.Key == StrictReportEvent) { replayLegacyReport = false; trace.Add(e); }
                 else if (e.Key == ClusterNavigationEvent) EndLegacyNavigation(e);
                 else if (e.Key == LineEditingEvent) EndLegacyLineEditing(e);
@@ -208,14 +222,22 @@ internal sealed class LabRun
                 else if (e.Key == NotebookActionsEvent) { Scene.ReplayLegacyNotebookActions = false; trace.Add(e); }
                 else if (e.Key == NotebookWordEraseEvent) { replayLegacyNotebookWordErase = false; trace.Add(e); }
                 else if (e.Key == StrictTriggersEvent) { replayLegacyTriggers = false; trace.Add(e); }
+                else if (e.Key == CsvExplorerScopeEvent) { replayLegacyCsvExplorer = false; trace.Add(e); }
                 else Input(e.Key, e.Down, e.Text, e.NativeEnglish ? "EN" : "");
             }
             if (replayLegacyUrl) trace.Add(new(ExactUrlEvent));
+            if (Scene.ReplayLegacyTerminalSearch) EndLegacyTerminalSearch(new(TerminalHistoryEvent));
+            if (Scene.ReplayLegacyQuickOpen)
+            { Scene.ReplayLegacyQuickOpen = false; trace.Add(new(ExactQuickOpenEvent)); }
             if (replayLegacyReport) trace.Add(new(StrictReportEvent));
             if (replayLegacyNavigation) EndLegacyNavigation(new(ClusterNavigationEvent));
             if (replayLegacyLineEditing) EndLegacyLineEditing(new(LineEditingEvent));
             if (replayLegacyPythonEditing) EndLegacyPythonEditing(new(PythonEditingEvent));
             if (replayLegacyTriggers) { replayLegacyTriggers = false; trace.Add(new(StrictTriggersEvent)); }
+            // Do not earn different credits for already-recorded keys. A resumed CSV
+            // lesson starts using object-scoped evidence only for subsequent input.
+            if (replayLegacyCsvExplorer && Scene.CsvNotebook) trace.Add(new(CsvExplorerScopeEvent));
+            replayLegacyCsvExplorer = false;
             // Earlier notebook drafts recorded rejected Ctrl+Delete/Backspace
             // as key events. Do not turn them into edits while replaying.
             if (replayLegacyNotebookWordErase && Scene.NotebookCourse) trace.Add(new(NotebookWordEraseEvent));
@@ -227,6 +249,7 @@ internal sealed class LabRun
             // Trace describes the current mission, not the whole attempt. Its
             // replay reconstructs the scene without generating any new credit.
             Solved = Math.Max(0, progress?.Solved ?? 0);
+            SimulatedWindowSwitches = Math.Max(0, progress?.SimulatedWindowSwitches ?? SimulatedWindowSwitches);
             Errors = Math.Max(0, progress?.Errors ?? 0);
             taskInBlock = Solved % 20;
             Block = 1 + Solved / 20;
@@ -242,6 +265,12 @@ internal sealed class LabRun
                 coach = new(draft.CoachStage, draft.CoachReason ?? "");
             restoring = false;
         }
+    }
+
+    private void EndLegacyTerminalSearch(LiveEvent marker)
+    {
+        Scene.ReplayLegacyTerminalSearch = false;
+        trace.Add(marker);
     }
 
     private void EndLegacyNavigation(LiveEvent marker)
@@ -269,9 +298,12 @@ internal sealed class LabRun
 
     internal LiveDraft Draft() => new() { App = App, DesktopEnvironment = EnvironmentProfile, Level = Level, Mission = MissionId, Layout = initialLayout, Guidance = Guidance,
         Dock = Scene.Dock, ProjectFixture = neutralProject ? NeutralProject.FixtureId : null, DesktopProfile = Scene.GnomePractice.Length == 0 ? null : Scene.DesktopProfile, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, NativeEnglishInput = nativeEnglishInput, EditorCourse = EditorCourse, RouteKind = RouteKind,
-        AdaptiveGuide = AdaptiveGuide, CoachStage = CoachStage, CoachReason = CoachReason, Trace = JsonSerializer.Serialize(trace),
+        AdaptiveGuide = AdaptiveGuide, CoachStage = CoachStage, CoachReason = CoachReason,
+        MissionRevision = Scene.GuideNoteActive ? LabScene.GuideNoteRevision : null,
+        Trace = JsonSerializer.Serialize(trace),
         Progress = new() { Session = Session, Mode = Mode, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Solved = Solved,
-            Errors = Errors, ActiveMilliseconds = ActiveMilliseconds, Series = JsonSerializer.Serialize(points),
+            Errors = Errors, SimulatedWindowSwitches = SimulatedWindowSwitches, ActiveMilliseconds = ActiveMilliseconds,
+            Series = JsonSerializer.Serialize(points),
             LimitDecisionPending = PendingLimitChoice, LimitReached = LimitReached,
             FinishingMission = FinishingMission } };
 
@@ -349,6 +381,33 @@ internal sealed class LabRun
         int before = Scene.Version;
         if (!Scene.ExplorerPointer(action, path) && before == Scene.Version) return false;
         trace.Add(new(ExplorerPointerEvent, Text: action + ":" + path));
+        return true;
+    }
+
+    internal bool SimulateWindowSwitch()
+    {
+        if (!CanSimulateWindowSwitch || held.Count != 0) return false;
+        var goal = pending[0];
+        var trial = Scene.Clone();
+        if (!trial.Apply(goal.Task.Action) || !trial.Switcher) return false;
+        trial.CommitSwitch();
+        // Demonstrate an actual change in the same desktop, not skip the step
+        // from a stale or incorrect window.
+        if (LiveCourse.Evidence(goal.Task, trial) != goal.Target ||
+            LiveCourse.Evidence(goal.Task, Scene) == goal.Target) return false;
+        string noCredit = ShowGuide ? goal.Task.Keys + " не зачтено." : "Сочетание не проверялось.";
+        Scene = trial;
+        watching = null;
+        switchEvidenceId = switchReleaseKey = null;
+        trace.Add(new(SimulatedWindowSwitchEvent));
+        pending.RemoveAt(0);
+        SimulatedWindowSwitches++;
+        // No Pass/Record: this is a demonstration of the resulting window,
+        // not a physical shortcut or an attempt against the action budget.
+        Next();
+        LastKey = "";
+        Feedback = "simulation";
+        Status = "Учебное окно переключено. " + noCredit;
         return true;
     }
 
@@ -448,10 +507,19 @@ internal sealed class LabRun
         if (Scene.OnNotebook && actual != null && (!LabScene.NotebookGlobalAction(actual.Action) ||
             Scene.ReplayLegacyNotebookActions && actual.Action is "palette" or "code-definition" or "code-back" or "restore-tab")) actual = null;
         string before = Scene.Overview ? Scene.Search : Scene.Active?.App == "terminal" || Scene.Active?.Focus is "terminal" or "reverse-search" ? Scene.TerminalInput : Scene.Active?.Input ?? "";
-        bool submitting = Task.Action == "command" && key == "Enter" && !commandModifiers;
-        bool matches = submitting && Scene.Terminal.MatchesCommand(before, Task.Text);
+        bool searching = !Scene.ReplayLegacyTerminalSearch && Scene.Active?.Focus == "reverse-search";
         if (actual == null && Scene.WindowsDesktop && (Scene.DesktopOverlay.Length > 0 || Scene.ShowDesktop))
             return Miss(key, WrongKeyMessage(key));
+        if (searching && key == "Enter" && !commandModifiers && !Scene.CanExecuteHistoryMatch)
+        {
+            // No shell command ran. Stay in search instead of inferring a
+            // credit (or a wrong submission) from a prior terminal result.
+            Scene.Text(key, "");
+            Status = Scene.Active.Status; LastKey = ""; Feedback = "ready";
+            return null;
+        }
+        bool submitting = Task.Action == "command" && key == "Enter" && !commandModifiers;
+        bool matches = submitting && Scene.Terminal.MatchesCommand(before, Task.Text);
         if (actual != null && !submitting)
         {
             if (actual.Id is "screenshot" or "debug-window-shot") Scene.StartCapture(text);
@@ -475,11 +543,15 @@ internal sealed class LabRun
             matches && Scene.Terminal.LastSuccess || typedEdit || changed && Task.Action is not ("python-edit-write" or "notebook-type") && Task.Keys.Length == 0 && key == "Enter" && !submitting ? Task.Id : null);
         if (passed != null) return passed;
         if (submitting && !Scene.Terminal.LastSuccess) return Miss(key, Scene.Active.Status);
+        if (submitting && searching && !matches) return Miss(key, ShowGuide
+            ? "Выполнена другая команда. Перед Enter сравните строку с заданием."
+            : "Выполнена другая команда.");
         if (matches && watching?.Any(item => item.Goal.Task == Task && item.Goal.VerifyReport) == true)
             return Miss(key, "Команда выполнена, но отчёт не совпадает с заданием. Проверьте весь сохранённый файл и папку «Загрузки».");
         if (matches && watching?.Any(item => item.Goal.Task == Task && item.Goal.ArtifactPath != null) == true)
             return Miss(key, "Сохранённая заметка отличается от исходника. Вернитесь в редактор, вставьте скопированный текст целиком и сохраните файл.");
-        if (!changed) return Miss(key, "Здесь эта клавиша не выполняет действие.");
+        if (!changed) return Miss(key, key == "Enter" && Scene.Active?.Focus == "quick-open"
+            ? Scene.Active.Status : "Здесь эта клавиша не выполняет действие.");
         Feedback = "ready"; LastKey = ""; Status = ""; return null;
     }
 
@@ -539,8 +611,9 @@ internal sealed class LabRun
     {
 
         if (actual.Id == "screenshot" && ShowGuide && Task.Keys == "F11") return Miss(key, WrongKeyMessage(key));
-        bool changed = actual.Action.StartsWith("python-edit-", StringComparison.Ordinal)
-            ? Scene.PerformPythonEdit(actual.Action) : LabCatalog.Available(actual, Scene) && Scene.Apply(actual.Action);
+        bool pythonEdit = actual.Action.StartsWith("python-edit-", StringComparison.Ordinal);
+        bool attempted = !pythonEdit && LabCatalog.Available(actual, Scene);
+        bool changed = pythonEdit ? Scene.PerformPythonEdit(actual.Action) : attempted && Scene.Apply(actual.Action);
         if (changed && mission != null)
         {
             if (Scene.Switcher && (actual.Id is "switch-next" or "switch-prev" or "switch-group-next" or "switch-group-prev" or "win-switch"))
@@ -565,11 +638,15 @@ internal sealed class LabRun
             var passed = Observe(key, acceptExistingUrlSelection: !replayLegacyUrl && actual.Id == "url" && actual.Keys != "Alt+D", actualTaskId: actual.Id);
             if (passed != null) return passed;
         }
-        if (!changed && actual.Action == "file-paste" && Task.Text == "!conflict" && Scene.NotebookConflictExpected())
+        if (!changed && attempted && actual.Action == "file-paste" && Task.Text == "!conflict" && Scene.NotebookConflictExpected())
         {
-            var conflict = Observe(key, actualTaskId: actual.Id);
+            // Only a real new paste can verify the refusal; an unrelated
+            // unchanged state or an old error message cannot earn the goal.
+            var conflict = Observe(key, actualTaskId: actual.Id, renewedCsvConflict: true);
             if (conflict != null) return conflict;
         }
+        if (changed && actual.Id == "focus-editor" && Task.Id == "focus-editor" && Scene.GuideNoteActive && !Scene.GuideNoteVerified())
+            return Miss(key, "Заметка не совпала с тремя фрагментами. Сверьте review-notes.txt и сохраните его, не меняя исходники.");
         if (changed) { Status = ""; LastKey = ""; Feedback = "ready"; return null; }
         if (actual.Action is "file-name-commit" or "file-paste" or "file-undo" && Scene.FileProblem is string reason)
             return Miss(key, reason);
@@ -581,35 +658,46 @@ internal sealed class LabRun
         if (mission == null) return;
         if (AdaptiveGuide) attemptCoachContext = CoachContext();
         var eligible = Guidance == "independent" ? pending.TakeWhile(goal => goal.Phase == pending[0].Phase) : pending.Take(1);
-        watching = eligible.Select(goal => (goal, LiveCourse.Evidence(goal.Task, Scene, verifyReport: goal.VerifyReport && !replayLegacyReport,
-            artifactPath: goal.ArtifactPath))).ToList();
+        watching = eligible.Select(goal => (goal, ObserveEvidence(goal, null, goal.VerifyReport && !replayLegacyReport))).ToList();
     }
 
-    private ShortcutAttempt Observe(string key, string equivalentCommand = null, bool acceptExistingUrlSelection = false, string actualTaskId = null)
+    private bool UsesCsvExplorerScope(LiveGoal goal) => !replayLegacyCsvExplorer && goal.CsvExplorerTarget != null;
+    private string ObserveEvidence(LiveGoal goal, string command, bool strictReport) => UsesCsvExplorerScope(goal)
+        ? LiveCourse.CsvExplorerProof(goal.Task, Scene)
+        : LiveCourse.Evidence(goal.Task, Scene, command, strictReport, goal.ArtifactPath);
+
+    private ShortcutAttempt Observe(string key, string equivalentCommand = null, bool acceptExistingUrlSelection = false,
+        string actualTaskId = null, bool renewedCsvConflict = false)
     {
         if (mission == null || watching == null || Scene.Switcher) return null;
         foreach (var (goal, before) in watching)
         {
-            if (mission.Curated && actualTaskId != goal.Task.Id) continue;
+            bool csvExplorerScope = UsesCsvExplorerScope(goal);
+            bool alternatePicker = csvExplorerScope && Guidance == "independent" &&
+                goal.Task.Id == "file-next" && actualTaskId == "file-prev";
+            if (mission.Curated && actualTaskId != goal.Task.Id && !alternatePicker) continue;
             bool strictReport = goal.VerifyReport && !replayLegacyReport;
-            string target = goal.VerifyReport && replayLegacyReport ? goal.LegacyTarget : goal.Target;
+            string target = csvExplorerScope ? goal.CsvExplorerTarget :
+                goal.VerifyReport && replayLegacyReport ? goal.LegacyTarget : goal.Target;
             bool recheckingArtifact = goal.ArtifactPath != null && goal.Task == Task && equivalentCommand != null;
             if (goal.ArtifactPath != null && !recheckingArtifact) continue;
-            if (before == target && !(Scene.NotebookCourse && actualTaskId == goal.Task.Id && goal.Task.Action is "notebook-run" or "save") && !recheckingArtifact && !(acceptExistingUrlSelection && goal.Task.Id == "url")) continue;
+            bool recheckingConflict = csvExplorerScope && renewedCsvConflict && goal.Task.Text == "!conflict";
+            if (before == target && !(Scene.NotebookCourse && actualTaskId == goal.Task.Id && goal.Task.Action is "notebook-run" or "save") &&
+                !recheckingArtifact && !recheckingConflict && !(acceptExistingUrlSelection && goal.Task.Id == "url")) continue;
             string command = goal.Task == Task ? equivalentCommand : null;
-            if (LiveCourse.Evidence(goal.Task, Scene, command, strictReport, goal.ArtifactPath) != target) continue;
+            if (ObserveEvidence(goal, command, strictReport) != target) continue;
             // Published drafts retain earned progress, but a report receipt is only issued
             // when the reconstructed workspace also meets today's verification rules.
             if (goal.VerifyReport && (strictReport || LiveCourse.Evidence(goal.Task, Scene, command, verifyReport: true) == goal.Target))
                 verifiedReport = Scene.ReadReportArtifact();
             Task = goal.Task;
             pending.Remove(goal);
-            return Pass(key);
+            return Pass(key, alternatePicker ? actualTaskId : null);
         }
         return null;
     }
 
-    private ShortcutAttempt Pass(string key)
+    private ShortcutAttempt Pass(string key, string actualSkill = null)
     {
         if (!restoring && ActionLimit > 0 && Solved == ActionLimit - 1 && latchedLimit == null)
         {
@@ -622,7 +710,7 @@ internal sealed class LabRun
                 activeSince = null;
             }
         }
-        var attempt = Record(true, key);
+        var attempt = Record(true, key, actualSkill);
         Solved++; taskInBlock++;
         string result = Task.Action == "command" ? Task.Text switch
         {
@@ -652,14 +740,15 @@ internal sealed class LabRun
         return attempt;
     }
 
-    private ShortcutAttempt Record(bool correct, string key)
+    private ShortcutAttempt Record(bool correct, string key, string actualSkill = null)
     {
         int milliseconds = (int)Math.Clamp(clock() - sinceTask, 1, 60000);
-        var attempt = new ShortcutAttempt { Skill = "lab/" + App + "/" + Task.Id, Session = Session, Verification = "lab-scene",
+        string skill = actualSkill ?? Task.Id;
+        var attempt = new ShortcutAttempt { Skill = "lab/" + App + "/" + skill, Session = Session, Verification = "lab-scene",
             Date = DateTime.Now, Correct = correct, Milliseconds = milliseconds, MistakeKey = correct ? null : key, InputMode = "exact", Mission = MissionId, Layout = attemptLayout,
             Assisted = ShowGuide, Independent = Guidance == "independent" || coach.Blind, FirstTry = correct && !hadError,
             CoachStage = CoachStage.Length == 0 ? null : CoachStage, CoachContext = CoachStage.Length == 0 ? null : attemptCoachContext };
-        Attempts.Add(attempt); points.Add(new LabPoint(Seconds, correct, key, Task.Id, milliseconds));
+        Attempts.Add(attempt); points.Add(new LabPoint(Seconds, correct, key, skill, milliseconds));
         return attempt;
     }
 
@@ -737,6 +826,8 @@ internal sealed class LabRun
             else
             {
                 mission = courses.FirstOrDefault(m => m.Id == requestedMission) ?? throw new ArgumentException("Поручение недоступно для выбранного уровня.");
+                if (restoring && restoreOriginalGuide && mission.Id == "code-guide")
+                    mission = NeutralProject.LegacyMission(LiveCourse.Missions.Single(m => m.Id == "code-guide"));
                 if (!restoring) variant = random.Next(3);
                 Scene = PrepareMissionScene();
                 mission.Prepare?.Invoke(Scene);
@@ -747,6 +838,8 @@ internal sealed class LabRun
             if (!restoring)
             {
                 trace.Add(new(ExactUrlEvent));
+                trace.Add(new(ExactQuickOpenEvent));
+                trace.Add(new(TerminalHistoryEvent));
                 trace.Add(new(StrictReportEvent));
                 trace.Add(new(ClusterNavigationEvent));
                 trace.Add(new(LineEditingEvent));
@@ -754,6 +847,7 @@ internal sealed class LabRun
                 trace.Add(new(NotebookActionsEvent));
                 trace.Add(new(StrictTriggersEvent));
                 if (Scene.NotebookCourse) trace.Add(new(NotebookWordEraseEvent));
+                if (Scene.CsvNotebook) trace.Add(new(CsvExplorerScopeEvent));
             }
             foreach (string key in held) trace.Add(new("@held/" + key, superUsed));
             missionLength = pending.Count;
@@ -796,7 +890,8 @@ internal sealed class LabRun
         int previousRecord = previousBest?.Solved ?? 0;
         bool complete = Completed;
         bool better = complete && (previousBest == null || Solved > previousBest.Solved || Solved == previousBest.Solved && Errors < previousBest.Errors);
-        return new { App, Mode, Level, Solved, Errors, Seconds, TimeLimit, ActionLimit, Guidance, completed = complete,
+        return new { App, Mode, Level, Solved, Errors, Seconds, TimeLimit, ActionLimit, Guidance,
+            SimulatedWindowSwitches, completed = complete,
             accuracy = Solved + Errors == 0 ? 0 : Math.Round(100.0 * Solved / (Solved + Errors), 1),
             record = Math.Max(previousRecord, complete ? Solved : 0), previousRecord, previousRecordErrors = previousBest?.Errors ?? 0, newRecord = better,
             series = points, weak = points.Where(point => !point.Correct).GroupBy(point => point.Task).Select(group =>

@@ -20,6 +20,8 @@ namespace TouchTypingStudio
         // Opt-in card route. Old profiles continue their selected individual mission.
         public bool EditorCourse;
         public string RouteKind;
+        // Only version a scenario when its already-recorded keystrokes would change meaning.
+        public string MissionRevision;
         public bool AdaptiveGuide;
         public string CoachStage, CoachReason;
         // Absent in older drafts, including explicit unlimited sessions.
@@ -29,7 +31,7 @@ namespace TouchTypingStudio
     public class LiveDraftProgress
     {
         public string Session, Mode, Series, Revision, LimitReached;
-        public int TimeLimit, ActionLimit, Solved, Errors;
+        public int TimeLimit, ActionLimit, Solved, Errors, SimulatedWindowSwitches;
         public double ActiveMilliseconds;
         public bool LimitDecisionPending, FinishingMission;
     }

@@ -159,7 +159,8 @@ internal static class LabCatalog
         T("terminal-kill", "Удалите текст после курсора", "Ctrl+K", "terminal-kill", 2),
         T("terminal-home", "Перейдите в начало команды", "Ctrl+A", "terminal-home", 1),
         T("terminal-end", "Перейдите в конец команды", "Ctrl+E", "terminal-end", 1),
-        T("terminal-history-up", "Восстановите предыдущую команду", "Up", "terminal-history-up"),
+        T("terminal-history-up", "Восстановите предыдущую команду", "Up", "terminal-history-up",
+            hint: "Нажмите стрелку ↑, не печатайте Up. Это возвращает строку для правки, но не запускает её."),
         T("terminal-history-down", "Перейдите вперёд по истории команд", "Down", "terminal-history-down", 1),
         T("terminal-submit", "Выполните введённую команду", "Enter", "terminal-submit"),
         T("code-problem-next", "Перейдите к диагностике из панели проблем", "F8", "code-problem-next", 1),
@@ -399,6 +400,8 @@ internal static class LabCatalog
             if (task.Id == "escape" && (scene.BrowserResearchActive || scene.ContextHandoffActive) && context.Contains(task.Id))
                 return true; // Esc closes the app's find bar when no Windows overlay has focus.
             if (UbuntuIds.Contains(task.Id) || task.Id is "switch-group-next" or "switch-group-prev") return !scene.WindowsDesktop;
+            if (app == "code" && !terminal && task.Id == "restore-tab" && scene.GuideNoteActive && scene.Active.Focus == "body")
+                return true;
             return context.Contains(task.Id) || terminal && app == "code" && task.Id is "terminal-toggle" or "panel" or "escape";
         });
     }

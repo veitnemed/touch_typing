@@ -1,6 +1,8 @@
 """Validate actual learner actions and outputs in every new VS Code family."""
+import gzip
 import json
 import os
+from pathlib import Path
 import re
 import tempfile
 import unittest
@@ -65,6 +67,81 @@ def step(e, s):
 
 
 class ExpandedNotebookRoutes(unittest.TestCase):
+    def test_native_preview7_quick_open_typo_replays_its_existing_scratch_tab(self):
+        fixture = Path(__file__).with_name("fixtures") / "preview7-original-quick-open-typo.xml.gz"
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": root}):
+            profile = Path(root) / "TouchTypingStudio-QA"
+            profile.mkdir()
+            (profile / "progress.xml").write_bytes(gzip.decompress(fixture.read_bytes()))
+
+            e = Engine(verify=True)
+            try:
+                e.call("configure", platform="windows", layout="EN")
+                e.call("lab-start", app="code", mode="sandbox", guidance="guided", level=2,
+                       desktopProfile="ubuntu", routeKind="mission", nativeEnglishInput=True,
+                       **{"continue": True})
+                restored = e.call("lab-resume")
+                self.assertEqual((restored["solved"], restored["errors"], restored["task"]["id"], editor(restored)["url"]),
+                                 (1, 0, "quick-choose", "incoming/waehouse-"))
+                before = gesture(e, "Ctrl+P")
+                tabs = [tab["url"] for tab in editor(before)["tabs"]]
+                text(e, "incoming/no-file?")
+                rejected = gesture(e, "Enter")
+                self.assertEqual((rejected["solved"], editor(rejected)["focus"], editor(rejected)["url"]),
+                                 (1, "quick-open", "incoming/waehouse-"))
+                self.assertEqual([tab["url"] for tab in editor(rejected)["tabs"]], tabs)
+
+                gesture(e, "Ctrl+A")
+                text(e, rejected["task"]["text"])
+                opened = gesture(e, "Enter")
+                self.assertEqual((opened["solved"], editor(opened)["url"], filemap(opened)),
+                                 (2, "/home/student/project/task-list/incoming/warehouse-count.csv", filemap(before)))
+            finally:
+                e.close()
+
+    def test_quick_open_typo_stays_in_picker_preserving_the_scene_and_draft(self):
+        for platform in ("linux", "windows"):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as root, patch.dict(
+                    os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": root}):
+                config = dict(app="code", mode="sandbox", level=2, mission=ROUTES[2], seed=1,
+                              actionLimit=0, seconds=0, guidance="guided", nativeEnglishInput=True)
+                e = Engine(verify=True)
+                try:
+                    e.call("configure", platform=platform, layout="EN")
+                    e.call("lab-start", **config)
+                    self.assertFalse(e.call("lab-resume")["paused"])
+                    opened = gesture(e, "Ctrl+P")
+                    expect = opened["task"]["text"]
+                    typo = expect[:5] + "?" + expect[5:]
+                    w = editor(opened)
+                    tabs = [tab["url"] for tab in w["tabs"]]
+                    original = filemap(opened)
+                    text(e, typo)
+                    refused = gesture(e, "Enter")
+                    view = editor(refused)
+                    self.assertEqual((view["focus"], view["input"], view["entries"], view["url"]),
+                                     ("quick-open", typo, [], w["url"]))
+                    self.assertEqual([tab["url"] for tab in view["tabs"]], tabs)
+                    self.assertEqual((refused["solved"], filemap(refused)), (1, original))
+                    self.assertIn("Совпадений нет", refused["status"])
+                    self.assertTrue(e.call("lab-stop")["saved"])
+                    e.close()
+                    e = Engine(verify=True)
+                    e.call("configure", platform=platform, layout="EN")
+                    e.call("lab-start", **(config | {"continue": True}))
+                    restored = e.call("lab-resume")
+                    self.assertEqual((restored["solved"], editor(restored)["focus"], editor(restored)["input"]),
+                                     (1, "quick-open", typo))
+                    self.assertEqual([tab["url"] for tab in editor(restored)["tabs"]], tabs)
+                    gesture(e, "Ctrl+A")
+                    before_return = text(e, expect)
+                    self.assertEqual(len(editor(before_return)["entries"]), 1)
+                    opened = gesture(e, "Enter")
+                    self.assertEqual((opened["solved"], editor(opened)["focus"], filemap(opened)), (2, "body", original))
+                    self.assertIn("/incoming/" + expect.split("/")[-1], editor(opened)["url"])
+                finally:
+                    e.close()
+
     def play(self, platform, level, seed, restart=False, challenge=False):
         with tempfile.TemporaryDirectory() as profile, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": profile}):
             e = Engine(verify=True)
@@ -155,6 +232,144 @@ class ExpandedNotebookRoutes(unittest.TestCase):
                         self.assertEqual([c["id"] for c in notebook["cells"][:4]], ["brief", "dataset", "metric", "source-note"])
                         self.assertEqual(len(notebook["cells"]), 5)
                         self.assertEqual(notebook["cells"][3]["cell_type"], "markdown")
+            finally:
+                e.close()
+
+    @staticmethod
+    def csv_options(guidance):
+        return dict(app="code", mode="sandbox", mission=ROUTES[2], level=2, seed=0, seconds=0,
+                    actionLimit=0, guidance=guidance, routeKind="mission", nativeEnglishInput=True)
+
+    @staticmethod
+    def csv_start(e, guidance):
+        e.call("lab-start", **ExpandedNotebookRoutes.csv_options(guidance))
+        e.call("lab-resume")
+        gesture(e, "Ctrl+P")
+        text(e, "incoming/sample")  # real partial path, not the compiler's entire hint
+        opened = gesture(e, "Enter")
+        assert editor(opened)["url"].endswith("/incoming/sample-duration.csv"), opened["task"]
+        return gesture(e, "Ctrl+Shift+E")
+
+    @staticmethod
+    def selected_path(s):
+        w = editor(s)
+        return w["entries"][w["item"]]["path"].partition("/task-list/")[2]
+
+    def test_independent_can_use_up_after_inspecting_other_folder(self):
+        for platform in ("linux", "windows"):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as profile, patch.dict(
+                    os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": profile}):
+                e = Engine(verify=True)
+                try:
+                    e.call("configure", platform=platform, layout="EN")
+                    s = self.csv_start(e, "independent")
+                    original = filemap(s)
+                    for key, path in (("Down", "data"), ("Enter", "data"), ("Down", "data/sample-duration.csv")):
+                        s = gesture(e, key)
+                        self.assertEqual((s["solved"], self.selected_path(s)), (3, path))
+                    # Inspect the same-named archived CSV first, with exact keyboard input.
+                    archived = gesture(e, "Enter")
+                    self.assertEqual(archived["solved"], 3)
+                    self.assertTrue(editor(archived)["url"].endswith("/data/sample-duration.csv"))
+                    gesture(e, "Ctrl+Shift+E")
+                    for key, count, path in (("Down", 4, "incoming"), ("Enter", 5, "incoming"),
+                                             ("Down", 6, "incoming/sample-duration.csv"),
+                                             ("Ctrl+X", 7, "incoming/sample-duration.csv")):
+                        s = gesture(e, key)
+                        self.assertEqual((s["solved"], self.selected_path(s)), (count, path), (key, s["status"]))
+                    # Neither selecting the origin nor pasting into it is the data goal.
+                    wrong = gesture(e, "Up")
+                    self.assertEqual((wrong["solved"], self.selected_path(wrong)), (7, "incoming"))
+                    wrong = gesture(e, "Ctrl+V")
+                    self.assertEqual((wrong["solved"], filemap(wrong)), (7, original))
+                    adjacent = gesture(e, "Up")
+                    self.assertEqual((adjacent["solved"], self.selected_path(adjacent)), (7, "data/sample-duration.csv"))
+                    target = gesture(e, "Up")
+                    self.assertEqual((target["solved"], self.selected_path(target), target["task"]["text"]),
+                                     (8, "data", "!conflict"))
+                    attempt = e.call("lab-result")["series"][-1]
+                    self.assertEqual((attempt["key"], attempt["task"], attempt["correct"]), ("Up", "file-prev", True))
+                    s = gesture(e, "Ctrl+V")
+                    self.assertEqual((s["solved"], filemap(s)), (9, original))
+                    self.assertIn("Ничего не заменено", editor(s)["status"])
+                    self.assertTrue(s["phase"].startswith("Разрешите конфликт"))
+                    s = gesture(e, "Ctrl+V")
+                    self.assertEqual((s["solved"], filemap(s)), (9, original))
+                    # The detour opened a different tab and left data expanded. Complete
+                    # the remaining keyboard actions without resetting either state.
+                    while not s["finished"]:
+                        count, task = s["solved"], s["task"]
+                        s = step(e, s)
+                        self.assertEqual(s["solved"], count + 1, (task, s["status"], editor(s)["status"]))
+                    self.assertEqual(s["solved"], 39)
+                    nb = editor(s)["notebook"]
+                    self.assertEqual(nb["cells"][2]["output"], "16")
+                    self.assertTrue(editor(s)["url"].endswith("/verified/sample-duration-verification.ipynb"))
+                    self.assertEqual(filemap(s)[next(path for path in original if path.endswith("/data/sample-duration.csv"))],
+                                     original[next(path for path in original if path.endswith("/data/sample-duration.csv"))])
+                finally:
+                    e.close()
+
+    def test_guided_rejects_up_and_conflict_requires_a_new_physical_paste(self):
+        with tempfile.TemporaryDirectory() as profile, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": profile}):
+            e = Engine(verify=True)
+            try:
+                e.call("configure", platform="linux", layout="EN")
+                s = self.csv_start(e, "guided")
+                original = filemap(s)
+                while s["solved"] < 7:
+                    s = step(e, s)
+                gesture(e, "Up")
+                s = gesture(e, "Up")
+                self.assertEqual((s["solved"], self.selected_path(s), s["task"]["keys"]), (7, "data", "Down"))
+                s = step(e, s)
+                self.assertEqual((s["solved"], s["task"]["text"]), (8, "!conflict"))
+                # A real pointer-triggered conflict is visible but does not
+                # demonstrate the requested Ctrl+V. It leaves the same state.
+                s = e.call("lab-explorer-action", action="paste", path="")
+                self.assertEqual((s["solved"], filemap(s)), (8, original))
+                self.assertIn("Ничего не заменено", editor(s)["status"])
+                # Ctrl+V in the editor cannot earn a file operation even with
+                # that old conflict still present in the Explorer model.
+                gesture(e, "Ctrl+1")
+                s = gesture(e, "Ctrl+V")
+                self.assertEqual((s["solved"], editor(s)["focus"], filemap(s)), (8, "body", original))
+                gesture(e, "Ctrl+Z")
+                gesture(e, "Ctrl+Shift+E")
+                s = gesture(e, "Ctrl+V")
+                self.assertEqual((s["solved"], filemap(s)), (9, original))
+                self.assertIn("Ничего не заменено", editor(s)["status"])
+            finally:
+                e.close()
+
+    def test_preview7_draft_with_uncredited_conflict_keeps_its_progress_then_recovers(self):
+        with tempfile.TemporaryDirectory() as profile, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": profile}):
+            fixture = Path(__file__).with_name("fixtures") / "preview7-original-csv-context.xml.gz"
+            target = Path(profile) / "TouchTypingStudio-QA" / "progress.xml"
+            target.parent.mkdir()
+            target.write_bytes(gzip.decompress(fixture.read_bytes()))
+            e = Engine(verify=True)
+            try:
+                e.call("configure", platform="linux", layout="EN")
+                options = self.csv_options("independent") | {"continue": True}
+                s = e.call("lab-start", **options)
+                self.assertEqual((s["solved"], s["scenarioStep"], self.selected_path(s), s["task"]["id"]),
+                                 (7, 8, "data", "file-next"))
+                original = filemap(s)
+                self.assertIn("Ничего не заменено", editor(s)["status"])
+                e.call("lab-resume")
+                gesture(e, "Down")
+                s = gesture(e, "Up")
+                self.assertEqual((s["solved"], self.selected_path(s), s["task"]["text"]), (8, "data", "!conflict"))
+                s = gesture(e, "Ctrl+V")
+                self.assertEqual((s["solved"], filemap(s)), (9, original))
+                e.call("lab-pause")
+                e.close()
+                e = Engine(verify=True)
+                e.call("configure", platform="linux", layout="EN")
+                restored = e.call("lab-start", **options)
+                self.assertEqual((restored["solved"], restored["scenarioStep"], restored["task"], filemap(restored)),
+                                 (9, 10, s["task"], original))
             finally:
                 e.close()
 

@@ -52,14 +52,16 @@ namespace TouchTypingStudio
         {
             Rectangle(0, 29, width, h - 50, CodeCanvas);
             Rectangle(width - 1, 29, 1, h - 50, CodeBorder);
-            string[] glyphs = { "▤", "⌕", "⑂", "▷", "▦" };
+            string[] glyphs = { "▤", "⌕", "", "▷", "▦" };
             string view = window.S("view");
             int current = view == "project-search" ? 1 : view == "changes" ? 2 : view == "extensions" ? 4 : 0;
             for (int index = 0; index < glyphs.Length && 39 + index * 44 < h - 66; index++)
             {
                 double y = 29 + index * 44;
                 if (current == index && window.B("sidebar", true)) Rectangle(0, y, 2, 44, CodeForeground);
-                Text(glyphs[index], 12, y + 9, 23, current == index ? CodeForeground : CodeMuted, 29);
+                string tint = current == index ? CodeForeground : CodeMuted;
+                if (index == 2) DrawWorkbenchMark("branch", (width - 20) / 2, y + 12, 20, tint);
+                else Text(glyphs[index], 12, y + 9, 23, tint, 29);
             }
             if (h > 270) Text("◉", 12, h - 93, 22, CodeMuted, 27);
             Text("⚙", 12, h - 54, 22, CodeMuted, 27);
@@ -137,6 +139,27 @@ namespace TouchTypingStudio
             }
         }
 
+        private void DrawWorkbenchMark(string name, double x, double y, double size, string color)
+        {
+            // Vector equivalents of the Copy and Source Control marks. No platform font fallback.
+            double factor = size / 16;
+            var pen = new Pen(Ui.Brush(color), 1.35 * factor) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
+            Func<double, double, Point> point = (a, b) => new Point(x + a * factor, y + b * factor);
+            var paths = name == "copy" ? new[] {
+                new[] { point(2, 11), point(2, 2), point(10, 2), point(10, 4) },
+                new[] { point(2, 11), point(4, 11) },
+                new[] { point(5, 5), point(14, 5), point(14, 14), point(5, 14), point(5, 5) }
+            } : new[] {
+                new[] { point(4, 5.5), point(4, 10.5) },
+                new[] { point(11.5, 6), point(11.5, 7.5), point(9.5, 9.5), point(4, 9.5) }
+            };
+            foreach (var path in paths)
+                for (int index = 1; index < path.Length; index++) context.DrawLine(pen, path[index - 1], path[index]);
+            if (name == "branch")
+                foreach (var center in new[] { point(4, 3.5), point(4, 12.5), point(11.5, 4) })
+                    context.DrawEllipse(Ui.Brush(CodeCanvas), pen, center, 1.975 * factor, 1.975 * factor);
+        }
+
         private void DrawCodeFileIcon(string file, double x, double y)
         {
             if (file.EndsWith(".py", StringComparison.OrdinalIgnoreCase))
@@ -164,8 +187,9 @@ namespace TouchTypingStudio
             string language = file.EndsWith(".py", StringComparison.OrdinalIgnoreCase) ? "Python" :
                 file.EndsWith(".md", StringComparison.OrdinalIgnoreCase) ? "Markdown" : "Plain Text";
             double rightWidth = Math.Min(w * .64, 345);
-            Text("⑂ main   ⓧ " + scene.I("diagnosticProblemCount") + "   ⚠ 0",
-                12, h - 19, 12, CodeMuted, w - rightWidth - 18);
+            DrawWorkbenchMark("branch", 12, h - 18, 13, CodeMuted);
+            Text("main   ⓧ " + scene.I("diagnosticProblemCount") + "   ⚠ 0",
+                28, h - 19, 12, CodeMuted, w - rightWidth - 34);
             if (window.D("notebook").Exists)
             {
                 Data nb = window.D("notebook");

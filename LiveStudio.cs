@@ -230,6 +230,17 @@ namespace TouchTypingStudio
         {
             try
             {
+                if (command == "configure" || command == "inspect" || command == "shortcut-start" || command == "lab-start" ||
+                    command == "lab-native-layout" || command == "typing-start" || command == "typing-continue" ||
+                    command == "typing-review-start" || ((command == "typing-physical" || command == "lab-key") &&
+                        Array.IndexOf(fields, "RAlt") >= 0))
+                {
+                    // Old/custom HKLs may use AltGr or an IME. Don't recommend
+                    // right Alt for a system chord unless it is a known layout.
+                    var nativeLayout = Native.ActiveLayout();
+                    fields = fields.Concat(new object[] { "rightAltMode", nativeLayout == Layout.Russian || nativeLayout == Layout.English
+                        ? "alt" : "unknown" }).ToArray();
+                }
                 var reply = engine.Call(command, fields);
                 SetNotice(engine.Notice);
                 return reply;
@@ -762,7 +773,8 @@ namespace TouchTypingStudio
             tape.Update(TapeText(Tail(before, 90)), TapeText(after.Substring(0, count)),
                 TapeText(after.Substring(count, Math.Min(after.Length - count, 90))), !state.B("correct", true), command);
             feedback.Text = paused ? "Пауза. Нажмите " + DisplayLabGesture(PauseKey()) + " для продолжения." :
-                !command && state.S("wantedLayout") != CurrentLayout() ? "Переключите раскладку: " + state.S("wantedLayout") : "";
+                !command && state.S("wantedLayout") != CurrentLayout() ? "Переключите раскладку: " + state.S("wantedLayout") :
+                command ? state.S("expectedNote") : "";
             sceneLabel.Visibility = Visibility.Collapsed;
             keyHints.Text = "";
             var targets = state.Items("expectedTargets").ToList();

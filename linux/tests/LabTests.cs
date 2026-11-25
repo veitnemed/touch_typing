@@ -441,7 +441,7 @@ internal static class LabTests
         Expect("code", "Ctrl+G", "goto-line", s => {}, s => s.Active.Focus=="goto-line");
         Expect("chrome", "Ctrl+G", "find-next", s => {s.Active.Tab.Body="draft text draft"; s.Active.Find="draft"; s.Active.Select(0,5);}, s => s.Active.Start==11 && s.Active.End==16);
         Expect("terminal", "Ctrl+K", "terminal-kill", s => {s.TerminalInput="echo draft"; s.Active.Cursor=5;}, s => s.TerminalInput=="echo " && s.Active.Cursor==5);
-        Expect("terminal", "Ctrl+R", "terminal-search", s => {s.TerminalInput="pwd"; s.Text("Enter",""); s.TerminalInput="draft"; s.Active.Cursor=5;}, s => s.Active.Focus=="reverse-search" && s.TerminalInput=="pwd");
+        Expect("terminal", "Ctrl+R", "terminal-search", s => {s.TerminalInput="pwd"; s.Text("Enter",""); s.TerminalInput="draft"; s.Active.Cursor=5;}, s => s.Active.Focus=="reverse-search" && s.TerminalInput=="" && s.Text("P","p") && s.TerminalInput=="pwd");
         Expect("chrome", "Ctrl+Shift+B", "bookmarks", s => s.Active.Bookmarks=false, s => s.Active.Bookmarks);
         Expect("terminal", "Ctrl+Shift+C", "terminal-copy", s => {s.TerminalInput="echo draft"; s.Active.Select(5,10);}, s => s.Clipboard=="draft" && s.TerminalInput=="echo draft");
         Expect("code", "Ctrl+Shift+P", "palette", s => {}, s => s.Active.Focus=="palette");

@@ -92,7 +92,7 @@ namespace TouchTypingStudio
                         .Select(w => w.S("url").Split('/').Last())) : ""));
             System.Windows.Automation.AutomationProperties.SetHelpText(this, scene.S("terminalInput"));
             var terminal = scene.Items("windows").FirstOrDefault(w => w.B("active") &&
-                (w.S("app") == "terminal" || w.S("focus") == "terminal"));
+                (w.S("app") == "terminal" || w.S("focus") == "terminal" || w.S("focus") == "reverse-search"));
             var editor = scene.Items("windows").FirstOrDefault(w => w.B("active") && w.S("app") == "code");
             System.Windows.Automation.AutomationProperties.SetItemStatus(this, terminal != null ?
                 "cursor:" + terminal.I("cursor", -1).ToString(CultureInfo.InvariantCulture) : editor == null ? "" :
@@ -829,6 +829,7 @@ namespace TouchTypingStudio
                 if (focus == "find" && window.S("status").StartsWith("Совпадение ", StringComparison.Ordinal))
                     title += " · " + window.S("status");
                 var entries = window.Items("entries").ToArray();
+                if (focus == "quick-open" && entries.Length == 0) title += " · Совпадений нет";
                 bool notebookPalette = focus == "palette" && (window.D("notebook").Exists || window.S("input").Trim().Length > 0 &&
                     entries.Any(item => item.S("kind") == "notebook-command" || item.S("kind") == "explorer-command"));
                 string[] options = focus == "palette" && !notebookPalette && window.B("browserPractice") ? new[] { "Git: Clone" } :
@@ -985,8 +986,17 @@ namespace TouchTypingStudio
         private void TerminalField(Data window, double x, double y, double width)
         {
             string prompt = "student@ubuntu:" + scene.D("terminal").S("cwd", "~").Replace("/home/student", "~") + "$ ";
-            Field(prompt + scene.S("terminalInput"), window, x, y, width, 13, "#E9EFF6", -prompt.Length,
-                window.B("active") && (window.S("app") == "terminal" || window.S("focus") == "terminal"),
+            string value = scene.S("terminalInput");
+            bool searching = window.S("focus") == "reverse-search";
+            if (searching)
+            {
+                prompt = "Поиск «";
+                string query = window.S("query");
+                value = query + "»  ›  " + (query.Length == 0 ? "Введите фрагмент команды" :
+                    value.Length == 0 ? "Нет совпадений" : value);
+            }
+            Field(prompt + value, window, x, y, width, 13, "#E9EFF6", -prompt.Length,
+                window.B("active") && (window.S("app") == "terminal" || window.S("focus") == "terminal" || searching),
                 scrollKey: "terminal:" + window.S("id"));
         }
 

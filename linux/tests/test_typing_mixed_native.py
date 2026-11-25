@@ -137,6 +137,40 @@ class NativeMixed(TypingCycles):
         yield from self.chord(label)
         assert self.state["progressDone"] == s["progressDone"] + 1, (value, label, self.last_event, self.state)
 
+    def russian_shared_keys(self):
+        yield from self.choose("WordsDigitsHotkeys", layout="RU")
+        # Follow one real on-screen Russian word. Do not touch XKB again
+        # after activation; the user has not changed layout between letters,
+        # the space and the following number.
+        letters = ""
+        for _ in range(15):
+            unit = self.state["expected"]
+            if self.state["expectedKeys"] == ["Space"]:
+                break
+            assert self.state["expectedKind"] == "text" and self.state["wantedLayout"] == "RU"
+            assert len(unit) == 1 and ("а" <= unit.lower() <= "я" or unit.lower() == "ё"), unit
+            yield from self.type_unit()
+            letters += unit
+        assert letters and self.state["expectedKeys"] == ["Space"] and xkb_group() == 1
+        assert self.layout == "RU" and self.layout_chips["RU"].has_css_class("active")
+        yield from self.landmark("09a-ru-before-space")
+        before = self.state["progressDone"]
+        yield from self.chord("Space")
+        assert self.last_event["text"] == " ", self.last_event
+        event = self.last_event.copy()
+        assert self.state["progressDone"] == before + 1 and xkb_group() == 1, (event, self.state)
+        assert self.layout == "RU" and self.layout_chips["RU"].has_css_class("active"), (letters, event, self.layout)
+        assert not self.layout_chips["EN"].has_css_class("active")
+        assert self.state["wantedLayout"] == "RU" and self.state["expected"].isdecimal()
+        assert "Смените раскладку" not in self.typing_detail.get_label(), self.typing_detail.get_label()
+        yield from self.landmark("09b-ru-after-space-no-layout-change")
+        yield from self.type_unit()
+        assert self.layout == "RU" and xkb_group() == 1
+        row = dict(case="ru-word-space-digit", word=letters, before=before, after=before+1,
+                   server_group=xkb_group(), activation_key=event, app_layout=self.layout)
+        print("GTK shared key: " + json.dumps(row, ensure_ascii=False), flush=True)
+        self.evidence.append(row)
+
     def exercise(self):
         self.focus_window()
         yield from self.os_layout("EN")
@@ -146,10 +180,14 @@ class NativeMixed(TypingCycles):
         required = ("Digits", "TopRow", "Hotkeys", "WordsDigits", "WordsDigitsHotkeys")
         assert all(key in self.typing_rows and self.typing_rows[key].get_visible() for key in required)
         yield from self.landmark("09-compact-mode-list")
+        yield from self.russian_shared_keys()
+        if os.environ.get("TOUCH_TYPING_QA_MIXED_BASE") == "1":
+            (out / "mixed-native-base-results.json").write_text(json.dumps(self.evidence, ensure_ascii=False, indent=2))
+            return
 
         # Start on EN, switch the actual OS as required for composing words; the
         # exercise chooses its cap legends independently. Cross both text/chord boundaries.
-        yield from self.choose("WordsDigitsHotkeys")
+        yield from self.choose("WordsDigitsHotkeys", layout="EN")
         assert not self.guide.board.get_mapped()
         yield from self.chord("F4")  # explicit opt-in, not the clean-profile default
         assert self.guide.board.get_mapped()
@@ -240,7 +278,8 @@ if __name__ == "__main__":
     root = Path(os.environ["TOUCH_TYPING_QA_DATA_ROOT"]) / "mixed-ordinary-profile"
     root.mkdir(parents=True, exist_ok=False)
     os.environ["XDG_DATA_HOME"] = str(root)
-    subprocess.run(["setxkbmap", "-layout", "us,ru", "-option", ""], check=True)
+    config = ["-rules", "base", "-model", "pc105"] if os.environ.get("TOUCH_TYPING_QA_MIXED_BASE") == "1" else []
+    subprocess.run(["setxkbmap", *config, "-layout", "us,ru", "-option", ""], check=True)
     app = NativeMixed()
     code = app.run([])
     raise SystemExit(1 if app.smoke_failure else code)

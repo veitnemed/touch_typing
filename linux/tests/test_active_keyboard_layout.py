@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from platform_linux import _XkbState, _x11_active_group, active_keyboard_layout
+from platform_linux import _XkbState, _x11_active_group, active_keyboard_layout, keyboard_layout_for_event
 
 Gdk = SimpleNamespace(ModifierType=lambda bits: bits, keyval_to_unicode=lambda value: value)
 
@@ -35,6 +35,22 @@ class ActiveKeyboardLayoutTest(unittest.TestCase):
         self.assertEqual(active_keyboard_layout(Gdk, display({0:"ф"}, active=-1)), "RU")
         self.assertIsNone(active_keyboard_layout(Gdk, display({0:"q"}, active=0)))
         self.assertIsNone(active_keyboard_layout(Gdk, None))
+
+    def test_shared_glyph_uses_active_xkb_even_when_effective_group_is_other(self):
+        board = display({0: "a", 1: "ф"}, backend="GdkX11Display")
+        with patch("platform_linux._x11_active_group", return_value=1):
+            for symbol in (" ", "", "7", "!", "\t", "\n"):
+                with self.subTest(symbol=symbol):
+                    self.assertEqual(keyboard_layout_for_event(Gdk, board, symbol, 0), "RU")
+        with patch("platform_linux._x11_active_group", return_value=0):
+            self.assertEqual(keyboard_layout_for_event(Gdk, board, " ", 1), "EN")
+        with patch("platform_linux._x11_active_group", return_value=None):
+            self.assertIsNone(keyboard_layout_for_event(Gdk, board, " ", 0))
+        with patch("platform_linux._x11_active_group", side_effect=AssertionError("unneeded round trip")):
+            self.assertEqual(keyboard_layout_for_event(Gdk, board, "э", 0), "RU")
+            self.assertEqual(keyboard_layout_for_event(Gdk, board, "A", 1), "EN")
+        wayland = display({0: "a", 1: "ф"})
+        self.assertEqual(keyboard_layout_for_event(Gdk, wayland, " ", 1), "RU")
 
     def test_xkb_probe_returns_active_not_locked_byte_and_closes_connection(self):
         def fill(connection, device, record):

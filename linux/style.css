@@ -209,8 +209,8 @@ button.reference-card {
   border-radius: 19px; color: #f9f4ff; background: linear-gradient(150deg,#241e44,#1b1833);
 }
 button.reference-card.reference-card-lower { min-height: 210px; padding-top: 16px; }
-button.reference-card.reference-selected {
-  border: 2px solid #ad7cf8; background: linear-gradient(142deg,#4b2e83 0%,#2c2251 58%,#312254 100%);
+button.reference-card:focus-visible {
+  border-color: #ad7cf8; background: linear-gradient(142deg,#4b2e83 0%,#2c2251 58%,#312254 100%);
   box-shadow: inset 0 0 16px alpha(#7440dc,.42), 0 0 21px alpha(#8f4aff,.26);
 }
 button.reference-card:hover { background: linear-gradient(150deg,#382565,#221a3d); border-color: #9271d3; }
@@ -239,7 +239,7 @@ window.reference-light .reference-hero-title, window.reference-light .reference-
 window.reference-light .reference-hero-subtitle, window.reference-light .reference-card-description,
 window.reference-light .reference-progress-label { color: #442d67; }
 window.reference-light button.reference-card { background: #f8f3ff; border-color: #c9b4ec; }
-window.reference-light button.reference-card.reference-selected { background: #eee1ff; border-color: #945cdb; }
+window.reference-light button.reference-card:focus-visible { background: #eee1ff; border-color: #945cdb; }
 window.reference-light .reference-meter trough { background: #d7c8ed; }
 
 .reference-header .reference-brand { margin-right: 22px; }
@@ -414,8 +414,8 @@ window.reference-window > .titlebar, .reference-header,
 button.reference-card {
   background: @graph_card; border-color: @graph_edge; color: @graph_ink; box-shadow: none;
 }
-button.reference-card.reference-selected { background: #2a2730; border-color: @graph_accent; box-shadow: none; }
-button.reference-card:hover { background: @graph_panel; border-color: @graph_accent; }
+button.reference-card:focus-visible { background: #2a2730; border-color: @graph_accent; box-shadow: none; }
+button.reference-card:hover { background: @graph_panel; }
 .reference-meter trough, .reference-lesson-footer .reference-meter trough { background: #3d3944; }
 .reference-meter progress, .reference-lesson-footer .reference-meter progress { background: @graph_accent; }
 button.reference-quiet, .reference-config-button > button, .reference-resume > button,
@@ -508,8 +508,8 @@ window.reference-light .reference-hero-subtitle,
 window.reference-light .reference-card-description,
 window.reference-light .reference-progress-label { color: #4b4055; }
 window.reference-light button.reference-card { background: #faf7fc; border-color: #cbbfd2; }
-window.reference-light button.reference-card.reference-selected { background: #eee7f0; border-color: @graph_cta; }
-window.reference-light button.reference-card:hover { background: #e7dcea; border-color: @graph_cta; }
+window.reference-light button.reference-card:focus-visible { background: #eee7f0; border-color: @graph_cta; }
+window.reference-light button.reference-card:hover { background: #e7dcea; }
 .reference-settings-page .reference-config-caption { font-size: 13px; }
 .reference-settings-page .reference-config-dropdown > button {
   font-size: 15px; font-weight: 500;
