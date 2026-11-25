@@ -62,7 +62,7 @@ namespace TouchTypingStudio
         internal string BrowserPracticeWitness(Data snapshot)
         {
             var active = snapshot.Items("windows").FirstOrDefault(item => item.B("active"));
-            if (active == null || !active.B("browserPractice")) return "";
+            if (active == null || (!active.B("browserPractice") && active.S("app") != "code")) return "";
             return string.Join("|", new[] { active.S("app"), active.S("url"), active.S("focus"), active.S("input"),
                 snapshot.S("clipboard"), active.S("projectName"),
                 string.Join(";", active.Items("entries").Select(item => item.S("path"))),

@@ -139,6 +139,7 @@ jobs:
           $proof = "$env:RUNNER_TEMP/windows-proof"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -NotebookMission -Seed 0 -OutputDirectory "$proof/notebook"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -ProjectFileMission -Seed 0 -OutputDirectory "$proof/project-files"
+          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -EditorProjectFileMission -Seed 0 -OutputDirectory "$proof/editor-project-files"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -BrowserClone -Seed 0 -OutputDirectory "$proof/browser"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock off -Seed 0 -OutputDirectory "$proof/keypad-off"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock on -Seed 0 -OutputDirectory "$proof/keypad-on"

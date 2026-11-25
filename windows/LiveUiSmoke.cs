@@ -44,8 +44,9 @@ internal static class LiveUiSmoke
             bool pythonEditor = arguments.Contains("--python-editor");
             bool notebookMission = arguments.Contains("--notebook-mission");
             bool projectFileMission = arguments.Contains("--project-file-mission");
+            bool editorProjectFileMission = arguments.Contains("--editor-project-file-mission");
             bool nativeLayout = arguments.Contains("--native-layout");
-            bool referenceEvidence = notebookMission || projectFileMission || liveUx || nativeLayout || referenceBrowser || browserClone || numLockMode.Length > 0 || dailyUse || gnomeProfile || debugDay || codeTheme || pythonEditor || arguments.Contains("--reference-evidence");
+            bool referenceEvidence = notebookMission || projectFileMission || editorProjectFileMission || liveUx || nativeLayout || referenceBrowser || browserClone || numLockMode.Length > 0 || dailyUse || gnomeProfile || debugDay || codeTheme || pythonEditor || arguments.Contains("--reference-evidence");
             if (referenceEvidence && SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
                 throw new InvalidOperationException("Per-monitor-aware evidence capture cannot be enabled.");
             string path = Path.GetFullPath(arguments[0]);
@@ -57,8 +58,8 @@ internal static class LiveUiSmoke
                 Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_SOFT_FINISH_SECONDS", "7");
             Console.WriteLine("UI test seed " + Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"));
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_NAV_TRACE", gnomeProfile ? "workspace" : numLockMode.Length > 0 ? "workday-keypad" :
-                referenceEvidence && !nativeLayout && !referenceBrowser && !dailyUse && !debugDay && !codeTheme && !pythonEditor && !browserClone && !notebookMission && !projectFileMission ? "terminal" : null);
-            Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_BROWSER_CLONE", browserClone || projectFileMission ? "1" : null);
+                referenceEvidence && !nativeLayout && !referenceBrowser && !dailyUse && !debugDay && !codeTheme && !pythonEditor && !browserClone && !notebookMission && !projectFileMission && !editorProjectFileMission ? "terminal" : null);
+            Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_BROWSER_CLONE", browserClone || projectFileMission || editorProjectFileMission ? "1" : null);
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_PYTHON_EDITOR", pythonEditor ? "1" : null);
             app = Process.Start(new ProcessStartInfo(path, "--qa --live") { WorkingDirectory = Path.GetDirectoryName(path) });
             Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "trainer window", 12000);
@@ -82,6 +83,12 @@ internal static class LiveUiSmoke
             {
                 CheckProjectFileMission();
                 Console.WriteLine("PASS: " + count + " native WPF download and project file checks");
+                return 0;
+            }
+            if (editorProjectFileMission)
+            {
+                CheckEditorProjectFileMission();
+                Console.WriteLine("PASS: " + count + " native WPF Explorer project file checks");
                 return 0;
             }
             if (pythonEditor)
@@ -770,6 +777,39 @@ internal static class LiveUiSmoke
             {
                 move = true;
                 CaptureReferenceFrame("project-files-02-moved");
+            }
+        });
+    }
+
+    private static void CheckEditorProjectFileMission()
+    {
+        bool renamed = false, moved = false;
+        CheckCatalogMission("code", 0, "Переименовать файл и переместить его по проекту", (step, prompt) =>
+        {
+            var witness = BrowserWitness(prompt == "result" ? "LabResult" : "LabDesktop");
+            if (prompt == "result")
+            {
+                Check(renamed && moved && witness[0] == "code" && witness[1].Contains("/project/reports/") &&
+                    witness[1].EndsWith(".csv", StringComparison.Ordinal), "VS Code reopens the moved report in reports");
+                CaptureReferenceFrame("editor-file-03-result");
+            }
+            else if (!renamed && witness[0] == "code" && witness[2] == "file-name")
+            {
+                EnterCharacters("draft"); Key("Enter");
+                Until(delegate { return BrowserWitness("LabDesktop")[2] == "file-name"; }, "duplicate name keeps rename open");
+                Check(ReadSolved() == step, "An existing filename does not advance the exercise");
+                Key("Esc");
+                Until(delegate { return BrowserWitness("LabDesktop")[2] == "explorer"; }, "Esc returns to the VS Code tree");
+                Check(ReadSolved() == step, "Cancelling rename keeps the current goal");
+                Key("F2");
+                Until(delegate { return BrowserWitness("LabDesktop")[2] == "file-name"; }, "F2 reopens the original item");
+                renamed = true;
+                CaptureReferenceFrame("editor-file-01-rename");
+            }
+            else if (!moved && witness[6].Contains("/project/reports/") && witness[6].Contains(".csv"))
+            {
+                moved = true;
+                CaptureReferenceFrame("editor-file-02-moved");
             }
         });
     }
