@@ -442,7 +442,11 @@ namespace TouchTypingStudio
             if (verifyMode)
             {
                 string keys = task.S("keys"), text = task.S("text");
-                AutomationProperties.SetItemStatus(labKeys, keys.Length > 0 ? text : "");
+                // Many navigation tasks carry the target row's title in Text;
+                // it describes the destination and must not be typed.
+                string id = task.S("id");
+                AutomationProperties.SetItemStatus(labKeys,
+                    keys.Length > 0 && (id == "quick-choose" || id == "save") ? text : "");
                 AutomationProperties.SetItemStatus(labTask,
                     keys.Length > 0 ? "keys:" + keys : text.Length > 0 ? "text:" + text : "none:");
             }
