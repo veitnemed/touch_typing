@@ -128,7 +128,12 @@ class TerminalPowerShellTests(unittest.TestCase):
         windows = e.call("lab-catalog", desktopProfile="windows")
         ubuntu = e.call("lab-catalog", desktopProfile="ubuntu")
         self.assertEqual(next(m for m in windows["classes"] if m["id"] == "terminal")["title"], "PowerShell")
-        self.assertEqual({m["id"] for m in windows["missions"] if m["app"] == "terminal"}, {POWERSHELL})
+        windows_missions = {m["id"]: m for m in windows["missions"] if m["app"] == "terminal"}
+        self.assertIn(POWERSHELL, windows_missions)
+        self.assertIn("terminal-explore", windows_missions)
+        self.assertNotIn(PRACTICAL, windows_missions)
+        self.assertTrue(all(item["title"].startswith("Bash (учебный Ubuntu) · ")
+                            for key, item in windows_missions.items() if key != POWERSHELL))
         self.assertIn(PRACTICAL, {m["id"] for m in ubuntu["missions"] if m["app"] == "terminal"})
         self.assertEqual([(d["mission"], d["desktopProfile"]) for d in windows["drafts"] if d["app"] == "terminal"],
                          [("terminal-explore", "ubuntu")])
