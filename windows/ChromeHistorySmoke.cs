@@ -108,12 +108,19 @@ internal static partial class LiveUiSmoke
             Key("Enter");
             Check(ReadSolved() == before && BrowserWitness("LabDesktop")[1] == "chrome://history",
                 "Enter on the search field does not fake the opening step.");
+            const string historyHint = "Tab выбирает запись, Enter открывает её.";
+            Until(delegate { return Name("LabDesktop").Contains(historyHint); },
+                "Enter on the query displays the selection hint in the real browser surface");
+            CaptureReferenceFrame("chrome-history-01b-selection-hint");
             AdvanceChromeHistoryStep();
+            Check(!Name("LabDesktop").Contains(historyHint), "Selecting a result clears the field-only hint.");
             Check(Find("LabDesktop").Current.HelpText.Contains("Выбрано: Проверить копию"),
                 "The rendered row selection is the actual expected procedure.");
             AdvanceChromeHistoryStep();
             Check(BrowserWitness("LabDesktop")[1] == "https://practice.local/handbook/backup#procedure",
                 "Tab and Enter open the exact previously visited instruction.");
+            Check(!Name("LabDesktop").Contains(historyHint),
+                "The source page no longer displays a History-only instruction.");
             CaptureReferenceFrame("chrome-history-02-recovered");
             Console.WriteLine("PASS Windows Chrome: typed real history query, observed filter, restored exact page.");
             return 0;

@@ -1082,6 +1082,7 @@ class MissionTest(unittest.TestCase):
 
             before = records()
             self.assertEqual(len(before), 21)
+            self.assertFalse(ET.parse(profile).findall(".//ShortcutAttempt/TerminalCase"))
             self.assertNotIn("@strict-report", [event["Key"] for event in trace()])
             options = dict(app="workday", level=0, mode="sandbox", seconds=0, guidance="guided", mission="workday-report", seed=0)
             for _ in range(2):
@@ -1666,8 +1667,9 @@ class MissionTest(unittest.TestCase):
                     engine.close()
 
     def walk(self, engine, mission):
+        environment = {"desktopProfile": mission["desktopProfile"]} if mission.get("desktopProfile") else {}
         state = engine.call("lab-start", app=mission["app"], level=mission["level"], mode="sandbox",
-                            seconds=0, guidance="guided", mission=mission["id"], seed=0)
+                            seconds=0, guidance="guided", mission=mission["id"], seed=0, **environment)
         total = state["scenarioLength"]
         self.assertGreaterEqual(total, 1 if mission.get("curated") else 20)
         state = engine.call("lab-resume")
@@ -1692,6 +1694,15 @@ class MissionTest(unittest.TestCase):
         for step in range(total):
             self.assertEqual(state["mission"], mission["id"])
             task = state["task"]
+            if task["id"] == "terminal-interrupt":
+                from time import monotonic, sleep
+                self.assertTrue(state["scene"]["terminal"]["followingLog"], task)
+                deadline = monotonic() + 8
+                while not state["scene"]["terminal"]["logIncidentArrived"] and monotonic() < deadline:
+                    sleep(.09)
+                    state = engine.call("lab-state")
+                self.assertTrue(state["scene"]["terminal"]["logIncidentArrived"], state["scene"]["terminal"])
+                self.assertEqual(state["solved"], step, "Arrival updates the journal, not the learner's credit")
             for attempt in range(24):
                 if (mission["id"].startswith("code-notebook-") and task["text"] and attempt == 0
                         and task["id"] in {"quick-choose", "save", "notebook-type"}):

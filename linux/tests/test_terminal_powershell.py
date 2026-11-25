@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from time import sleep
 import unittest
 from unittest.mock import patch
+from xml.etree import ElementTree as ET
 
 from platform_linux import Engine
 from test_editor_course import enter
@@ -103,6 +104,11 @@ class TerminalPowerShellTests(unittest.TestCase):
         self.assertEqual((s["solved"], s["finished"]), (4, True))
         self.assertEqual(terminal(s)["output"][-2:], [f"sync.log:5:INFO {new_id} started", f"sync.log:6:{fresh}"])
         self.assertTrue(e.call("lab-result")["completed"])
+        rows = ET.parse(self.profile / "TouchTypingStudio-QA" / "progress.xml").findall(".//ShortcutAttempt")
+        journal = [a for a in rows if a.findtext("Skill") == "lab/terminal/command/powershell-incident"
+                   and a.findtext("Correct") == "true"]
+        self.assertEqual(len(journal), 1)
+        self.assertIn(journal[0].findtext("TerminalCase"), ("1", "2", "3"))
         next_case = begin(e, "windows", seed)
         self.assertNotEqual(sync_log(next_case), first)
         return fresh

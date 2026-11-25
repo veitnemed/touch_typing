@@ -52,6 +52,7 @@ namespace TouchTypingStudio
         public string InputMode, Mission, CoachStage, CoachContext;
         // Filled only for finished practical journal cases; old history remains valid.
         public int TerminalCase;
+        public bool ShouldSerializeTerminalCase() { return TerminalCase > 0; }
         // Simulated input layout just before the action; absent on older records.
         public string Layout;
         public bool Assisted, Independent, FirstTry;
