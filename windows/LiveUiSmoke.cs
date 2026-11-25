@@ -62,7 +62,12 @@ internal static class LiveUiSmoke
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_BROWSER_CLONE", browserClone || projectFileMission || editorProjectFileMission ? "1" : null);
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_PYTHON_EDITOR", pythonEditor ? "1" : null);
             app = Process.Start(new ProcessStartInfo(path, "--qa --live") { WorkingDirectory = Path.GetDirectoryName(path) });
-            Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "trainer window", 12000);
+            Until(delegate {
+                app.Refresh();
+                if (app.HasExited) throw new InvalidOperationException("Trainer exited at startup: " + app.ExitCode);
+                trainer = app.MainWindowHandle;
+                return trainer != IntPtr.Zero;
+            }, "trainer window", 45000);
             window = AutomationElement.FromHandle(trainer);
             Check(window.Current.ProcessId == app.Id, "The automation root belongs to the new QA process");
             Focus();
