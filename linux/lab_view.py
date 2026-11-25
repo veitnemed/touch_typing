@@ -1266,9 +1266,10 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
             label(title,left+48,ty,13,fg,bold=True,width=title_w)
             if host and pane-title_w >= 168:
                 label(host,left+58+title_w,ty+1,12,muted,width=pane-84-title_w)
+            if chosen and pane >= 260:
+                label("Enter",left+pane-57,ty+1,11,blue,width=44)
             if interactive and path:
-                self.chrome_mark("forward",left+pane-29,row_y+(pitch-14)/2,14,muted,row_bg)
-                hit(left+8,row_y+2,pane-16,pitch-4,"entry",title+" · Enter — открыть",path=path)
+                hit(left+8,row_y+2,pane-16,pitch-4,"entry","Выбрать: "+title+" · Enter — открыть",path=path)
         if len(entries)>visible:
             track = max(6,panel_h-head_h-10)
             thumb = max(19,track*visible/len(entries))

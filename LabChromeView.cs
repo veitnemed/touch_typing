@@ -311,11 +311,9 @@ namespace TouchTypingStudio
                 string host = BrowserHost(path);
                 if (host.Length > 0 && pane-titleWidth>=168)
                     Text(host,left+58+titleWidth,ty+1,12,ChromeHistoryMuted,pane-84-titleWidth);
+                if (chosen && pane>=260) Text("Enter",left+pane-57,ty+1,11,ChromeFocus,44);
                 if (interactive && path.Length > 0)
-                {
-                    DrawChromeMark("forward",left+pane-29,rowY+(pitch-14)/2,14,ChromeHistoryMuted,rowBg);
-                    hit(new Rect(left+8,rowY+2,pane-16,pitch-4),"entry",title+" · Enter — открыть",path);
-                }
+                    hit(new Rect(left+8,rowY+2,pane-16,pitch-4),"entry","Выбрать: "+title+" · Enter — открыть",path);
             }
             if (visible>0 && entries.Length>visible)
             {

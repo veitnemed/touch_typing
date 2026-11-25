@@ -6,12 +6,13 @@ $exe=(Resolve-Path -LiteralPath $Application).ProviderPath
 if(Test-Path -LiteralPath $OutputDirectory) { throw 'Use a new empty evidence directory.' }
 [void][IO.Directory]::CreateDirectory($OutputDirectory)
 $out=(Resolve-Path -LiteralPath $OutputDirectory).ProviderPath
-$framework=Join-Path $env:WINDIR 'Microsoft.NETFramework644.0.30319'
+$framework=Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319'
 $probe=Join-Path $out 'ChromeHistoryViewSmoke.exe'
 $options=@('/nologo','/target:exe','/platform:x64','/codepage:65001','/main:ChromeHistoryViewMain',"/out:$probe",
-    "/reference:$frameworkWPFUIAutomationClient.dll", "/reference:$frameworkWPFUIAutomationTypes.dll",
-    "/reference:$frameworkWPFWindowsBase.dll", "/reference:$frameworkSystem.Xml.dll",
-    "/reference:$frameworkSystem.Drawing.dll", "/reference:$frameworkSystem.Windows.Forms.dll",
+    "/reference:$framework/WPF/UIAutomationClient.dll", "/reference:$framework/WPF/UIAutomationTypes.dll",
+    "/reference:$framework/WPF/WindowsBase.dll", "/reference:$framework/System.Xml.dll",
+    "/reference:$framework/System.Drawing.dll", "/reference:$framework/System.Windows.Forms.dll",
+    "/reference:$framework/System.Web.Extensions.dll",
     (Join-Path $PSScriptRoot 'LiveUiSmoke.cs'), (Join-Path $PSScriptRoot 'ChromeHistoryViewSmoke.cs'),
     (Join-Path $PSScriptRoot 'TypingProofClient.cs'))
 & (Join-Path $framework 'csc.exe') @options
