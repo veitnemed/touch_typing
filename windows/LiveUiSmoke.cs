@@ -950,7 +950,11 @@ internal static class LiveUiSmoke
             Console.WriteLine("RESEARCH " + step + " " + Name("LabTask") + " | " + prompt);
             if (prompt.StartsWith("text:"))
             {
-                EnterCharacters(prompt.Substring(5));
+                string expectedText = prompt.Substring(5);
+                EnterCharacters(expectedText);
+                var input = BrowserWitness("LabDesktop");
+                Check(input[2] == "find" && input[3] == expectedText,
+                    "Search field has the exact input before Enter (received: " + input[3] + ")");
                 Key("Enter");
             }
             else
@@ -1268,7 +1272,9 @@ internal static class LiveUiSmoke
 
     private static void EnterCharacters(string text)
     {
-        foreach (char c in text) Send(Character(c));
+        // SendInput is asynchronous. Pace consecutive Shift-up / Shift-down
+        // pairs so the low-level hook observes both on Windows Server.
+        foreach (char c in text) { Send(Character(c)); Wait(18); }
     }
 
     private static void WaitEditorState(int solved, string focus, string file, int anchor, int caret)
