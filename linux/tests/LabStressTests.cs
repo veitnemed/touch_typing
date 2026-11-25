@@ -80,6 +80,8 @@ internal static class LabStressTests
             int before = Run.Solved;
             if (task.Keys.Length > 0)
             {
+                if (Run.Scene.CompletingMovedReport && task.Id == "save" && task.Text.Length > 0)
+                { Chord("Ctrl+End"); Type(task.Text); }
                 if (Run.Scene.NotebookCourse && task.Text.Length > 0 && task.Id is "quick-choose" or "save")
                     Type(task.Text);
                 for (int i = 0; i < 32 && Run.Solved == before; i++)

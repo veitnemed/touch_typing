@@ -43,7 +43,7 @@ internal static partial class LiveCourse
             {
                 if (!nativeEnglishInput && (IsCommandToken(token) || IsProjectSearchQuery(token) || token is "browser-search" or "code-clone-command" or "research-find" or "file-name-commit" ||
                     token is "code-rename-confirm" or "debug-unit" or "debug-report-check"
-                    or "debug-project-query" or "debug-doc-submit" or "debug-rewrite" or "exact-find-submit" or "python-edit-write" or "notebook-file" or "notebook-report" or "notebook-type" or "notebook-report-save" ||
+                    or "debug-project-query" or "debug-doc-submit" or "debug-rewrite" or "exact-find-submit" or "python-edit-write" or "notebook-file" or "notebook-report" or "notebook-type" or "notebook-report-save" or "moved-report-save" ||
                     trial.ExactEdit && token is "quick-choose" or "save") && trial.Layout == "RU")
                 {
                     var change = trial.WithBinding(Actions["layout"]);
@@ -108,6 +108,10 @@ internal static partial class LiveCourse
     {
         if (NotebookTask(token, scene) is LabTask notebook) return notebook;
         if (PythonEditTask(token) is LabTask edit) return edit;
+        if (token == "moved-report-save") return Actions["save"] with {
+            Title = "Допишите «" + scene.NewReportRow + "» в конце перемещённого CSV и сохраните файл",
+            Hint = "Ctrl+End перейдёт к пустой строке после данных. Введите " + scene.NewReportRow + " и нажмите Ctrl+S.",
+            Text = scene.NewReportRow };
         if (token == "file-route-parent") token = scene.WindowsDesktop ? "win-explorer-parent" : "file-parent";
         if (token == "file-name-commit") return Actions[token] with { Keys = "", Text = scene.FileStem,
             Title = "Введите «" + scene.FileStem + "» вместо выделенного имени и нажмите Enter",
@@ -199,6 +203,11 @@ internal static partial class LiveCourse
 
     private static bool Demonstrate(LabTask task, LabScene trial)
     {
+        if (trial.CompletingMovedReport && task.Action == "save" && task.Text.Length > 0)
+        {
+            trial.Text("End", "", word: true);
+            trial.Insert(trial.Active, task.Text);
+        }
         if (trial.NotebookCourse)
         {
             if (task.Action == "notebook-type") return trial.Text("Text", task.Text);

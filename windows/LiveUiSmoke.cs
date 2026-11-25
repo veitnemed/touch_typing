@@ -701,7 +701,12 @@ internal static class LiveUiSmoke
                 if (Exists("LabKeys"))
                 {
                     string prefixText = Find("LabKeys").Current.ItemStatus;
-                    if (!String.IsNullOrEmpty(prefixText)) EnterCharacters(prefixText);
+                    if (!String.IsNullOrEmpty(prefixText))
+                    {
+                        if (area == "code" && title == "Переименовать файл и переместить его по проекту" && keys == "Ctrl+S")
+                            Chord("Ctrl+End");
+                        EnterCharacters(prefixText);
+                    }
                 }
                 for (int i = 0; i < (keys == "Tab" || keys == "Down" ? 20 : 1); i++)
                 {

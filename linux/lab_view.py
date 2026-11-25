@@ -1174,7 +1174,7 @@ class DesktopView(Gtk.Widget):
                 offset += self.units(line) + 1
             if cell["output"]:
                 tone = "#ff7b72" if cell["failed"] else "#7ee787"
-                self.label(("Предыдущий вывод   " if cell.get("stale") else "Вывод   ") + cell["output"], x + 51, row + cell_h - 27, 13, tone, width=w - 64, mono=True)
+                self.label(cell["outputLabel"] + "   " + cell["output"], x + 51, row + cell_h - 27, 13, tone, width=w - 64, mono=True)
             row += cell_h
         self.snapshot.pop()
 

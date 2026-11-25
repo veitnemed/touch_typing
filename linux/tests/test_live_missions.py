@@ -1592,6 +1592,9 @@ class MissionTest(unittest.TestCase):
                 if task["keys"]:
                     expects_text = task["id"] in {"code-rename-confirm", "project-search-submit"} or (
                         mission["id"] == "code-find-exact-edit" and task["id"] in {"quick-choose", "exact-find-submit", "save"})
+                    if mission["id"] == "code-project-file-move" and task["id"] == "save" and attempt == 0:
+                        chord(["LCtrl", "End"])
+                        expects_text = True
                     if expects_text and attempt == 0:
                         for char in task["text"]:
                             chord(["LShift", "-"] if char == "_" else ["LShift", char] if char.isupper() else ["Space" if char == " " else char.upper()], char)

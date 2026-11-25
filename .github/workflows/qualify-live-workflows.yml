@@ -59,7 +59,18 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - id: download_candidate
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: live-verified-archives
+          path: ${{ runner.temp }}/archives
+      # Artifact indexing can lag behind the successful upload job.
+      - if: steps.download_candidate.outcome == 'failure'
+        shell: bash
+        run: sleep 15
+      - if: steps.download_candidate.outcome == 'failure'
+        uses: actions/download-artifact@v4
         with:
           name: live-verified-archives
           path: ${{ runner.temp }}/archives
@@ -88,7 +99,7 @@ jobs:
           for scenario in test_editor_notebooks_x11.py test_project_files_x11.py; do
             export TOUCH_TYPING_QA_OUTPUT="$RUNNER_TEMP/gtk-proof/${scenario%.py}" TOUCH_TYPING_QA_DATA_ROOT="$temp/${scenario%.py}"
             mkdir -m 700 "$TOUCH_TYPING_QA_OUTPUT" "$TOUCH_TYPING_QA_DATA_ROOT"
-            export SCENARIO="$scenario"
+            export SCENARIO="$scenario" TOUCH_TYPING_QA_VIDEO=1
             timeout 180s xvfb-run -a -s "-screen 0 1024x600x24 -nolisten tcp" bash -c '
               set -e
               ffmpeg -y -loglevel warning -f x11grab -framerate 15 -video_size 1024x600 -i "$DISPLAY" \
@@ -119,7 +130,18 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 20
     steps:
-      - uses: actions/download-artifact@v4
+      - id: download_candidate
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: live-verified-archives
+          path: ${{ runner.temp }}/archives
+      # Artifact indexing can lag behind the successful upload job.
+      - if: steps.download_candidate.outcome == 'failure'
+        shell: bash
+        run: sleep 15
+      - if: steps.download_candidate.outcome == 'failure'
+        uses: actions/download-artifact@v4
         with:
           name: live-verified-archives
           path: ${{ runner.temp }}/archives
@@ -167,7 +189,18 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - id: download_candidate
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: live-verified-archives
+          path: ${{ runner.temp }}/publication
+      # Artifact indexing can lag behind the successful upload job.
+      - if: steps.download_candidate.outcome == 'failure'
+        shell: bash
+        run: sleep 15
+      - if: steps.download_candidate.outcome == 'failure'
+        uses: actions/download-artifact@v4
         with:
           name: live-verified-archives
           path: ${{ runner.temp }}/publication

@@ -18,6 +18,7 @@ class NotebookWindow(QA):
         self.navigate("home")
         for _ in range(30): yield
         self.focus_window()
+        yield from self.video_hold("Каталог Live")
         settings, mission, level, mode, actions, timer, start = self.home_configure["code"]
         settings.emit("clicked")
         level.set_selected(1)
@@ -34,6 +35,7 @@ class NotebookWindow(QA):
             assert lab.active and lab.state["mission"]=="code-notebook-repair"
             self.focus_window(); lab.desktop.grab_focus()
             active=lambda: next(w for w in lab.state["scene"]["windows"] if w["active"])
+            yield from self.video_hold("Задача в .py")
             changed=[]; types=set()
             for _ in range(28):
                 t=lab.state["task"]; old=lab.state["solved"]; task=t["id"]
@@ -60,14 +62,36 @@ class NotebookWindow(QA):
                     if task=="notebook-run" and n["selected"]==2:
                         changed.append(n["cells"][2]["output"])
                         self.capture_widget_png(out/("notebook-wrong.png" if len(changed)==1 else "notebook-corrected.png"))
+                        yield from self.video_hold("Первое вычисление" if len(changed) == 1 else "Новый результат")
+                        if len(changed)==1:
+                            # New tab via normal shortcuts: saved output survives, its Python variables don't.
+                            expected=n["cells"][2]["output"]; name=active()["url"].rsplit("/",1)[-1]
+                            solved=lab.state["solved"]
+                            for k in ("Ctrl+S","Ctrl+W","Ctrl+P"): yield from self.chord(k)
+                            yield from self.typed({"id":"type-code","text":name})
+                            yield from self.chord("Enter")
+                            n=active()["notebook"]
+                            assert n["cells"][2]["output"]==expected and n["cells"][2]["outputLabel"]=="Сохранённый вывод"
+                            for k in ("Down","Down"): yield from self.chord(k)
+                            self.capture_widget_png(out/"notebook-saved-output.png")
+                            yield from self.video_hold("Сохранённый вывод")
+                            yield from self.chord("Ctrl+Enter")
+                            assert "NameError" in active()["notebook"]["cells"][2]["output"]
+                            for k in ("Up","Shift+Enter","Ctrl+Enter"): yield from self.chord(k)
+                            n=active()["notebook"]
+                            assert n["cells"][2]["output"]==expected and n["cells"][2]["outputLabel"]=="Вывод"
+                            assert lab.state["solved"]==solved
                     if task=="notebook-type":
                         assert n["editing"] and n["cells"][2]["source"]==t["text"]
+                        assert n["cells"][2]["outputLabel"]=="Предыдущий вывод"
                         self.capture_widget_png(out/"notebook-edit.png")
+                        yield from self.video_hold("Правка и предыдущий вывод")
                 if not lab.active: break
             assert types=={"markdown","code"} and len(changed)==2 and changed[0]!=changed[1],changed
             s=lab.state
             assert s["finished"] and any(f["path"].endswith("-result.txt") and f["content"]==changed[-1]
                                           for f in s["scene"]["terminal"]["files"])
+            yield from self.video_hold("Ноутбук и ответ сохранены")
             print("PASS GTK catalog → app.py → notebook → correction → saved number:", changed,"in",s["solved"],"steps",flush=True)
 
 if __name__=="__main__":

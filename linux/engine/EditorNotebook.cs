@@ -150,6 +150,11 @@ internal sealed class EditorNotebook
     }
     internal bool Fresh(int i) => executions.TryGetValue(i, out var s) && s == InputSignature(i);
     private bool Stale(int i) => executions.ContainsKey(i) && !Fresh(i);
+    // Display metadata only. A saved nbformat output is useful evidence of a *past*
+    // kernel, but it must not read like a result reproduced from current variables.
+    private string OutputLabel(int i) => !executions.ContainsKey(i) && (Runs(i) > 0 || Output(i) != "") ? "Сохранённый вывод" :
+        Stale(i) ? "Предыдущий вывод" : "Вывод";
+
     internal bool RunAndAdvance()
     {
         if (Selected == Cells.Count - 1 && Cells.Count >= 128) return false;
@@ -175,8 +180,9 @@ internal sealed class EditorNotebook
 
     internal object Snapshot() => new { simulated = true, selected = Selected, editing = Editing, caret = Caret, anchor = Anchor,
         cells = Enumerable.Range(0, Cells.Count).Select(i => new { kind = Kind(i), source = Source(i),
-            runs = Runs(i), stale = Stale(i), output = Output(i), failed = Failed(i), syntax = Kind(i) == "code" ? PythonHighlight.For(Source(i), "cell.py") : [] }).ToArray() };
+            runs = Runs(i), stale = Stale(i), outputLabel = OutputLabel(i), output = Output(i), failed = Failed(i), syntax = Kind(i) == "code" ? PythonHighlight.For(Source(i), "cell.py") : [] }).ToArray() };
     internal string Describe() => "Блокнот · ячейка " + (Selected + 1) + " из " + Cells.Count +
         (Editing ? " · редактирование" : " · выбор ячейки") + ". " + Source(Selected) +
-        (Runs(Selected) > 0 ? ". Вывод: " + (Output(Selected) == "" ? "без вывода" : Output(Selected)) + (Stale(Selected) ? " (предыдущий расчёт)" : "") : "");
+        (Output(Selected) != "" ? ". " + OutputLabel(Selected) + ": " + Output(Selected) :
+            Runs(Selected) > 0 ? ". " + OutputLabel(Selected) + ": без вывода" : "");
 }

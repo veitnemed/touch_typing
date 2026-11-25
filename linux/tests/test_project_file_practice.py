@@ -11,6 +11,8 @@ CASES = {"inventory.csv": ("weekly-stock", "sku,quantity\nKB-04,18\nUSB-C,32\n")
          "shipments.csv": ("ready-shipments", "dispatch,status\nPK-31,sent\nPK-42,ready\n"),
          "checks.csv": ("kit-checks", "kit,result\nST-05,pass\nST-08,recheck\n")}
 
+NEW_ROWS = {"inventory.csv": "KB-08,24", "shipments.csv": "PK-53,ready", "checks.csv": "ST-11,pass"}
+
 
 def active(s):
     return next(w for w in s["scene"]["windows"] if w["active"])
@@ -32,7 +34,7 @@ def chord(e, combo, char=""):
 
 def type_text(e, value):
     for c in value:
-        chord(e, "Space" if c == " " else c.upper(), c)
+        chord(e, "Space" if c == " " else ("Shift+" if c.isupper() else "") + c.upper(), c)
 
 
 def begin(e, mission, seed=0, platform="linux"):
@@ -45,6 +47,8 @@ def begin(e, mission, seed=0, platform="linux"):
 
 def advance(e, s):
     before, t = s["solved"], s["task"]
+    if t["id"] == "save" and t["text"]:
+        chord(e,"Ctrl+End"); type_text(e,t["text"])
     if t["keys"]:
         for _ in range(40 if t["id"] in {"link-next","file-next"} else 1):
             s = chord(e, t["keys"])
@@ -98,9 +102,10 @@ class ProjectFiles(unittest.TestCase):
                         self.assertIn(name, CASES)
                         self.assertEqual(stem, CASES[name][0])
                         final = ROOT+"reports/"+stem+".csv"
-                        self.assertEqual((active(s)["url"],active(s)["body"]), (final,CASES[name][1]))
+                        expected = CASES[name][1] + (NEW_ROWS[name] if m.endswith("-move") else "")
+                        self.assertEqual((active(s)["url"],active(s)["body"]), (final,expected))
                         files = disk(s)
-                        self.assertEqual(files[final], CASES[name][1])
+                        self.assertEqual(files[final], expected)
                         self.assertEqual(files[ROOT+"archive/"+stem+".csv"], "period,status\nprevious,archived\n")
                         source_dir = DOWNLOADS if "inbox" in m else ROOT
                         self.assertEqual(files[source_dir+"draft.csv"], "state,approved\ndraft,no\n")
@@ -140,8 +145,17 @@ class ProjectFiles(unittest.TestCase):
             self.assertEqual((active(s)["url"],active(s)["body"],disk(s)[dest]), (dest,original+"z",original))
             self.assertEqual(disk(s)[ROOT+"archive/"+stem+".csv"],original_files[ROOT+"archive/"+stem+".csv"])
             self.assertNotIn(old_path,disk(s))
-            s=chord(e,"Ctrl+1"); s=chord(e,"Ctrl+S")
-            self.assertEqual(disk(s)[dest],original+"z")
+            s=advance(e,s)  # Open the relocated tab, preserving its unsaved edit/caret.
+            self.assertEqual((active(s)["url"], active(s)["body"], active(s)["bodyCursor"]), (dest, original+"z", len(original)+1))
+            self.assertEqual((s["task"]["id"], s["finished"]), ("save", False))
+            before=s["solved"]; s=chord(e,"Ctrl+S")
+            self.assertEqual((s["solved"], disk(s)[dest]), (before, original+"z"))
+            s=chord(e,"Backspace"); row=NEW_ROWS[old_path.rsplit("/",1)[-1]]
+            type_text(e,row)
+            self.assertEqual(disk(chord(e,"Ctrl+End"))[dest],original+"z")
+            s=chord(e,"Ctrl+S")
+            self.assertEqual((s["finished"],s["solved"],disk(s)[dest]),(True,before+1,original+row))
+            self.assertEqual(disk(s)[ROOT+"archive/"+stem+".csv"],original_files[ROOT+"archive/"+stem+".csv"])
             self.assertNotIn(old_path,disk(s))
             self.assertNotIn(ROOT+stem+".csv",disk(s))
         self.run_clean(run)

@@ -93,6 +93,45 @@ class NotebookCourse(unittest.TestCase):
                         variants.add(self.run_route(p,level,seed))
         self.assertEqual(variants,{"weekly.ipynb","delivery.ipynb","checks.ipynb"})
 
+    def test_reopen_has_saved_output_not_a_live_kernel(self):
+        for platform in ("linux","windows"):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as root, patch.dict(os.environ,{"TOUCH_TYPING_QA_DATA_ROOT":root}):
+                e=Engine(verify=True)
+                try:
+                    e.call("configure",platform=platform,layout="EN")
+                    s=e.call("lab-start",**options(1,0));e.call("lab-resume")
+                    for _ in range(2): s=advance(e,s)
+                    name=editor(s)["url"].rsplit("/",1)[-1]
+                    self.assertEqual(editor(s)["notebook"]["selected"],0)
+                    for k in ("Down","Shift+Enter","Ctrl+Enter","Ctrl+S"):
+                        s=gesture(e,k)
+                    def metric(s): return editor(s)["notebook"]["cells"][2]
+                    original=metric(s)["output"]
+                    self.assertTrue(original.isdigit())
+                    self.assertEqual(metric(s)["outputLabel"],"Вывод")
+                    old_solved=s["solved"]
+                    # Merely selecting another tab must not restart this notebook.
+                    s=gesture(e,"Ctrl+Tab"); self.assertTrue(editor(s)["url"].endswith("app.py"))
+                    s=gesture(e,"Ctrl+Tab")
+                    self.assertEqual((metric(s)["outputLabel"],metric(s)["output"]),("Вывод",original))
+                    # Closing a saved tab and opening its actual file is different.
+                    s=gesture(e,"Ctrl+W"); self.assertTrue(editor(s)["url"].endswith("app.py"))
+                    gesture(e,"Ctrl+P");text(e,name);s=gesture(e,"Enter")
+                    self.assertEqual((metric(s)["outputLabel"],metric(s)["output"],s["solved"]),
+                                     ("Сохранённый вывод",original,old_solved))
+                    for k in ("Down","Down","Ctrl+Enter"): s=gesture(e,k)
+                    self.assertTrue(metric(s)["failed"])
+                    self.assertIn("NameError", metric(s)["output"])
+                    for k in ("Up","Shift+Enter","Ctrl+Enter","Enter","Ctrl+A"): s=gesture(e,k)
+                    new_source="len("+metric(s)["source"].split("(",1)[1]
+                    s=text(e,new_source);s=gesture(e,"Esc")
+                    self.assertEqual((metric(s)["outputLabel"],metric(s)["output"],metric(s)["stale"]),
+                                     ("Предыдущий вывод",original,True))
+                    s=gesture(e,"Ctrl+Enter")
+                    self.assertEqual((metric(s)["outputLabel"],metric(s)["stale"],metric(s)["failed"]),("Вывод",False,False))
+                    self.assertNotEqual(metric(s)["output"],original)
+                finally:e.close()
+
     def test_word_deletion_preserves_cell_and_undo_positions(self):
         for platform in ("linux", "windows"):
             with self.subTest(platform=platform), tempfile.TemporaryDirectory() as root, patch.dict(

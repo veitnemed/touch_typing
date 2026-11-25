@@ -54,7 +54,7 @@ namespace TouchTypingStudio
                         else DrawStyledCodeLine(lines[j], field, syntax, x + 51, lineY, w - 67, offset, caret, anchor, editing, j + 1 < lines.Length);
                         offset += lines[j].Length + 1;
                     }
-                    if (cell.S("output").Length != 0) Text((cell.B("stale") ? "Предыдущий вывод   " : "Вывод   ") + cell.S("output"), x + 51, row + height - 27,
+                    if (cell.S("output").Length != 0) Text(cell.S("outputLabel") + "   " + cell.S("output"), x + 51, row + height - 27,
                         13, cell.B("failed") ? "#FF7B72" : "#7EE787", w - 64, 1, true);
                     row += height;
                 }

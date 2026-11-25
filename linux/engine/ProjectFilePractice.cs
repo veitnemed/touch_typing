@@ -19,6 +19,8 @@ internal sealed partial class LabScene
     }
     private ResearchCase FileCase => ReportCases[browserCaseVariant];
     internal string FileStem => new[] { "weekly-stock", "ready-shipments", "kit-checks" }[browserCaseVariant];
+    internal bool CompletingMovedReport => projectFileFamily == "move";
+    internal string NewReportRow => new[] { "KB-08,24", "PK-53,ready", "ST-11,pass" }[browserCaseVariant];
     private string IncomingDirectory => projectFileFamily == "inbox" ? "/home/student/Downloads" : Project;
     private static string ParentOf(string path) => path[..Math.Max(1, path.LastIndexOf('/'))];
     private static string RevealTitle(string path) => "Показать в папке: " + NameOf(path);
@@ -167,7 +169,7 @@ internal sealed partial class LabScene
         if (projectFileFamily == null) return null;
         var w = Active;
         string action = task.Action;
-        if (w == null || !(action.StartsWith("file-", StringComparison.Ordinal) || action is "item-open" or "item-next" or "item-prev" or "explorer" or "win-explorer-parent")) return null;
+        if (w == null || !(action.StartsWith("file-", StringComparison.Ordinal) || action is "item-open" or "item-next" or "item-prev" or "explorer" or "win-explorer-parent" || CompletingMovedReport && action == "save")) return null;
         string name = FileStem + ".csv";
         object Files() => new {
             source = Terminal.ReadFile(IncomingDirectory + "/" + FileCase.Download),
@@ -187,7 +189,10 @@ internal sealed partial class LabScene
             "file-name-commit" or "file-paste" => new { w.App, w.Focus, entry, files = Files() },
             "file-cut" or "file-copy" => new { w.App, w.Focus, entry, fileCut, fileTransfer },
             "file-parent" or "win-explorer-parent" => new { w.App, w.Focus, w.Folder },
+            "item-open" when CompletingMovedReport && w.App == "code" && w.Focus == "body" =>
+                new { w.App, w.Focus, w.Url, exists = Terminal.ReadFile(Project + "/reports/" + name) != null },
             "item-open" when w.App == "code" && w.Focus == "body" => new { w.App, w.Focus, w.Url, w.Body, files = Files() },
+            "save" when w.App == "code" => new { w.App, w.Focus, w.Url, files = Files() },
             "item-open" when w.App == "files" => new { w.App, w.Focus, w.Folder, entry },
             "item-open" when w.App == "chrome" => new { w.App, w.Focus, w.Url, entry,
                 downloaded = Terminal.ReadFile(IncomingDirectory + "/" + FileCase.Download) },
@@ -212,7 +217,8 @@ internal static partial class LiveCourse
         Add("code", 0, "code-project-file-move", "Переименовать файл и переместить его по проекту", "move",
             new("Выберите исходный отчёт в проводнике VS Code", "explorer pick:@source"),
             new("Исправьте имя, сохранив расширение CSV", "file-name-start file-name-commit"),
-            new("Перенесите сам файл в reports и откройте его там", "file-cut pick:reports file-paste file-open"));
+            new("Перенесите сам файл в reports и откройте его там", "file-cut pick:reports file-paste file-open"),
+            new("Продолжите работу в открытом файле: внесите новую строку отчёта", "moved-report-save"));
         Add("code", 1, "code-project-file-copy", "Подготовить рабочую копию, сохранив оригинал", "copy",
             new("Найдите и скопируйте исходный отчёт в проводнике VS Code", "explorer pick:@source file-copy"),
             new("Поместите копию в reports, оставив оригинал на месте", "pick:reports file-paste"),

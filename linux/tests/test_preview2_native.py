@@ -6,6 +6,7 @@ Keyboard input, widget state, scene and resulting screenshots are native.
 import ctypes as C
 import json
 import os
+import time
 from pathlib import Path
 import gi
 gi.require_version("Gtk", "4.0")
@@ -43,6 +44,13 @@ class QA(LabWindowTest):
         super().__init__()
         self.window_size = (1024, 600)
         self.witness = []
+    def video_hold(self, label):
+        if os.environ.get("TOUCH_TYPING_QA_VIDEO") != "1":
+            return
+        print(f"VIDEO {time.time():.3f} {label}", flush=True)
+        until = time.monotonic() + 2.35
+        while time.monotonic() < until:
+            yield
     def focus_window(self):
         surface = self.window.get_surface()
         xid = GdkX11.X11Surface.get_xid(surface)

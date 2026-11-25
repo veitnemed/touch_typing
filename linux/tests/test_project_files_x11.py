@@ -38,14 +38,28 @@ class FileWindowQA(QA):
                 if w["focus"] == "file-name":
                     assert w["input"][w["cursor"]:] == ".csv" and w["anchor"] == 0, w
                     self.capture_widget_png(out/(mission+"-rename.png"))
+                    if mission == "code-project-file-move":
+                        yield from self.video_hold("F2: имя без расширения")
                 if task["id"] == "file-paste":
                     self.capture_widget_png(out/(mission+"-destination.png"))
+                    if mission == "code-project-file-move":
+                        yield from self.video_hold("Ctrl+V: папка reports")
+                if task["id"] == "save" and mission == "code-project-file-move":
+                    yield from self.chord("Ctrl+End")
+                    yield from self.typed({"id":"type-code", "text":task["text"]})
+                    assert lab.state["solved"] == state["solved"] and lab.active
+                    self.capture_widget_png(out/"code-project-file-edit.png")
+                    yield from self.video_hold("Новая строка после переноса")
                 yield from self.advance_goal(lab)
             state=lab.state
             w=next(x for x in state["scene"]["windows"] if x["active"])
             files={f["path"]:f["content"] for f in state["scene"]["terminal"]["files"]}
             assert w["app"] == "code" and "/project/reports/" in w["url"]
-            assert files[w["url"]] == w["body"] and len(w["body"].splitlines())==3
+            assert files[w["url"]] == w["body"]
+            if mission == "code-project-file-move":
+                expected_last = {"weekly-stock.csv":"KB-08,24", "ready-shipments.csv":"PK-53,ready", "kit-checks.csv":"ST-11,pass"}
+                assert len(w["body"].splitlines())==4 and w["body"].splitlines()[-1]==expected_last[w["url"].rsplit("/",1)[-1]]
+            else: assert len(w["body"].splitlines())==3
             print("NATIVE GTK:",mission,state["solved"],w["url"],repr(w["body"]),flush=True)
 
 if __name__ == "__main__":

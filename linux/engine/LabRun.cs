@@ -447,7 +447,7 @@ internal sealed class LabRun
             "code-rename-confirm" => window.Focus == "symbol-rename",
             "exact-find-submit" or "research-find" => window.Focus == "find",
             "quick-choose" => (Scene.NotebookCourse || Scene.ExactEdit) && window.Focus == "quick-open" && Task.Text.Length > 0,
-            "save" => (Scene.NotebookCourse || Scene.ExactEdit) && window.App == "code" && window.Focus == "body" && Task.Text.Length > 0,
+            "save" => (Scene.NotebookCourse || Scene.ExactEdit || Scene.CompletingMovedReport) && window.App == "code" && window.Focus == "body" && Task.Text.Length > 0,
             _ => false
         };
     }
