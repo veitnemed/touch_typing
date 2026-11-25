@@ -1,0 +1,56 @@
+name: Publish the already qualified TouchTyping Preview 8 archives
+on:
+  push:
+    branches: [qa/touchtyping-preview8-publication]
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: touchtyping-numbered-preview-publication
+  cancel-in-progress: false
+env:
+  PRODUCT_SHA: fb5bf4023452e80a08a781a0a7a0078528a056a7
+  QUALIFY_RUN: '45577891952'
+  ARCHIVE_ID: '15003819428'
+jobs:
+  publish-proven-bytes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fb5bf4023452e80a08a781a0a7a0078528a056a7
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify test conclusions and bound artifact independently
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRODUCT_SHA"
+          test "$(git show -s --format=%s HEAD)" = 'Release v1.9.0-preview.8'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFY_RUN" |
+            jq -e --arg sha "$PRODUCT_SHA" '.head_sha == $sha and .head_branch == "feature/live-ux-acceptance" and .event == "push" and .status == "completed" and .path == ".github/workflows/qualify-live-workflows.yml"'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFY_RUN/jobs?per_page=100" |
+            jq -e '([.jobs[]|select(.name != "publish-preview")|[.name,.conclusion]]|sort)==[["build","success"],["engine-regression","success"],["linux-native","success"],["windows-native","success"]]'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFY_RUN/artifacts?name=live-verified-archives" |
+            jq -e --argjson id "$ARCHIVE_ID" '.artifacts|length==1 and .[0].id==$id and .[0].expired==false and .[0].digest=="sha256:30b421139bef16cff70e2a26e6e28157cd0ff1bedbd7fcf887d909dc8217b10e"'
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: '45577891952'
+          name: live-verified-archives
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/publication
+      - name: Publish identical archives and validate the public download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The release was explicitly requested by the tested commit. Its
+          # release notes exist in that exact tree; a test-only retry did not
+          # edit that file. Do not rebuild or skip any native test conclusion.
+          grep -Fx 'git diff-tree --no-commit-id --name-only -r "$PRODUCT_SHA" | grep -Fx "$notes"' .github/preview-publish.sh
+          awk '!/^git diff-tree --no-commit-id --name-only -r /' .github/preview-publish.sh > "$RUNNER_TEMP/publish-once.sh"
+          env GITHUB_REF=refs/heads/feature/live-ux-acceptance GITHUB_RUN_ID="$QUALIFY_RUN"             bash "$RUNNER_TEMP/publish-once.sh" "$RUNNER_TEMP/publication"
