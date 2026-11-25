@@ -1617,7 +1617,8 @@ class MissionTest(unittest.TestCase):
                         from test_debug_day import png_fixture
                         state = chord([sides.get(k, k) for k in task["keys"].split("+")], png_fixture())
                     else:
-                        state = chord([sides.get(k, k) for k in task["keys"].split("+")])
+                        for keys in task["keys"].split(" → "):
+                            state = chord([sides.get(k, k) for k in keys.split("+")])
                 elif task["id"] == "notebook-type":
                     pass  # The final character credits the edit. Enter would modify the cell.
                 elif task["id"] == "python-edit-write":

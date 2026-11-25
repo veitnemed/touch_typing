@@ -194,9 +194,13 @@ def inside_widget(widget, ancestor):
 
 class KeyboardView(Gtk.Box):
     def __init__(self, rows, function_row=True):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
         self.add_css_class("keyboard")
-        self.cells = {}
+        self.cells, self.aux_caps, self.aux_groups = {}, {}, {}
+        self.function_row = function_row
+        main = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        main.set_hexpand(True)
+        self.append(main)
         functions = [{"key": k, "units": 1, "en": k, "ru": k} for k in
                      ("Esc", *[f"F{i}" for i in range(1, 13)], "Print")]
         def extra(key, label):
@@ -230,12 +234,40 @@ class KeyboardView(Gtk.Box):
                 line.attach(cell, start, 0, end - start, 1)
                 start = end
                 self.cells[key] = (cell, item)
-            self.append(line)
+            main.append(line)
+
+    def prepare_auxiliary(self, caps):
+        if not self.function_row or self.aux_caps:
+            return
+        for cap in caps:
+            group = cap["group"]
+            if group not in self.aux_groups:
+                grid = Gtk.Grid(column_homogeneous=True, row_homogeneous=True, column_spacing=1, row_spacing=1)
+                self.aux_groups[group] = grid
+                self.append(grid)
+            cell = text("", "cap", "special", "aux-cap")
+            cell.set_xalign(.5)
+            cell.set_size_request(30, -1)
+            cell.set_ellipsize(Pango.EllipsizeMode.END)
+            self.aux_groups[group].attach(cell, cap["column"], cap["row"], cap["width"], cap["height"])
+            self.aux_caps[cap["key"]] = cap
+            self.cells[cap["key"]] = (cell, {"en": cap["label"], "ru": cap["label"]})
 
     def paint(self, layout, keys=(), held=(), miss=None, finger_map=None, profile=None):
         finger_map = finger_map or {}
         profile = profile or {}
         matebook = profile.get("keyboardProfile") == "matebook-d16"
+        self.prepare_auxiliary(profile.get("keyboardAux", ()))
+        held, targets = set(held), set(keys)
+        activity = held | {miss}
+        # On the MateBook the printed alternative for Home etc. is in the
+        # number block. If a dedicated Home actually arrives it remains visible.
+        nav = {cap["key"] for cap in self.aux_caps.values() if cap["group"] == "service"}
+        pad_aliases = {cap["key"]: cap.get("alias") for cap in self.aux_caps.values() if cap["group"] == "pad"}
+        aliases = {pad: alias for pad, alias in pad_aliases.items() if matebook and alias in nav and alias in targets}
+        visible = (targets - set(aliases.values())) | set(aliases) | activity
+        for group, grid in self.aux_groups.items():
+            grid.set_visible(any(k in self.aux_caps and self.aux_caps[k]["group"] == group for k in visible))
         for key, (cell, cap) in self.cells.items():
             if key == "Print":
                 cell.set_visible(not matebook)
@@ -256,8 +288,18 @@ class KeyboardView(Gtk.Box):
                 cell.add_css_class("dual-function")
             else:
                 cell.remove_css_class("dual-function")
+            if key in aliases:
+                # Both legends are on the physical pad key, only the
+                # printed action's canonical label changes with the target.
+                label += " · " + {"PageUp": "PgUp", "PageDown": "PgDn", "Insert": "Ins",
+                                    "Delete": "Del"}.get(aliases[key], aliases[key])
+                cell.set_ellipsize(Pango.EllipsizeMode.NONE)
+            elif key in pad_aliases:
+                cell.set_ellipsize(Pango.EllipsizeMode.END)
             cell.set_label(label)
-            if needs_fn(key, profile):
+            if key in aliases:
+                cell.set_tooltip_text(f"{key_label(key)} · {aliases[key]} на цифровом блоке")
+            elif needs_fn(key, profile):
                 cell.set_tooltip_text(physical_key_hint(key, profile) +
                                       (" · полноэкранный режим" if key == "F11" else ""))
             elif key == "Print" and profile.get("keyboardProfile") == "matebook-d16" and profile.get("fnMode") == "hotkeys":
@@ -265,7 +307,7 @@ class KeyboardView(Gtk.Box):
             else:
                 cell.set_tooltip_text(key_label(key))
             same_key = ("F11", "Print") if key == "F11" and matebook else (key,)
-            for name, enabled in (("target", any(item in keys for item in same_key)),
+            for name, enabled in (("target", key in aliases or any(item in targets for item in same_key)),
                                   ("held", any(item in held for item in same_key)),
                                   ("miss", miss in same_key)):
                 if enabled:
@@ -1853,7 +1895,7 @@ class Studio(Gtk.Application):
                                                                        Gdk.ModifierType.SUPER_MASK)):
             if inside_widget(self.window.get_focus(), self.page):
                 return False
-            self.replay_result(self.result_kind, self.result_settings)
+            self.result_default.activate()
             return True
         if (not self.result_kind and self.mode in ("shortcuts", "typing") and key in ("F4", "F7")
                 and not (modifiers & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SUPER_MASK))):
@@ -1937,15 +1979,7 @@ class Studio(Gtk.Application):
 
     def build_typing(self):
         catalog = self.library["typing"]
-        self.typing_options = [
-            ("Russian", "Русские фразы"), ("English", "Английские фразы"),
-            ("WordsRU", "Русский словарь"), ("WordsEN", "Английский словарь"),
-            ("Digits", "Цифры"), ("TopRow", "Цифры и знаки верхнего ряда"),
-            ("Hotkeys", "Горячие клавиши"), ("WordsDigits", "Слова и цифры"),
-            ("WordsDigitsHotkeys", "Слова, цифры и горячие клавиши"),
-            ("Project", "Python · task-list"), ("Symbols", "Спецсимволы"),
-            ("WeakRU", "Работа над промахами · RU"), ("WeakEN", "Работа над промахами · EN"),
-        ]
+        self.typing_options = [(item["id"], item["title"]) for item in catalog["modes"]]
         main_count = len(self.typing_options)
         self.typing_options += [(item["id"], "Python · " + item["title"]) for item in catalog["projects"]]
         self.typing_options += [(item["id"], "Свой набор · " + item["title"]) for item in catalog["sets"]]
@@ -1979,6 +2013,12 @@ class Studio(Gtk.Application):
         self.typing_prep = add(box(gap=8),
                               add(row(12), expand(text("Печать", "lesson-title")), self.typing_start),
                               self.typing_summary, self.typing_settings)
+        self.review_continuations = []
+        for pending in reversed(catalog.get("reviewDrafts", [])):
+            action = button(f'Продолжить исправление · {pending["title"]} · {pending["position"]}/{pending["total"]}',
+                            lambda id=pending["sourceId"]: self.start_mistake_review(id))
+            self.typing_prep.append(action)
+            self.review_continuations.append(action)
         self.typing_rows, self.typing_record_labels = {}, {}
         def grid_of(options):
             grid = Gtk.Grid(column_homogeneous=True, column_spacing=8, row_spacing=5)
@@ -2099,6 +2139,15 @@ class Studio(Gtk.Application):
                           seconds=[0, 60, 180, 300, 600][self.typing_time.get_selected()], layout=self.layout)
         if state is not None:
             self.accept_typing_run(state)
+
+    def start_mistake_review(self, source_id):
+        if self.workout:  # ignore the second activation of a button just replaced
+            return
+        state = self.call("typing-review-start", sourceId=source_id, layout=self.layout)
+        if state is None:
+            return
+        self.navigate("typing")
+        self.accept_typing_run(state)
 
     def accept_typing_run(self, state):
         self.message()
@@ -2498,17 +2547,33 @@ class Studio(Gtk.Application):
         panel.append(details)
         actions = row(8, "reference-modal-actions")
         actions.set_halign(Gtk.Align.CENTER)
-        again = button("Начать сначала", lambda: self.replay_result(kind, settings), "reference-primary")
-        again.set_tooltip_text("Начать сначала · Пробел")
-        add(actions, button("Завершить", lambda: self.navigate(kind), "reference-quiet"),
-            again, button("Прогресс", lambda: self.navigate("progress"), "reference-quiet"))
+        review = kind == "typing" and result["state"].get("isReview", False)
+        read_only = review or (kind == "typing" and result["state"].get("isHistory", False))
+        offer = kind == "typing" and result["state"].get("reviewAvailable", False)
+        self.correction_button = None
+        if offer:
+            self.correction_button = button("Работа над ошибками",
+                lambda: self.start_mistake_review(result["state"]["attemptId"]), "reference-primary")
+            self.correction_button.set_tooltip_text("Короткая практика только по промахам этой попытки")
+            panel.append(self.correction_button)
+        finish = button("К урокам" if review else "Завершить", lambda: self.navigate(kind),
+                        "reference-primary" if review else "reference-quiet")
+        actions.append(finish)
+        again = None
+        if not read_only:
+            again = button("Начать сначала", lambda: self.replay_result(kind, settings),
+                           "reference-quiet" if offer else "reference-primary")
+            actions.append(again)
+        self.result_progress = button("Прогресс", lambda: self.navigate("progress"), "reference-quiet")
+        actions.append(self.result_progress)
         panel.append(actions)
+        self.result_default = self.correction_button or again or finish
         scroller = scroll(panel)
         scroller.set_halign(Gtk.Align.CENTER)
         scroller.set_vexpand(True)
         scroller.set_overlay_scrolling(False)
         self.page.append(scroller)
-        again.grab_focus()
+        self.result_default.grab_focus()
 
     def replay_result(self, kind, settings):
         self.navigate(kind)
@@ -2558,11 +2623,24 @@ class Studio(Gtk.Application):
         typing = add(card(gap=8), text("Печать", "h3"))
         if not self.library["typingHistory"]:
             typing.append(text("Здесь сохраняются результаты занятий печатью.", "muted"))
+        self.typing_history_results = {}
         for item in self.library["typingHistory"]:
             when = item["date"][:10].split("-")
             label = f'{when[2]}.{when[1]}.{when[0]}  ·  {item["speed"]} сим/мин  ·  {item["accuracy"]:.1f}%  ·  ошибок {item["errors"]}'
-            typing.append(add(row(8), expand(text(item["lesson"], wrap=True)), text(label, "muted")))
+            entry = add(row(8), expand(text(item["lesson"], wrap=True)), text(label, "muted"))
+            if item.get("sourceId"):
+                view = button("Результат", lambda source=item["sourceId"]: self.open_typing_result(source))
+                bind_name(view, "Результат: " + item["lesson"])
+                self.typing_history_results[item["sourceId"]] = view
+                entry.append(view)
+            typing.append(entry)
         self.page.append(typing)
+
+    def open_typing_result(self, source_id):
+        result = self.call("typing-history-result", sourceId=source_id)
+        if result is not None:
+            self.navigate("typing")
+            self.build_result("typing", result, (), result["state"]["finished"])
 
     def from_progress(self, key):
         self.navigate("shortcuts")

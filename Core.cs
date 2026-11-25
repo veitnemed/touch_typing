@@ -14,8 +14,8 @@ namespace TouchTypingStudio
         public string LabDesktopEnvironment;
         public bool Configured;
         public bool F2Seen;
-        public bool ShowKeys = true;
-        public bool ShowHands = true;
+        public bool ShowKeys;
+        public bool ShowHands;
         public bool LiveShowKeys;
         public bool LiveShowHands;
         public bool ShowMistakeKey = true;
@@ -45,6 +45,7 @@ namespace TouchTypingStudio
         public List<TypingDraft> Drafts = new List<TypingDraft>();
         public List<string> GoodPasses = new List<string>();
         public List<string> CompletedRoutes = new List<string>();
+        public List<TypingReviewTicket> TypingReviews = new List<TypingReviewTicket>();
         public List<TypingResult> Results = new List<TypingResult>();
         public List<KeyMistakes> KeyHistory = new List<KeyMistakes>();
         public List<DayNote> Notes = new List<DayNote>();
@@ -108,9 +109,21 @@ namespace TouchTypingStudio
         public DateTime LastMistake;
     }
 
+    // One small ticket per eligible source session. Runtime-only input objects are
+    // deliberately not serialized by the desktop client (.NET Framework 4.8).
+    public class TypingReviewTicket
+    {
+        public string SourceId, Title;
+        public string Weights, Plan, Mistakes;
+        public int Position, Errors, Revision;
+        public double Seconds;
+        public bool Completed;
+    }
+
     public class TypingResult
     {
         public string Lesson;
+        public string PracticeAttemptId, ReviewOf;
         public string Language;
         public DateTime Date;
         public int Count;

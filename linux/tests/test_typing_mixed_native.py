@@ -150,6 +150,9 @@ class NativeMixed(TypingCycles):
         # Start on EN, switch the actual OS as required for composing words; the
         # exercise chooses its cap legends independently. Cross both text/chord boundaries.
         yield from self.choose("WordsDigitsHotkeys")
+        assert not self.guide.board.get_mapped()
+        yield from self.chord("F4")  # explicit opt-in, not the clean-profile default
+        assert self.guide.board.get_mapped()
         witnessed = set()
         for i in range(60):
             s = self.state

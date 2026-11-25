@@ -74,6 +74,7 @@ internal sealed partial class PracticeService
     internal object Handle(JsonElement message)
     {
         typingConflictNotice = null;
+        if (TryReviewCommand(message, out var reviewResponse)) return reviewResponse;
         bool verifyProfile = false;
         switch (Text(message, "command"))
         {
@@ -387,6 +388,10 @@ internal sealed partial class PracticeService
                 key = ShortcutCatalog.KeyName(cap), cap.Units, cap.Finger, cap.Anchor,
                 en = cap.English, ru = cap.Russian, enShift = cap.EnglishShift, ruShift = cap.RussianShift
             })),
+            keyboardAux = TypingKeyboard.Auxiliary.Select(cap => new
+            {
+                cap.Key, cap.Label, cap.Group, cap.Alias, cap.Column, cap.Row, cap.Width, cap.Height
+            }),
             liveSkills = profile.ShortcutHistory.Where(a => a.Mission != null).GroupBy(a => a.Skill).Select(group =>
             {
                 var samples = group.Where(a => a.Layout == layout && a.Independent && !a.Assisted).TakeLast(10).ToArray();
@@ -399,10 +404,11 @@ internal sealed partial class PracticeService
                         && successes.Select(a => a.Session).Distinct().Count() >= 2 };
             }),
             typing = TypingRun.Catalog(profile),
-            typingHistory = profile.Results.Where(item => item.Activity is "LinuxTyping" or "TypingPractice")
+            typingHistory = profile.Results.Where(item => item.Activity is "LinuxTyping" or "TypingPractice" or "TypingMistakeReview")
                 .TakeLast(60).Reverse().Select(item => new
             {
-                item.Lesson, item.Date, item.Speed, item.Accuracy, item.Count, item.Errors, item.Seconds
+                item.Lesson, item.Date, item.Speed, item.Accuracy, item.Count, item.Errors, item.Seconds,
+                sourceId = TypingReviewLedger.HistoryId(item)
             }),
             profile.ShowKeys, profile.ShowHands, profile.LiveShowKeys, profile.LiveShowHands,
             profile.ShowMistakeKey, profile.RightHandChord,
@@ -621,6 +627,14 @@ internal sealed partial class PracticeService
 
     internal void SuspendTyping(bool close = true)
     {
+        if (review != null)
+        {
+            // Normal window shutdown reaches this path after stdin EOF. A failed
+            // checkpoint has already preserved the previous complete XML on disk.
+            try { PersistReview(pause: true, force: true); }
+            catch (InvalidOperationException) when (close) { }
+            return;
+        }
         if (mixedTyping != null) { SuspendMixedTyping(); return; }
         typing?.Pause();
         if (typing == null || typing.IsSaved) return;

@@ -153,13 +153,16 @@ namespace TouchTypingStudio
             fingers = this.targets.Select(target => target.I("finger", -1)).Where(i => i >= 0 && i < FingerNames.Length).Distinct().ToArray();
             System.Windows.Automation.AutomationProperties.SetName(this,
                 string.Join(", ", fingers.Select(i => FingerNames[i])));
-            if (System.Windows.Automation.AutomationProperties.GetAutomationId(this) == "TypingKeyboard")
+            if (ReferenceAidRail || System.Windows.Automation.AutomationProperties.GetAutomationId(this) == "TypingKeyboard")
             {
                 var caps = this.rows.SelectMany(row => row.Items());
                 var shown = this.targets.Select(target => {
                     string id = target.S("key");
                     var cap = caps.FirstOrDefault(item => item.S("key") == id);
-                    string label = cap == null ? Title(id) : CapCaption(id, cap);
+                    var aux = TypingKeyboard.Auxiliary.FirstOrDefault(a => a.Key == id);
+                    var preferred = PreferredPad(id);
+                    if (preferred != null) return AuxiliaryLabel(preferred).Replace("\n", " / ") + " (" + preferred.Key + ")";
+                    string label = cap == null ? (aux == null ? Title(id) : aux.Label) : CapCaption(id, cap);
                     if (string.IsNullOrWhiteSpace(label)) label = Title(id);
                     return label.Equals(id, StringComparison.OrdinalIgnoreCase) ? label : label + " (" + id + ")";
                 });
@@ -186,6 +189,32 @@ namespace TouchTypingStudio
             return caption;
         }
 
+        private AuxiliaryCap PreferredPad(string key)
+        {
+            if (!functionRow || keyboardProfile != "matebook-d16") return null;
+            // Keep the existing directional block for ordinary arrows. On the
+            // laptop the secondary Home/Pg/Ins/Del marks live on the number pad.
+            if (!TypingKeyboard.Auxiliary.Any(cap => cap.Group == "service" && cap.Key == key)) return null;
+            return TypingKeyboard.Auxiliary.FirstOrDefault(cap => cap.Alias == key);
+        }
+
+        private string AuxiliaryLabel(AuxiliaryCap cap)
+        {
+            var nav = cap.Alias == null ? null : PreferredPad(cap.Alias);
+            if (nav != cap || !targets.Any(t => t.S("key") == cap.Alias)) return cap.Label;
+            return cap.Label + "\n" + TypingKeyboard.Auxiliary.First(a => a.Key == cap.Alias).Label;
+        }
+
+        private bool AuxiliaryActive(AuxiliaryCap cap)
+        {
+            return held.Contains(cap.Key) || incorrect == cap.Key || targets.Any(t =>
+            {
+                string key = t.S("key");
+                var pad = PreferredPad(key);
+                return pad == null ? cap.Key == key : cap == pad;
+            });
+        }
+
         protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer()
         { return new System.Windows.Automation.Peers.FrameworkElementAutomationPeer(this); }
 
@@ -208,12 +237,17 @@ namespace TouchTypingStudio
             if (keys)
             {
                 dc.DrawRoundedRectangle(Shell, new Pen(Edge, 1), bounds, 9, 9);
+                var extra = functionRow ? TypingKeyboard.Auxiliary.GroupBy(cap => cap.Group)
+                    .Where(group => group.Any(AuxiliaryActive)).ToArray() : new IGrouping<string, AuxiliaryCap>[0];
+                int extraColumns = extra.Sum(group => group.Max(cap => cap.Column + cap.Width));
+                double extraUnit = extraColumns == 0 ? 0 : Math.Min(35, bounds.Width * .30 / extraColumns);
+                double mainWidth = keyWidth - extraColumns * extraUnit - extra.Length * 5;
                 double height = (bounds.Height - 14) / (functionRow ? 6 : 5);
                 double y = bounds.Y + 7;
                 if (functionRow)
                 {
                     var functions = keyboardProfile == "matebook-d16" ? Functions.Take(13).ToArray() : Functions;
-                    double unit = (keyWidth - 14) / functions.Length;
+                    double unit = (mainWidth - 14) / functions.Length;
                     for (int i = 0; i < functions.Length; i++)
                         DrawKey(dc, functions[i], functions[i] == "F11" && keyboardProfile == "matebook-d16"
                                 ? (fnMode == "hotkeys" ? "PrtSc\nF11" : "F11\nPrtSc") : Title(functions[i]), -1, false,
@@ -230,7 +264,7 @@ namespace TouchTypingStudio
                     }
                     double total = items.Sum(item => item.N("units", 1));
                     if (total <= 0) continue;
-                    double wanted = (keyWidth - 14) / total;
+                    double wanted = (mainWidth - 14) / total;
                     double x = bounds.X + 7;
                     foreach (var cap in items)
                     {
@@ -242,6 +276,19 @@ namespace TouchTypingStudio
                         x += width;
                     }
                     y += height;
+                }
+                double groupX = bounds.X + mainWidth;
+                foreach (var group in extra)
+                {
+                    groupX += 5;
+                    int columns = group.Max(cap => cap.Column + cap.Width);
+                    double rows = group.Max(cap => cap.Row + cap.Height);
+                    double unitHeight = Math.Min(height, (bounds.Height - 14) / rows);
+                    foreach (var cap in group)
+                        DrawKey(dc, cap.Key, AuxiliaryLabel(cap), -1, false,
+                            new Rect(groupX + cap.Column * extraUnit, bounds.Y + 7 + cap.Row * unitHeight,
+                                Math.Max(1, cap.Width * extraUnit - 3), Math.Max(1, cap.Height * unitHeight - 3)));
+                    groupX += columns * extraUnit;
                 }
             }
             if (!hands) return;
@@ -264,8 +311,13 @@ namespace TouchTypingStudio
         private void DrawKey(DrawingContext dc, string id, string label, int finger, bool anchor, Rect rectangle)
         {
             bool combinedPrint = keyboardProfile == "matebook-d16" && id == "F11";
-            var target = targets.FirstOrDefault(item => item.S("key") == id ||
-                combinedPrint && item.S("key") == "Print");
+            var target = targets.FirstOrDefault(item =>
+            {
+                string key = item.S("key");
+                if (key == id || combinedPrint && key == "Print") return true;
+                string alias = TypingKeyboard.NavigationAlias(id);
+                return alias == key && PreferredPad(key) != null;
+            });
             if (target != null) finger = target.I("finger", finger);
             bool assigned = finger >= 0 && finger < Colors.Length;
             bool pressed = held.Contains(id) || combinedPrint && held.Contains("Print");

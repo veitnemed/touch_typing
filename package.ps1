@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory)]
     [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$')]
@@ -30,6 +30,8 @@ try {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'windows\Start-Workday.cmd') -Destination $payload
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'windows\Test-Live-UI.ps1') -Destination $payload
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'windows\LiveUiSmoke.cs') -Destination $payload
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'windows\Test-TypingReview.ps1') -Destination $payload
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'windows\TypingReviewWindowSmoke.cs') -Destination $payload
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'windows\README.md') -Destination (Join-Path $payload 'README.md')
     $codeLesson = Join-Path $payload 'code-lesson'
     [void][IO.Directory]::CreateDirectory($codeLesson)

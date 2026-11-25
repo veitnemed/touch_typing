@@ -82,6 +82,31 @@ class MixedTypingTest(unittest.TestCase):
         # Layout independent physical key positions of the laptop's ANSI rows.
         self.assertEqual([PHYSICAL[k] for k in (12, 55, 56, 68, 79)], ["3", "V", "B", "F2", "NumPad7"])
 
+    def test_modifier_only_native_layout_binding_never_becomes_a_command_or_miss(self):
+        for platform in ("windows", "linux"):
+            self.os = "RU"
+            self.engine.call("configure", platform=platform, layout=self.os, forward="Alt+Shift", backward="Ctrl+Shift")
+            for mode in ("Digits", "Hotkeys"):
+                with self.subTest(platform=platform, mode=mode):
+                    s = self.engine.call("typing-start", mode=mode, layout=self.os, level=2, seed=3)
+                    for modifier in ("LAlt", "LShift"):
+                        s = self.key(modifier)
+                        self.assertFalse(s["consumePhysical"], (s["held"], modifier))
+                    for modifier in ("LShift", "LAlt"):
+                        s = self.key(modifier, False)
+                    self.assertEqual((s["progressDone"], s["errors"], s["held"]), (0, 0, []))
+                    for modifier in ("RCtrl", "RShift"):
+                        s = self.key(modifier)
+                        self.assertFalse(s["consumePhysical"], (s["held"], modifier))
+                    for modifier in ("RShift", "RCtrl"):
+                        s = self.key(modifier, False)
+                    # Wrong modifiers + a non-layout trigger are not excused.
+                    if mode == "Hotkeys":
+                        self.assertEqual(self.chord("Alt+Shift+F8")["errors"], 1)
+                    n = s["errors"] + (mode == "Hotkeys")
+                    s = self.answer(s)
+                    self.assertEqual((s["progressDone"], s["errors"], s["held"]), (1, n, []))
+
     def test_toprow_symbols_and_keypad_text_are_composed_not_physical(self):
         for layout, expected_sign in (("RU", "№"), ("EN", "#")):
             with self.subTest(layout=layout):

@@ -157,6 +157,7 @@ namespace TouchTypingStudio
             root.Children.Add(feedbackStrip);
 
             keyboard = new LiveKeyboard { IsHitTestVisible = false, ReferenceAidRail = true };
+            AutomationProperties.SetAutomationId(keyboard, "LiveKeyboard");
             labGuide = new LiveAidRail { Child = keyboard, Height = 148, Margin = new Thickness(16, 0, 16, 5) };
             AutomationProperties.SetAutomationId(labGuide, "LiveAidPanel");
             Grid.SetRow(labGuide, 5);
