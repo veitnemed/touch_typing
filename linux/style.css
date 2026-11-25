@@ -533,3 +533,20 @@ window.reference-light button.reference-card:hover { background: #e7dcea; border
 }
 
 .typing-counter { color: #d4cbdc; font-family: Roboto, sans-serif; font-size: 15px; font-weight: 500; }
+
+/* A practice row is one keyboard action. Only its record marker/score conveys a band. */
+.reference-window .lesson-page button.typing-mode-row { background: @graph_card; border: 1px solid @graph_edge;
+  border-left-width: 3px; border-radius: 8px; padding: 4px 10px; min-height: 26px; }
+.reference-window .lesson-page button.typing-mode-row:hover { background: @graph_field; }
+.reference-window .lesson-page button.typing-mode-row:focus-visible { outline: 2px solid @graph_accent; outline-offset: -2px; }
+.typing-mode-title { color: @graph_ink; font-family: Roboto,sans-serif; font-size: 14px; font-weight: 500; }
+.typing-record-value, .typing-record-time { font-size: 12px; font-feature-settings: "tnum"; }
+.typing-record-time { color: @graph_muted; min-width: 38px; }
+.reference-window .lesson-page button.typing-record-gray { border-left-color: #77717c; }
+.reference-window .lesson-page button.typing-record-red { border-left-color: #d78e99; }
+.reference-window .lesson-page button.typing-record-orange { border-left-color: #d9ae78; }
+.reference-window .lesson-page button.typing-record-green { border-left-color: #8fbc9f; }
+.typing-record-gray .typing-record-value { color: #aaa4ae; }
+.typing-record-red .typing-record-value { color: #eaa2ad; }
+.typing-record-orange .typing-record-value { color: #ecc38f; }
+.typing-record-green .typing-record-value { color: #a7d4b4; }

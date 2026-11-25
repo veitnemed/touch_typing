@@ -30,6 +30,7 @@ namespace TouchTypingStudio
         public int AdaptivePythonLevel;
         public List<PracticeSet> PracticeSets = new List<PracticeSet>();
         public List<PracticeRecord> PracticeRecords = new List<PracticeRecord>();
+        public List<TypingModeBest> TypingModeBests = new List<TypingModeBest>();
         public List<SavedShortcut> Shortcuts = new List<SavedShortcut>();
         public List<ShortcutAttempt> ShortcutHistory = new List<ShortcutAttempt>();
         public List<LiveDraft> LiveDrafts = new List<LiveDraft>();
@@ -124,6 +125,7 @@ namespace TouchTypingStudio
         public bool Qualified;
         public int FirstMs;
         public string Context;
+        public TypingRecordConditions TypingConditions;
         [XmlIgnore] public double Accuracy { get { return Count + Errors == 0 ? 0 : (100.0 * Count) / (Count + Errors); } }
         [XmlIgnore] public int Speed { get { return Seconds <= 0 ? 0 : (int)Math.Round(60 * Count / Seconds); } }
     }

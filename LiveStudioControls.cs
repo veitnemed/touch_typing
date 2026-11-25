@@ -17,18 +17,20 @@ namespace TouchTypingStudio
         private static readonly Brush Error = Ui.Brush("#FF5366");
         private static readonly Typeface Typeface = new Typeface("Courier New");
 
-        public void Update(string before, string current, string after, bool error = false)
+        public void Update(string before, string current, string after, bool error = false, bool command = false)
         {
             Left = before;
             Current = current;
             Right = after;
             Incorrect = error;
+            IsCommand = command;
             AutomationPropertiesText();
             InvalidateVisual();
         }
 
         private string Left = "", Current = "", Right = "";
-        private bool Incorrect;
+        private bool Incorrect, IsCommand;
+        private static readonly Brush Command = Ui.Brush("#CBBAEA");
         private void AutomationPropertiesText()
         { System.Windows.Automation.AutomationProperties.SetName(this, Current + " " + Right); }
 
@@ -47,11 +49,11 @@ namespace TouchTypingStudio
             dc.DrawRoundedRectangle(Fill, new Pen(Edge, 6), bounds, 10, 10);
             double center = ActualWidth / 2;
             double size = Math.Min(54, Math.Max(41, ActualWidth / 19));
-            var active = Make(Current, size, Incorrect ? Error : Ink);
+            var active = Make(Current, size, Incorrect ? Error : IsCommand ? Command : Ink);
             if (active.Width > center - 20)
             {
                 size *= (center - 20) / active.Width;
-                active = Make(Current, size, Incorrect ? Error : Ink);
+                active = Make(Current, size, Incorrect ? Error : IsCommand ? Command : Ink);
             }
             var previous = Make(Left, size, Previous);
             var next = Make(Right, size, Ink);
@@ -151,9 +153,41 @@ namespace TouchTypingStudio
             fingers = this.targets.Select(target => target.I("finger", -1)).Where(i => i >= 0 && i < FingerNames.Length).Distinct().ToArray();
             System.Windows.Automation.AutomationProperties.SetName(this,
                 string.Join(", ", fingers.Select(i => FingerNames[i])));
+            if (System.Windows.Automation.AutomationProperties.GetAutomationId(this) == "TypingKeyboard")
+            {
+                var caps = this.rows.SelectMany(row => row.Items());
+                var shown = this.targets.Select(target => {
+                    string id = target.S("key");
+                    var cap = caps.FirstOrDefault(item => item.S("key") == id);
+                    string label = cap == null ? Title(id) : CapCaption(id, cap);
+                    if (string.IsNullOrWhiteSpace(label)) label = Title(id);
+                    return label.Equals(id, StringComparison.OrdinalIgnoreCase) ? label : label + " (" + id + ")";
+                });
+                string description = keys ? "Раскладка: " + layout + ". Подсвечены: " + string.Join(" + ", shown) :
+                    "Экранная клавиатура скрыта.";
+                System.Windows.Automation.AutomationProperties.SetHelpText(this, description);
+            }
             if (reflow) InvalidateMeasure();
             InvalidateVisual();
         }
+
+        private string CapCaption(string id, Data cap)
+        {
+            string language = layout == "RU" ? "ru" : "en";
+            string caption = cap.S(language, id);
+            if (Array.IndexOf(held, "LShift") >= 0 || Array.IndexOf(held, "RShift") >= 0)
+            {
+                string shifted = cap.S(language + "Shift");
+                if (shifted.Length > 0) caption = shifted;
+            }
+            if (id == "LSuper") return "⊞";
+            if (id == "Space") return "";
+            if (id == "CapsLock") return "Caps Lock";
+            return caption;
+        }
+
+        protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer()
+        { return new System.Windows.Automation.Peers.FrameworkElementAutomationPeer(this); }
 
         protected override Size MeasureOverride(Size available)
         {
@@ -201,10 +235,7 @@ namespace TouchTypingStudio
                     foreach (var cap in items)
                     {
                         string id = cap.S("key");
-                        string caption = cap.S(layout == "RU" ? "ru" : "en", id);
-                        if (id == "LSuper") caption = "⊞";
-                        if (id == "Space") caption = "";
-                        if (id == "CapsLock") caption = "Caps Lock";
+                        string caption = CapCaption(id, cap);
                         double width = wanted * cap.N("units", 1);
                         DrawKey(dc, id, caption,
                             cap.I("finger", -1), cap.B("anchor"), new Rect(x, y, Math.Max(1, width - 3), height - 3));

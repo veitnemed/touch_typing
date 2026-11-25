@@ -469,11 +469,14 @@ namespace TouchTypingStudio
             labKeyAid.ToolTip = "Показать или скрыть клавиатуру · " + DisplayLabGesture("F4");
             labHandAid.ToolTip = "Показать или скрыть руки · " + DisplayLabGesture("F7");
             var guide = state.D("guide").Items("steps").FirstOrDefault();
-            keyboard.Update(library.Items("keyboard"), "EN",
-                guide == null ? Enumerable.Empty<Data>() : guide.Items(), state.Items("held").Select(key => key.Value()),
+            var exerciseLayout = state.D("scene").S("layout") == "RU" ? "RU" : "EN";
+            var guideTargets = guide == null ? Enumerable.Empty<Data>() : guide.Items();
+            keyboard.Update(library.Items("keyboard"), exerciseLayout,
+                guideTargets, state.Items("held").Select(key => key.Value()),
                 library.B("showMistakeKey", true) && state.S("feedback") == "error" ? state.S("lastKey") : "",
                 library.B("liveShowKeys"), library.B("liveShowHands"), true,
                 library.S("keyboardProfile", "matebook-d16"), library.S("fnMode", "hotkeys"));
+            AutomationProperties.SetHelpText(labGuide, "Раскладка клавиатуры: " + exerciseLayout);
             labKeyAid.Opacity = library.B("liveShowKeys") ? 1 : .5;
             labHandAid.Opacity = library.B("liveShowHands") ? 1 : .5;
             labMistakeAid.Opacity = library.B("showMistakeKey", true) ? 1 : .5;

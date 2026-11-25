@@ -170,4 +170,4 @@ internal sealed class ClassicTypingPlan
 internal sealed record ClassicPlanCheckpoint(string[][] Cycles, TypingDraft[] Attempts);
 internal sealed record ClassicRunCheckpoint(string Format, string Id, string Mode, string Title, string Source,
     int Level, int Round, int TimeLimit, string Kind, int Cycle, int Cycles, int Done, int Total,
-    ClassicPlanCheckpoint Plan);
+    ClassicPlanCheckpoint Plan, string RecordMaterial = null);

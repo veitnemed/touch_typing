@@ -15,7 +15,7 @@ internal sealed partial class TypingRun
     private readonly Lesson lesson;
     private readonly int variant;
     private readonly ContinuousTyping continuous;
-    private readonly string title, source, tag;
+    private readonly string title, source, tag, recordMaterial;
     private readonly ClassicTypingPlan classic;
     private readonly ContinuousKind kind;
     private readonly int level;
@@ -38,7 +38,8 @@ internal sealed partial class TypingRun
     internal bool IsSaved => saved;
     internal static object Catalog(StudioProfile profile) => new
     {
-        draft = DraftHeader(profile.ClassicTypingDraft),
+        draft = DraftHeader(profile.ClassicTypingDraft) ?? MixedTypingRun.DraftSummary(profile.ClassicTypingDraft),
+        actionModes = MixedTypingRun.Modes.Select(p => new { id = p.Key, title = p.Value }).ToArray(),
         lessons = Lessons.All.Select(item => new { id = "lesson:" + item.Id, title = item.Title, language = CodeText.LanguageName(item.Language) }),
         projects = NeutralProject.Exercises.Select(item => new { id = "project:" + item.Name, title = item.Name, source = item.Path }),
         sets = profile.PracticeSets.Where(item => item.Kind != PracticeSetKind.Shortcuts)
@@ -51,6 +52,7 @@ internal sealed partial class TypingRun
         int cycles = 1, bool infinite = false)
     {
         tag = mode;
+        recordMaterial = TypingModeRecords.Material(profile, mode);
         timeLimit = Math.Clamp(seconds, 0, 3600);
         this.level = level = Math.Clamp(level, 0, 2);
         kind = ContinuousKind.Custom;
@@ -149,6 +151,7 @@ internal sealed partial class TypingRun
         if (!CanSave) return;
         var now = DateTime.Now;
         var score = Snapshot;
+        TypingModeRecords.PreserveHistory(profile); // Before motor/typing history can rotate.
         if (continuous != null)
         {
             continuous.SaveProgress(profile, now);
@@ -162,9 +165,11 @@ internal sealed partial class TypingRun
             TrainingProgress.OnLesson(profile, lesson, variant,
                 (classic == null ? continuous.HasPendingProgress : CompletedPlan && classic.Count >= lesson.Rounds[variant].Length) &&
                 score.Accuracy >= profile.Training.Goal, now);
-        profile.Results.Add(new TypingResult { Lesson = title, Task = tag, Activity = "TypingPractice", Date = now,
+        var item = new TypingResult { Lesson = title, Task = tag, Activity = "TypingPractice", Date = now,
             Count = (int)score.Count, Errors = (int)score.Errors, Seconds = score.Seconds,
-            Language = CodeText.LanguageOfText(Attempt.Target), Completed = CompletedPlan || (CycleCount == 0 && timeLimit > 0 && Finished) });
+            Language = CodeText.LanguageOfText(Attempt.Target), Completed = CompletedPlan || (CycleCount == 0 && timeLimit > 0 && Finished) };
+        TypingModeRecords.Record(profile, item, level, CycleCount, timeLimit, lesson == null ? -1 : variant, material: recordMaterial);
+        profile.Results.Add(item);
         if (profile.Results.Count > 500) profile.Results.RemoveRange(0, profile.Results.Count - 500);
         if (PracticeRecords.CanRecordTyping(score)) PracticeRecords.Record(profile, "linux-typing/" + tag, score.Cpm, score.Accuracy);
     }
@@ -179,7 +184,7 @@ internal sealed partial class TypingRun
     {
         if (!HasFiniteDraft) return null;
         return JsonSerializer.Serialize(new ClassicRunCheckpoint("classic-v1", AttemptId, tag, title, source, level, variant,
-            timeLimit, kind.ToString(), classic.Cycle, CycleCount, classic.Count, classic.Total, classic.Checkpoint()), DraftJson);
+            timeLimit, kind.ToString(), classic.Cycle, CycleCount, classic.Count, classic.Total, classic.Checkpoint(), recordMaterial), DraftJson);
     }
 
     internal static TypingRun Continue(string saved)
@@ -200,6 +205,7 @@ internal sealed partial class TypingRun
     {
         if (!Enum.TryParse<ContinuousKind>(d.Kind, out kind) || !Enum.IsDefined(kind)) throw ClassicTypingPlan.InvalidDraft();
         tag = d.Mode; title = d.Title; source = d.Source; level = d.Level; AttemptId = d.Id;
+        recordMaterial = d.RecordMaterial;
         timeLimit = d.TimeLimit; variant = d.Round;
         lesson = tag.StartsWith("lesson:", StringComparison.Ordinal) ? Lessons.Find(tag[7..]) : null;
         if (lesson != null && (variant < 0 || variant >= lesson.Rounds.Length)) throw ClassicTypingPlan.InvalidDraft();

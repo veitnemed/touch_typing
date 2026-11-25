@@ -17,7 +17,7 @@ gi.require_version("Graphene", "1.0")
 gi.require_version("PangoCairo", "1.0")
 from gi.repository import Gdk, Gio, GLib, Graphene, Gtk, Pango, PangoCairo
 
-from platform_linux import APP_ID, Engine, EngineError, FINGERS, InputSources, MODIFIERS, PHYSICAL, ROOT, chord_label, key_label
+from platform_linux import APP_ID, Engine, EngineError, FINGERS, InputSources, MODIFIERS, PHYSICAL, ROOT, active_keyboard_layout, chord_label, key_label, layout_for_group
 from lab_view import DesktopView
 from visuals import PracticeLine, fingers as paint_fingers, hand_picture, series_chart
 
@@ -242,7 +242,10 @@ class KeyboardView(Gtk.Box):
                     cell.remove_css_class(style)
             if color_class != "finger-":
                 cell.add_css_class(color_class)
-            caption = cap["ru" if layout == "RU" else "en"]
+            language = "ru" if layout == "RU" else "en"
+            caption = cap[language]
+            if "LShift" in held or "RShift" in held:
+                caption = cap.get(language + "Shift") or caption
             label = {"LSuper": "⊞", "RSuper": "⊞", "Space": "", "Print": "PrtSc",
                      "CapsLock": "Caps Lock"}.get(key, caption)
             if key == "F11" and matebook:
@@ -272,6 +275,7 @@ class LessonGuide(Gtk.Box):
     def __init__(self, rows, function_row=True):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.add_css_class("lesson-guide")
+        self.rows, self.function_row = rows, function_row
         self.board = KeyboardView(rows, function_row)
         self.board.add_css_class("key-deck")
         self.board.set_hexpand(False)
@@ -290,6 +294,19 @@ class LessonGuide(Gtk.Box):
         self.show_keys = self.show_hands = True
         self.chosen = ()
         self.reflow(1140)
+
+    def set_functions(self, show):
+        if show == self.function_row:
+            return
+        self.function_row = show
+        self.panel.remove(self.board)
+        self.board = KeyboardView(self.rows, show)
+        self.board.add_css_class("key-deck")
+        self.board.set_hexpand(False)
+        self.board.set_valign(Gtk.Align.CENTER)
+        self.panel.insert_child_after(self.board, self.hands["left"])
+        width, self.guide_width = self.guide_width, 0
+        self.reflow(width)
 
     def reflow(self, width):
         width = max(606, width)
@@ -1693,7 +1710,7 @@ class Studio(Gtk.Application):
         elif self.workout == "typing":
             self.render_typing_state(self.state)
         elif self.mode == "typing":
-            self.guide.paint(self.library, self.layout)
+            self.guide.set_visible(False)
 
     def hint_key(self, key):
         toggle = self.hint_buttons[key]
@@ -1715,16 +1732,15 @@ class Studio(Gtk.Application):
         elif controller is not None:
             # GNOME can replace the Wayland keymap when switching sources. Ask GDK
             # how it translates physical A in this event, independent of source-list order.
-            translated, probe, *_ = self.window.get_display().translate_key(
-                38, Gdk.ModifierType(0), controller.get_group())
-            if translated and (codepoint := Gdk.keyval_to_unicode(probe)):
-                candidate = {"a": "EN", "ф": "RU"}.get(chr(codepoint).lower())
+            candidate = layout_for_group(Gdk, self.window.get_display(), controller.get_group())
         if candidate and candidate != self.layout:
             self.layout = candidate
             self.show_layout()
             if not self.workout and not self.recording and not self.result_kind and self.mode == "shortcuts":
                 self.refresh()
                 self.change_group()
+            elif not self.workout and not self.result_kind and self.mode == "typing":
+                self.refresh_typing_records()
 
     def key_pressed(self, controller, keyval, keycode, modifiers):
         key = PHYSICAL.get(keycode, "")
@@ -1769,23 +1785,42 @@ class Studio(Gtk.Application):
             self.send_shortcut_key(key or "Неизвестная клавиша", True, character)
             return True
         if self.workout == "typing":
-            if key == "Esc":
+            physical = self.state.get("typedActions", False)
+            command_target = self.state.get("expectedKind") == "command" and key in self.state.get("expectedKeys", ())
+            modified = modifiers & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK |
+                                    Gdk.ModifierType.SUPER_MASK | Gdk.ModifierType.SHIFT_MASK)
+            # Reserved standalone trainer controls never break an authored chord that uses the same key.
+            control = not modified and (not command_target or self.paused)
+            if key == "Esc" and control:
                 self.stop()
-            elif key in ("F4", "F7"):
+            elif key in ("F4", "F7") and control:
                 self.hint_key("keys" if key == "F4" else "hands")
-            elif key == "F8" or self.paused and key == "Space":
+            elif (key == "F8" and control) or (self.paused and key == "Space" and not modified):
                 self.typing_pause() if not self.paused else self.typing_resume()
             elif self.paused and key == "Enter":
                 return self.window.get_focus() is not self.finish_button
-            elif not self.paused and not (modifiers & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK |
-                                                         Gdk.ModifierType.SUPER_MASK)):
-                typed = {"Enter": "\n", "NumEnter": "\n", "Backspace": "\b", "Tab": "\t"}.get(key, character)
-                if typed and (typed in ("\n", "\t", "\b") or typed.isprintable()):
-                    state = self.call("typing-key", text=typed, layout=self.layout)
-                    if state:
-                        self.render_typing_state(state)
-                        if state["finished"]:
-                            self.stop(completed=True)
+            elif not self.paused:
+                if physical and key:
+                    self.pressed.add(key)
+                    state = self.call("typing-physical", key=key, pressed=True, layout=self.layout)
+                    if state is None:
+                        return True
+                    consumed = state["consumePhysical"]
+                    self.render_typing_state(state)
+                    if state["finished"]:
+                        self.stop(completed=True)
+                        return True
+                    if consumed:
+                        return True
+                if not (modified & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK |
+                                    Gdk.ModifierType.SUPER_MASK)):
+                    typed = {"Enter": "\n", "NumEnter": "\n", "Backspace": "\b", "Tab": "\t"}.get(key, character)
+                    if typed and (typed in ("\n", "\t", "\b") or typed.isprintable()):
+                        state = self.call("typing-key", text=typed, layout=self.layout)
+                        if state:
+                            self.render_typing_state(state)
+                            if state["finished"]:
+                                self.stop(completed=True)
             return True
         if key == "F5" and not self.result_kind and self.mode in ("shortcuts", "typing"):
             self.toggle_shortcut() if self.mode == "shortcuts" else self.start_typing()
@@ -1824,6 +1859,12 @@ class Studio(Gtk.Application):
             return
         if self.recording:
             self.capture_release(key)
+        elif self.workout == "typing" and self.state.get("typedActions") and key in self.pressed:
+            self.pressed.discard(key)
+            if not self.paused:
+                state = self.call("typing-physical", key=key, pressed=False, layout=self.layout)
+                if state:
+                    self.render_typing_state(state)
         elif self.workout == "shortcuts" and key in self.pressed:
             self.pressed.remove(key)
             if not self.paused and not self.capture_was_revoked():
@@ -1880,14 +1921,16 @@ class Studio(Gtk.Application):
         self.typing_options = [
             ("Russian", "Русские фразы"), ("English", "Английские фразы"),
             ("WordsRU", "Русский словарь"), ("WordsEN", "Английский словарь"),
+            ("Digits", "Цифры"), ("TopRow", "Цифры и знаки верхнего ряда"),
+            ("Hotkeys", "Горячие клавиши"), ("WordsDigits", "Слова и цифры"),
+            ("WordsDigitsHotkeys", "Слова, цифры и горячие клавиши"),
             ("Project", "Python · task-list"), ("Symbols", "Спецсимволы"),
             ("WeakRU", "Работа над промахами · RU"), ("WeakEN", "Работа над промахами · EN"),
         ]
+        main_count = len(self.typing_options)
         self.typing_options += [(item["id"], "Python · " + item["title"]) for item in catalog["projects"]]
         self.typing_options += [(item["id"], "Свой набор · " + item["title"]) for item in catalog["sets"]]
-        self.typing_options += [(item["id"], "Урок · " + item["title"]) for item in catalog["lessons"]
-                                if item["language"] == "RU" or item["id"] in ("lesson:qwop", "lesson:xc") or
-                                "motion" in item["id"] or item["id"] == "lesson:home-rest"]
+        self.typing_options += [(item["id"], "Урок · " + item["title"]) for item in catalog["lessons"]]
         self.typing_pick = bind_name(dropdown([item[1] for item in self.typing_options]), "Урок печати")
         current = next((index for index, item in enumerate(self.typing_options) if item[0] == self.typing_choice), 0)
         self.typing_pick.set_selected(current)
@@ -1900,20 +1943,49 @@ class Studio(Gtk.Application):
         settings_row = row(12)
         for name, field in (("Объём", self.typing_cycles), ("Сложность", self.typing_level), ("Таймер", self.typing_time)):
             settings_row.append(expand(add(box(gap=3), text(name, "muted"), field)))
-        self.typing_settings.set_child(settings_row)
+        self.typing_settings.set_child(add(box(gap=5), settings_row, text("Поиск по всем упражнениям", "muted"), self.typing_pick))
         self.typing_summary = text("", "muted", wrap=True)
         def summarize(*_):
             index = self.typing_cycles.get_selected()
             caption = ["1 цикл", "2 цикла", "3 цикла", "4 цикла", "5 циклов", "Бесконечная печать"][index]
             timer = ["без таймера", "1 мин", "3 мин", "5 мин", "10 мин"][self.typing_time.get_selected()]
-            self.typing_summary.set_label(f"{caption}  ·  {timer}" +
-                                          ("  ·  350–550 знаков в цикле" if index < 5 else ""))
+            has_commands = self.typing_options[self.typing_pick.get_selected()][0] in ("Hotkeys", "WordsDigitsHotkeys")
+            units = "действий" if has_commands else "знаков"
+            self.typing_summary.set_label(f"{caption}  ·  {timer}" + (f"  ·  350–550 {units} в цикле" if index < 5 else "")
+                                          + ("  ·  сочетание = 1 действие" if has_commands else ""))
+        self.typing_pick.connect("notify::selected", summarize)
         self.typing_cycles.connect("notify::selected", summarize)
         self.typing_time.connect("notify::selected", summarize)
         summarize()
-        self.typing_prep = add(box(gap=8), text("Печать", "lesson-title"),
-                              add(row(8), expand(self.typing_pick), self.typing_start),
+        self.typing_prep = add(box(gap=8),
+                              add(row(12), expand(text("Печать", "lesson-title")), self.typing_start),
                               self.typing_summary, self.typing_settings)
+        self.typing_rows, self.typing_record_labels = {}, {}
+        def grid_of(options):
+            grid = Gtk.Grid(column_homogeneous=True, column_spacing=8, row_spacing=5)
+            for i, (mode, name) in enumerate(options):
+                control = Gtk.Button()
+                control.add_css_class("typing-mode-row")
+                title = text(name, "typing-mode-title")
+                title.set_ellipsize(Pango.EllipsizeMode.END)
+                accuracy, seconds = text("—", "typing-record-value"), text("—", "typing-record-time")
+                control.set_child(add(row(7), expand(title), accuracy, seconds))
+                self.typing_rows[mode], self.typing_record_labels[mode] = control, (accuracy, seconds)
+                def start_row(_widget, selected=mode):
+                    self.typing_pick.set_selected(next(i for i, item in enumerate(self.typing_options)
+                                                       if item[0] == selected))
+                    self.start_typing()
+                control.connect("clicked", start_row)
+                grid.attach(control, i % 2, i // 2, 1, 1)
+            return grid
+        self.typing_prep.append(text("Упражнение   ·   лучшая точность и активное время одной попытки", "muted", wrap=True))
+        self.typing_prep.append(grid_of(self.typing_options[:main_count]))
+        more = Gtk.Expander(label=f"Дополнительные уроки и материалы · {len(self.typing_options) - main_count}")
+        more.set_child(grid_of(self.typing_options[main_count:]))
+        self.typing_prep.append(more)
+        for selector in (self.typing_level, self.typing_cycles, self.typing_time):
+            selector.connect("notify::selected", self.refresh_typing_records)
+        self.refresh_typing_records()
         draft = catalog.get("draft")
         if draft:
             def continue_draft():
@@ -1957,6 +2029,38 @@ class Studio(Gtk.Application):
         self.finish_button.set_visible(False)
         add(self.page, self.typing_hero, self.guide)
         self.guide.paint(self.library, self.layout)
+        self.typing_hero.set_visible(False)
+        self.guide.set_visible(False)
+
+    def refresh_typing_records(self, *_):
+        choice = self.typing_cycles.get_selected()
+        values = self.call("typing-records", level=self.typing_level.get_selected(),
+                           cycles=choice + 1 if choice < 5 else 0, infinite=choice == 5,
+                           seconds=[0, 60, 180, 300, 600][self.typing_time.get_selected()], layout=self.layout) or {}
+        for mode, name in self.typing_options:
+            record = values.get(mode) or {}
+            accuracy, seconds = record.get("accuracy"), record.get("seconds")
+            control = self.typing_rows[mode]
+            labels = self.typing_record_labels[mode]
+            band = record.get("band", "gray")
+            for style in ("gray", "red", "orange", "green"):
+                cls = "typing-record-" + style
+                if style == band:
+                    control.add_css_class(cls)
+                else:
+                    control.remove_css_class(cls)
+            # Truncate for display, never round a non-qualifying score UP to a boundary.
+            acc = "—" if accuracy is None else (f"{math.floor(accuracy * 100) / 100:.2f}"
+                                                 .rstrip("0").rstrip(".").replace(".", ",") + "%")
+            duration = "—" if seconds is None else self.clock_text(seconds)
+            labels[0].set_label(acc)
+            labels[1].set_label(duration)
+            note = (f"Лучшая точность: {acc}. Активное время этой попытки: {duration}." if accuracy is not None
+                    else "Нет завершённых сопоставимых попыток.")
+            if record.get("legacy"):
+                note += " Из прежней версии, параметры не записаны."
+            control.set_tooltip_text(name + ". " + note)
+            bind_name(control, name + ". " + note)
 
     def start_typing(self):
         if self.workout:
@@ -1964,6 +2068,12 @@ class Studio(Gtk.Application):
             return
         self.typing_choice = self.typing_options[self.typing_pick.get_selected()][0]
         choice = self.typing_cycles.get_selected()
+        # A pointer click or Space can start an exercise immediately after the
+        # system layout changed. Neither input is evidence for the last letter's layout.
+        active = active_keyboard_layout(Gdk, self.window.get_display()) or self.sources.guess(self.layout)
+        if active != self.layout:
+            self.layout = active
+            self.show_layout()
         state = self.call("typing-start", mode=self.typing_choice, level=self.typing_level.get_selected(),
                           cycles=choice + 1 if choice < 5 else 0, infinite=choice == 5,
                           seconds=[0, 60, 180, 300, 600][self.typing_time.get_selected()], layout=self.layout)
@@ -1975,6 +2085,10 @@ class Studio(Gtk.Application):
         self.workout = "typing"
         self.paused = False
         self.typing_prep.set_visible(False)
+        self.typing_hero.set_visible(True)
+        self.guide.set_visible(True)
+        self.guide.set_functions(bool(state.get("typedActions")))
+        self.pressed.clear()
         self.page.add_css_class("engaged")
         self.typing_controls.set_visible(True)
         self.pause_button.set_visible(True)
@@ -2001,13 +2115,15 @@ class Studio(Gtk.Application):
             self.typing_progress.set_fraction(state["progressFraction"])
         self.typing_counter.set_label(f'{done}/{state["progressTotal"]}' if finite else f"Набрано: {done}")
         self.typing_counter.set_visible(True)
-        self.typing_text.update(state["before"], state["after"], state["correct"])
+        command = state.get("expectedKind") == "command"
+        self.typing_text.update(state["before"], state["after"], state["correct"],
+                                state.get("expectedDisplay", "") if command else "")
         timer = self.clock_text(state["seconds"])
         if state["timeLimit"]:
             timer += " / " + self.clock_text(state["timeLimit"])
         self.typing_timer.set_label(timer)
         detail = "Пауза. Нажмите пробел, чтобы продолжить." if self.paused else ""
-        if not detail and state["wantedLayout"] != self.layout and state["key"]:
+        if not detail and not command and state["wantedLayout"] != self.layout and state["key"]:
             detail = "Смените раскладку на " + state["wantedLayout"]
         if not detail and state["weak"]:
             detail = "Повтор промаха: " + state["weak"]
@@ -2018,19 +2134,23 @@ class Studio(Gtk.Application):
                                            "Пауза · " + physical_key_hint("F8", self.library))
         hints = []
         targets = {}
-        if state["finger"] is not None:
+        if state.get("expectedTargets"):
+            targets.update((entry["key"], entry["finger"]) for entry in state["expectedTargets"])
+        elif state["finger"] is not None:
             targets[state["key"]] = state["finger"]
         if state["modifier"]:
             targets[state["modifier"]] = 0 if state["modifier"] == "LShift" else 7
         for key, finger in targets.items():
             hints.append(f"{key_label(key)} — {FINGERS[finger]}")
-        self.guide.paint(self.library, state["wantedLayout"], targets, notes="  ·  ".join(hints), chosen=targets.values())
+        self.guide.paint(self.library, state["wantedLayout"], targets, state.get("held", ()),
+                         notes="  ·  ".join(hints), chosen=targets.values())
 
     def toggle_typing_pause(self):
         self.typing_resume() if self.paused else self.typing_pause()
 
     def typing_pause(self):
         self.paused = True
+        self.pressed.clear()
         state = self.call("typing-pause", layout=self.layout)
         if state:
             self.render_typing_state(state)
@@ -2745,7 +2865,7 @@ class LabPage(Gtk.Box):
         self.guide_scroll.set_propagate_natural_height(True)
         self.guide_scroll.set_child(self.guide)
         self.content.append(self.guide_scroll)
-        self.guide.paint(self.live_guide_profile(), "EN")
+        self.guide.paint(self.live_guide_profile(), "RU" if host.layout == "RU" else "EN")
         self.set_desktop_classes()
         for widget in (self.toolbar, self.stage, self.footer, self.guide_scroll, self.details):
             widget.set_visible(False)
@@ -3289,7 +3409,8 @@ class LabPage(Gtk.Box):
         guided = state.get("showGuide", True)
         self.task.set_label(task.get("title", "") if guided else state.get("phase", ""))
         hints = [task.get("hint", "")] if guided else []
-        gesture = display_chord(task.get("keys", ""), self.host.library) or task.get("text", "")
+        raw_keys = task.get("keys", "")
+        gesture = raw_keys.replace("+", " + ") or task.get("text", "")
         if guided and not task.get("keys") and task.get("id", "").startswith("open-"):
             gesture = "⊞ → " + task["text"] + " → Enter"
         elif guided and task.get("id", "").startswith("command/") and len(task.get("text", "")) > 12:
@@ -3309,7 +3430,7 @@ class LabPage(Gtk.Box):
                 tile = text(token, "reference-key-join" if token in ("+", "→") else "reference-keycap")
                 tile.set_ellipsize(Pango.EllipsizeMode.END)
                 tile.set_max_width_chars(25 if len(tokens) == 1 else 11)
-                tile.set_tooltip_text(token)
+                tile.set_tooltip_text(display_chord(raw_keys, self.host.library) if raw_keys else token)
                 tile.set_xalign(.5)
                 self.gesture.append(tile)
         self.gesture.set_visible(bool(tokens))
@@ -3352,7 +3473,9 @@ class LabPage(Gtk.Box):
         notes = "  ·  ".join(f'{key_label(k)} — {FINGERS[f]}' for k, f in targets.items())
         miss = (state.get("lastKey") if state.get("feedback") == "error" and
                 self.host.library.get("showMistakeKey", True) else None)
-        self.guide.paint(self.live_guide_profile(), "EN", targets,
+        scene = state["scene"]
+        exercise_layout = scene.get("layout", "EN") if scene.get("layoutIsVirtual") else self.host.layout
+        self.guide.paint(self.live_guide_profile(), exercise_layout, targets,
                          state["held"], miss=miss, notes=notes, chosen=targets.values())
         self.layout_guide()
         if state.get("limitDecisionPending"):

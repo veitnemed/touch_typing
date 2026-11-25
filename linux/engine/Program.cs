@@ -224,10 +224,12 @@ internal sealed partial class PracticeService
             case "shortcut-resume": run?.Resume(); return ShortcutState();
             case "typing-start":
                 FinishTyping();
-                if (typing?.CanSave == true && store.Error != null) throw new InvalidOperationException(store.Error);
+                if ((typing?.CanSave == true || mixedTyping?.CanSave == true) && store.Error != null) throw new InvalidOperationException(store.Error);
                 profile = store.Read();
                 if (store.Error != null) throw new InvalidOperationException(store.Error);
                 TrainingProgress.Migrate(profile, DateTime.Now);
+                mixedTyping = null;
+                if (StartMixedTyping(message)) return TypingState(message);
                 string typingMode = Text(message, "mode");
                 typing = new TypingRun(typingMode.Length == 0 ? "Russian" : typingMode, Number(message, "level"), Number(message, "round", -1),
                     Number(message, "seconds"), profile,
@@ -241,19 +243,26 @@ internal sealed partial class PracticeService
                 profile = store.Read();
                 if (store.Error != null) throw new InvalidOperationException(store.Error);
                 RequireRequestedTypingDraft(message, profile.ClassicTypingDraft);
+                if (ContinueMixedTyping()) return TypingState(message);
+                mixedTyping = null;
                 typing = TypingRun.Continue(profile.ClassicTypingDraft);
                 BeginTypingOwnership(profile.ClassicTypingDraft, true);
                 return TypingState(message);
+            case "typing-physical": return MixedInputState(message);
             case "typing-key":
-                typing?.Enter(Text(message, "text"));
-                verifyProfile = typing?.Finished == true;
+                if (mixedTyping != null) mixedTyping.Enter(Text(message, "text")); else typing?.Enter(Text(message, "text"));
+                verifyProfile = mixedTyping?.Finished ?? typing?.Finished == true;
                 break;
-            case "typing-state": verifyProfile = typing?.Finished == true; break;
+            case "typing-state": verifyProfile = mixedTyping?.Finished ?? typing?.Finished == true; break;
             case "typing-pause": SuspendTyping(close: false); break;
             case "typing-suspend": SuspendTyping(); break;
-            case "typing-resume": typing?.Resume(); break;
+            case "typing-resume": if (mixedTyping != null) mixedTyping.Resume(); else typing?.Resume(); break;
             case "typing-stop": FinishTyping(); break;
-            case "typing-result": return typing?.Result(Text(message, "layout"));
+            case "typing-records":
+                return TypingModeRecords.ForCards(profile, Number(message, "level"),
+                    Flag(message, "infinite") ? 0 : Number(message, "cycles", 1),
+                    Number(message, "seconds"), Number(message, "round", -1), Text(message, "layout"));
+            case "typing-result": return mixedTyping?.Result(Text(message, "layout")) ?? typing?.Result(Text(message, "layout"));
             case "ping": return "ok";
             default: throw new ArgumentException("Неизвестная команда.");
         }
@@ -585,6 +594,7 @@ internal sealed partial class PracticeService
 
     internal void FinishTyping()
     {
+        if (mixedTyping != null) { FinishMixedTyping(); return; }
         typing?.Pause();
         if (typing?.CanSave != true) return;
         if (SaveTypingOutcome(typing.AttemptId, typing.Save)) typing.Saved();
@@ -592,6 +602,7 @@ internal sealed partial class PracticeService
 
     internal void SuspendTyping(bool close = true)
     {
+        if (mixedTyping != null) { SuspendMixedTyping(); return; }
         typing?.Pause();
         if (typing == null || typing.IsSaved) return;
         if (typing.HasFiniteDraft)
@@ -601,7 +612,7 @@ internal sealed partial class PracticeService
         else if (typing.Finished || close && typing.CycleCount == 0) FinishTyping();
     }
 
-    private object TypingState(JsonElement message) => typing?.State(Text(message, "layout") == "RU" ? "RU" : "EN");
+    private object TypingState(JsonElement message) => mixedTyping?.State(Text(message, "layout")) ?? typing?.State(Text(message, "layout") == "RU" ? "RU" : "EN");
 
     private void Save(Action<StudioProfile> change)
     {

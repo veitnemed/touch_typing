@@ -37,6 +37,9 @@ jobs:
           export PYTHONPATH="$PWD/linux" TOUCH_TYPING_ENGINE="$p/touch-typing-linux-x64/engine/TouchTyping.Engine"
           /usr/bin/python3 linux/tests/test_practice.py
           /usr/bin/python3 linux/tests/test_classic_cycles.py
+          /usr/bin/python3 linux/tests/test_mixed_typing.py
+          /usr/bin/python3 linux/tests/test_typing_mode_records.py
+          /usr/bin/python3 linux/tests/test_active_keyboard_layout.py
           /usr/bin/python3 linux/tests/test_live_entry_preferences.py
           /usr/bin/python3 linux/tests/test_live_missions.py
           /usr/bin/python3 linux/tests/test_editor_notebooks.py
@@ -80,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends xvfb xauth ffmpeg gir1.2-gtk-4.0 python3-gi python3-cairo python3-gi-cairo libxtst6 libglib2.0-bin
+          sudo apt-get install -y --no-install-recommends xvfb xauth ffmpeg x11-xkb-utils gir1.2-gtk-4.0 python3-gi python3-cairo python3-gi-cairo libxtst6 libglib2.0-bin
           p="$RUNNER_TEMP/archives"
           (cd "$p" && sha256sum -c SHA256SUMS.txt)
           temp=$(mktemp -d)
@@ -97,7 +100,7 @@ jobs:
             trap "kill -INT $video 2>/dev/null || true; wait $video || true" EXIT
             /usr/bin/python3 linux/tests/test_preview2_native.py
           ' | tee "$TOUCH_TYPING_QA_OUTPUT/gtk-test.log"
-          for scenario in test_editor_notebooks_x11.py test_project_files_x11.py test_typing_cycles_native.py; do
+          for scenario in test_editor_notebooks_x11.py test_project_files_x11.py test_typing_cycles_native.py test_typing_records_gtk.py test_typing_mixed_native.py test_live_guide_layout_native.py; do
             export TOUCH_TYPING_QA_OUTPUT="$RUNNER_TEMP/gtk-proof/${scenario%.py}" TOUCH_TYPING_QA_DATA_ROOT="$temp/${scenario%.py}"
             mkdir -m 700 "$TOUCH_TYPING_QA_OUTPUT" "$TOUCH_TYPING_QA_DATA_ROOT"
             export SCENARIO="$scenario" TOUCH_TYPING_QA_VIDEO=1
@@ -168,6 +171,9 @@ jobs:
           Expand-Archive -LiteralPath $zip -DestinationPath $app
           $proof = "$env:RUNNER_TEMP/windows-proof"
           & "./windows/Test-Typing-Session.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-session"
+          & "./windows/Test-TypingCardRecords.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-records"
+          & "./windows/Test-Typing-Mixed.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-mixed"
+          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -NativeLayout -Seed 0 -OutputDirectory "$proof/live-layout"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -NotebookMission -Seed 0 -OutputDirectory "$proof/notebook"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -ProjectFileMission -Seed 0 -OutputDirectory "$proof/project-files"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -EditorProjectFileMission -Seed 0 -OutputDirectory "$proof/editor-project-files"

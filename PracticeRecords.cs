@@ -8,6 +8,23 @@ namespace TouchTypingStudio
         public double Speed, Accuracy;
     }
 
+    // XML types understood by both the shared engine and the Windows shell.
+    // An old TypingResult has no TypingConditions: never silently give it a modern cohort.
+    public class TypingRecordConditions
+    {
+        public int Level, Cycles, TimerSeconds, Round = -1;
+        public string Layout, Material;
+        public bool Eligible;
+    }
+
+    public class TypingModeBest
+    {
+        public string Mode;
+        public TypingRecordConditions Conditions;
+        public int Count, Errors;
+        public double ActiveSeconds;
+    }
+
     internal static class PracticeRecords
     {
         public const int MinimumCharacters = 180;
