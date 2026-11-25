@@ -64,6 +64,7 @@ internal sealed class VirtualTerminal
     internal string[] Entries(string path) => Children(Resolve(path)).OrderByDescending(directories.Contains).ThenBy(Name, StringComparer.OrdinalIgnoreCase).ToArray();
     internal void StoreFile(string path, string body) => Write(Resolve(path), body);
     internal void Transfer(string source, string destination, bool move) => CopyMove(move ? [source, destination] : ["-r", source, destination], move);
+    internal void RemoveProjectEntry(string path, bool folder) => Remove(folder ? ["-r", path] : [path]);
     internal void CreateFolder(string path) => MakeDirectories(["-p", path]);
     internal string ReadFile(string path) => files.GetValueOrDefault(Resolve(path));
     internal bool Exists(string path) => files.ContainsKey(Resolve(path)) || directories.Contains(Resolve(path));

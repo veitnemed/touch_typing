@@ -24,11 +24,12 @@ internal sealed partial class LabScene
     ];
     private NotebookCase notebookCase;
     private int notebookLevel;
-    internal bool NotebookCourse => notebookCase != null;
-    internal string NotebookFile => notebookCase.File;
-    internal string NotebookReport => notebookCase.Report;
+    internal bool NotebookCourse => notebookCase != null || CsvNotebook;
+    internal string NotebookFile => CsvNotebook ? CsvNotebookFile : notebookCase.File;
+    internal string NotebookReport => CsvNotebook ? "verification-result.txt" : notebookCase.Report;
     internal string NotebookEditTarget => notebookLevel == 2 ? notebookCase.Binding(true) : notebookCase.Formula;
-    internal string NotebookAnswer => notebookCase.Value(notebookLevel == 2).ToString(CultureInfo.InvariantCulture);
+    internal string NotebookAnswer => CsvNotebook ? Invariant(csvNotebook.Expect(csvNotebook.Readings)) :
+        notebookCase.Value(notebookLevel == 2).ToString(CultureInfo.InvariantCulture);
     internal string NotebookBrief => notebookCase.What;
     internal int NotebookExtra => notebookCase.Extra;
 
@@ -53,9 +54,11 @@ internal sealed partial class LabScene
 
     internal bool OnNotebook => Active?.App == "code" && Active.Focus == "body" && Active.Tab?.Notebook != null &&
         !Switcher && !Overview && !Screenshot && DesktopOverlay.Length == 0;
-    internal object NotebookEvidence(string action)
+    internal object NotebookEvidence(LabTask task) => AdvancedNotebook ? AdvancedNotebookEvidence(task) : NotebookEvidence(task.Action);
+    private object NotebookEvidence(string action)
     {
         var w = Active; var n = w?.Tab?.Notebook;
+        n?.SynchronizeWorkspace(NotebookRead);
         if (action == "save")
         {
             bool correctNotebook = NotebookSavedCorrect();
@@ -68,7 +71,7 @@ internal sealed partial class LabScene
             return new { path = w.Url, n.Selected, n.Editing, source = n.Source(previous),
                 ran = n.Fresh(previous), valid = !n.Failed(previous), output = n.Output(previous) };
         }
-        if (action == "notebook-run") return new { path = w.Url, n.Selected, source = n.Source(n.Selected), ran = n.Fresh(n.Selected),
+        if (action == "notebook-run") return new { path = w.Url, n.Selected, n.Editing, source = n.Source(n.Selected), ran = n.Fresh(n.Selected),
             failed = n.Failed(n.Selected), output = n.Output(n.Selected) };
         if (action == "notebook-all") return new { path = w.Url, n.Selected, n.Editing,
             entire = Math.Min(n.Caret, n.Anchor) == 0 && Math.Max(n.Caret, n.Anchor) == n.Source(n.Selected).Length };
@@ -77,12 +80,13 @@ internal sealed partial class LabScene
     }
     internal bool NotebookSavedCorrect()
     {
+        if (AdvancedNotebook) return AdvancedNotebookSaved();
         var saved = EditorNotebook.Open(NotebookFile, Terminal.ReadFile(NotebookRoot + "/" + NotebookFile) ?? "");
         return saved != null && saved.Count >= 3 && saved.Source(1) == notebookCase.Binding(notebookLevel == 2) &&
             saved.Source(2) == notebookCase.Formula && saved.Runs(1) > 0 && saved.Runs(2) > 0 && !saved.Failed(2) && saved.Output(2) == NotebookAnswer;
     }
     internal static bool NotebookGlobalAction(string action) => action is "save" or "quick-open" or "explorer" or "focus-editor" or
-        "next-tab" or "prev-tab" or "close-tab" or "new-file" or "sidebar" or "panel" or "terminal-toggle" or "layout" or "overview" or
+        "next-tab" or "prev-tab" or "code-definition" or "code-back" or "close-tab" or "new-tab" or "restore-tab" or "palette" or "new-file" or "sidebar" or "panel" or "terminal-toggle" or "layout" or "overview" or
         "switch-next" or "switch-prev" or "minimize" or "maximize" or "restore" or "screenshot" or "close-window" or
         "open-code" or "open-chrome" or "open-files" or "open-terminal" or "launch";
     private bool? ApplyNotebook(string action, LabWindow w)
@@ -94,13 +98,14 @@ internal sealed partial class LabScene
         {
             case "notebook-down": changed = n.Move(1); break;
             case "notebook-up": changed = n.Move(-1); break;
-            case "notebook-edit": changed = n.SetMode(true); break;
-            case "notebook-leave": changed = n.SetMode(false); break;
+            case "notebook-delete-arm": n.DeleteArmed = true; w.Status = "Нажмите D ещё раз, чтобы удалить ячейку."; return true;
+            case "notebook-edit": case "notebook-leave": case "notebook-run": case "notebook-run-next":
+            case "notebook-undo": case "notebook-redo": case "notebook-add-above": case "notebook-add-below":
+            case "notebook-move-up": case "notebook-move-down": case "notebook-delete-cell":
+            case "notebook-copy-cell": case "notebook-cut-cell": case "notebook-paste-cell":
+            case "notebook-code": case "notebook-markdown":
+                return NotebookCommand(w, action[9..]);
             case "notebook-all": n.SelectAll(); changed = true; break;
-            case "notebook-undo": changed = n.Undo(false); break;
-            case "notebook-redo": changed = n.Undo(true); break;
-            case "notebook-run": changed = n.Run(); break;
-            case "notebook-run-next": changed = n.RunAndAdvance(); break;
             case "notebook-copy": case "notebook-cut":
                 int lo = Math.Min(n.Caret, n.Anchor), hi = Math.Max(n.Caret, n.Anchor);
                 if (lo == hi) return false;
@@ -111,7 +116,7 @@ internal sealed partial class LabScene
             default: return NotebookGlobalAction(action) || action.StartsWith("win-", StringComparison.Ordinal) ? null : false;
         }
         if (changed) {
-            if (action is "notebook-cut" or "notebook-paste" or "notebook-undo" or "notebook-redo" or "notebook-run" or "notebook-run-next")
+            if (action is "notebook-cut" or "notebook-paste")
                 w.Body = n.Pack();
             w.Status = n.Describe(); Version++;
         }
@@ -119,7 +124,7 @@ internal sealed partial class LabScene
     }
     private bool NotebookText(string key, string text, bool extend, bool word)
     {
-        var w = Active; var n = w.Tab.Notebook; if (!n.Editing) return false;
+        var w = Active; var n = w.Tab.Notebook; if (!n.Editing || n.Busy) return false;
         string src = n.Source(n.Selected); int caret = n.Caret, anchor = n.Anchor;
         int next;
         switch (key)
@@ -144,15 +149,20 @@ internal sealed partial class LabScene
                     n.ReplaceRange(Math.Min(caret, edge), Math.Max(caret, edge), "");
                     return Mark();
                 }
-                if (anchor == caret) n.Anchor = key == "Backspace" ? PreviousBoundary(src, caret) : NextBoundary(src, caret);
-                if (n.Anchor == caret) return false;
-                n.Replace(""); return Mark();
+                if (anchor == caret)
+                {
+                    int edge = key == "Backspace" ? PreviousBoundary(src, caret) : NextBoundary(src, caret);
+                    if (edge == caret) return false;
+                    n.ReplaceRange(Math.Min(caret, edge), Math.Max(caret, edge), "");
+                }
+                else n.Replace("");
+                return Mark();
             case "Enter": n.Replace("\n"); return Mark();
             default:
                 if (string.IsNullOrEmpty(text) || text.Any(char.IsControl)) return false;
                 n.Replace(text); return Mark();
         }
-        n.Caret = next; if (!extend) n.Anchor = next; Version++; return true;
+        n.Caret = InsertionBoundary(src, next); if (!extend) n.Anchor = n.Caret; Version++; return true;
         bool Mark() { w.Body = n.Pack(); w.Status = n.Describe(); Version++; return true; }
     }
 }
@@ -173,14 +183,41 @@ internal static partial class LiveCourse
         NotebookKey("redo", "Повторите правку ячейки", "Ctrl+Shift+Z", "Проверьте содержимое ячейки."),
         NotebookKey("copy", "Скопируйте выделение", "Ctrl+C", "Копируется только выделенный текст ячейки."),
         NotebookKey("cut", "Вырежьте выделенный текст", "Ctrl+X", "Соседние ячейки остаются на месте."),
-        NotebookKey("paste", "Вставьте в ячейку", "Ctrl+V", "Это общий учебный буфер обмена.")
+        NotebookKey("paste", "Вставьте в ячейку", "Ctrl+V", "Это общий учебный буфер обмена."),
+        NotebookKey("add-above", "Добавьте ячейку выше", "A", "В режиме выбора A вставляет отдельную ячейку перед выбранной."),
+        NotebookKey("add-below", "Добавьте ячейку ниже", "B", "В режиме выбора B вставляет отдельную ячейку после выбранной."),
+        NotebookKey("move-up", "Переместите выбранную ячейку выше", "Alt+Up", "Данные и вывод перемещаются вместе с ячейкой."),
+        NotebookKey("move-down", "Переместите выбранную ячейку ниже", "Alt+Down", "Граница документа не меняется при повторе."),
+        NotebookKey("delete-cell", "Удалите выбранную ячейку", "D → D", "Дважды нажмите D в режиме выбора. Delete в тексте удаляет символ."),
+        NotebookKey("copy-cell", "Скопируйте выбранную ячейку", "C", "Копируется ячейка, а не её прежний запуск."),
+        NotebookKey("cut-cell", "Вырежьте выбранную ячейку", "X", "Содержимое ячейки останется в учебном буфере."),
+        NotebookKey("paste-cell", "Вставьте копию ячейки ниже", "V", "Новая ячейка получит собственный результат при выполнении."),
+        NotebookKey("markdown", "Сделайте выбранную ячейку Markdown", "M", "Пояснение не выполняется как код."),
+        NotebookKey("code", "Сделайте выбранную ячейку кодом", "Y", "Ячейку снова можно выполнить.")
     ];
     internal static IEnumerable<LabTask> NotebookActions => NotebookKeys;
     internal static LabTask ResolveNotebook(string key, IEnumerable<string> held, LabScene s)
     {
         var n = s.Active.Tab.Notebook;
+        if (s.ReplayLegacyNotebookActions)
+            return NotebookKeys.Take(12).Where(t => t.Id is "notebook-run" or "notebook-run-next" ||
+                (n.Editing ? t.Id is not ("notebook-down" or "notebook-up" or "notebook-edit") :
+                    t.Id is "notebook-down" or "notebook-up" or "notebook-edit"))
+                .FirstOrDefault(t => { var chord = Gesture.Parse(t.Keys).Chords[0]; return chord.Trigger == key && chord.FitsModifiers(held); });
+        bool armed = n.DeleteArmed; n.DeleteArmed = false;
+        bool plain = !held.Any(KeyChord.IsModifier);
+        if (!n.Editing && key == "D" && plain)
+            return armed ? NotebookKeys.First(t => t.Id == "notebook-delete-cell") :
+                NotebookKey("delete-arm", "Подтвердите удаление клавишей D", "D", "");
+        if (!n.Editing && key == "Z" && (plain || Gesture.Parse("Shift+Z").Chords[0].FitsModifiers(held)))
+        {
+            string binding = plain ? "Z" : "Shift+Z";
+            return NotebookKeys.First(t => t.Id == (plain ? "notebook-undo" : "notebook-redo")) with { Keys = binding };
+        }
         return NotebookKeys.Where(t => t.Id is "notebook-run" or "notebook-run-next" ||
-            (n.Editing ? t.Id is not ("notebook-down" or "notebook-up" or "notebook-edit") : t.Id is "notebook-down" or "notebook-up" or "notebook-edit"))
+            (n.Editing ? t.Id is "notebook-leave" or "notebook-all" or "notebook-undo" or "notebook-redo" or "notebook-copy" or "notebook-cut" or "notebook-paste" :
+                t.Id is "notebook-down" or "notebook-up" or "notebook-edit" or "notebook-add-above" or "notebook-add-below" or
+                    "notebook-move-up" or "notebook-move-down" or "notebook-copy-cell" or "notebook-cut-cell" or "notebook-paste-cell" or "notebook-code" or "notebook-markdown"))
             .FirstOrDefault(t => { var c = Gesture.Parse(t.Keys).Chords[0]; return c.Trigger == key && c.FitsModifiers(held); });
     }
     private static void NotebookMission(List<LiveMission> list, int level)
@@ -205,6 +242,7 @@ internal static partial class LiveCourse
     private static LabTask NotebookTask(string token, LabScene s)
     {
         if (!s.NotebookCourse) return null;
+        if (AdvancedNotebookTask(token, s) is LabTask expanded) return expanded;
         switch (token)
         {
             case "notebook-file": case "notebook-report":
@@ -219,8 +257,10 @@ internal static partial class LiveCourse
                 return Actions["save"] with { Title = "Запишите число из вывода в " + s.NotebookReport + " и сохраните",
                     Hint = "Нужен только итог последнего расчёта: " + s.NotebookAnswer + ". Затем Ctrl+S.", Text = s.NotebookAnswer };
             case "notebook-run":
-                return NotebookKeys.First(t => t.Action == token) with { Title = s.Active?.Tab?.Notebook?.Selected == 1 ? "Выполните ячейку данных: создайте список в ядре" :
-                    "Выполните ячейку расчёта и прочитайте число под ней" };
+                var n = s.Active?.Tab?.Notebook;
+                return NotebookKeys.First(t => t.Action == token) with { Title = n?.IsCode(n.Selected) == false ? "Завершите редактирование и прочитайте пояснение Markdown" :
+                    s.AdvancedNotebook ? "Выполните выбранную ячейку и проверьте появившийся вывод" :
+                    n?.Selected == 1 ? "Выполните ячейку данных: создайте список в ядре" : "Выполните ячейку расчёта и прочитайте число под ней" };
             default: return NotebookKeys.FirstOrDefault(t => t.Action == token);
         }
     }

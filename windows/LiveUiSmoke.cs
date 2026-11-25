@@ -46,8 +46,10 @@ internal static partial class LiveUiSmoke
             bool projectFileMission = arguments.Contains("--project-file-mission");
             bool editorProjectFileMission = arguments.Contains("--editor-project-file-mission");
             bool editorCourse = arguments.Contains("--editor-course");
+            bool coachHint = arguments.Contains("--live-coach-hint");
+            bool coach = coachHint || arguments.Contains("--live-coach");
             bool nativeLayout = arguments.Contains("--native-layout");
-            bool referenceEvidence = notebookMission || projectFileMission || editorProjectFileMission || editorCourse || liveUx || nativeLayout || referenceBrowser || browserClone || numLockMode.Length > 0 || dailyUse || gnomeProfile || debugDay || codeTheme || pythonEditor || arguments.Contains("--reference-evidence");
+            bool referenceEvidence = notebookMission || projectFileMission || editorProjectFileMission || editorCourse || coach || liveUx || nativeLayout || referenceBrowser || browserClone || numLockMode.Length > 0 || dailyUse || gnomeProfile || debugDay || codeTheme || pythonEditor || arguments.Contains("--reference-evidence");
             if (referenceEvidence && SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
                 throw new InvalidOperationException("Per-monitor-aware evidence capture cannot be enabled.");
             string path = Path.GetFullPath(arguments[0]);
@@ -59,8 +61,8 @@ internal static partial class LiveUiSmoke
                 Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_SOFT_FINISH_SECONDS", "7");
             Console.WriteLine("UI test seed " + Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"));
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_NAV_TRACE", gnomeProfile ? "workspace" : numLockMode.Length > 0 ? "workday-keypad" :
-                referenceEvidence && !nativeLayout && !referenceBrowser && !dailyUse && !debugDay && !codeTheme && !pythonEditor && !browserClone && !notebookMission && !projectFileMission && !editorProjectFileMission && !editorCourse ? "terminal" : null);
-            Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_BROWSER_CLONE", browserClone || projectFileMission || editorProjectFileMission ? "1" : null);
+                referenceEvidence && !nativeLayout && !referenceBrowser && !dailyUse && !debugDay && !codeTheme && !pythonEditor && !browserClone && !notebookMission && !projectFileMission && !editorProjectFileMission && !editorCourse && !coach ? "terminal" : null);
+            Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_BROWSER_CLONE", browserClone || projectFileMission || editorProjectFileMission || coach ? "1" : null);
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_PYTHON_EDITOR", pythonEditor ? "1" : null);
             app = Process.Start(new ProcessStartInfo(path, "--qa --live") { WorkingDirectory = Path.GetDirectoryName(path) });
             Until(delegate {
@@ -89,6 +91,12 @@ internal static partial class LiveUiSmoke
             {
                 CheckProjectFileMission();
                 Console.WriteLine("PASS: " + count + " native WPF download and project file checks");
+                return 0;
+            }
+            if (coach)
+            {
+                CheckLiveCoach(coachHint);
+                Console.WriteLine("PASS: " + count + " native WPF Live coaching assertions");
                 return 0;
             }
             if (editorCourse)
@@ -738,6 +746,90 @@ internal static partial class LiveUiSmoke
             }
         }
         throw new InvalidOperationException("Mission did not finish: " + title);
+    }
+
+    private static void CheckLiveCoach(bool revealHint)
+    {
+        OpenLiveConfiguration("chrome");
+        var choice = Find("LabMode");
+        var selected = ((SelectionPattern)choice.GetCurrentPattern(SelectionPattern.Pattern)).Current.GetSelection();
+        Check(selected.Length == 1 && selected[0].Current.Name == "По шагам", "Settings start in the familiar guided mode");
+        var popup = (ExpandCollapsePattern)choice.GetCurrentPattern(ExpandCollapsePattern.Pattern);
+        popup.Expand();
+        Wait(80);
+        string[] names = choice.FindAll(TreeScope.Descendants, new PropertyCondition(
+            AutomationElement.ControlTypeProperty, ControlType.ListItem)).Cast<AutomationElement>().Select(option => option.Current.Name).ToArray();
+        Check(new[] { "Самостоятельно", "По шагам", "По ситуации" }.All(names.Contains),
+            "Guided, independent, and adaptive modes all remain selectable");
+        popup.Collapse();
+        Invoke("LiveConfigureBack");
+        Until(delegate { return FocusedLiveCard("chrome"); }, "Configure returns to the original card");
+        Find("HomeClass-chrome").SetFocus();
+        Key("Enter");
+        Until(delegate { return Visible("LabDesktop") && ReadSolved() == 0 && Name("LabPause").StartsWith("Пауза"); },
+            "ordinary Chrome card has started the adaptive course");
+        VirtualEnglish();
+        string before = BrowserWitness("LabDesktop")[1];
+        Check(before.StartsWith("https://docs.python.org"), "Chrome course begins with a documentation page");
+        Chord("Alt+D");
+        Until(delegate { return BrowserWitness("LabDesktop")[2] == "url" && ReadSolved() == 0; },
+            "wrong chord can focus the address but cannot get credit");
+        Check(Visible("LabKeys"), "Correction still displays the right combination");
+        CaptureReferenceFrame("coach-01-visible-hint");
+        Chord("Ctrl+L");
+        Until(delegate { return ReadSolved() == 1; }, "correct chord earns one credit");
+
+        Action<int> next = delegate(int solved)
+        {
+            string prompt = Find("LabTask").Current.ItemStatus;
+            Check(prompt.StartsWith("keys:"), "The current simulated action uses a physical shortcut");
+            string keys = prompt.Substring(5);
+            for (int attempt = 0; attempt < (keys == "Down" || keys == "Tab" ? 24 : 1); attempt++)
+            {
+                Chord(keys);
+                if (ReadSolved() > solved) break;
+            }
+            Until(delegate { return ReadSolved() == solved + 1; }, "one exact credit at " + solved + " for " + keys);
+        };
+
+        for (int solved = 1; solved < 22; solved++) next(solved);
+        Check(!Visible("LabKeys") && Name("LabTask") == "Выделите адрес страницы" &&
+            BrowserWitness("LabDesktop")[1] == before, "A later task states the goal without giving away the shortcut");
+        CaptureReferenceFrame("coach-02-blind-recall");
+        if (revealHint)
+        {
+            Key("F1");
+            Until(delegate { return Visible("LabKeys") && ReadSolved() == 22; },
+                "the explicitly requested F1 hint appears without adding a score");
+            CaptureReferenceFrame("coach-02b-requested-hint");
+        }
+        next(22);
+        for (int solved = 23; solved < 26; solved++) next(solved);
+        Check(!Visible("LabKeys") && Name("LabTask") == "Выделите адрес страницы" &&
+            BrowserWitness("LabDesktop")[1] == "https://www.google.com/" &&
+            Find("LabTask").Current.ItemType.StartsWith("Найти нужный раздел справки"),
+            "The same skill transfers without a visible key to a new lesson and a different page");
+        CaptureReferenceFrame("coach-03-blind-transfer");
+        next(26);
+        Check(BrowserWitness("LabDesktop")[2] == "url", "The recalled action changed the actual Chrome address focus");
+        Invoke("LabBack");
+        Until(delegate { return FocusedLiveCard("chrome") && Visible("LiveResume-chrome"); }, "coaching evidence saves with its draft");
+        string profile = Path.Combine(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT"),
+            "TouchTypingStudio-QA", "progress.xml");
+        var xml = new XmlDocument();
+        xml.XmlResolver = null;
+        xml.Load(profile);
+        var earned = xml.SelectNodes("/StudioProfile/ShortcutHistory/ShortcutAttempt[Skill='lab/chrome/url' and Correct='true' and CoachStage]");
+        Check(earned.Count == 3, "Only three coached successes followed the real input");
+        var receipts = earned.Cast<XmlNode>().ToArray();
+        Check(receipts[0]["CoachStage"].InnerText == "practice" && receipts[0]["Assisted"].InnerText == "true",
+            "First corrected action is a practice success");
+        Check(receipts[1]["CoachStage"].InnerText == "recall" &&
+            receipts[1]["Assisted"].InnerText == (revealHint ? "true" : "false"), "Hint choice is stored with the recall attempt");
+        Check(receipts[2]["CoachStage"].InnerText == (revealHint ? "recall" : "transfer") &&
+            receipts[2]["Assisted"].InnerText == "false" &&
+            receipts[1]["CoachContext"].InnerText != receipts[2]["CoachContext"].InnerText,
+            "A receipt reserves transfer for a previous independent success in a different context");
     }
 
     private static void CheckEditorCourse(string executable)

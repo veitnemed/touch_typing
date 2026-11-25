@@ -55,7 +55,7 @@ internal sealed partial class LabScene
         if (url == RepositoryPage) return ("veitnemed / touch_typing", "GitHub · репозиторий\nКод вслепую · Учебный тренажёр с режимами «Печать» и Live.");
         if (url == SearchDecoy) return ("Статьи о слепой печати", "Здесь собраны советы. Исходников тренажёра здесь нет.");
         if (url == "https://github.com/other/typing-demo") return ("Учебный пример typing-demo", "Это другой репозиторий.");
-        return ResearchPage(url);
+        return BulletinPage(url) ?? ResearchPage(url);
     }
 
     private LabEntry[] PracticeSearchEntries(string url)
@@ -68,6 +68,8 @@ internal sealed partial class LabScene
             ("Документация Python", "https://docs.python.org/3/", "python docs documentation документация"),
         };
         var terms = query.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+        var bulletin = BulletinSearch(terms);
+        if (bulletin.Length > 0) return bulletin;
         if (browserResearch != null)
         {
             var research = ResearchCases.Where(item => terms.Length > 0 && terms.All(term =>

@@ -107,7 +107,7 @@ class MissionTest(unittest.TestCase):
                     self.assertEqual(set(tips), {entry["id"] for entry in catalog["classes"]})
                     self.assertEqual(tips["code"]["level"], expected)
                     self.assertTrue(all(tips[entry]["level"] is None for entry in tips if entry != "code"))
-                    self.assertEqual(catalog["drafts"], [dict(app="code", level=0, mission="code-first-fix", guidance="guided")])
+                    self.assertEqual(catalog["drafts"], [dict(app="code", level=0, mission="code-first-fix", guidance="guided", adaptiveGuide=False)])
                     self.assertEqual(profile.read_bytes(), previous)
                     if label in {"editor-basic", "only-ru", "unknown-layout", "split-layout"}:
                         engine.call("configure", layout="RU")
@@ -1573,6 +1573,17 @@ class MissionTest(unittest.TestCase):
         total = state["scenarioLength"]
         self.assertGreaterEqual(total, 1 if mission.get("curated") else 20)
         state = engine.call("lab-resume")
+        # Observe real edits, two-press notebook commands and file conflict
+        # handling while walking the full named catalog.
+        from test_notebook_advanced_routes import ROUTES, step as notebook_step
+        if mission["id"] in ROUTES:
+            for expected in range(1, total + 1):
+                previous = state["task"]
+                state = notebook_step(engine, state)
+                self.assertEqual(state["solved"], expected, (previous, state["status"]))
+            self.assertTrue(state["finished"])
+            return
+
         def chord(keys, char=""):
             for key in keys:
                 engine.call("lab-key", key=key, pressed=True, text=char if key == keys[-1] else "")

@@ -69,6 +69,7 @@ internal static class LabCatalog
         T("file-copy", "Скопируйте выбранный файл", "Ctrl+C", "file-copy"),
         T("file-cut", "Подготовьте файл к переносу", "Ctrl+X", "file-cut"),
         T("file-paste", "Поместите файл в эту папку", "Ctrl+V", "file-paste"),
+        T("file-undo", "Отмените последнее действие с файлом", "Ctrl+Z", "file-undo"),
         T("file-parent", "Перейдите на уровень выше", "Alt+Up", "file-parent"),
         T("file-home", "Откройте домашнюю папку", "Alt+Home", "file-home"),
         T("file-back", "Вернитесь в предыдущую папку", "Alt+Left", "file-back"),
@@ -111,6 +112,7 @@ internal static class LabCatalog
         T("project-search", "Откройте поиск по проекту", "Ctrl+Shift+F", "project-search", 1),
         T("move-line-up", "Поднимите строку", "Alt+Up", "move-line-up"),
         T("move-line-down", "Перенесите строку ниже", "Alt+Down", "move-line-down"),
+        T("code-document-end", "Перейдите в конец заметки", "Ctrl+End", "document-end"),
         T("document-start", "Перейдите в начало файла", "Ctrl+Home", "document-start"),
         T("occurrence", "Выделите вхождение", "Ctrl+D", "occurrence"),
         T("replace", "Откройте замену", "Ctrl+H", "replace"),
@@ -206,7 +208,7 @@ internal static class LabCatalog
     ]);
     private static readonly HashSet<string> FilesIds = new(Shortcuts.Where(task => task.Id.StartsWith("file-") || task.Id is "trash" or "restore-trash").Select(task => task.Id));
     private static readonly HashSet<string> ChromeIds = new(["history", "downloads", "bookmark-manager", "link-next", "link-prev", "link-open", "new-tab", "close-tab", "restore-tab", "next-tab", "prev-tab", "first-tab", "last-tab", "url", "navigate-pasted", "find", "find-next", "refresh", "back", "forward", "fullscreen", "zoom-in", "zoom-out", "zoom-reset", "bookmark", "bookmarks", "select-all", "copy", "cut", "paste", "escape", "layout"]);
-    private static readonly HashSet<string> CodeIds = new(["file-next", "file-prev", "file-open", "file-cut", "file-copy", "file-paste", "file-name-start", "file-name-commit", "file-name-cancel", "document-start", "move-line-up", "move-line-down", "occurrence", "replace", "replace-field", "replace-one", "symbols", "symbol-next", "symbol-open", "changes", "focus-editor", "focus-second", "panel", "extensions", "select-line", "new-file", "close-tab", "next-tab", "prev-tab", "quick-open", "quick-next", "quick-choose", "palette", "palette-next", "palette-choose", "goto-line", "explorer", "project-search", "sidebar", "split", "terminal-toggle", "save", "select-all", "copy", "cut", "paste", "undo", "redo", "comment", "delete-line", "find", "escape", "layout"]);
+    private static readonly HashSet<string> CodeIds = new(["file-undo", "file-next", "file-prev", "file-open", "file-cut", "file-copy", "file-paste", "file-name-start", "file-name-commit", "file-name-cancel", "document-start", "move-line-up", "move-line-down", "occurrence", "replace", "replace-field", "replace-one", "symbols", "symbol-next", "symbol-open", "changes", "focus-editor", "focus-second", "panel", "extensions", "select-line", "new-file", "close-tab", "next-tab", "prev-tab", "quick-open", "quick-next", "quick-choose", "palette", "palette-next", "palette-choose", "goto-line", "explorer", "project-search", "sidebar", "split", "terminal-toggle", "save", "select-all", "copy", "cut", "paste", "undo", "redo", "comment", "delete-line", "find", "escape", "layout"]);
     static LabCatalog()
     {
         CodeIds.UnionWith(Shortcuts.Where(task => task.Id.StartsWith("code-", StringComparison.Ordinal) || task.Id.StartsWith("project-search-", StringComparison.Ordinal)).Select(task => task.Id));
@@ -219,8 +221,8 @@ internal static class LabCatalog
         bool neutralProject = false, string environment = "ubuntu")
     {
         var draftRows = (drafts ?? []).Select(d => d.App is "ubuntu" or "windows" or "workday"
-            ? (object)new { d.App, d.Level, d.Mission, d.Guidance, desktopProfile = LabScene.DesktopEnvironment(d.DesktopEnvironment) }
-            : new { d.App, d.Level, d.Mission, d.Guidance });
+            ? (object)new { d.App, d.Level, d.Mission, d.Guidance, d.AdaptiveGuide, desktopProfile = LabScene.DesktopEnvironment(d.DesktopEnvironment) }
+            : new { d.App, d.Level, d.Mission, d.Guidance, d.AdaptiveGuide });
         var profiles = new[] { new { id = "ubuntu", title = "Ubuntu" }, new { id = "windows", title = "Windows 10" } };
         return new {
             desktopProfile = environment, desktopProfiles = profiles,
@@ -260,10 +262,12 @@ internal static class LabCatalog
             "file-name-commit" or "file-name-cancel" => window?.Focus == "file-name",
             "file-name-start" => fileList && scene.Entries(window).ElementAtOrDefault(window.Item)?.Kind == "file",
             "file-next" or "file-prev" or "file-paste" => fileList,
+            "file-undo" => window?.App == "code" && window.Focus == "explorer" && scene.CanUndoProjectFile && !scene.ReplayLegacyNotebookActions,
             "code-clone-command" => scene.BrowserPracticeActive && window?.Focus == "palette" && window.Input.Trim().Equals("Git: Clone", StringComparison.OrdinalIgnoreCase),
             "code-clone-confirm" => scene.BrowserPracticeActive && window?.Focus == "clone-url",
             "code-problem-next" or "code-fix-open" or "code-fix-next" or "code-fix-prev" or
             "code-fix-apply" or "code-fix-cancel" => scene.DiagnosticActionAvailable(task.Action),
+            "code-document-end" => scene.ContextHandoffActive && window?.App == "code" && window.Focus == "body",
             "document-start" or "move-line-up" or "move-line-down" or "occurrence" => window?.App == "code" && window.Focus == "body",
             "exact-find-submit" or "exact-find-next" or "exact-find-prev" => scene.ExactEdit && window?.Focus == "find",
             "exact-call-home" => scene.ExactEdit && window?.App == "code" && window.Focus == "body",
@@ -392,7 +396,7 @@ internal static class LabCatalog
             if (scene.Active?.Focus == "file-name") return task.Id is "file-name-commit" or "file-name-cancel" or "select-all" or "copy" or "cut" or "paste";
             if (scene.DebugDay && task.Id.StartsWith("debug-", StringComparison.Ordinal)) return true;
             if (scene.ExactEdit && task.Id.StartsWith("exact-", StringComparison.Ordinal)) return true;
-            if (task.Id == "escape" && scene.BrowserResearchActive && context.Contains(task.Id))
+            if (task.Id == "escape" && (scene.BrowserResearchActive || scene.ContextHandoffActive) && context.Contains(task.Id))
                 return true; // Esc closes the app's find bar when no Windows overlay has focus.
             if (UbuntuIds.Contains(task.Id) || task.Id is "switch-group-next" or "switch-group-prev") return !scene.WindowsDesktop;
             return context.Contains(task.Id) || terminal && app == "code" && task.Id is "terminal-toggle" or "panel" or "escape";

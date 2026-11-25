@@ -23,6 +23,7 @@ namespace TouchTypingStudio
         private string lastLabMission = "";
         private string lastLabRouteKind = "";
         private int lastLabRuntimeActions, lastLabRuntimeSeconds;
+        private bool lastLabAdaptiveGuide;
         private Button labHint;
         private Button labLimitContinue, labLimitFinish, labLimitArmedButton;
         private Key labLimitArmedKey;
@@ -171,7 +172,7 @@ namespace TouchTypingStudio
             if (resume) { SetNotice("Сохранённое занятие больше недоступно."); return; }
             labLevel = 0;
             labMode = "sandbox";
-            StartLabAttempt("", false, "course", true);
+            StartLabAttempt("", false, "course", true, adaptiveGuide: true);
         }
 
         private void ReturnToLiveCatalog()
@@ -186,7 +187,7 @@ namespace TouchTypingStudio
         private bool labSavePending, labSaveClosePending, labSaveBackPending, labExplicitFinishPending;
 
         private void StartLabAttempt(string mission, bool resume, string routeKind = "",
-            bool defaultBudget = false, int? actionOverride = null, int? timeOverride = null)
+            bool defaultBudget = false, int? actionOverride = null, int? timeOverride = null, bool adaptiveGuide = false)
         {
             if (active) return;
             if (Keyboard.Modifiers != ModifierKeys.None)
@@ -207,6 +208,7 @@ namespace TouchTypingStudio
                 "softFinish", true, "combinedLimits", true, "nativeEnglishInput", true
             };
             if (routeKind.Length > 0) fields.AddRange(new object[] { "routeKind", routeKind });
+            if (adaptiveGuide) fields.AddRange(new object[] { "adaptiveGuide", true });
             if (!defaultBudget) fields.AddRange(new object[] { "seconds", seconds, "actionLimit", actions });
             int seed;
             if (verifyMode && int.TryParse(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"), out seed))
@@ -218,6 +220,7 @@ namespace TouchTypingStudio
             lastLabRouteKind = initial.S("routeKind");
             lastLabRuntimeActions = initial.I("actionLimit");
             lastLabRuntimeSeconds = initial.I("timeLimit");
+            lastLabAdaptiveGuide = initial.B("adaptiveGuide");
             labActive = active = true;
             paused = true;
             pressed.Clear();
@@ -385,6 +388,20 @@ namespace TouchTypingStudio
         private void ToggleLabPause()
         { if (paused) ResumeLab(); else PauseLab(); }
 
+        private void ApplyLabNotebookCommand(string command, int cell, int offset)
+        {
+            if (!labActive || paused || !IsActive || referenceHelpOpen || state.B("limitDecisionPending")) return;
+            var next = Request("lab-notebook-action", "action", command, "cell", cell, "offset", offset);
+            if (next.Exists) RenderLab(next);
+        }
+
+        private void ApplyLabExplorerCommand(string command, string path)
+        {
+            if (!labActive || paused || !IsActive || referenceHelpOpen || state.B("limitDecisionPending")) return;
+            var next = Request("lab-explorer-action", "action", command, "path", path);
+            if (next.Exists) RenderLab(next);
+        }
+
         private static bool LabEditingRepeat(string key)
         {
             switch (key)
@@ -429,6 +446,8 @@ namespace TouchTypingStudio
                 if (key == "F4" && !state.D("task").S("keys").Split('+').Contains("F4")) { ToggleLabAid(true); return; }
                 if (key == "F7" && !state.D("task").S("keys").Split('+').Contains("F7")) { ToggleLabAid(false); return; }
             }
+            if (down && !pressed.Any(k => IsModifier(k) && k != "LShift" && k != "RShift") &&
+                labDesktop.NotebookViewportKey(key, pressed.Contains("LShift") || pressed.Contains("RShift"))) return;
             var next = Request("lab-key", "key", key, "pressed", down, "nativeLayout", KnownNativeLessonLayout(inputLayout) ?? "",
                 "text", key == "Print" && down
                 ? labDesktop.CapturePng(state.D("scene").B("debugDay") && (pressed.Contains("LAlt") || pressed.Contains("RAlt"))) : value ?? "");
@@ -437,8 +456,12 @@ namespace TouchTypingStudio
 
         private void RenderLab(Data next)
         {
+            // A displayed hint belongs to that step. Do not let an open
+            // help surface expose the answer to a later recall exercise.
+            bool completedPrevious = referenceHelpOpen && state != null && state.Exists && next.I("solved") > state.I("solved");
             state = next;
             if (state.B("finished")) { FinishLab(); return; }
+            if (completedPrevious) CloseReferenceLessonHelp();
             paused = state.B("paused");
             if (state.B("limitDecisionPending"))
             {
@@ -459,11 +482,17 @@ namespace TouchTypingStudio
                 AutomationProperties.SetItemType(labTask, state.S("scenario") + "    ·    " + state.S("phase") +
                     "\nВыполнено " + state.I("solved"));
             var task = state.D("task");
-            labTask.Text = state.B("showGuide", true) ? task.S("title") : state.S("phase");
-            labTask.ToolTip = (state.S("desktopProfile", LessonDesktopProfile) == "windows" ? "Windows 10" : "Ubuntu") + " · " + state.S("scenario") + "\n" + string.Join("\n", state.Items("objectives").Select(item => item.Value()));
-            labKeys.ToolTip = state.B("showGuide", true) ? task.S("hint") : "";
-            AutomationProperties.SetHelpText(labKeys, task.S("keys"));
-            AutomationProperties.SetHelpText(labTask, task.S("text"));
+            bool guided = state.B("showGuide", true);
+            string coachPrompt = state.S("coachPrompt"), coachReason = state.S("coachReason");
+            labTask.Text = guided ? task.S("title") : coachPrompt.Length > 0 ? coachPrompt : state.S("phase");
+            string objectives = coachPrompt.Length > 0 ? coachReason :
+                string.Join("\n", state.Items("objectives").Select(item => item.Value())) +
+                (coachReason.Length > 0 ? "\n" + coachReason : "");
+            labTask.ToolTip = (state.S("desktopProfile", LessonDesktopProfile) == "windows" ? "Windows 10" : "Ubuntu") + " · " + state.S("scenario") +
+                "\n" + objectives;
+            labKeys.ToolTip = guided ? task.S("hint") : "";
+            AutomationProperties.SetHelpText(labKeys, guided ? task.S("keys") : "");
+            AutomationProperties.SetHelpText(labTask, guided ? task.S("text") : "");
             // A WPF TextBlock with empty HelpText falls back to its tooltip.
             // Keep QA input metadata separate from visible/accessibility hints.
             if (verifyMode)
@@ -701,7 +730,7 @@ namespace TouchTypingStudio
             if (labActive) FinishLab();
             if (labActive) return; // Retain the paused lesson until its save succeeds.
             StartLabAttempt(lastLabRouteKind == "course" ? "" : lastLabMission, false, lastLabRouteKind,
-                actionOverride: lastLabRuntimeActions, timeOverride: lastLabRuntimeSeconds);
+                actionOverride: lastLabRuntimeActions, timeOverride: lastLabRuntimeSeconds, adaptiveGuide: lastLabAdaptiveGuide);
         }
 
         private FrameworkElement BuildLabResult(Data result, FrameworkElement backdrop, bool preview = false)

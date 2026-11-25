@@ -52,6 +52,7 @@ internal static partial class LiveCourse
         Add(1,"symbols","Сопоставить определения функций","model","spectrum","identifiers","signal","note");
         Add(2,"handover","Передать код и пояснение на ревью","signal","archive","model","patch","readme","tools");
         NotebookMission(list, 2);
+        AdvancedNotebookMissions(list);
         Add(2,"repair","Восстановить рабочую версию после правки","spectrum","reorder","model","review","search","layout");
         Add(2,"inspection","Проверить связанные правки в двух модулях","signal","patch","spectrum","reorder","identifiers","deduplicate");
         list.Add(new("code", 0, "code-go-definition", "Перейти к определению и вернуться",

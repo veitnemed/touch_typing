@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from platform_linux import Engine
 from test_editor_notebooks import chord_for
+from test_notebook_advanced_routes import ROUTES as NOTEBOOK_EXPANDED, step as notebook_step
 from test_project_file_practice import active, chord, disk
 
 EXTRAS = ("code-notebook-", "code-project-file-")
@@ -75,6 +76,10 @@ def begin(e, **options):
 def advance(e, state):
     task, mission, before = state["task"], state["mission"], state["solved"]
     task_id, keys, value = task["id"], task["keys"], task["text"]
+    if mission in NOTEBOOK_EXPANDED:
+        result = notebook_step(e, state)
+        assert result["solved"] == before + 1, (mission, task, result["status"], active(result).get("focus"))
+        return result
     if task_id == "project-search-repair":
         chord(e, "End"); chord(e, "Backspace"); enter(e, "5")
     elif mission == "code-project-file-move" and task_id == "save":
@@ -188,20 +193,21 @@ class EditorCourseTests(unittest.TestCase):
                 try:
                     e.call("configure", platform="linux", layout="EN")
                     missions = {m["id"] for m in e.call("lab-catalog")["missions"] if m["app"] == "code" and m["level"] == level}
-                    self.assertEqual(missions, expected)
+                    self.assertTrue(expected <= missions, sorted(expected - missions))
                     state = begin(e, level=level, editorCourse=True, actionLimit=0, seconds=0, seed=0)
                     self.assertFalse(supplement(state["mission"]))
                     seen = []
-                    for _ in range(len(expected)):
+                    for _ in range(2 * len(missions)):
+                        if missions <= set(seen):
+                            break
                         current = state["mission"]
-                        self.assertNotIn(current, seen)
                         self.assertFalse(seen and supplement(seen[-1]) and supplement(current))
                         seen.append(current)
                         while state["mission"] == current:
                             state = advance(e, state)
                             self.assertFalse(state["finished"])
-                    self.assertEqual(set(seen), expected)
-                    self.assertIn(state["mission"], expected)
+                    self.assertEqual(set(seen), missions)
+                    self.assertIn(state["mission"], missions)
                 finally:
                     e.close()
 

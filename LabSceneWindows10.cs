@@ -64,6 +64,7 @@ namespace TouchTypingStudio
         private void DrawSimulatedWindows10(DrawingContext dc)
         {
             double scale = Math.Min(ActualWidth / WidthUnits, ActualHeight / HeightUnits);
+            NotebookStartFrame(scale, (ActualWidth - WidthUnits * scale) / 2, (ActualHeight - HeightUnits * scale) / 2);
             dc.PushTransform(new TranslateTransform((ActualWidth - WidthUnits * scale) / 2, (ActualHeight - HeightUnits * scale) / 2));
             dc.PushTransform(new ScaleTransform(scale, scale));
             dc.PushClip(new RectangleGeometry(new Rect(0, 0, WidthUnits, HeightUnits), 10, 10));
@@ -116,6 +117,7 @@ namespace TouchTypingStudio
         private void DrawWindows10Window(Data window, Rect bounds)
         {
             string app = window.S("app");
+            NotebookWindow(bounds);
             context.PushTransform(new TranslateTransform(bounds.X, bounds.Y));
             context.PushClip(new RectangleGeometry(new Rect(0, 0, bounds.Width, bounds.Height)));
             Rectangle(0, 0, bounds.Width, bounds.Height, "#20252B");

@@ -144,7 +144,7 @@ internal sealed partial class PracticeService
                 bool course = LiveRoutePolicy.Resolve(routeKind, selectedMission, editorCourse, chosenApp, draft) == LiveRoutePolicy.Course;
                 lab = new LabRun(chosenApp, Text(message, "mode"), Number(message, "level"),
                     Number(message, "seconds", combinedLimits || course || routeKind == LiveRoutePolicy.Mission ? 0 : 180), layout, profile.ShortcutHistory,
-                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit", course ? LiveRoutePolicy.DefaultActions : 0), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: selectedMission, draft: draft, softFinish: Flag(message, "softFinish"), combinedLimits: combinedLimits, windowsBindings: windows, desktopProfile: windows ? null : desktopProfile, neutralProject: neutralProject, environment: chosenEnvironment, nativeEnglishInput: Flag(message, "nativeEnglishInput"), editorCourse: editorCourse, routeKind: routeKind);
+                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit", course ? LiveRoutePolicy.DefaultActions : 0), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: selectedMission, draft: draft, softFinish: Flag(message, "softFinish"), combinedLimits: combinedLimits, windowsBindings: windows, desktopProfile: windows ? null : desktopProfile, neutralProject: neutralProject, environment: chosenEnvironment, nativeEnglishInput: Flag(message, "nativeEnglishInput"), editorCourse: editorCourse, routeKind: routeKind, adaptiveGuide: Flag(message, "adaptiveGuide"));
                 persistedLabAttempts = 0;
                 labCheckpoint = draft;
                 preservePreviousLabDraft = !continuing && Flag(message, "preserveDraft");
@@ -167,7 +167,16 @@ internal sealed partial class PracticeService
                 else if (lab.AwaitingLimitChoice) CheckLabLimit();
                 else if (labAttempt != null) SaveLabCheckpoint();
                 return LabState();
-            case "lab-state": CheckLabLimit(); FinishLabAutomatically(); return LabState();
+            case "lab-explorer-action":
+                CheckLabLimit();
+                if (lab?.ExplorerPointer(Text(message, "action"), Text(message, "path")) == true) SaveLabCheckpoint();
+                return LabState();
+            case "lab-notebook-action":
+                CheckLabLimit();
+                if (lab?.NotebookPointer(Text(message, "action"), Number(message, "cell", -1), Number(message, "offset", -1)) == true) SaveLabCheckpoint();
+                return LabState();
+            case "lab-state":
+                CheckLabLimit(); lab?.TickNotebook(); FinishLabAutomatically(); return LabState();
             case "lab-hint":
                 CheckLabLimit();
                 if (lab?.AwaitingLimitChoice != true) lab?.Hint();
@@ -287,7 +296,7 @@ internal sealed partial class PracticeService
             // A time cap may be crossed between polling and serialization.
             // Never show its decision until capture actually paused.
             limitDecisionPending = lab.Paused && lab.AwaitingLimitChoice, finishingMission = lab.FinishingMission, limitReached = lab.LimitReached,
-            reportArtifact = lab.ReportArtifact, lab.EditorCourse, lab.RouteKind,
+            reportArtifact = lab.ReportArtifact, lab.EditorCourse, lab.RouteKind, lab.AdaptiveGuide, lab.CoachStage, lab.CoachReason, lab.CoachPrompt,
             mission = lab.MissionId, phase = lab.PhaseTitle, objectives = lab.Objectives, scenario = lab.ScenarioTitle, scenarioStep = lab.ScenarioStep, scenarioLength = lab.ScenarioLength, scenarioCompletedGoals = lab.ScenarioCompletedGoals,
             guide = !lab.ShowGuide || lab.Task.Keys.Length == 0 ? null : Describe(Gesture.Parse(lab.Task.Keys), "") };
     }

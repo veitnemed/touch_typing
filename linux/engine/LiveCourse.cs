@@ -28,6 +28,7 @@ internal static partial class LiveCourse
         WindowsDesktopMissions(result);
         WorkdayDebugMissions(result);
         ProjectFileMissions(result);
+        SourceHandoffMissions(result);
         return result;
     }
 
@@ -41,8 +42,8 @@ internal static partial class LiveCourse
         {
             foreach (string token in RouteTokens(mission.Phases[phase]))
             {
-                if (!nativeEnglishInput && (IsCommandToken(token) || IsProjectSearchQuery(token) || token is "browser-search" or "code-clone-command" or "research-find" or "file-name-commit" ||
-                    token is "code-rename-confirm" or "debug-unit" or "debug-report-check"
+                if (!nativeEnglishInput && (IsCommandToken(token) || token is "source-log-command" or "source-config-test" || IsProjectSearchQuery(token) || token is "browser-search" or "code-clone-command" or "research-find" or "file-name-commit" ||
+                    NotebookEnglishToken(token) || token is "code-rename-confirm" or "debug-unit" or "debug-report-check"
                     or "debug-project-query" or "debug-doc-submit" or "debug-rewrite" or "exact-find-submit" or "python-edit-write" or "notebook-file" or "notebook-report" or "notebook-type" or "notebook-report-save" or "moved-report-save" ||
                     trial.ExactEdit && token is "quick-choose" or "save") && trial.Layout == "RU")
                 {
@@ -112,6 +113,8 @@ internal static partial class LiveCourse
             Title = "Допишите «" + scene.NewReportRow + "» в конце перемещённого CSV и сохраните файл",
             Hint = "Ctrl+End перейдёт к пустой строке после данных. Введите " + scene.NewReportRow + " и нажмите Ctrl+S.",
             Text = scene.NewReportRow };
+        if (token == "source-log-command") token = "cmd:" + scene.SourceLogCommand.Replace(' ', '~');
+        if (token == "source-config-test") token = "cmd:" + LabScene.SourceTestCommand.Replace(' ', '~');
         if (token == "file-route-parent") token = scene.WindowsDesktop ? "win-explorer-parent" : "file-parent";
         if (token == "file-name-commit") return Actions[token] with { Keys = "", Text = scene.FileStem,
             Title = "Введите «" + scene.FileStem + "» вместо выделенного имени и нажмите Enter",
@@ -121,8 +124,10 @@ internal static partial class LiveCourse
                 Title = "Введите «" + scene.BrowserPracticeQuery + "» и нажмите Enter",
                 Hint = "Ищем в учебной выдаче; откройте результат и вернитесь к тому же запросу." };
         if (token == "research-find")
-            return new(token, "Найдите запись «" + scene.BrowserResearchNeedle + "» в открытом файле",
-                "", "Введите идентификатор записи и нажмите Enter.", scene.BrowserResearchNeedle, token);
+            return new(token, scene.ContextHandoffActive ? scene.SourceReadTitle :
+                "Найдите запись «" + scene.BrowserResearchNeedle + "» в открытом файле",
+                "", "Введите идентификатор записи и нажмите Enter.",
+                scene.ContextHandoffActive ? scene.SourceReadNeedle : scene.BrowserResearchNeedle, token);
         if (token == "code-clone-command")
             return Actions[token] with { Keys = "", Text = "Git: Clone",
                 Title = "Введите Git: Clone в палитре и нажмите Enter" };
@@ -141,7 +146,7 @@ internal static partial class LiveCourse
         if (IsPickerToken(token))
         {
             var w = scene.Active;
-            string raw = scene.FileRouteTarget(scene.ResolveBrowserRouteTarget(token[(token.IndexOf(':') + 1)..]));
+            string raw = scene.SourceRouteTarget(scene.FileRouteTarget(scene.ResolveBrowserRouteTarget(token[(token.IndexOf(':') + 1)..])));
             string query = raw.Replace('_', ' ');
             var entry = scene.Entries(w).FirstOrDefault(item => item.Path == raw || item.Path.EndsWith("/" + raw, StringComparison.Ordinal) ||
                 item.Path == query || item.Title == query || item.Path.EndsWith("/" + query, StringComparison.Ordinal));
@@ -176,10 +181,10 @@ internal static partial class LiveCourse
             string query = token == "project-search-submit" ? LabScene.SearchNeedle : token[13..].Replace('~', ' ');
             return Actions["project-search-submit"] with { Text = query, Title = "Введите «" + query + "» и нажмите Enter" };
         }
-        var task = scene.WithBinding(Actions[token]);
+        var task = scene.DescribeSourceTask(scene.WithBinding(Actions[token]));
         if (scene.GnomePractice == "matebook" && token == "layout")
             return task with { Title = "Переключите учебный ввод на " + (scene.Layout == "RU" ? "EN" : "RU") };
-        if (scene.GnomePractice == "same-app" && token.StartsWith("switch-group-", StringComparison.Ordinal))
+        if (!scene.ContextHandoffActive && scene.GnomePractice == "same-app" && token.StartsWith("switch-group-", StringComparison.Ordinal))
             return task with { Title = scene.Active?.Url == "app.py" ? "Выберите окно с README.md" : "Выберите окно с app.py" };
         if (scene.ExactEdit && token == "quick-choose") return task with
             { Title = "Введите ap и откройте app.py", Text = LabScene.ExactFileFragment };
@@ -211,8 +216,13 @@ internal static partial class LiveCourse
         if (trial.NotebookCourse)
         {
             if (task.Action == "notebook-type") return trial.Text("Text", task.Text);
-            if (task.Action == "quick-choose" && task.Text.Length > 0) { trial.Active.Input = task.Text; trial.Active.OptionIndex = 0; }
-            if (task.Action == "save" && task.Text.Length > 0) trial.Insert(trial.Active, task.Text);
+            if (task.Action is "quick-choose" or "palette-choose" && task.Text.Length > 0)
+            { trial.Active.Input = task.Text; trial.Active.OptionIndex = 0; }
+            if (task.Action == "save" && task.Text.Length > 0)
+            {
+                if (trial.CsvNotebook && trial.Active.Url.EndsWith("/" + trial.CsvModuleName, StringComparison.Ordinal)) trial.Active.Selected = true;
+                trial.Insert(trial.Active, task.Text);
+            }
         }
         if (task.Action.StartsWith("python-edit-", StringComparison.Ordinal)) return trial.PerformPythonEdit(task.Action);
         if (task.Action == "launch") { trial.Ensure(task.Id[5..]); return true; }
@@ -248,8 +258,11 @@ internal static partial class LiveCourse
             return trial.Text("Enter", "");
         }
         if (task.Action == "code-rename-confirm") trial.Active.Input = LabScene.RenameTarget;
+        if (trial.CsvNotebook && task.Action == "file-paste" && task.Text == "!conflict")
+            return !trial.Apply(task.Action) && trial.NotebookConflictExpected();
         if (!LabCatalog.Available(task, trial) || !trial.Apply(task.Action)) return false;
-        if (trial.NotebookCourse && task.Action == "save" && !trial.NotebookSavedCorrect())
+        if (trial.NotebookCourse && task.Action == "save" &&
+            !(trial.CsvNotebook && trial.Active.Url.EndsWith("/" + trial.CsvModuleName, StringComparison.Ordinal)) && !trial.NotebookSavedCorrect())
             throw new InvalidOperationException("Маршрут не подтвердил содержимое сохранённого блокнота.");
         if (trial.Switcher) trial.CommitSwitch();
         return true;
@@ -259,8 +272,9 @@ internal static partial class LiveCourse
     {
         var w = scene.Active;
         string app = w?.App ?? "", action = task.Action;
+        if (scene.SourceHandoffEvidence(task, equivalentCommand) is object source) return JsonSerializer.Serialize(source);
         if (scene.ProjectFileEvidence(task) is object files) return JsonSerializer.Serialize(files);
-        if (scene.NotebookCourse) return JsonSerializer.Serialize(scene.NotebookEvidence(action));
+        if (scene.NotebookCourse) return JsonSerializer.Serialize(scene.NotebookEvidence(task));
         if (scene.WindowsDesktop && (!scene.BrowserResearchActive || action.StartsWith("win-", StringComparison.Ordinal)))
             return JsonSerializer.Serialize(scene.WindowsDesktopEvidence());
         if (scene.PythonEditingExercise) return JsonSerializer.Serialize(scene.PythonEditEvidence());

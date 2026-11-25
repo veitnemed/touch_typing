@@ -75,6 +75,11 @@ namespace TouchTypingStudio
             Text(heading, x + 16, 41, 11, CodeForeground, width - 40);
             Text("···", x + width - 27, 39, 15, CodeMuted, 20);
             bool projectView = view != "changes" && view != "project-search" && view != "extensions";
+            if (projectView && window.B("explorerActions"))
+            {
+                DrawWorkingExplorer(window, x, width, h);
+                return;
+            }
             if (projectView)
                 Text("⌄   " + CodeProjectName(window).ToUpperInvariant(), x + 6, 65, 12, CodeForeground, width - 12);
             var names = view == "extensions" ? new[] { "Python", "Pylance" } :
@@ -142,6 +147,13 @@ namespace TouchTypingStudio
                 Rectangle(x + 6, y + 3, 1, 1, CodeCanvas);
                 Rectangle(x + 9, y + 11, 1, 1, CodeCanvas);
             }
+            else if (file.EndsWith(".ipynb", StringComparison.OrdinalIgnoreCase))
+            {
+                var ring = new Pen(Ui.Brush("#F4A261"), 1.2);
+                context.DrawEllipse(null, ring, new Point(x + 7, y + 7), 5.5, 4);
+                Rectangle(x + 11, y + 1, 2, 2, "#F4A261");
+                Rectangle(x + 2, y + 11, 2, 2, "#B1BAC4");
+            }
             else Text("▪", x + 2, y - 2, 14, CodeMuted, 12);
         }
 
@@ -155,7 +167,13 @@ namespace TouchTypingStudio
             Text("⑂ main   ⓧ " + scene.I("diagnosticProblemCount") + "   ⚠ 0",
                 12, h - 19, 12, CodeMuted, w - rightWidth - 18);
             if (window.D("notebook").Exists)
-            { Text("Ячейка " + (window.D("notebook").I("selected") + 1) + "    Jupyter Notebook", w - rightWidth, h - 19, 12, CodeMuted, rightWidth - 6); return; }
+            {
+                Data nb = window.D("notebook");
+                string note = "Ячейка " + (nb.I("selected") + 1) + "/" + nb.Items("cells").Count() + "   ·   " +
+                    (window.S("focus") != "body" ? "Фокус вне блокнота" : nb.B("editing") ? "Редактирование" : "Выбор ячеек");
+                Text(note, w - rightWidth, h - 19, 12, NotebookMuted, rightWidth - 6);
+                return;
+            }
             Text(string.Format(CultureInfo.InvariantCulture, "Ln {0}, Col {1}     Spaces: 4     UTF-8     LF     {2}", line, column, language),
                 w - rightWidth, h - 19, 12, CodeMuted, rightWidth - 6);
         }
@@ -184,7 +202,7 @@ namespace TouchTypingStudio
         }
 
         private void DrawStyledCodeLine(string value, Data window, Data[] syntax, double x, double y, double width,
-            int offset, int caret, int anchor, bool focused, bool hasLineBreak)
+            int offset, int caret, int anchor, bool focused, bool hasLineBreak, double manualScroll = -1)
         {
             if (width <= 0) return;
             int localCaret = caret - offset, localAnchor = anchor - offset;
@@ -207,7 +225,7 @@ namespace TouchTypingStudio
             {
                 double cx = drawCaret ? line.Distance(localCaret) : 0;
                 double breakWidth = Math.Ceiling(CodeFontSize * .6);
-                double shift = Math.Max(0, cx - width + (selectBreak ? breakWidth + 2 : 3));
+                double shift = manualScroll >= 0 ? manualScroll : Math.Max(0, cx - width + (selectBreak ? breakWidth + 2 : 3));
                 var origin = new Point(x - shift, y);
                 context.PushClip(new RectangleGeometry(new Rect(x, y, width, 20)));
                 try

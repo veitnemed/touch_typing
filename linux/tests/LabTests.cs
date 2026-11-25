@@ -463,7 +463,10 @@ internal static class LabTests
             var courses = LiveCourse.Missions.Where(m => m.App == app && m.Level == level).ToList();
             int expectedCourses = app == "windows" ? 0 : app == "workday" ? (level == 0 ? 2 : 1) : 4;
             Check(courses.Count(course => !course.Curated) == expectedCourses, "Course count: " + app);
-            if (app == "windows") Check(courses.Count == 2 && courses.All(course => course.Curated), "Windows curated route: " + level);
+            if (app == "windows")
+                Check(courses.Any(course => course.Id == "windows-desktop-" + level) &&
+                    courses.Any(course => course.Id == "windows-desktop-return-" + level) &&
+                    courses.All(course => course.Curated), "Windows original curated routes remain available: " + level);
             foreach (var course in courses)
             foreach (int variant in Enumerable.Range(0, 3))
             foreach (string layout in new[] { "RU", "EN" })

@@ -40,10 +40,12 @@ internal sealed partial class LabScene
             "chrome://downloads" => DownloadEntries(),
             "chrome://bookmarks" => w.SavedBookmarks.Order().Select(PageEntry).ToArray(),
             _ when BrowserPracticeActive && IsSearchResult(w.Url) => PracticeSearchEntries(w.Url),
+            _ when BulletinWorkflow => BulletinLinks(w.Url),
             _ when BrowserPracticeActive => BrowserResearchLinks(w.Url),
             _ => Links
         };
         if (w.App == "code" && w.Focus is "explorer" or "file-name") return ProjectTree(EditorProjectRoot, w.ExpandedProjectFolders).ToArray();
+        if (w.Focus == "palette" && NotebookPalette(w) is { Length: > 0 } commands) return commands;
         if (w.Focus == "project-results") return ProjectMatchEntries(w);
         if (w.App == "code" && DiagnosticWorkspace &&
             (w.Focus is "code-problems" or "code-quick-fix" || w.Panel && w.Focus == "body"))
@@ -69,7 +71,7 @@ internal sealed partial class LabScene
 
     private readonly Dictionary<string, string> originalFiles = [];
     private string EditorProjectRoot => NotebookCourse ? NotebookRoot : RepoCloned ? CloneRoot : ExactEdit ? ExactRoot : PythonEditingExercise ? PythonEditRoot : DiagnosticWorkspace ? DiagnosticRoot : SearchProjectRoot ?? (symbolWorkspace ? SymbolProject : Project);
-    private IEnumerable<string> ProjectDocuments() => projectFileFamily != null ?
+    private IEnumerable<string> ProjectDocuments() => projectFileFamily != null || ContextHandoffActive || NotebookCourse ?
         ProjectTree(EditorProjectRoot, null, recursive: true).Where(e => e.Kind == "file").Select(e => e.Path) : DebugDay ? DebugProjectDocuments() :
         DiagnosticWorkspace ? Terminal.Entries(DiagnosticRoot).Where(path => !Terminal.DirectoryExists(path)) :
         Terminal.Entries(EditorProjectRoot)
@@ -77,6 +79,7 @@ internal sealed partial class LabScene
         .Where(path => !Terminal.DirectoryExists(path));
     private object WindowSnapshot(LabWindow w)
     {
+        w.Tab?.Notebook?.SynchronizeWorkspace(NotebookRead);
         var paths = w.App == "code" ? ProjectDocuments().ToArray() : [];
         string Relative(string path) => DebugDay ? DebugRelative(path) : path[(EditorProjectRoot.Length + 1)..];
         var changes = paths.Where(path => !originalFiles.TryGetValue(path, out var original) || original != Terminal.ReadFile(path)).Select(Relative);
@@ -88,7 +91,9 @@ internal sealed partial class LabScene
             DebugDay && activePath.StartsWith(debugDay.Root + "/", StringComparison.Ordinal) ? DebugRelative(activePath) : activePath.StartsWith(EditorProjectRoot + "/", StringComparison.Ordinal)
                 ? Relative(activePath) : NameOf(activePath);
         return w.Snapshot(w.Id == ActiveWindow, Entries(w), paths.Select(Relative), changes, results, projectName, projectRelative,
-            WindowsDesktop && w.App == "files" ? WindowsPath(w.Folder) : null, BrowserPracticeActive, EditorProjectRoot.Count(ch => ch == '/'));
+            WindowsDesktop && w.App == "files" ? WindowsPath(w.Folder) : null, BrowserPracticeActive, EditorProjectRoot.Count(ch => ch == '/'),
+            w.App == "code" ? ProjectTree(EditorProjectRoot, w.ExpandedProjectFolders).ToArray() : null, CanUndoProjectFile,
+            CanPasteProjectFile, CanPasteNotebookCell);
     }
 
     private static bool IsIdentifier(char c) => char.IsLetterOrDigit(c) || c == '_';
@@ -121,7 +126,8 @@ internal sealed partial class LabScene
         int index = w.Body.IndexOf(w.Find, next ? Math.Clamp(Math.Max(pos.Caret, pos.Anchor), 0, w.Body.Length) : 0, StringComparison.OrdinalIgnoreCase);
         if (index < 0 && next) index = w.Body.IndexOf(w.Find, StringComparison.OrdinalIgnoreCase);
         if (index < 0) { w.Status = "Совпадений нет"; return false; }
-        pos.Anchor = index; pos.Caret = index + w.Find.Length; w.Status = "Найдено: " + w.Find; return true;
+        pos.Anchor = index; pos.Caret = index + w.Find.Length; w.Status = "Найдено: " + w.Find;
+        RememberSourceMatch(w, index); return true;
     }
 
     internal void PrepareCase(int variant, string app)
@@ -176,6 +182,7 @@ internal sealed partial class LabScene
                 int column = w.Cursor - LineStart(body, w.Cursor);
                 Remember(w); (lines[row], lines[target]) = (lines[target], lines[row]); w.Body = string.Join("\n", lines);
                 w.Cursor = lines.Take(target).Sum(line => line.Length + 1) + column; return true;
+            case "document-end": w.Cursor = w.Body.Length; w.Tab.ExtraMatches.Clear(); return true;
             case "document-start": w.Cursor = 0; w.Tab.ExtraMatches.Clear(); return true;
             case "occurrence":
                 if (!w.Selected)
@@ -262,7 +269,7 @@ internal sealed partial class LabScene
                         string path = "/home/student/Downloads/" + entry.Path;
                         for (int copy = 1; Terminal.Exists(path); copy++)
                             path = "/home/student/Downloads/" + System.IO.Path.GetFileNameWithoutExtension(entry.Path) + " (" + copy + ")" + System.IO.Path.GetExtension(entry.Path);
-                        Terminal.StoreFile(path, BrowserDownloadBody(entry.Path) ?? (NeutralWorkspace ? NeutralProject.ReportBody : ReportBody)); downloads.Insert(0, path);
+                        Terminal.StoreFile(path, BulletinDownload(entry.Path) ?? BrowserDownloadBody(entry.Path) ?? (NeutralWorkspace ? NeutralProject.ReportBody : ReportBody)); downloads.Insert(0, path);
                         w.Status = "Загружен " + entry.Path; break;
                     case "file":
                         string content = Terminal.ReadFile(entry.Path);
@@ -290,6 +297,7 @@ internal sealed partial class LabScene
                 Clipboard = fileTransfer = file.Path; fileCut = action == "file-cut";
                 w.Status = (fileCut ? "К переносу: " : "К копированию: ") + file.Title; return true;
             case "file-paste": return PasteProjectFile(w);
+            case "file-undo": return w.App == "code" && w.Focus == "explorer" && UndoProjectFile(w);
             case "trash":
                 var selected = Entries(w).ElementAtOrDefault(w.Item);
                 if (selected == null) return false;

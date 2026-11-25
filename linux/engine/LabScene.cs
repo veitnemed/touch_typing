@@ -99,7 +99,7 @@ internal sealed class LabWindow(string app, int number, int workspace)
     internal readonly HashSet<string> SavedBookmarks = [];
     internal int ActiveTab, Zoom = 100, OptionIndex;
     internal readonly List<LabTab> Tabs = [];
-    internal string RenamePath = "";
+    internal string RenamePath = "", PaletteFrom = "body";
     internal readonly HashSet<string> ExpandedProjectFolders = new(StringComparer.Ordinal);
     internal readonly Stack<LabTab> ClosedTabs = [];
     internal Stack<EditRevision> Undo => Tab.Undo;
@@ -107,7 +107,9 @@ internal sealed class LabWindow(string app, int number, int workspace)
     internal LabTab Tab => Tabs.Count == 0 ? null : Tabs[Math.Clamp(ActiveTab, 0, Tabs.Count - 1)];
     internal string Body { get => Tab?.Body ?? ""; set { if (Tab != null) Tab.Body = value; } }
     internal string Url => Tab?.Url ?? "";
-    internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults, string projectName, string projectRelative, string windowsPath = null, bool browserPractice = false, int projectRootDepth = 3) => new { windowsPath, browserPractice, projectRootDepth, expandedFolders = ExpandedProjectFolders, notebook = Tab?.Notebook?.Snapshot(), notebookDescription = Tab?.Notebook?.Describe(), syntax = App == "code" ? PythonHighlight.For(Body, Url) : [], projectFiles, changedFiles, searchResults, projectName, projectRelative, ProjectSearchQuery, Id, App, Title, Workspace, State, NormalSlot, restoreState = MinimizedFrom, active, Folder, folderCanBack = FolderBack.Count != 0, folderCanForward = FolderForward.Count != 0, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(App == "code"), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
+    internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults, string projectName, string projectRelative, string windowsPath = null, bool browserPractice = false, int projectRootDepth = 3,
+        LabEntry[] explorerEntries = null, bool canUndoExplorer = false, bool explorerCanPaste = false, bool canPasteCell = false) => new { windowsPath, browserPractice, projectRootDepth, renamePath = RenamePath,
+        explorerActions = App == "code", explorerEntries, canUndoExplorer, explorerCanPaste, expandedFolders = ExpandedProjectFolders, notebook = Tab?.Notebook?.Snapshot(canPasteCell), notebookDescription = Tab?.Notebook?.Describe(), syntax = App == "code" ? PythonHighlight.For(Body, Url) : [], projectFiles, changedFiles, searchResults, projectName, projectRelative, ProjectSearchQuery, Id, App, Title, Workspace, State, NormalSlot, restoreState = MinimizedFrom, active, Folder, folderCanBack = FolderBack.Count != 0, folderCanForward = FolderForward.Count != 0, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(App == "code"), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
         tabs = Tabs.Select(tab => tab.Snapshot()), ActiveTab, Url, Body, Focus, Input, Find, Sidebar, Split, Status, Zoom, Selected, Cursor, Anchor, Panel, bodyCursor = Tab?.Position.Caret ?? 0, bodyAnchor = Tab?.Position.Anchor ?? 0, OptionIndex, Bookmarks, savedBookmarks = SavedBookmarks.ToArray() };
     internal LabWindow Clone()
     {
@@ -123,7 +125,7 @@ internal sealed class LabWindow(string app, int number, int workspace)
         copy.PendingSymbol = PendingSymbol;
         foreach (string path in FolderBack.Reverse()) copy.FolderBack.Push(path);
         foreach (string path in FolderForward.Reverse()) copy.FolderForward.Push(path);
-        copy.RenamePath = RenamePath; copy.ExpandedProjectFolders.UnionWith(ExpandedProjectFolders);
+        copy.RenamePath = RenamePath; copy.PaletteFrom = PaletteFrom; copy.ExpandedProjectFolders.UnionWith(ExpandedProjectFolders);
         copy.Tabs.AddRange(Tabs.Select(tab => tab.Clone()));
         foreach (var tab in ClosedTabs.Reverse()) copy.ClosedTabs.Push(tab.Clone());
         foreach (var item in fields) copy.fields[item.Key] = item.Value;
@@ -140,7 +142,9 @@ internal sealed partial class LabScene
     internal int Workspace, WorkspaceCount = 3, Version, Screenshots;
     internal string[] Dock = ["chrome", "code", "terminal", "files"];
     internal string LayoutKey = "Super+Space", SwitchTarget;
-    internal string Layout, Clipboard = "build: 17 tests passed", ActiveWindow;
+    internal string Layout, ActiveWindow;
+    private string clipboard = "build: 17 tests passed";
+    internal string Clipboard { get => clipboard; set { clipboard = value; notebookClipboard = ""; } }
     internal bool Overview, Switcher, Screenshot, ScreenshotReady, ScreenshotCopied, ShowDesktop, LayoutIsVirtual;
     internal bool ReplayLegacyNavigation, ReplayLegacyLineEditing, UseWindowsBindings;
     internal bool GnomeWindows;
@@ -198,16 +202,20 @@ internal sealed partial class LabScene
         NeutralWorkspace = source.NeutralWorkspace;
         BrowserPracticeActive = source.BrowserPracticeActive; RepoCloned = source.RepoCloned; BrowserPracticeQuery = source.BrowserPracticeQuery;
         notebookCase = source.notebookCase; notebookLevel = source.notebookLevel;
+        notebookFamily = source.notebookFamily; csvNotebook = source.csvNotebook; verifiedNotebookBody = source.verifiedNotebookBody;
         browserCaseVariant = source.browserCaseVariant; browserResearch = source.browserResearch;
-        projectFileFamily = source.projectFileFamily;
+        projectFileFamily = source.projectFileFamily; lastProjectFileEdit = source.lastProjectFileEdit;
+        lastFileConflict = source.lastFileConflict;
         Terminal = source.Terminal.Clone(); captureImage = source.captureImage;
         CloneDebugDay(source);
+        RestoreSourceFixture(source);
         symbolWorkspace = source.symbolWorkspace;
         SearchProjectRoot = source.SearchProjectRoot; ExactEdit = source.ExactEdit;
         foreach (var file in source.originalFiles) originalFiles[file.Key] = file.Value;
         Dock = [.. source.Dock]; LayoutKey = source.LayoutKey; SwitchTarget = source.SwitchTarget;
         Workspace = source.Workspace; WorkspaceCount = source.WorkspaceCount; Version = source.Version;
-        Screenshots = source.Screenshots; Layout = source.Layout; Clipboard = source.Clipboard;
+        Screenshots = source.Screenshots; Layout = source.Layout; clipboard = source.clipboard;
+        notebookClipboard = source.notebookClipboard;
         ActiveWindow = source.ActiveWindow; Overview = source.Overview; Switcher = source.Switcher;
         Screenshot = source.Screenshot; ScreenshotReady = source.ScreenshotReady;
         ScreenshotCopied = source.ScreenshotCopied; ShowDesktop = source.ShowDesktop;
@@ -217,6 +225,7 @@ internal sealed partial class LabScene
         LayoutIsVirtual = source.LayoutIsVirtual; ReplayLegacyNavigation = source.ReplayLegacyNavigation; Search = source.Search;
         GnomeWindows = source.GnomeWindows; GnomePractice = source.GnomePractice; DesktopProfile = [.. source.DesktopProfile]; SwitchChoices = [.. source.SwitchChoices];
         ReplayLegacyLineEditing = source.ReplayLegacyLineEditing;
+        ReplayLegacyNotebookActions = source.ReplayLegacyNotebookActions;
         ReplayLegacyPythonEditing = source.ReplayLegacyPythonEditing; PythonEditingExercise = source.PythonEditingExercise;
         windowNumber = source.windowNumber;
         historyDraft = source.historyDraft; killedText = source.killedText;
@@ -283,6 +292,7 @@ internal sealed partial class LabScene
         if (action.StartsWith("win-", StringComparison.Ordinal)) return ApplyWindowsAction(action);
         var window = Active;
         if (ApplyNotebook(action, window) is bool notebookChanged) return notebookChanged;
+        if (ApplyNotebookPalette(action, window) is bool notebookCommand) return notebookCommand;
         if (ApplyDebugDayAction(action, window) is bool debug) return debug;
         bool changed = true;
         switch (action)
@@ -464,7 +474,7 @@ internal sealed partial class LabScene
                 var chosen = Entries(window).ElementAtOrDefault(window.OptionIndex);
                 if (chosen == null) return false;
                 OpenDocument(chosen.Path); break;
-            case "palette": if (!code) return false; window.Focus = "palette"; window.Cursor = 0; window.Input = ""; window.OptionIndex = 0; break;
+            case "palette": if (!code) return false; window.PaletteFrom = window.Focus; window.Focus = "palette"; window.Cursor = 0; window.Input = ""; window.OptionIndex = 0; break;
             case "palette-next": if (!code || window.Focus != "palette") return false; window.OptionIndex = (window.OptionIndex + 1) % 3; break;
             case "palette-choose":
                 if (!code || window.Focus != "palette") return false;
@@ -487,7 +497,7 @@ internal sealed partial class LabScene
                 int first = LineStart(window.Body, window.Start);
                 int last = LineEnd(window.Body, window.End);
                 window.Select(first, Math.Min(window.Body.Length, last + 1)); break;
-            case "save": if (!code || window.Tab == null) return false; Terminal.StoreFile(EditorPath(window.Tab), window.Body); window.Tab.SavedBody = window.Body; window.Status = "Файл «" + window.Tab.Title + "» сохранён"; break;
+            case "save": if (!code || window.Tab == null) return false; Terminal.StoreFile(EditorPath(window.Tab), window.Body); window.Tab.SavedBody = window.Body; AfterNotebookSave(window); window.Status = "Файл «" + window.Tab.Title + "» сохранён"; break;
             case "select-all": window.Selected = true; break;
             case "terminal-copy":
                 if (!window.Selected) return false;

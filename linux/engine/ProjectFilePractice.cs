@@ -9,6 +9,11 @@ namespace TouchTypingStudio;
 internal sealed partial class LabScene
 {
     private string projectFileFamily;
+    private sealed record FileRevision(string Kind, string From, string To, string Content = null);
+    private FileRevision lastProjectFileEdit;
+    private (string From, string To)? lastFileConflict;
+    internal bool CanUndoProjectFile => lastProjectFileEdit != null;
+    private bool CanPasteProjectFile => fileTransfer.Length > 0 && Clipboard == fileTransfer && Terminal.Exists(fileTransfer);
     // Feedback about a rejected action is not a file operation and is not replay state.
     internal string FileProblem { get; private set; }
     private bool RejectFile(LabWindow w, string reason)
@@ -44,12 +49,12 @@ internal sealed partial class LabScene
         }
     }
 
-    internal string FileRouteTarget(string value) => projectFileFamily == null ? value : value switch
+    internal string FileRouteTarget(string value) => NotebookFileTarget(value) ?? (projectFileFamily == null ? value : value switch
     {
         "@source" => IncomingDirectory + "/" + FileCase.Download,
         "@reveal" => RevealTitle(FileCase.Download),
         _ => value
-    };
+    });
 
     private IEnumerable<LabEntry> ProjectTree(string folder, HashSet<string> expanded, bool recursive = false)
     {
@@ -63,7 +68,7 @@ internal sealed partial class LabScene
         }
     }
 
-    private LabEntry[] DownloadEntries() => downloads.SelectMany(path => projectFileFamily == "inbox"
+    private LabEntry[] DownloadEntries() => downloads.SelectMany(path => projectFileFamily == "inbox" || BulletinWorkflow
         ? new[] { new LabEntry(NameOf(path), path, "file"), new LabEntry(RevealTitle(path), path, "reveal") }
         : new[] { new LabEntry(NameOf(path), path, "file") }).ToArray();
 
@@ -107,6 +112,7 @@ internal sealed partial class LabScene
 
     private bool BeginFileName(LabWindow w)
     {
+        FileProblem = null;
         var entry = Entries(w).ElementAtOrDefault(w.Item);
         if (entry?.Kind != "file" || !Terminal.Exists(entry.Path)) return false;
         w.RenamePath = entry.Path; w.Focus = "file-name"; w.Input = entry.Title;
@@ -116,35 +122,130 @@ internal sealed partial class LabScene
         return true;
     }
 
+    private bool BeginNewProjectFolder(LabWindow w, string parent = null)
+    {
+        if (w.App != "code" || w.Focus == "file-name") return false;
+        parent ??= EditorProjectRoot;
+        if (!Terminal.DirectoryExists(parent) || parent != EditorProjectRoot && !parent.StartsWith(EditorProjectRoot + "/", StringComparison.Ordinal)) return false;
+        FileProblem = null; w.RenamePath = parent + "/"; w.Focus = "file-name"; w.Input = ""; w.Cursor = 0;
+        w.Status = "Новая папка в «" + NameOf(parent) + "». Введите имя, затем Enter или Esc.";
+        return true;
+    }
+
     private bool EndFileName(LabWindow w, bool cancel)
     {
         FileProblem = null;
         string oldPath = w.RenamePath, newPath = oldPath;
         if (w.Focus != "file-name" || oldPath.Length == 0) return false;
+        bool makingFolder = oldPath.EndsWith('/');
         if (!cancel)
         {
             if (!LegalLeaf(w.Input, WindowsFileRules) || System.Text.Encoding.UTF8.GetByteCount(w.Input) > 255)
-            return RejectFile(w, "Некорректное имя. Введите имя файла без пути.");
-            newPath = ParentOf(oldPath) + "/" + w.Input;
+                return RejectFile(w, "Некорректное имя. Введите имя без пути.");
+            newPath = (makingFolder ? oldPath : ParentOf(oldPath) + "/") + w.Input;
             if (Occupied(newPath, oldPath))
-            return RejectFile(w, "Такое имя уже занято. Исходный файл не изменён.");
-            if (!Terminal.Exists(oldPath)) return RejectFile(w, "Исходный файл больше не существует");
-            if (newPath != oldPath)
+                return RejectFile(w, "Такое имя уже занято. Существующие файлы не изменены.");
+            if (makingFolder)
             {
-                try { Terminal.Transfer(oldPath, newPath, true); }
-                catch (ArgumentException) { return RejectFile(w, "Не удалось переименовать файл. Проверьте путь и права."); }
-                RelinkTabs(oldPath, newPath);
-                if (fileTransfer == oldPath && Clipboard == oldPath) Clipboard = fileTransfer = newPath;
+                try { Terminal.CreateFolder(newPath); }
+                catch (ArgumentException) { return RejectFile(w, "Не удалось создать папку. Проверьте путь и права."); }
+                w.ExpandedProjectFolders.Add(ParentOf(newPath));
+                lastProjectFileEdit = new("folder", "", newPath);
+            }
+            else
+            {
+                if (!Terminal.Exists(oldPath)) return RejectFile(w, "Исходный файл больше не существует.");
+                if (newPath != oldPath)
+                {
+                    try { Terminal.Transfer(oldPath, newPath, true); }
+                    catch (ArgumentException) { return RejectFile(w, "Не удалось переименовать файл. Проверьте путь и права."); }
+                    RelinkTabs(oldPath, newPath);
+                    if (fileTransfer == oldPath && Clipboard == oldPath) Clipboard = fileTransfer = newPath;
+                    lastProjectFileEdit = new("move", oldPath, newPath);
+                }
             }
         }
-        w.RenamePath = ""; w.Focus = w.App == "code" ? "explorer" : "body"; SelectPath(w, newPath);
-        w.Status = cancel ? "Переименование отменено" : "Имя файла: " + NameOf(newPath);
+        w.RenamePath = ""; w.Focus = w.App == "code" ? "explorer" : "body";
+        SelectPath(w, cancel && makingFolder ? oldPath.TrimEnd('/') : newPath);
+        w.Status = cancel ? makingFolder ? "Создание папки отменено" : "Переименование отменено" :
+            (makingFolder ? "Создана папка: " : "Имя файла: ") + NameOf(newPath);
         return true;
+    }
+
+    private bool UndoProjectFile(LabWindow w)
+    {
+        FileProblem = null; lastFileConflict = null;
+        var revision = lastProjectFileEdit;
+        if (revision == null || !Terminal.Exists(revision.To))
+            return RejectFile(w, "Здесь нет действия с файлом для отмены.");
+        try
+        {
+            switch (revision.Kind)
+            {
+                case "move":
+                    if (Occupied(revision.From))
+                        return RejectFile(w, "Прежнее имя уже занято. Отмена не заменила другой файл.");
+                    Terminal.Transfer(revision.To, revision.From, true);
+                    RelinkTabs(revision.To, revision.From);
+                    if (fileTransfer == revision.To && Clipboard == revision.To) Clipboard = fileTransfer = revision.From;
+                    if (w.App == "code") w.ExpandedProjectFolders.Add(ParentOf(revision.From));
+                    break;
+                case "copy":
+                    if (Terminal.ReadFile(revision.To) != revision.Content || Windows.Any(win => win.App == "code" &&
+                        win.Tabs.Any(tab => EditorPath(tab) == revision.To && tab.Body != tab.SavedBody)))
+                        return RejectFile(w, "Копия уже изменена. Отмена не удалит вашу правку.");
+                    Terminal.RemoveProjectEntry(revision.To, false);
+                    foreach (var win in Windows.Where(win => win.App == "code"))
+                    {
+                        int former = win.ActiveTab;
+                        var activeTab = win.Tab;
+                        win.Tabs.RemoveAll(tab => EditorPath(tab) == revision.To);
+                        int kept = win.Tabs.IndexOf(activeTab);
+                        win.ActiveTab = kept >= 0 ? kept : Math.Clamp(former, 0, Math.Max(0, win.Tabs.Count - 1));
+                    }
+                    break;
+                default:
+                    if (!Terminal.DirectoryExists(revision.To) || Terminal.Entries(revision.To).Length > 0)
+                        return RejectFile(w, "В новой папке уже есть данные. Отмена их не удалит.");
+                    Terminal.RemoveProjectEntry(revision.To, true);
+                    w.ExpandedProjectFolders.Remove(revision.To);
+                    break;
+            }
+        }
+        catch (ArgumentException) { return RejectFile(w, "Не удалось отменить последнее действие с файлом."); }
+        lastProjectFileEdit = null;
+        SelectPath(w, revision.From);
+        w.Status = "Последнее действие с файлом отменено.";
+        return true;
+    }
+
+    internal bool ExplorerPointer(string action, string path)
+    {
+        var w = Active;
+        if (w?.App != "code" || w.Focus is not ("body" or "explorer" or "file-name") ||
+            Switcher || Overview || Screenshot || DesktopOverlay.Length > 0) return false;
+        if (w.Focus == "file-name") return action switch
+        {
+            "commit" => Apply("file-name-commit"), "cancel" => Apply("file-name-cancel"), _ => false
+        };
+        if (action == "quick-open") return Apply("quick-open");
+        if (action is not ("select" or "open" or "rename" or "new-folder" or "undo" or "copy" or "cut" or "paste")) return false;
+        if (path != "" && !ProjectTree(EditorProjectRoot, w.ExpandedProjectFolders).Any(e => e.Path == path)) return false;
+        if (!Apply("explorer")) return false;
+        if (path.Length > 0) SelectPath(w, path);
+        return action switch {
+            "select" => w.Item >= 0,
+            "open" => Apply("item-open"), "rename" => Apply("file-name-start"),
+            "new-folder" => BeginNewProjectFolder(w, path.Length > 0 ?
+                Terminal.DirectoryExists(path) ? path : ParentOf(path) : null),
+            "undo" => UndoProjectFile(w), "copy" => Apply("file-copy"),
+            "cut" => Apply("file-cut"), _ => Apply("file-paste")
+        };
     }
 
     private bool PasteProjectFile(LabWindow w)
     {
-        FileProblem = null;
+        FileProblem = null; lastFileConflict = null;
         string source = fileTransfer;
         if (source.Length == 0 || Clipboard != source || !Terminal.Exists(source))
             return RejectFile(null, "В буфере нет доступного файла. Снова выберите и скопируйте или вырежьте его.");
@@ -153,12 +254,18 @@ internal sealed partial class LabScene
             selected == null ? EditorProjectRoot : ParentOf(selected.Path)) : w.Folder;
         string dest = folder + "/" + NameOf(source);
         if (dest == source) return RejectFile(null, "Файл уже в этой папке. Выберите другую папку назначения.");
-        if (!Terminal.DirectoryExists(folder) || folder == source || folder.StartsWith(source + "/", StringComparison.Ordinal) ||
-            Occupied(dest))
-        return RejectFile(w, "Нельзя вставить сюда: проверьте папку и совпадение имён. Ничего не заменено.");
+        if (!Terminal.DirectoryExists(folder) || folder == source || folder.StartsWith(source + "/", StringComparison.Ordinal))
+            return RejectFile(w, "Нельзя вставить сюда. Выберите другую папку назначения.");
+        if (Occupied(dest))
+        {
+            lastFileConflict = (source, dest);
+            return RejectFile(w, "«" + NameOf(dest) + "» уже есть в «" + NameOf(folder) +
+                "». Ничего не заменено. Переименуйте исходный или выберите другую папку.");
+        }
         try { Terminal.Transfer(source, dest, fileCut); }
         catch (ArgumentException) { return RejectFile(w, "Не удалось перенести данные. Проверьте путь и права."); }
         if (fileCut) { RelinkTabs(source, dest); fileTransfer = ""; }
+        if (w.App == "code") lastProjectFileEdit = new(fileCut ? "move" : "copy", source, dest, Terminal.ReadFile(dest));
         if (w.App == "code") w.ExpandedProjectFolders.Add(folder);
         SelectPath(w, dest); w.Status = (fileCut ? "Перемещён: " : "Создана копия: ") + NameOf(dest);
         return true;

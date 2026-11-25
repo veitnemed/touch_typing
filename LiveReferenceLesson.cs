@@ -85,9 +85,11 @@ namespace TouchTypingStudio
             Grid.SetRow(referenceHintPanel, 1);
             root.Children.Add(referenceHintPanel);
 
-            labDesktop = new LabSceneView { MinHeight = 118, WitnessPythonEditor = verifyMode &&
+            labDesktop = new LabSceneView { MinHeight = 118, Focusable = true, WitnessPythonEditor = verifyMode &&
                 Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_PYTHON_EDITOR") == "1" };
             AutomationProperties.SetAutomationId(labDesktop, "LabDesktop");
+            labDesktop.NotebookCommand += ApplyLabNotebookCommand;
+            labDesktop.ExplorerCommand += ApplyLabExplorerCommand;
             var sceneFrame = ReferenceLessonPanel(labDesktop, new Thickness(4), 13);
             sceneFrame.Margin = new Thickness(16, 8, 16, 0);
             Grid.SetRow(sceneFrame, 2);

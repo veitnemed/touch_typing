@@ -38,7 +38,7 @@ internal static class LiveRoutePolicy
     };
 
     internal static LiveMission Pick(LiveMission[] unused, LiveMission[] rotation, LiveMission previous,
-        string environment, IEnumerable<ShortcutAttempt> attempts)
+        string environment, IEnumerable<ShortcutAttempt> attempts, HashSet<string> targets = null)
     {
         bool needsCore = previous == null || !IsCore(previous, environment);
         var candidates = unused.Where(m => IsCore(m, environment) == needsCore).ToArray();
@@ -48,6 +48,11 @@ internal static class LiveRoutePolicy
             // even in a future level with more supplements than core routes.
             candidates = needsCore ? rotation.Where(m => IsCore(m, environment)).ToArray() : unused;
             if (candidates.Length == 0) candidates = unused;
+        }
+        if (targets?.Count > 0)
+        {
+            var practice = candidates.Where(m => LiveCourse.CouldPracticeAny(m, targets)).ToArray();
+            if (practice.Length > 0) candidates = practice;
         }
         var lastPracticed = attempts.Where(a => a.Correct && a.Mission != null)
             .GroupBy(a => a.Mission).ToDictionary(g => g.Key, g => g.Max(a => a.Date));

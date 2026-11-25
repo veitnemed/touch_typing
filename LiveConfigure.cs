@@ -61,7 +61,7 @@ namespace TouchTypingStudio
             ConfigureField(choiceGroup, "Поручение", mission);
             ConfigureField(choiceGroup, "Сложность", level);
             var guideGroup = ConfigureGroup(guide, "Как тренироваться");
-            var mode = LiveSelect("Режим подсказок", "LabMode", new[] { "Самостоятельно", "По шагам" }, labMode == "sandbox" ? 1 : 0);
+            var mode = LiveSelect("Режим подсказок", "LabMode", new[] { "Самостоятельно", "По шагам", "По ситуации" }, labMode == "sandbox" ? 1 : 0);
             ConfigureField(guideGroup, "Подсказки", mode);
             var durationGroup = ConfigureGroup(guide, "Длительность");
             var actions = LiveSelect("Лимит действий", "LabDuration",
@@ -97,7 +97,8 @@ namespace TouchTypingStudio
                 lastLabTimer = Math.Max(0, timer.SelectedIndex);
                 liveConfiguredMissionApp = labApp;
                 liveConfiguredMission = Get(mission);
-                StartLabAttempt(liveConfiguredMission, false, string.IsNullOrEmpty(liveConfiguredMission) ? "course" : "mission");
+                StartLabAttempt(liveConfiguredMission, false, string.IsNullOrEmpty(liveConfiguredMission) ? "course" : "mission",
+                    adaptiveGuide: mode.SelectedIndex == 2);
             }, 10);
             start.Content = "Начать";
             start.IsDefault = true;

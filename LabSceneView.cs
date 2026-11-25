@@ -98,7 +98,8 @@ namespace TouchTypingStudio
             if (terminal == null && editor != null)
             {
                 string focus = editor.S("focus");
-                string description = focus == "code-problems" || focus == "code-quick-fix" ?
+                string description = editor.B("explorerActions") && (focus == "file-name" || focus == "explorer") ?
+                    ExplorerDescription(editor) : focus == "code-problems" || focus == "code-quick-fix" ?
                     (focus == "code-problems" ? "Проблемы: " : "Быстрые исправления: ") +
                     string.Join("; ", editor.Items("entries").Select(item => item.S("title"))) : focus == "symbol-references" ?
                     "Использования: " + string.Join("; ", editor.Items("entries").Select(item => item.S("title"))) :
@@ -106,7 +107,7 @@ namespace TouchTypingStudio
                     focus == "project-results" ? "Поиск «" + editor.S("projectSearchQuery") + "»: " +
                     string.Join("; ", editor.Items("entries").Select(item => item.S("title"))) :
                     focus == "symbol-rename" ? "Переименовать символ: " + editor.S("input") :
-                    focus == "body" && editor.D("notebook").Exists ? editor.S("url").Split('/').Last() + " · " + editor.S("notebookDescription") :
+                    focus == "body" && editor.D("notebook").Exists ? editor.S("url").Split('/').Last() + " · " + editor.S("notebookDescription") + " " + NbA11y :
                     editor.Items("tabs").Skip(Math.Max(0, editor.I("activeTab"))).Select(item => item.S("title")).FirstOrDefault();
                 System.Windows.Automation.AutomationProperties.SetHelpText(this, description ?? "");
             }
@@ -121,20 +122,29 @@ namespace TouchTypingStudio
         {
             if (ActualWidth < 1 || ActualHeight < 1) return;
             context = dc;
-            if (scene.S("desktopStyle") == "win10")
+            notebookHits.Clear();
+            notebookTarget = null;
+            notebookMenuVisible = false;
+            ExplorerStartFrame();
+            NotebookStartFrame(1, 0, 0);
+            bool immersive = (classApp == "chrome" || classApp == "code") && NotebookInteractionClear() &&
+                scene.Items("windows").Any(item => item.B("active") && item.S("app") == classApp && item.S("state") != "minimized");
+            bool windowsNotebook = immersive && classApp == "code" && scene.Items("windows").Any(
+                item => item.B("active") && item.S("app") == "code" && item.D("notebook").Exists);
+            if (scene.S("desktopStyle") == "win10" && !windowsNotebook)
             {
                 DrawSimulatedWindows10(dc);
                 context = null;
                 return;
             }
-            if ((classApp == "chrome" || classApp == "code") && !scene.B("overview") && !scene.B("showDesktop") && !scene.B("switcher") &&
-                scene.Items("windows").Any(item => item.B("active") && item.S("app") == classApp && item.S("state") != "minimized"))
+            if (immersive)
             {
                 DrawImmersive(dc);
                 context = null;
                 return;
             }
             double scale = Math.Min(ActualWidth / WidthUnits, ActualHeight / HeightUnits);
+            NotebookStartFrame(scale, (ActualWidth - WidthUnits * scale) / 2, (ActualHeight - HeightUnits * scale) / 2);
             dc.PushTransform(new TranslateTransform((ActualWidth - WidthUnits * scale) / 2, (ActualHeight - HeightUnits * scale) / 2));
             dc.PushTransform(new ScaleTransform(scale, scale));
             dc.PushClip(new RectangleGeometry(new Rect(0, 0, WidthUnits, HeightUnits), 10, 10));
@@ -179,6 +189,7 @@ namespace TouchTypingStudio
             double width = classApp == "chrome" ? Math.Min(900, Math.Max(610, ActualWidth)) : Math.Max(420, ActualWidth);
             double scale = ActualWidth / width;
             double height = ActualHeight / scale;
+            NotebookStartFrame(scale, 0, 0);
             dc.PushTransform(new ScaleTransform(scale, scale));
             dc.PushClip(new RectangleGeometry(new Rect(0, 0, width, height), 10, 10));
             Rectangle(0, 0, width, height, classApp == "chrome" ? "#F7F6FD" : CodeCanvas);
@@ -252,6 +263,7 @@ namespace TouchTypingStudio
 
         private void DrawWindow(Data window, Rect bounds)
         {
+            NotebookWindow(bounds);
             context.PushTransform(new TranslateTransform(bounds.X, bounds.Y));
             context.PushClip(new RectangleGeometry(new Rect(0, 0, bounds.Width, bounds.Height), 8, 8));
             Rounded(0, 0, bounds.Width, bounds.Height, "#252527", 8);
@@ -697,7 +709,7 @@ namespace TouchTypingStudio
             double gutter = Math.Max(49, 21 + lines.Length.ToString(CultureInfo.InvariantCulture).Length * 8);
             int offset = 0;
             var syntax = window.Items("syntax").ToArray();
-            if (window.D("notebook").Exists) DrawNotebookPage(window.D("notebook"), primary, firstRowY - 4, editorWidth, bottom - firstRowY, bodyFocused);
+            if (window.D("notebook").Exists) DrawNotebookPage(window, window.D("notebook"), window.S("url"), primary, firstRowY - 7, editorWidth, bottom - firstRowY + 7, true);
             else for (int i = 0; i < Math.Min(lines.Length, first + visible); i++)
             {
                 if (i >= first)
@@ -741,7 +753,7 @@ namespace TouchTypingStudio
                 Rectangle(x + editorWidth, 60, 1, Math.Max(1, (window.B("panel") ? h * .55 : h - 21) - 60), "#414854");
                 Data other = window.D("otherTab");
                 Text(other.S("title"), secondary + 14, 73, 11, "#BFD0DF", editorWidth - 28);
-                if (other.D("notebook").Exists) DrawNotebookPage(other.D("notebook"), secondary, 94, editorWidth, bottom - 94, false);
+                if (other.D("notebook").Exists) DrawNotebookPage(window, other.D("notebook"), other.S("url"), secondary, 94, editorWidth, bottom - 94, false);
                 else Text(other.S("body"), secondary + 18, 94, 12, "#C7D9E7", editorWidth - 32, visible, true);
             }
             DrawCodeStatus(window, w, h, caretLine + 1, caretColumn, file);
@@ -799,9 +811,12 @@ namespace TouchTypingStudio
                     focus == "quick-open" ? "Открыть файл" : focus == "goto-line" ? "Перейти к строке" : "Поиск";
                 if (focus == "find" && window.S("status").StartsWith("Совпадение ", StringComparison.Ordinal))
                     title += " · " + window.S("status");
-                string[] options = focus == "palette" && window.B("browserPractice") ? new[] { "Git: Clone" } :
-                    focus == "palette" ? new[] { "Форматировать документ", "Переключить боковую панель", "Разделить редактор" } :
-                    window.Items("entries").Select(item => item.S("title")).ToArray();
+                var entries = window.Items("entries").ToArray();
+                bool notebookPalette = focus == "palette" && (window.D("notebook").Exists || window.S("input").Trim().Length > 0 &&
+                    entries.Any(item => item.S("kind") == "notebook-command" || item.S("kind") == "explorer-command"));
+                string[] options = focus == "palette" && !notebookPalette && window.B("browserPractice") ? new[] { "Git: Clone" } :
+                    focus == "palette" && !notebookPalette ? new[] { "Форматировать документ", "Переключить боковую панель", "Разделить редактор" } :
+                    entries.Select(item => item.S("title")).ToArray();
                 int index = window.I("optionIndex"), shown = Math.Min(options.Length, Math.Min(6, Math.Max(1, (int)((h - 115) / 25))));
                 int start = Math.Max(0, index - shown + 1);
                 double pw = Math.Min(570, w - 105), px = (w - pw) / 2;

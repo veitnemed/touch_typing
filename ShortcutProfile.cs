@@ -20,6 +20,8 @@ namespace TouchTypingStudio
         // Opt-in card route. Old profiles continue their selected individual mission.
         public bool EditorCourse;
         public string RouteKind;
+        public bool AdaptiveGuide;
+        public string CoachStage, CoachReason;
         // Absent in older drafts, including explicit unlimited sessions.
         public LiveDraftProgress Progress;
     }
@@ -45,7 +47,7 @@ namespace TouchTypingStudio
     public class ShortcutAttempt
     {
         public string Skill, Session, Verification, MistakeKey;
-        public string InputMode, Mission;
+        public string InputMode, Mission, CoachStage, CoachContext;
         // Simulated input layout just before the action; absent on older records.
         public string Layout;
         public bool Assisted, Independent, FirstTry;

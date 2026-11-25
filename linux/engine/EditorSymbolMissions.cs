@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 namespace TouchTypingStudio;
 
 internal sealed record SymbolLocation(string Path, int Offset, int Length, string Kind);
-internal sealed record EditorJump(string Path, int Anchor, int Caret);
+internal sealed record EditorJump(string Path, int Anchor, int Caret, int NotebookCell = -1, bool NotebookEditing = false);
 internal sealed record SymbolBinding(string Path, string Name, SymbolLocation Definition, SymbolLocation[] Occurrences);
 
 internal sealed partial class LabScene
@@ -141,6 +141,7 @@ internal sealed partial class LabScene
         switch (action)
         {
             case "code-definition":
+                if (w.Tab?.Notebook != null) return NotebookDefinition(w);
                 var symbol = ResolveSymbol(w);
                 if (symbol == null) return false;
                 w.SymbolBack.Push(new(EditorPath(w.Tab), w.Anchor, w.Cursor));
@@ -149,7 +150,14 @@ internal sealed partial class LabScene
             case "code-back":
                 if (!w.SymbolBack.TryPop(out var origin)) return false;
                 OpenDocument(origin.Path);
-                w.Select(origin.Anchor, origin.Caret);
+                if (origin.NotebookCell >= 0 && w.Tab?.Notebook is EditorNotebook notebook && origin.NotebookCell < notebook.Count)
+                {
+                    notebook.Select(origin.NotebookCell); notebook.SetMode(origin.NotebookEditing);
+                    string source = notebook.Source(notebook.Selected);
+                    notebook.Anchor = InsertionBoundary(source, Math.Clamp(origin.Anchor, 0, source.Length));
+                    notebook.Caret = InsertionBoundary(source, Math.Clamp(origin.Caret, 0, source.Length));
+                }
+                else w.Select(origin.Anchor, origin.Caret);
                 return true;
             case "code-references":
                 var referenced = ResolveSymbol(w);
@@ -182,6 +190,28 @@ internal sealed partial class LabScene
             default:
                 return null;
         }
+    }
+
+    private bool NotebookDefinition(LabWindow w)
+    {
+        var n = w.Tab.Notebook;
+        if (!n.Editing || !n.IsCode(n.Selected)) return false;
+        string source = MaskPython(n.Source(n.Selected));
+        var token = PythonLexemes.Matches(source).Cast<Match>()
+            .FirstOrDefault(m => m.Groups["name"].Success && m.Index <= n.Caret && n.Caret < m.Index + m.Length);
+        if (token == null) return false;
+        string name = token.Value;
+        var imports = Enumerable.Range(0, n.Selected + 1).Where(n.IsCode)
+            .SelectMany(i => NamedImports(MaskPython(n.Source(i)), name)).Select(item => item.Module).Distinct().ToArray();
+        if (imports.Length != 1) return false;
+        string path = EditorProjectRoot + "/" + imports[0] + ".py";
+        string body = w.Tabs.FirstOrDefault(t => EditorPath(t) == path)?.Body ?? Terminal.ReadFile(path);
+        if (body == null) return false;
+        var def = NamedDefinitions(MaskPython(body), name).ToArray();
+        if (def.Length != 1) return false;
+        w.SymbolBack.Push(new(EditorPath(w.Tab), n.Anchor, n.Caret, n.Selected, n.Editing));
+        GoToSymbol(new(path, def[0].Index, name.Length, "definition"));
+        return true;
     }
 
     private void GoToSymbol(SymbolLocation location)

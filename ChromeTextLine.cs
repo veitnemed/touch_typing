@@ -46,6 +46,14 @@ namespace TouchTypingStudio
             return line.GetDistanceFromCharacterHit(new CharacterHit(offset, 0));
         }
 
+        internal int CharacterAt(double x)
+        {
+            if (x <= 0 || text.Length == 0) return 0;
+            if (x >= WidthWithTrailingWhitespace) return text.Length;
+            var hit = line.GetCharacterHitFromDistance(x);
+            return Boundary(hit.FirstCharacterIndex + hit.TrailingLength, hit.TrailingLength > 0);
+        }
+
         internal IEnumerable<Rect> Bounds(int start, int end)
         {
             if (end <= start) yield break;

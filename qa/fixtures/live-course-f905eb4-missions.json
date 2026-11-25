@@ -1,0 +1,494 @@
+[
+  {
+    "profile": "ubuntu",
+    "app": "ubuntu",
+    "level": 0,
+    "missions": [
+      "ubuntu-start",
+      "ubuntu-file",
+      "ubuntu-image",
+      "ubuntu-restore"
+    ],
+    "primaryStart": "ubuntu-start",
+    "primaryFirstActions": 32,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "ubuntu",
+    "app": "ubuntu",
+    "level": 1,
+    "missions": [
+      "ubuntu-research",
+      "ubuntu-window",
+      "ubuntu-gnome-windows",
+      "ubuntu-workspaces",
+      "ubuntu-gnome-workspaces",
+      "ubuntu-gnome-same-app",
+      "ubuntu-matebook-layout",
+      "ubuntu-languages"
+    ],
+    "primaryStart": "ubuntu-research",
+    "primaryFirstActions": 30,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "ubuntu",
+    "app": "ubuntu",
+    "level": 2,
+    "missions": [
+      "ubuntu-briefing",
+      "ubuntu-review",
+      "ubuntu-archive",
+      "ubuntu-return"
+    ],
+    "primaryStart": "ubuntu-briefing",
+    "primaryFirstActions": 25,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "ubuntu",
+    "app": "chrome",
+    "level": 0,
+    "missions": [
+      "chrome-reader",
+      "chrome-docs-reference",
+      "chrome-sources",
+      "chrome-return",
+      "chrome-download-verify",
+      "chrome-report",
+      "chrome-search-clone",
+      "chrome-project-file-inbox"
+    ],
+    "primaryStart": "chrome-reader",
+    "primaryFirstActions": 26,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "ubuntu",
+    "app": "chrome",
+    "level": 1,
+    "missions": [
+      "chrome-library",
+      "chrome-handoff",
+      "chrome-release-compare",
+      "chrome-compare",
+      "chrome-recovery"
+    ],
+    "primaryStart": "chrome-library",
+    "primaryFirstActions": 29,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "ubuntu",
+    "app": "chrome",
+    "level": 2,
+    "missions": [
+      "chrome-review",
+      "chrome-audit",
+      "chrome-restore-source",
+      "chrome-briefing",
+      "chrome-collection"
+    ],
+    "primaryStart": "chrome-review",
+    "primaryFirstActions": 33,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "ubuntu",
+    "app": "code",
+    "level": 0,
+    "missions": [
+      "code-guide",
+      "code-notebook-read",
+      "code-first-fix",
+      "code-scratch",
+      "code-navigation",
+      "code-go-definition",
+      "code-rename-symbol",
+      "code-search-error",
+      "code-find-exact-edit",
+      "code-line-edit",
+      "code-project-file-move"
+    ],
+    "primaryStart": "code-guide",
+    "primaryFirstActions": 33,
+    "primaryActionsLimit": 40,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "ubuntu",
+    "app": "code",
+    "level": 1,
+    "missions": [
+      "code-refactor",
+      "code-notebook-repair",
+      "code-extract",
+      "code-console",
+      "code-symbols",
+      "code-python-edit",
+      "code-diagnostic-test",
+      "code-project-file-copy"
+    ],
+    "primaryStart": "code-refactor",
+    "primaryFirstActions": 39,
+    "primaryActionsLimit": 40,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "ubuntu",
+    "app": "code",
+    "level": 2,
+    "missions": [
+      "code-handover",
+      "code-notebook-recheck",
+      "code-repair",
+      "code-inspection",
+      "code-publish"
+    ],
+    "primaryStart": "code-handover",
+    "primaryFirstActions": 39,
+    "primaryActionsLimit": 40,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "ubuntu",
+    "app": "terminal",
+    "level": 0,
+    "missions": [
+      "terminal-essentials-locate",
+      "terminal-essentials-inspect",
+      "terminal-essentials-restart",
+      "terminal-explore",
+      "terminal-handoff",
+      "terminal-backup",
+      "terminal-investigate",
+      "terminal-task-list-tests"
+    ],
+    "primaryStart": "terminal-essentials-locate",
+    "primaryFirstActions": 7,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "ubuntu",
+    "app": "terminal",
+    "level": 1,
+    "missions": [
+      "terminal-essentials-session",
+      "terminal-essentials-home-check",
+      "terminal-access",
+      "terminal-catalog",
+      "terminal-triage",
+      "terminal-transfer"
+    ],
+    "primaryStart": "terminal-essentials-session",
+    "primaryFirstActions": 7,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "ubuntu",
+    "app": "terminal",
+    "level": 2,
+    "missions": [
+      "terminal-essentials-support",
+      "terminal-essentials-process-check",
+      "terminal-revision",
+      "terminal-snapshot",
+      "terminal-incident",
+      "terminal-changes"
+    ],
+    "primaryStart": "terminal-essentials-support",
+    "primaryFirstActions": 8,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "ubuntu",
+    "app": "workday",
+    "level": 0,
+    "missions": [
+      "workday-report",
+      "workday-source-note"
+    ],
+    "primaryStart": "workday-report",
+    "primaryFirstActions": 30,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "ubuntu",
+    "app": "workday",
+    "level": 1,
+    "missions": [
+      "workday-analysis",
+      "workday-download-handoff",
+      "workday-debug-guided",
+      "workday-debug-independent",
+      "workday-project-file-inbox"
+    ],
+    "primaryStart": "workday-analysis",
+    "primaryFirstActions": 39,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "ubuntu",
+    "app": "workday",
+    "level": 2,
+    "missions": [
+      "workday-handover"
+    ],
+    "primaryStart": "workday-handover",
+    "primaryFirstActions": 55,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "windows",
+    "app": "windows",
+    "level": 0,
+    "missions": [
+      "windows-desktop-0",
+      "windows-desktop-return-0"
+    ],
+    "primaryStart": "windows-desktop-0",
+    "primaryFirstActions": 10,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "windows",
+    "app": "windows",
+    "level": 1,
+    "missions": [
+      "windows-desktop-1",
+      "windows-desktop-return-1"
+    ],
+    "primaryStart": "windows-desktop-1",
+    "primaryFirstActions": 20,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "windows",
+    "app": "windows",
+    "level": 2,
+    "missions": [
+      "windows-desktop-2",
+      "windows-desktop-return-2"
+    ],
+    "primaryStart": "windows-desktop-2",
+    "primaryFirstActions": 25,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "windows",
+    "app": "chrome",
+    "level": 0,
+    "missions": [
+      "chrome-reader",
+      "chrome-docs-reference",
+      "chrome-sources",
+      "chrome-return",
+      "chrome-download-verify",
+      "chrome-report",
+      "chrome-search-clone",
+      "chrome-project-file-inbox"
+    ],
+    "primaryStart": "chrome-reader",
+    "primaryFirstActions": 26,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "windows",
+    "app": "chrome",
+    "level": 1,
+    "missions": [
+      "chrome-library",
+      "chrome-handoff",
+      "chrome-release-compare",
+      "chrome-compare",
+      "chrome-recovery"
+    ],
+    "primaryStart": "chrome-library",
+    "primaryFirstActions": 29,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "windows",
+    "app": "chrome",
+    "level": 2,
+    "missions": [
+      "chrome-review",
+      "chrome-audit",
+      "chrome-restore-source",
+      "chrome-briefing",
+      "chrome-collection"
+    ],
+    "primaryStart": "chrome-review",
+    "primaryFirstActions": 33,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "windows",
+    "app": "code",
+    "level": 0,
+    "missions": [
+      "code-guide",
+      "code-notebook-read",
+      "code-first-fix",
+      "code-scratch",
+      "code-navigation",
+      "code-go-definition",
+      "code-rename-symbol",
+      "code-search-error",
+      "code-find-exact-edit",
+      "code-line-edit",
+      "code-project-file-move"
+    ],
+    "primaryStart": "code-guide",
+    "primaryFirstActions": 33,
+    "primaryActionsLimit": 40,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "windows",
+    "app": "code",
+    "level": 1,
+    "missions": [
+      "code-refactor",
+      "code-notebook-repair",
+      "code-extract",
+      "code-console",
+      "code-symbols",
+      "code-python-edit",
+      "code-diagnostic-test",
+      "code-project-file-copy"
+    ],
+    "primaryStart": "code-refactor",
+    "primaryFirstActions": 39,
+    "primaryActionsLimit": 40,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "windows",
+    "app": "code",
+    "level": 2,
+    "missions": [
+      "code-handover",
+      "code-notebook-recheck",
+      "code-repair",
+      "code-inspection",
+      "code-publish"
+    ],
+    "primaryStart": "code-handover",
+    "primaryFirstActions": 39,
+    "primaryActionsLimit": 40,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "windows",
+    "app": "terminal",
+    "level": 0,
+    "missions": [
+      "terminal-essentials-locate",
+      "terminal-essentials-inspect",
+      "terminal-essentials-restart",
+      "terminal-explore",
+      "terminal-handoff",
+      "terminal-backup",
+      "terminal-investigate",
+      "terminal-task-list-tests"
+    ],
+    "primaryStart": "terminal-essentials-locate",
+    "primaryFirstActions": 7,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "windows",
+    "app": "terminal",
+    "level": 1,
+    "missions": [
+      "terminal-essentials-session",
+      "terminal-essentials-home-check",
+      "terminal-access",
+      "terminal-catalog",
+      "terminal-triage",
+      "terminal-transfer"
+    ],
+    "primaryStart": "terminal-essentials-session",
+    "primaryFirstActions": 7,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "windows",
+    "app": "terminal",
+    "level": 2,
+    "missions": [
+      "terminal-essentials-support",
+      "terminal-essentials-process-check",
+      "terminal-revision",
+      "terminal-snapshot",
+      "terminal-incident",
+      "terminal-changes"
+    ],
+    "primaryStart": "terminal-essentials-support",
+    "primaryFirstActions": 8,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "windows",
+    "app": "workday",
+    "level": 0,
+    "missions": [
+      "workday-windows-0",
+      "workday-windows-return-0"
+    ],
+    "primaryStart": "workday-windows-0",
+    "primaryFirstActions": 14,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "windows",
+    "app": "workday",
+    "level": 1,
+    "missions": [
+      "workday-windows-1",
+      "workday-windows-return-1",
+      "workday-windows-download-handoff",
+      "workday-windows-project-file-inbox"
+    ],
+    "primaryStart": "workday-windows-1",
+    "primaryFirstActions": 23,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  },
+  {
+    "profile": "windows",
+    "app": "workday",
+    "level": 2,
+    "missions": [
+      "workday-windows-2",
+      "workday-windows-return-2"
+    ],
+    "primaryStart": "workday-windows-2",
+    "primaryFirstActions": 25,
+    "primaryActionsLimit": 0,
+    "primaryTimer": 0
+  }
+]

@@ -1,23 +1,18 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
 
 namespace TouchTypingStudio;
 
 // A bounded offline teaching kernel, not a Python runtime. Preserve nbformat
 // metadata and non-executed cells when editing/saving a supported notebook.
-internal sealed class EditorNotebook
+internal sealed partial class EditorNotebook
 {
     private readonly JsonObject doc;
-    private readonly Dictionary<string, int[]> values = new(StringComparer.Ordinal);
-    private readonly Dictionary<int, string> executions = new();
-    private static readonly Regex Bind = new(@"\A([a-z][a-z0-9_]{0,23})\s*=\s*\[\s*((?:-?[0-9]{1,6}\s*,\s*){0,39}-?[0-9]{1,6})\s*\]\z");
-    private static readonly Regex Call = new(@"\A(sum|max|min|len)\(\s*([a-z][a-z0-9_]{0,23})\s*\)\z");
-    private readonly Stack<(int Index, EditRevision R)> undo = new(), redo = new();
+    private NotebookPythonKernel kernel = new();
+    private readonly HashSet<string> staleFiles = new(StringComparer.Ordinal);
     internal int Selected, Caret, Anchor, Counter;
     internal bool Editing;
     private JsonArray Cells => (JsonArray)doc["cells"];
@@ -28,6 +23,7 @@ internal sealed class EditorNotebook
     private static int Number(JsonNode node) => node is JsonValue v && v.TryGetValue<int>(out int n) ? n : 0;
     internal string Source(int i) => Lines(Cell(i)["source"]);
     private string Kind(int i) => Str(Cell(i)["cell_type"]);
+    internal bool IsCode(int i) => Kind(i) == "code";
     internal string Output(int i)
     {
         if (Cell(i)["outputs"] is not JsonArray arr) return "";
@@ -39,7 +35,7 @@ internal sealed class EditorNotebook
     internal int Runs(int i) => Number(Cell(i)["execution_count"]);
     internal bool Failed(int i) => Cell(i)["outputs"] is JsonArray arr && arr.OfType<JsonObject>().Any(o => Str(o["output_type"]) == "error");
     internal string Pack() => doc.ToJsonString();
-    private EditorNotebook(JsonObject root) { doc = root; }
+    private EditorNotebook(JsonObject root) { doc = root; EnsureIds(); }
     internal static EditorNotebook Open(string path, string body)
     {
         if (!path.EndsWith(".ipynb", StringComparison.OrdinalIgnoreCase) || body.Length > 512_000) return null;
@@ -58,11 +54,13 @@ internal sealed class EditorNotebook
     internal EditorNotebook Clone()
     {
         var n = new EditorNotebook((JsonObject)doc.DeepClone()) {
-            Selected = Selected, Caret = Caret, Anchor = Anchor, Editing = Editing, Counter = Counter };
-        foreach (var pair in values) n.values.Add(pair.Key, (int[])pair.Value.Clone());
+            Selected = Selected, Caret = Caret, Anchor = Anchor, Editing = Editing, Counter = Counter,
+            nextId = nextId, generation = generation, interrupted = interrupted, DeleteArmed = DeleteArmed };
+        n.kernel = kernel.Clone(); n.staleFiles.UnionWith(staleFiles);
         foreach (var pair in executions) n.executions.Add(pair.Key, pair.Value);
-        foreach (var r in undo.Reverse()) n.undo.Push(r);
-        foreach (var r in redo.Reverse()) n.redo.Push(r);
+        n.undo.AddRange(undo);
+        n.redo.AddRange(redo);
+        foreach (int cell in queue) n.queue.Enqueue(cell);
         return n;
     }
     internal static string Create(string heading, string binding, string formula)
@@ -78,13 +76,12 @@ internal sealed class EditorNotebook
     }
     internal bool Move(int direction)
     {
-        if (Editing || Selected + direction < 0 || Selected + direction >= Cells.Count) return false;
-        Selected += direction; Caret = Anchor = 0; return true;
+        return !Editing && Select(Selected + direction);
     }
     internal bool SetMode(bool edit)
     {
-        if (Editing == edit) return false;
-        Editing = edit;
+        if (Editing == edit || edit && Busy) return false;
+        Editing = edit; DeleteArmed = false;
         Caret = Anchor = Math.Min(Caret, Source(Selected).Length); return true;
     }
     internal void SelectAll() { Anchor = 0; Caret = Source(Selected).Length; }
@@ -93,94 +90,68 @@ internal sealed class EditorNotebook
     internal void ReplaceRange(int lo, int hi, string text)
     {
         string src = Source(Selected);
-        if (src.Length - hi + lo + text.Length > 4096) return;
-        undo.Push((Selected, new EditRevision(src, Caret, Anchor))); redo.Clear();
+        if (Busy || src.Length - hi + lo + text.Length > 4096) return;
+        Remember();
         Cell(Selected)["source"] = new JsonArray((JsonNode)(src[..lo] + text + src[hi..]));
         Caret = Anchor = lo + text.Length;
     }
-    internal bool Undo(bool forward)
+    internal bool Run(Func<string, string> read = null)
     {
-        var from = forward ? redo : undo; var to = forward ? undo : redo;
-        if (!from.TryPop(out var last)) return false;
-        bool same = Selected == last.Index;
-        Selected = last.Index;
-        int end = Source(Selected).Length;
-        to.Push((Selected, new EditRevision(Source(Selected), same ? Math.Min(Caret, end) : end, same ? Math.Min(Anchor, end) : end)));
-        Cell(Selected)["source"] = new JsonArray((JsonNode)last.R.Text);
-        Caret = last.R.Cursor; Anchor = last.R.Anchor; return true;
-    }
-
-    internal bool Run()
-    {
-        // The Jupyter Keymap binds Ctrl+Enter to executeAndFocusContainer.
-        // Keep the cell selected; ordinary arrows must select cells again.
-        Editing = false;
-        if (Kind(Selected) == "markdown") return true;
-        var cell = Cell(Selected); cell["execution_count"] = ++Counter; var outs = new JsonArray(); cell["outputs"] = outs;
-        string code = Source(Selected).Trim();
-        // All sources including edited input use the same small grammar.
-        // There is no eval, shell, network, host file access or external kernel.
-        var bind = Bind.Match(code); var call = Call.Match(code);
-        if (bind.Success)
-            values[bind.Groups[1].Value] = bind.Groups[2].Value.Split(',').Select(s => int.Parse(s.Trim(),CultureInfo.InvariantCulture)).ToArray();
-        else if (call.Success && values.TryGetValue(call.Groups[2].Value, out var numbers))
-        {
-            int n = call.Groups[1].Value switch { "sum" => numbers.Sum(), "max" => numbers.Max(), "min" => numbers.Min(), _ => numbers.Length };
-            outs.Add(new JsonObject { ["output_type"] = "execute_result", ["execution_count"] = Counter,
-                ["data"] = new JsonObject { ["text/plain"] = new JsonArray((JsonNode)n.ToString(CultureInfo.InvariantCulture)) }, ["metadata"] = new JsonObject() });
-        }
-        else
-        {
-            string error = call.Success ? "NameError" : "Учебное ядро";
-            string reason = call.Success ? "Сначала выполните ячейку с данными: " + call.Groups[2].Value :
-                "Поддержаны список чисел и sum, max, min, len. Другой код не выполняется.";
-            outs.Add(new JsonObject { ["output_type"] = "error", ["ename"] = error, ["evalue"] = reason,
-                ["traceback"] = new JsonArray((JsonNode)(error + ": " + reason)) });
-        }
-        executions[Selected] = InputSignature(Selected);
+        if (Busy) return false;
+        // Ctrl+Enter runs the cell and focuses its container, not the next cell.
+        Editing = false; DeleteArmed = false; interrupted = false;
+        Execute(Selected, read);
         return true;
     }
-    // A preceding execution number is not evidence that the current source
-    // and variable values were used (especially when both old/new tasks ran).
-    private string InputSignature(int i)
+
+    private void Execute(int index, Func<string, string> read)
     {
-        string src = Source(i).Trim(); var lhs = Bind.Match(src); var rhs = Call.Match(src);
-        string name = lhs.Success ? lhs.Groups[1].Value : rhs.Groups[2].Value;
-        return src + ":" + (values.TryGetValue(name, out var data) ? string.Join(",", data) : "unset");
+        if (Kind(index) == "markdown") return;
+        var cell = Cell(index); cell["execution_count"] = ++Counter;
+        var outs = new JsonArray(); cell["outputs"] = outs;
+        var run = kernel.Run(Source(index), read);
+        if (run.Stream.Length > 0)
+            outs.Add(new JsonObject { ["output_type"] = "stream", ["name"] = "stdout",
+                ["text"] = new JsonArray((JsonNode)run.Stream.TrimEnd('\n')) });
+        if (run.Error is NotebookPythonException e)
+        {
+            var trace = new JsonArray((JsonNode)("Cell In[" + Counter + "]"));
+            foreach (string frame in e.Trace.AsEnumerable().Reverse()) trace.Add(frame);
+            trace.Add(e.Name + ": " + e.Message);
+            outs.Add(new JsonObject { ["output_type"] = "error", ["ename"] = e.Name, ["evalue"] = e.Message, ["traceback"] = trace });
+        }
+        else if (run.Result is string result)
+            outs.Add(new JsonObject { ["output_type"] = "execute_result", ["execution_count"] = Counter,
+                ["data"] = new JsonObject { ["text/plain"] = new JsonArray((JsonNode)result) }, ["metadata"] = new JsonObject() });
+        executions[Id(index)] = run; staleFiles.Remove(Id(index));
     }
-    internal bool Fresh(int i) => executions.TryGetValue(i, out var s) && s == InputSignature(i);
-    private bool Stale(int i) => executions.ContainsKey(i) && !Fresh(i);
+    internal void SynchronizeWorkspace(Func<string, string> read)
+    {
+        staleFiles.Clear();
+        for (int i = 0; i < Count; i++)
+            if (executions.TryGetValue(Id(i), out var run) && !kernel.Fresh(run, Source(i), read))
+                staleFiles.Add(Id(i));
+    }
+    internal bool Fresh(int i) => executions.TryGetValue(Id(i), out var run) &&
+        !staleFiles.Contains(Id(i)) && kernel.Fresh(run, Source(i), null);
+    private bool Stale(int i) => executions.ContainsKey(Id(i)) && !Fresh(i);
     // Display metadata only. A saved nbformat output is useful evidence of a *past*
     // kernel, but it must not read like a result reproduced from current variables.
-    private string OutputLabel(int i) => !executions.ContainsKey(i) && (Runs(i) > 0 || Output(i) != "") ? "Сохранённый вывод" :
+    private string OutputLabel(int i) => !executions.ContainsKey(Id(i)) && (Runs(i) > 0 || Output(i) != "") ? "Сохранённый вывод" :
         Stale(i) ? "Предыдущий вывод" : "Вывод";
 
-    internal bool RunAndAdvance()
+    internal bool RunAndAdvance(Func<string, string> read = null)
     {
         if (Selected == Cells.Count - 1 && Cells.Count >= 128) return false;
-        if (!Run()) return false;
-        bool append = Selected == Cells.Count - 1;
-        if (append)
-        {
-            // Unique and deterministic under draft replay; do not overwrite a real cell ID.
-            string id = "practice-" + Cells.Count;
-            while (Cells.OfType<JsonObject>().Any(c => Str(c["id"]) == id)) id += "x";
-            string kind = Kind(Selected);
-            var newCell = new JsonObject { ["id"] = id, ["cell_type"] = kind, ["metadata"] = new JsonObject(),
-                ["source"] = new JsonArray() };
-            if (kind == "code") { newCell["execution_count"] = null; newCell["outputs"] = new JsonArray(); }
-            Cells.Add(newCell);
-        }
-        if (!Move(1)) return false;
-        // Selecting an existing cell focuses its container. A newly inserted
-        // cell receives editor focus instead, as in VS Code's executeActions.
-        if (append) SetMode(true);
-        return true;
+        if (!Run(read)) return false;
+        return Selected == Cells.Count - 1 ? InsertCell(false, Kind(Selected)) : Move(1);
     }
 
-    internal object Snapshot() => new { simulated = true, selected = Selected, editing = Editing, caret = Caret, anchor = Anchor,
-        cells = Enumerable.Range(0, Cells.Count).Select(i => new { kind = Kind(i), source = Source(i),
-            runs = Runs(i), stale = Stale(i), outputLabel = OutputLabel(i), output = Output(i), failed = Failed(i), syntax = Kind(i) == "code" ? PythonHighlight.For(Source(i), "cell.py") : [] }).ToArray() };
+    internal object Snapshot(bool canPasteCell = false) => new { simulated = true, selected = Selected, editing = Editing, caret = Caret, anchor = Anchor,
+        kernel = KernelSnapshot(), canUndo = CanUndo, canRedo = CanRedo, canPasteCell,
+        cells = Enumerable.Range(0, Cells.Count).Select(i => new { id = Id(i), kind = Kind(i), source = Source(i),
+            runs = Runs(i), stale = Stale(i), outputLabel = OutputLabel(i), output = Output(i), failed = Failed(i),
+            traceback = Traceback(i), syntax = Kind(i) == "code" ? PythonHighlight.For(Source(i), "cell.py") : [] }).ToArray() };
     internal string Describe() => "Блокнот · ячейка " + (Selected + 1) + " из " + Cells.Count +
         (Editing ? " · редактирование" : " · выбор ячейки") + ". " + Source(Selected) +
         (Output(Selected) != "" ? ". " + OutputLabel(Selected) + ": " + Output(Selected) :

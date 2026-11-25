@@ -18,9 +18,15 @@ desktop=$(xdg-user-dir DESKTOP 2>/dev/null || true)
 desktop=${desktop:-"$HOME/Desktop"}
 mkdir -p -- "$releases" "$applications" "$desktop"
 destination=$(mktemp -d "$releases/linux.XXXXXXXX")
-cp -a -- "$bundle/engine" "$bundle/touch_typing.py" "$bundle/platform_linux.py" "$bundle/visuals.py" "$bundle/lab_view.py" "$bundle/style.css" "$bundle/icon.png" "$bundle/hands.png" "$bundle/README.md" "$bundle/check.sh" "$bundle/qa_runner.py" "$bundle/qa" "$destination/"
+cp -a -- "$bundle/engine" "$bundle/touch_typing.py" "$bundle/platform_linux.py" "$bundle/visuals.py" "$bundle/lab_view.py" "$bundle/lab_notebook.py" "$bundle/lab_explorer.py" "$bundle/style.css" "$bundle/icon.png" "$bundle/hands.png" "$bundle/README.md" "$bundle/check.sh" "$bundle/qa_runner.py" "$bundle/qa" "$destination/"
 cp -a -- "$bundle"/result-*.png "$bundle/fonts" "$destination/"
 chmod u+x -- "$destination/touch_typing.py" "$destination/engine/TouchTyping.Engine"
+# Load frontend modules before replacing either shortcut. A reachable engine
+# alone does not prove that the freshly installed GTK program can import.
+if ! (cd -- "$destination" && /usr/bin/python3 -c 'import touch_typing'); then
+    echo 'Интерфейс не загрузился. Ярлыки предыдущей версии не изменены.' >&2
+    exit 2
+fi
 if ! printf '%s\n' '{"command":"ping"}' | "$destination/engine/TouchTyping.Engine" | /usr/bin/python3 -c \
     'import json, sys; assert json.load(sys.stdin)["value"] == "ok"'; then
     echo 'Учебный движок не запускается в этой системе.' >&2

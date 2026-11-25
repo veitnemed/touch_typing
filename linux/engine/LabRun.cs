@@ -25,6 +25,9 @@ internal sealed class LabRun
     private const string LineEditingEvent = "@line-editing";
     private const string PythonEditingEvent = "@python-editing";
     private const string NotebookWordEraseEvent = "@notebook-word-erase";
+    private const string NotebookActionsEvent = "@notebook-actions-v2";
+    private const string NotebookPointerEvent = "@notebook-pointer", NotebookKernelStepEvent = "@notebook-kernel-step",
+        ExplorerPointerEvent = "@explorer-pointer";
     private bool replayLegacyNotebookWordErase;
     private const string StrictTriggersEvent = "@strict-triggers";
     private bool replayLegacyTriggers;
@@ -35,7 +38,7 @@ internal sealed class LabRun
     private bool initialVirtual;
     internal bool HasDraft => !CompletedRoute && !limitAccepted && (!ReachedLimit || softFinish || FinishingMission) &&
         (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 ||
-        trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or StrictTriggersEvent)));
+        trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask, inputAtActiveMilliseconds;
@@ -51,10 +54,16 @@ internal sealed class LabRun
     internal readonly string Guidance;
     internal bool HintVisible { get; private set; }
     private bool hadError;
-    internal bool ShowGuide => Guidance == "guided" || HintVisible;
+    private LiveCoaching coach = LiveCoaching.None;
+    private string attemptCoachContext;
+    internal bool AdaptiveGuide { get; }
+    internal string CoachStage => coach.Stage;
+    internal string CoachReason => coach.Reason;
+    internal string CoachPrompt => coach.Blind && !ShowGuide ? Task.Title : "";
+    internal bool ShowGuide => HintVisible || Guidance == "guided" && !coach.Blind;
     internal void Hint()
     {
-        if (!HintVisible && !ShowGuide) trace.Add(new("@hint"));
+        if (!HintVisible && (!ShowGuide || restoring)) trace.Add(new("@hint"));
         HintVisible = true;
     }
     private double ActiveMilliseconds => activeMilliseconds + (activeSince is double since ? Math.Max(0, clock() - since) : 0);
@@ -116,7 +125,7 @@ internal sealed class LabRun
     internal string[] Held => held.ToArray();
 
     internal LabRun(string app, string mode, int level, int seconds, string layout, IEnumerable<ShortcutAttempt> history,
-        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null, bool softFinish = false, bool combinedLimits = false, bool windowsBindings = false, string[] desktopProfile = null, bool neutralProject = false, string environment = "ubuntu", bool nativeEnglishInput = false, bool editorCourse = false, string routeKind = "")
+        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null, bool softFinish = false, bool combinedLimits = false, bool windowsBindings = false, string[] desktopProfile = null, bool neutralProject = false, string environment = "ubuntu", bool nativeEnglishInput = false, bool editorCourse = false, string routeKind = "", bool adaptiveGuide = false)
     {
         if (!LabCatalog.Apps.Contains(app)) throw new ArgumentException("Выберите Ubuntu, Chrome, VS Code или Терминал.");
         if (mode is not ("drill" or "sandbox")) throw new ArgumentException("Выберите тренировку или учебный рабочий стол.");
@@ -124,6 +133,7 @@ internal sealed class LabRun
         this.neutralProject = draft == null ? neutralProject : draft.ProjectFixture == NeutralProject.FixtureId;
         this.nativeEnglishInput = draft?.NativeEnglishInput ?? nativeEnglishInput;
         RouteKind = LiveRoutePolicy.Resolve(routeKind, missionId, editorCourse, app, draft);
+        AdaptiveGuide = RouteKind is LiveRoutePolicy.Course or LiveRoutePolicy.Mission && (draft?.AdaptiveGuide ?? adaptiveGuide);
         this.softFinish = softFinish;
         this.windowsBindings = windowsBindings;
         EnvironmentProfile = app == "windows" ? "windows" : app == "workday" ? LabScene.DesktopEnvironment(draft?.DesktopEnvironment ?? environment) : "ubuntu";
@@ -156,14 +166,18 @@ internal sealed class LabRun
         // New traces begin with format markers. Old ones acquire the line
         // marker only after the historic keystrokes have been replayed.
         var initialFormat = savedEvents.TakeWhile(e => e.Key is
-            ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or StrictTriggersEvent);
+            ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent);
         replayLegacyNotebookWordErase = draft != null && !initialFormat.Any(e => e.Key == NotebookWordEraseEvent);
         replayLegacyTriggers = draft != null;
         replayLegacyLineEditing = draft != null && !initialFormat.Any(e => e.Key == LineEditingEvent);
         replayLegacyPythonEditing = draft != null && !initialFormat.Any(e => e.Key == PythonEditingEvent);
         Scene = new LabScene(SceneApp, draft?.Layout ?? layout, this.neutralProject) { LayoutKey = layoutKey, LayoutIsVirtual = draft?.VirtualLayout ?? false };
+        bool legacyNotebookActions = draft != null && !initialFormat.Any(e => e.Key == NotebookActionsEvent);
         if (dock != null) Scene.Dock = dock;
         Next();
+        // Next creates the mission's prepared scene. Only historical input,
+        // not the route definitions used by its compiler, has legacy semantics.
+        Scene.ReplayLegacyNotebookActions = legacyNotebookActions;
         if (draft != null)
         {
             Resume();
@@ -173,12 +187,25 @@ internal sealed class LabRun
                 if (e.Key.StartsWith("@held/")) { held.Add(e.Key[6..]); superUsed = e.Down; }
                 else if (e.Key == "@release") { Pause(); Resume(); }
                 else if (e.Key == "@hint") Hint();
+                else if (e.Key == NotebookPointerEvent)
+                {
+                    var parts = e.Text.Split(':');
+                    if (parts.Length is 2 or 3 && int.TryParse(parts[1], out int index))
+                        NotebookPointer(parts[0], index, parts.Length == 3 && int.TryParse(parts[2], out int offset) ? offset : -1);
+                }
+                else if (e.Key == NotebookKernelStepEvent) TickNotebook();
+                else if (e.Key == ExplorerPointerEvent)
+                {
+                    int cut = e.Text.IndexOf(':');
+                    if (cut > 0) ExplorerPointer(e.Text[..cut], e.Text[(cut + 1)..]);
+                }
                 else if (e.Key == NativeLayoutEvent) ApplyNativeLayout(e.Text, true);
                 else if (e.Key == ExactUrlEvent) { replayLegacyUrl = false; trace.Add(e); }
                 else if (e.Key == StrictReportEvent) { replayLegacyReport = false; trace.Add(e); }
                 else if (e.Key == ClusterNavigationEvent) EndLegacyNavigation(e);
                 else if (e.Key == LineEditingEvent) EndLegacyLineEditing(e);
                 else if (e.Key == PythonEditingEvent) EndLegacyPythonEditing(e);
+                else if (e.Key == NotebookActionsEvent) { Scene.ReplayLegacyNotebookActions = false; trace.Add(e); }
                 else if (e.Key == NotebookWordEraseEvent) { replayLegacyNotebookWordErase = false; trace.Add(e); }
                 else if (e.Key == StrictTriggersEvent) { replayLegacyTriggers = false; trace.Add(e); }
                 else Input(e.Key, e.Down, e.Text, e.NativeEnglish ? "EN" : "");
@@ -193,6 +220,8 @@ internal sealed class LabRun
             // as key events. Do not turn them into edits while replaying.
             if (replayLegacyNotebookWordErase && Scene.NotebookCourse) trace.Add(new(NotebookWordEraseEvent));
             replayLegacyNotebookWordErase = false;
+            if (Scene.ReplayLegacyNotebookActions)
+            { Scene.ReplayLegacyNotebookActions = false; trace.Add(new(NotebookActionsEvent)); }
             replayLegacyUrl = replayLegacyReport = false;
             Pause();
             // Trace describes the current mission, not the whole attempt. Its
@@ -209,6 +238,8 @@ internal sealed class LabRun
             Attempts.Clear(); LastKey = ""; Feedback = "ready";
             FinishingMission = progress?.FinishingMission == true;
             latchedLimit = progress?.LimitReached is "timer" or "actions" ? progress.LimitReached : null;
+            if (AdaptiveGuide && draft.CoachStage is LiveCoach.Practice or LiveCoach.Recall or LiveCoach.Transfer)
+                coach = new(draft.CoachStage, draft.CoachReason ?? "");
             restoring = false;
         }
     }
@@ -237,7 +268,8 @@ internal sealed class LabRun
     }
 
     internal LiveDraft Draft() => new() { App = App, DesktopEnvironment = EnvironmentProfile, Level = Level, Mission = MissionId, Layout = initialLayout, Guidance = Guidance,
-        Dock = Scene.Dock, ProjectFixture = neutralProject ? NeutralProject.FixtureId : null, DesktopProfile = Scene.GnomePractice.Length == 0 ? null : Scene.DesktopProfile, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, NativeEnglishInput = nativeEnglishInput, EditorCourse = EditorCourse, RouteKind = RouteKind, Trace = JsonSerializer.Serialize(trace),
+        Dock = Scene.Dock, ProjectFixture = neutralProject ? NeutralProject.FixtureId : null, DesktopProfile = Scene.GnomePractice.Length == 0 ? null : Scene.DesktopProfile, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, NativeEnglishInput = nativeEnglishInput, EditorCourse = EditorCourse, RouteKind = RouteKind,
+        AdaptiveGuide = AdaptiveGuide, CoachStage = CoachStage, CoachReason = CoachReason, Trace = JsonSerializer.Serialize(trace),
         Progress = new() { Session = Session, Mode = Mode, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Solved = Solved,
             Errors = Errors, ActiveMilliseconds = ActiveMilliseconds, Series = JsonSerializer.Serialize(points),
             LimitDecisionPending = PendingLimitChoice, LimitReached = LimitReached,
@@ -249,6 +281,7 @@ internal sealed class LabRun
         if (!Paused && held.Count > 0) trace.Add(new("@release"));
         Scene.Switcher = false; Scene.SwitchTarget = null; Scene.SwitchChoices = []; switchReleaseKey = switchEvidenceId = null;
         activeSince = null; Paused = true; held.Clear(); layoutBlockedKeys.Clear(); superUsed = false;
+        Scene.ResetNotebookChord();
     }
     internal void Resume()
     {
@@ -299,6 +332,30 @@ internal sealed class LabRun
         Scene.Layout = value;
         Scene.LayoutIsVirtual = false;
         trace.Add(new(NativeLayoutEvent, Text: value));
+    }
+
+    internal bool NotebookPointer(string action, int index, int offset)
+    {
+        if (Finished || AwaitingLimitChoice || Paused || !Scene.NotebookPointer(action, index, offset)) return false;
+        // Mouse/UI Automation and keyboard shortcuts alter the same document.
+        // Only physical keyboard Input() can earn an exact-shortcut credit.
+        trace.Add(new(NotebookPointerEvent, Text: action + ":" + index + ":" + offset));
+        return true;
+    }
+
+    internal bool ExplorerPointer(string action, string path)
+    {
+        if (Finished || AwaitingLimitChoice || Paused) return false;
+        int before = Scene.Version;
+        if (!Scene.ExplorerPointer(action, path) && before == Scene.Version) return false;
+        trace.Add(new(ExplorerPointerEvent, Text: action + ":" + path));
+        return true;
+    }
+
+    internal void TickNotebook()
+    {
+        if (!Finished && !AwaitingLimitChoice && !Paused && Scene.TickNotebook())
+            trace.Add(new(NotebookKernelStepEvent));
     }
 
     internal ShortcutAttempt Input(string key, bool pressed, string text, string nativeLayout = "")
@@ -388,7 +445,8 @@ internal sealed class LabRun
         var pythonEdit = Scene.OnNotebook ? null : LiveCourse.ResolvePythonEdit(key, held, Scene);
         if (pythonEdit != null) return Perform(pythonEdit, key);
         var actual = Scene.Overview && !commandModifiers && key != "Esc" ? null : LabCatalog.Resolve(key, held, Scene);
-        if (Scene.OnNotebook && actual != null && !LabScene.NotebookGlobalAction(actual.Action)) actual = null;
+        if (Scene.OnNotebook && actual != null && (!LabScene.NotebookGlobalAction(actual.Action) ||
+            Scene.ReplayLegacyNotebookActions && actual.Action is "palette" or "code-definition" or "code-back" or "restore-tab")) actual = null;
         string before = Scene.Overview ? Scene.Search : Scene.Active?.App == "terminal" || Scene.Active?.Focus is "terminal" or "reverse-search" ? Scene.TerminalInput : Scene.Active?.Input ?? "";
         bool submitting = Task.Action == "command" && key == "Enter" && !commandModifiers;
         bool matches = submitting && Scene.Terminal.MatchesCommand(before, Task.Text);
@@ -447,6 +505,7 @@ internal sealed class LabRun
             "navigate-pasted" => Scene.BrowserPracticeActive && Task.Text.Length > 0 && window.Focus == "url",
             "file-name-commit" => window.Focus == "file-name",
             "code-clone-command" => Scene.BrowserPracticeActive && window.Focus == "palette",
+            "palette-choose" => Scene.AdvancedNotebook && window.Focus == "palette" && Task.Text.Length > 0,
             "notebook-type" => Scene.OnNotebook && window.Tab.Notebook.Editing,
             "python-edit-write" or "gnome-write" or "debug-rewrite" => window.App == "code" && window.Focus == "body",
             "debug-doc-submit" => window.App == "chrome" && window.Focus == "find",
@@ -506,8 +565,13 @@ internal sealed class LabRun
             var passed = Observe(key, acceptExistingUrlSelection: !replayLegacyUrl && actual.Id == "url" && actual.Keys != "Alt+D", actualTaskId: actual.Id);
             if (passed != null) return passed;
         }
+        if (!changed && actual.Action == "file-paste" && Task.Text == "!conflict" && Scene.NotebookConflictExpected())
+        {
+            var conflict = Observe(key, actualTaskId: actual.Id);
+            if (conflict != null) return conflict;
+        }
         if (changed) { Status = ""; LastKey = ""; Feedback = "ready"; return null; }
-        if (actual.Action is "file-name-commit" or "file-paste" && Scene.FileProblem is string reason)
+        if (actual.Action is "file-name-commit" or "file-paste" or "file-undo" && Scene.FileProblem is string reason)
             return Miss(key, reason);
         return Miss(key, "Действие сейчас недоступно. " + Task.Title + ".");
     }
@@ -515,6 +579,7 @@ internal sealed class LabRun
     private void Watch()
     {
         if (mission == null) return;
+        if (AdaptiveGuide) attemptCoachContext = CoachContext();
         var eligible = Guidance == "independent" ? pending.TakeWhile(goal => goal.Phase == pending[0].Phase) : pending.Take(1);
         watching = eligible.Select(goal => (goal, LiveCourse.Evidence(goal.Task, Scene, verifyReport: goal.VerifyReport && !replayLegacyReport,
             artifactPath: goal.ArtifactPath))).ToList();
@@ -582,14 +647,18 @@ internal sealed class LabRun
     private ShortcutAttempt Miss(string key, string message)
     {
         hadError = true; Errors++; Feedback = "error"; Status = message; LastKey = key;
-        return Record(false, key);
+        var attempt = Record(false, key);
+        if (AdaptiveGuide && !restoring && !coach.Blind) UpdateCoaching();
+        return attempt;
     }
 
     private ShortcutAttempt Record(bool correct, string key)
     {
         int milliseconds = (int)Math.Clamp(clock() - sinceTask, 1, 60000);
         var attempt = new ShortcutAttempt { Skill = "lab/" + App + "/" + Task.Id, Session = Session, Verification = "lab-scene",
-            Date = DateTime.Now, Correct = correct, Milliseconds = milliseconds, MistakeKey = correct ? null : key, InputMode = "exact", Mission = MissionId, Layout = attemptLayout, Assisted = ShowGuide, Independent = Guidance == "independent", FirstTry = correct && !hadError };
+            Date = DateTime.Now, Correct = correct, Milliseconds = milliseconds, MistakeKey = correct ? null : key, InputMode = "exact", Mission = MissionId, Layout = attemptLayout,
+            Assisted = ShowGuide, Independent = Guidance == "independent" || coach.Blind, FirstTry = correct && !hadError,
+            CoachStage = CoachStage.Length == 0 ? null : CoachStage, CoachContext = CoachStage.Length == 0 ? null : attemptCoachContext };
         Attempts.Add(attempt); points.Add(new LabPoint(Seconds, correct, key, Task.Id, milliseconds));
         return attempt;
     }
@@ -621,7 +690,12 @@ internal sealed class LabRun
             initialVirtual = Scene.LayoutIsVirtual;
             if (IsCourse && string.IsNullOrEmpty(requestedMission))
             {
-                mission = LiveRoutePolicy.Pick(available, rotation, mission, EnvironmentProfile, past.Concat(Attempts));
+                var history = past.Concat(Attempts);
+                // Alternate a weak-skill opportunity with the least recently
+                // seen lesson. Keep the established-vs-supplement balance.
+                var target = AdaptiveGuide && used.Count % 2 == 1
+                    ? LiveCoach.Outstanding(App, initialLayout, history) : null;
+                mission = LiveRoutePolicy.Pick(available, rotation, mission, EnvironmentProfile, history, target);
                 variant = random.Next(3);
                 Scene = PrepareMissionScene();
                 mission.Prepare?.Invoke(Scene);
@@ -677,6 +751,7 @@ internal sealed class LabRun
                 trace.Add(new(ClusterNavigationEvent));
                 trace.Add(new(LineEditingEvent));
                 trace.Add(new(PythonEditingEvent));
+                trace.Add(new(NotebookActionsEvent));
                 trace.Add(new(StrictTriggersEvent));
                 if (Scene.NotebookCourse) trace.Add(new(NotebookWordEraseEvent));
             }
@@ -686,6 +761,17 @@ internal sealed class LabRun
         }
         Task = pending[0].Task;
         sinceTask = clock(); HintVisible = hadError = false;
+        if (!restoring) UpdateCoaching();
+    }
+
+    private string CoachContext() =>
+        string.Join("|", Scene.Active?.App ?? "", Scene.Active?.Focus ?? "", Scene.Active?.Url ?? "", Scene.Terminal.Cwd);
+
+    private void UpdateCoaching()
+    {
+        coach = AdaptiveGuide && Guidance == "guided"
+            ? LiveCoach.Decide(Task, App, Scene.Layout, MissionId, CoachContext(), past.Concat(Attempts))
+            : LiveCoaching.None;
     }
 
     private LabScene PrepareMissionScene()

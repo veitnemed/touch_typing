@@ -744,6 +744,7 @@ class Studio(Gtk.Application):
         lab = self.lab
         lab.direct_module = module
         lab.default_course_budget = launch is None and not draft
+        lab.adaptive_guide = not draft and (launch is None or launch.get("guidance") == 2)
         lab.route_kind = "" if draft else "mission" if (launch or {}).get("mission") else "course"
         index = next((i for i, item in enumerate(lab.classes) if item["id"] == module), None)
         if index is None:
@@ -759,7 +760,7 @@ class Studio(Gtk.Application):
         else:
             for name, picker in (("level", lab.level), ("guidance", lab.mode),
                                  ("actions", lab.limit), ("time", lab.time_limit)):
-                picker.set_selected(defaults.get(name, 0))
+                picker.set_selected(0 if name == "guidance" and lab.adaptive_guide else defaults.get(name, 0))
             target = defaults.get("mission", "")
         selected = next((i for i, (k, _) in enumerate(lab.choices) if k == target), None)
         if selected is None:
@@ -912,7 +913,7 @@ class Studio(Gtk.Application):
 
         mission = control("Упражнение", ())
         level = control("Сложность", ("Основы", "Рабочие приёмы", "Сложный"))
-        mode = control("Режим", ("По шагам", "Самостоятельно"))
+        mode = control("Режим", ("По шагам", "Самостоятельно", "По ситуации"))
         actions = control("Лимит действий", ("Без лимита", "20 действий", "40 действий", "60 действий", "100 действий"))
         timer = control("Таймер", ("Без таймера", "3 минуты", "10 минут"))
         left, right = box(gap=14), box(gap=14)
@@ -1054,7 +1055,8 @@ class Studio(Gtk.Application):
                 popup.add_css_class("reference-config-popover")
                 for draft in sorted(drafts, key=lambda d: (d["level"], d["guidance"])):
                     level = ("Основы", "Рабочие приёмы", "Сложный")[draft["level"]]
-                    guidance = "По шагам" if draft["guidance"] == "guided" else "Самостоятельно"
+                    guidance = ("По ситуации" if draft.get("adaptiveGuide") else
+                                "По шагам" if draft["guidance"] == "guided" else "Самостоятельно")
                     label = mission_titles.get(draft["mission"], "Сохранённое занятие")
                     options.append(button(label + " · " + level + " · " + guidance,
                                           lambda d=draft, m=module, p=popup: (p.popdown(), self.open_reference_module(m, d)),
@@ -2717,6 +2719,7 @@ class LabPage(Gtk.Box):
         self.direct_module = None
         self.route_kind = ""
         self.default_course_budget = False
+        self.adaptive_guide = False
         self.prep = box(Gtk.Orientation.VERTICAL, 12, "lab-prep")
         self.prep.append(text("Практика без мыши", "h2"))
         self.os_selector = bind_name(dropdown(["Ubuntu", "Windows 10"]), "Учебная операционная система")
@@ -2837,6 +2840,8 @@ class LabPage(Gtk.Box):
         self.content.append(self.toolbar)
         self.content.append(self.details)
         self.desktop = DesktopView()
+        self.desktop.notebook_command = self.apply_notebook_command
+        self.desktop.explorer_command = self.apply_explorer_command
         self.desktop.reference_chrome = True
         self.stage = Gtk.Overlay()
         self.stage.add_css_class("reference-workspace")
@@ -3152,7 +3157,7 @@ class LabPage(Gtk.Box):
                    "actionLimit": self.action_limits[self.limit.get_selected()]})
         self.state = self.host.call("lab-start", app=app, mode="sandbox", level=self.level.get_selected(), mission="" if mission == "@resume" else mission,
                                     **{"continue": mission == "@resume"}, routeKind=self.route_kind,
-                                    softFinish=True, combinedLimits=True, nativeEnglishInput=True,
+                                    adaptiveGuide=self.adaptive_guide, softFinish=True, combinedLimits=True, nativeEnglishInput=True,
                                     desktopProfile=self.desktop_profile,
                                     preserveDraft=bool(self.direct_module and mission != "@resume"),
                                     guidance="guided" if self.mode.get_selected() == 0 else "independent", **budget)
@@ -3328,6 +3333,22 @@ class LabPage(Gtk.Box):
         reserve_f8 = (self.state or {}).get("scene", {}).get("diagnosticWorkspace")
         return ("F6" if reserve_f8 or "F8" in tokens else "F8", "F9" if "F10" in tokens else "F10")
 
+    def apply_notebook_command(self, action, cell, offset=-1):
+        if (not self.active or self.state["paused"] or self.limit_resume_wait or self.save_pending
+                or self.state.get("limitDecisionPending") or self.settings_menu.get_popover().get_mapped()):
+            return
+        response = self.host.call("lab-notebook-action", action=action, cell=cell, offset=offset)
+        if response:
+            self.render(response)
+
+    def apply_explorer_command(self, action, path):
+        if (not self.active or self.state["paused"] or self.limit_resume_wait or self.save_pending
+                or self.state.get("limitDecisionPending") or self.settings_menu.get_popover().get_mapped()):
+            return
+        response = self.host.call("lab-explorer-action", action=action, path=path)
+        if response:
+            self.render(response)
+
     def key_down(self, key, character, modifiers=Gdk.ModifierType(0), keycode=None):
         if self.settings_menu.get_popover().get_mapped():
             return False  # Settings keyboard navigation is not lesson input.
@@ -3390,6 +3411,10 @@ class LabPage(Gtk.Box):
         if not self.window_only_keys and (not self.surface or not self.surface.get_property("shortcuts-inhibited")):
             self.pause_run("Захват клавиш прерван. Разрешите его, чтобы продолжить.")
             return True
+        notebook_modifiers = Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SUPER_MASK
+        if not (modifiers & notebook_modifiers) and self.desktop.notebook_viewport_key(
+                key, shift=bool(modifiers & Gdk.ModifierType.SHIFT_MASK)):
+            return True
         self.pressed.add(key)
         if key == "Print":
             active_only = (self.state.get("scene", {}).get("debugDay") and
@@ -3432,7 +3457,8 @@ class LabPage(Gtk.Box):
             return
         task = state.get("task") or {}
         guided = state.get("showGuide", True)
-        self.task.set_label(task.get("title", "") if guided else state.get("phase", ""))
+        coach_prompt = state.get("coachPrompt") or ""
+        self.task.set_label(task.get("title", "") if guided else coach_prompt or state.get("phase", ""))
         hints = [task.get("hint", "")] if guided else []
         raw_keys = task.get("keys", "")
         gesture = raw_keys.replace("+", " + ") or task.get("text", "")
@@ -3443,7 +3469,9 @@ class LabPage(Gtk.Box):
             hints.append("Ctrl+R: найдите команду по фрагменту и нажмите Enter.")
         if not guided:
             gesture = ""
-        details = "\n".join(filter(None, [state.get("scenario", ""), *state.get("objectives", []), *hints]))
+        coach_reason = state.get("coachReason") or ""
+        notes = [coach_reason] if coach_prompt else [*state.get("objectives", []), *hints, coach_reason]
+        details = "\n".join(filter(None, [state.get("scenario", ""), *notes]))
         self.task.set_tooltip_text(details)
         self.details_text.set_label(details)
         self.hint_button.set_visible(not guided)
@@ -3630,6 +3658,7 @@ class LabPage(Gtk.Box):
         self.host.navigate("lab")
         self.host.lab.direct_module = direct_module
         self.host.lab.route_kind = route_kind
+        self.host.lab.adaptive_guide = (self.state or {}).get("adaptiveGuide", False)
         self.host.lab.os_selector.set_selected(desktop_profile == "windows")
         class_index = next((i for i, item in enumerate(self.host.lab.classes) if item["id"] == selected_class), None)
         if class_index is None:
