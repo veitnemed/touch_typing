@@ -1,4 +1,4 @@
-name: Qualify TouchTyping Live workflows (no publication)
+name: Qualify TouchTyping archives and publish explicit previews
 on:
   push:
     branches: [feature/live-ux-acceptance]
@@ -88,8 +88,15 @@ jobs:
           for scenario in test_editor_notebooks_x11.py test_project_files_x11.py; do
             export TOUCH_TYPING_QA_OUTPUT="$RUNNER_TEMP/gtk-proof/${scenario%.py}" TOUCH_TYPING_QA_DATA_ROOT="$temp/${scenario%.py}"
             mkdir -m 700 "$TOUCH_TYPING_QA_OUTPUT" "$TOUCH_TYPING_QA_DATA_ROOT"
-            timeout 180s xvfb-run -a -s "-screen 0 1024x600x24 -nolisten tcp" /usr/bin/python3 "linux/tests/$scenario" |
-              tee "$TOUCH_TYPING_QA_OUTPUT/gtk-test.log"
+            export SCENARIO="$scenario"
+            timeout 180s xvfb-run -a -s "-screen 0 1024x600x24 -nolisten tcp" bash -c '
+              set -e
+              ffmpeg -y -loglevel warning -f x11grab -framerate 15 -video_size 1024x600 -i "$DISPLAY" \
+                -c:v libx264 -preset fast -crf 25 -pix_fmt yuv420p "$TOUCH_TYPING_QA_OUTPUT/session.mp4" &
+              video=$!
+              trap "kill -INT $video 2>/dev/null || true; wait $video || true" EXIT
+              /usr/bin/python3 "linux/tests/$SCENARIO"
+            ' | tee "$TOUCH_TYPING_QA_OUTPUT/gtk-test.log"
           done
           export TOUCH_TYPING_QA_OUTPUT="$RUNNER_TEMP/gtk-proof"
           unset TOUCH_TYPING_QA_DATA_ROOT
@@ -143,3 +150,27 @@ jobs:
           name: live-wpf-proof
           path: ${{ runner.temp }}/windows-proof/
           if-no-files-found: warn
+
+  publish-preview:
+    if: startsWith(github.event.head_commit.message, 'Release v1.9.0-preview.')
+    needs: [build, linux-native, windows-native]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: touchtyping-numbered-preview-publication
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: live-verified-archives
+          path: ${{ runner.temp }}/publication
+      - name: Publish and redownload the verified archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/preview-publish.sh "$RUNNER_TEMP/publication"
