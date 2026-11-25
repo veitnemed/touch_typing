@@ -1,12 +1,27 @@
 """Hosted X11: use real ordinary cards and continue active practice past the first task."""
 import json
-from test_preview2_native import QA, out
+from test_preview2_native import QA, alias, codes, out
 
 TEXT_PREFIX = {"code-rename-confirm", "project-search-submit", "exact-find-submit", "quick-choose"}
 TYPED_FINISH = {"notebook-type", "python-edit-write"}
 
 
 class CourseCards(QA):
+    def chord(self, label):
+        # XTest posts to the display asynchronously. Under CI load a fixed
+        # number of GTK timer ticks can elapse before routing the events. Wait
+        # for observed press AND release on every physical key; never repeat a
+        # credited shortcut merely because the renderer has not seen it yet.
+        keys = [codes[alias.get(key, key)] for key in label.split("+")]
+        receipts = {(key, down): self.received.get((key, down), 0) for key in keys for down in (True, False)}
+        yield from super().chord(label)
+        for _ in range(100):
+            if all(self.received.get(event, 0) > prior for event, prior in receipts.items()):
+                return
+            yield
+        observed = {event: self.received.get(event, 0) - prior for event, prior in receipts.items()}
+        raise AssertionError(("native X11 delivery did not settle", label, observed))
+
     def advance_card(self, lab):
         s = lab.state
         t, m = s["task"], s["mission"]
