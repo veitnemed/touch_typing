@@ -26,6 +26,22 @@ internal static partial class LiveUiSmoke
               !Visible("ReferenceNav-home") && !Visible("ReferenceNav-progress"), "the two real top level sections");
     }
 
+    private static double OrdinaryCourseValue()
+    {
+        var bar = Find("LabScenarioProgress");
+        return ((RangeValuePattern)bar.GetCurrentPattern(RangeValuePattern.Pattern)).Current.Value;
+    }
+
+    private static string OrdinaryVisibleKeys()
+    {
+        if (!Visible("LabKeys")) return "";
+        // Read the accessible label of the actual rendered keycap cluster, not
+        // ItemStatus, which is populated only for instrumented sessions.
+        string caption = Name("LabKeys");
+        int end = caption.IndexOf("   ·   шаг ", StringComparison.Ordinal);
+        return (end < 0 ? caption : caption.Substring(0, end)).Replace(" ", "");
+    }
+
     internal static int RunOrdinaryWpfLaunch(string executable, string output)
     {
         try
@@ -52,10 +68,10 @@ internal static partial class LiveUiSmoke
             CaptureReferenceFrame("ordinary-wpf-01-catalog");
             Find("HomeClass-chrome").SetFocus();
             Key("Enter");
-            Until(delegate { return Visible("LabDesktop") && ReadSolved() == 0; }, "ordinary Chrome course");
-            Check(Find("LabTask").Current.ItemStatus == "keys:Ctrl+L", "expected fresh real course standard action");
+            Until(delegate { return Visible("LabDesktop") && OrdinaryCourseValue() == 0; }, "ordinary Chrome course");
+            Check(OrdinaryVisibleKeys() == "Ctrl+L", "expected fresh real course standard action, observed: " + OrdinaryVisibleKeys());
             Chord("Ctrl+L");
-            Until(delegate { return ReadSolved() == 1 && Find("LabTask").Current.ItemStatus == "keys:Ctrl+C"; },
+            Until(delegate { return OrdinaryCourseValue() == 1 && OrdinaryVisibleKeys() == "Ctrl+C"; },
                   "location submitted to the virtual address field");
             CaptureReferenceFrame("ordinary-wpf-02-address");
             Invoke("LabBack");
@@ -66,10 +82,10 @@ internal static partial class LiveUiSmoke
             AttachOrdinaryWpf(executable);
             Check(Visible("LiveResume-chrome"), "same native start offers saved state");
             Find("HomeClass-chrome").SetFocus(); Key("Enter");
-            Until(delegate { return Visible("LabDesktop") && ReadSolved() == 1; }, "ordinary card resumed the same goal after restart");
-            Check(Find("LabTask").Current.ItemStatus == "keys:Ctrl+C", "restart retained the address selection objective");
+            Until(delegate { return Visible("LabDesktop") && OrdinaryCourseValue() == 1; }, "ordinary card resumed the same goal after restart");
+            Check(OrdinaryVisibleKeys() == "Ctrl+C", "restart retained the address selection objective: " + OrdinaryVisibleKeys());
             Chord("Ctrl+C");
-            Until(delegate { return ReadSolved() == 2 && Find("LabTask").Current.ItemStatus == "keys:Ctrl+T"; },
+            Until(delegate { return OrdinaryCourseValue() == 2 && OrdinaryVisibleKeys() == "Ctrl+T"; },
                   "the saved address selection really provides a value");
             CaptureReferenceFrame("ordinary-wpf-03-restored");
             Invoke("LabBack");

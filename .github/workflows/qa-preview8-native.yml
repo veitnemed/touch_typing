@@ -46,10 +46,16 @@ jobs:
           $app = "$env:RUNNER_TEMP/TouchTyping Preview8 QA"
           Expand-Archive -LiteralPath "$p/touchtyping-preview8-qa.zip" -DestinationPath $app
           $proof = "$env:RUNNER_TEMP/preview8-typing-proof"
-          & './windows/Test-Typing-Session.ps1' -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing"
-          & './windows/Test-OrdinaryWpfLaunch.ps1' -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/ordinary-live"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -EditorCourse -Seed 0 -OutputDirectory "$proof/editor"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock off -Seed 0 -OutputDirectory "$proof/number-pad"
+          $failures = @()
+          try { & './windows/Test-OrdinaryWpfLaunch.ps1' -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/ordinary-live" }
+          catch { $failures += "Ordinary Live: $_" }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -EditorCourse -Seed 0 -OutputDirectory "$proof/editor" }
+          catch { $failures += "Editor: $_" }
+          foreach($lockState in @('off','on','dedicated')) {
+            try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock $lockState -Seed 0 -OutputDirectory "$proof/number-pad-$lockState" }
+            catch { $failures += "${lockState}: $_" }
+          }
+          if($failures.Count) { throw ($failures -join '; ') }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

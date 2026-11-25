@@ -41,11 +41,7 @@ namespace TouchTypingStudio
                 var guide = ((LiveAidRail)Owner).Child as LiveKeyboard;
                 return guide == null ? base.GetHelpTextCore() : guide.ReferenceAidExtent;
             }
-            protected override string GetItemStatusCore()
-            {
-                var guide = ((LiveAidRail)Owner).Child as LiveKeyboard;
-                return guide == null ? base.GetItemStatusCore() : (guide.ReferenceAidDescription ?? "");
-            }
+
         }
 
         private FrameworkElement MakeReferenceLesson()
@@ -303,8 +299,11 @@ namespace TouchTypingStudio
             bool keys = library.B("liveShowKeys"), hands = library.B("liveShowHands");
             bool allows = keys || hands;
             labGuide.Visibility = allows && !referenceHelpOpen ? Visibility.Visible : Visibility.Collapsed;
-            AutomationProperties.SetName(labGuide, keys && hands ? "Клавиатура и положение рук" :
-                keys ? "Клавиатура" : hands ? "Положение рук" : "Учебные подсказки скрыты");
+            string aidName = keys && hands ? "Клавиатура и положение рук" :
+                keys ? "Клавиатура" : hands ? "Положение рук" : "Учебные подсказки скрыты";
+            string keyLabels = keyboard == null ? null : keyboard.ReferenceAidDescription;
+            AutomationProperties.SetName(labGuide, keys && !string.IsNullOrWhiteSpace(keyLabels) ?
+                aidName + ". " + keyLabels : aidName);
             AutomationProperties.SetItemStatus(labGuide, (keys ? "keyboard" : "no-keyboard") +
                 ";" + (hands ? "hands" : "no-hands"));
             // Keep the work surface primary. A short but intrinsically wide rail

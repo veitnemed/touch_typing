@@ -1236,12 +1236,11 @@ internal static partial class LiveUiSmoke
                 {
                     Check(!Visible("LiveAidPanel"), "Default aid stays hidden in the Workday run");
                     Key("F4");
-                    Until(delegate
-                    {
-                        return Visible("LiveAidPanel") &&
-                            Find("LiveAidPanel").Current.ItemStatus.Contains("7 / Home (NumPad7)");
-                    }, "Visible MateBook key points to 7/Home on the number pad");
+                    Until(delegate { return Visible("LiveAidPanel"); }, "F4 reveals the real keyboard rail");
                     CaptureReferenceFrame("workday-pad7-home");
+                    var aid = Find("LiveAidPanel").Current;
+                    Console.WriteLine("MateBook visible keyboard: " + aid.Name + "; " + aid.ItemStatus + "; " + aid.HelpText);
+                    Check(aid.Name.Contains("7 / Home (NumPad7)"), "Visible MateBook key points to 7/Home on the number pad");
                     Chord("Alt+7");
                     Check(ReadSolved() == before, "Top-row Alt+7 does not satisfy Alt+Home");
                 }
