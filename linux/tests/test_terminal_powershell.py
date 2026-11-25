@@ -132,11 +132,20 @@ class TerminalPowerShellTests(unittest.TestCase):
         self.assertIn(POWERSHELL, windows_missions)
         self.assertIn("terminal-explore", windows_missions)
         self.assertNotIn(PRACTICAL, windows_missions)
+        native_powershell = {
+            POWERSHELL,
+            "terminal-disk-space-powershell",
+            "terminal-disk-repeat-powershell",
+        }
         self.assertTrue(all(item["title"].startswith("Bash (учебный Ubuntu) · ")
-                            for key, item in windows_missions.items()
-                            if key not in (POWERSHELL, "terminal-disk-space-powershell")))
-        self.assertIn("terminal-disk-space-powershell", windows_missions)
-        self.assertIn(PRACTICAL, {m["id"] for m in ubuntu["missions"] if m["app"] == "terminal"})
+                            for key, item in windows_missions.items() if key not in native_powershell))
+        self.assertEqual(windows_missions["terminal-disk-space-powershell"]["title"],
+                         "Не сохранился архив: проверить место")
+        self.assertEqual(windows_missions["terminal-disk-repeat-powershell"]["title"],
+                         "Проверить место без подсказки")
+        ubuntu_missions = {m["id"] for m in ubuntu["missions"] if m["app"] == "terminal"}
+        self.assertIn(PRACTICAL, ubuntu_missions)
+        self.assertFalse(ubuntu_missions & native_powershell)
         self.assertEqual([(d["mission"], d["desktopProfile"]) for d in windows["drafts"] if d["app"] == "terminal"],
                          [("terminal-explore", "ubuntu")])
         ps = begin(e, "windows", 1)
