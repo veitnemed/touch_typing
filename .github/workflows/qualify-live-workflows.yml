@@ -42,7 +42,7 @@ jobs:
   engine-regression:
     needs: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 28
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
@@ -73,7 +73,7 @@ jobs:
           test "$(cat "$p/SOURCE-SHA.txt")" = "$PRODUCT_SHA"
           (cd "$p" && sha256sum -c SHA256SUMS.txt)
           tar -xzf "$p/touch-typing-candidate-linux-x64.tar.gz" -C "$p"
-          for suite in SharedRegression LabRegression TerminalRegression LabStressTests NotebookKernelRegression; do
+          for suite in SharedRegression LabRegression TerminalRegression LabStressTests NotebookKernelRegression TypingReviewTests; do
             dotnet run --project "linux/tests/$suite.csproj" -c Release
           done
           export PYTHONPATH="$PWD/linux" TOUCH_TYPING_ENGINE="$p/touch-typing-linux-x64/engine/TouchTyping.Engine"
@@ -81,6 +81,10 @@ jobs:
           /usr/bin/python3 linux/tests/test_classic_cycles.py
           /usr/bin/python3 linux/tests/test_mixed_typing.py
           /usr/bin/python3 linux/tests/test_typing_mode_records.py
+          /usr/bin/python3 linux/tests/test_typing_course_modes.py
+          /usr/bin/python3 linux/tests/test_registered_keyboard.py
+          /usr/bin/python3 linux/tests/test_live_registered_actions.py
+          /usr/bin/python3 linux/tests/test_typing_review.py
           /usr/bin/python3 linux/tests/test_active_keyboard_layout.py
           /usr/bin/python3 linux/tests/test_live_entry_preferences.py
           /usr/bin/python3 linux/tests/test_live_missions.py
@@ -95,7 +99,12 @@ jobs:
           /usr/bin/python3 linux/tests/test_source_handoff.py
           /usr/bin/python3 linux/tests/test_project_file_practice.py
           /usr/bin/python3 linux/tests/test_win10_protocol.py "$TOUCH_TYPING_ENGINE"
-          /usr/bin/python3 linux/tests/audit_live_shortcuts.py
+          /usr/bin/python3 linux/tests/audit_live_shortcuts.py --matrix --require-caps --json "$p/keyboard-course-matrix.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keyboard-course-matrix
+          path: ${{ runner.temp }}/live-workflows/keyboard-course-matrix.json
+          if-no-files-found: error
   linux-native:
     needs: build
     runs-on: ubuntu-24.04
@@ -138,6 +147,7 @@ jobs:
            bash "$package/install.sh"
            test -s "$XDG_DATA_HOME/applications/com.veitnemed.TouchTyping.desktop"
            test "$(find "$XDG_DATA_HOME/touch-typing/releases" -name lab_explorer.py -type f | wc -l)" -eq 1)
+          export TOUCH_TYPING_QA_EXECUTABLE="$package/touch_typing.py"
           export TOUCH_TYPING_QA_OUTPUT="$RUNNER_TEMP/gtk-proof" TOUCH_TYPING_ENGINE="$package/engine/TouchTyping.Engine"
           export XDG_DATA_HOME="$temp/data" XDG_RUNTIME_DIR="$temp/runtime" TOUCH_TYPING_QA_DATA_ROOT="$temp/profile"
           mkdir -p -m 700 "$TOUCH_TYPING_QA_OUTPUT" "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR" "$TOUCH_TYPING_QA_DATA_ROOT"
@@ -151,7 +161,7 @@ jobs:
             /usr/bin/python3 linux/tests/test_preview2_native.py
           ' | tee "$TOUCH_TYPING_QA_OUTPUT/gtk-test.log"
           native_failures=()
-          for scenario in test_editor_notebooks_x11.py test_project_files_x11.py test_editor_course_x11.py test_typing_cycles_native.py test_typing_records_gtk.py test_typing_mixed_native.py test_live_guide_layout_native.py test_live_course_cards_x11.py test_notebook_workbench_native.py test_source_handoff_x11.py test_source_handoff_x11.py:course test_live_coach_x11.py test_notebook_file_handoff_x11.py; do
+          for scenario in test_editor_notebooks_x11.py test_project_files_x11.py test_editor_course_x11.py test_typing_cycles_native.py test_typing_records_gtk.py test_typing_mixed_native.py test_live_guide_layout_native.py test_live_course_cards_x11.py test_notebook_workbench_native.py test_source_handoff_x11.py test_source_handoff_x11.py:course test_live_coach_x11.py test_notebook_file_handoff_x11.py test_typing_normal_launch_x11.py test_typing_review_native.py; do
             script="${scenario%%:*}"
             proof_name="${script%.py}"
             unset TOUCH_TYPING_QA_SOURCE_MODE
@@ -170,6 +180,7 @@ jobs:
               video=$!
               trap "kill -INT $video 2>/dev/null || true; wait $video || true" EXIT
               case "$SCENARIO" in
+                test_typing_normal_launch_x11.py) dbus-run-session -- /usr/bin/python3 "linux/tests/$SCENARIO" "$TOUCH_TYPING_QA_EXECUTABLE" "$TOUCH_TYPING_QA_DATA_ROOT" "$TOUCH_TYPING_QA_OUTPUT";;
                 test_typing_*) dbus-run-session -- /usr/bin/python3 "linux/tests/$SCENARIO";;
                 *) /usr/bin/python3 "linux/tests/$SCENARIO";;
               esac
@@ -250,6 +261,7 @@ jobs:
           & "./windows/Test-Typing-Session.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-session"
           & "./windows/Test-TypingCardRecords.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-records"
           & "./windows/Test-Typing-Mixed.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-mixed"
+          & "./windows/Test-TypingReview.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-review"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -NativeLayout -Seed 0 -OutputDirectory "$proof/live-layout"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -NotebookMission -Seed 0 -OutputDirectory "$proof/notebook"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -ProjectFileMission -Seed 0 -OutputDirectory "$proof/project-files"

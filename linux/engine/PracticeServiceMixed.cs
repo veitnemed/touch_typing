@@ -54,6 +54,7 @@ internal sealed partial class PracticeService
             p.Results.Add(item);
             TypingModeRecords.Record(p, item, t.Level, t.Cycles, t.TimeLimit, -1, t.StartLayout, completed: item.Completed);
             if (p.Results.Count > 500) p.Results.RemoveRange(0, p.Results.Count - 500);
+            if (item.Completed) TypingReviewLedger.Register(p, item, t.AttemptId, t.Title, ReviewMisses(t.Mistakes));
         })) t.Saved();
     }
 

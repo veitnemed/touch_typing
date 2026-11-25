@@ -168,26 +168,32 @@ internal sealed partial class MixedTypingRun
         if (string.IsNullOrEmpty(key)) return false;
         if (!pressed) { held.Remove(key); consumedTriggers.Remove(key); return false; }
         if (!Running) return false;
-        var target = Expected;
+        var chord = Expected.Command ? Expected.Chord : null;
         bool modifier = KeyChord.IsModifier(key);
         bool blockedText = held.Any(k => KeyChord.Family(k) is "Ctrl" or "Alt" or "Super");
-        ConsumePhysical = target.Command || blockedText || modifier && KeyChord.Family(key) is not "Shift";
-        // Physical lock switches change the OS, not the exercise; keeping one in the
-        // chord's held set could make the next genuine shortcut spuriously fail.
-        if (key is "NumLock" or "CapsLock" or "ScrollLock") return ConsumePhysical = false;
-        if (!held.Add(key)) return ConsumePhysical = ConsumePhysical || consumedTriggers.Contains(key); // command auto-repeat never earns another unit
-        if (modifier && (!target.Command || target.Chord.Trigger != null)) return ConsumePhysical;
-        bool switchingLayout = layoutBindings.Any(c => c.Trigger == key && c.FitsModifiers(held));
-        if (switchingLayout && (!target.Command || target.Chord.Trigger != key || !target.Chord.FitsModifiers(held)))
-            return ConsumePhysical = false; // let the OS switch layouts, with no exercise penalty
-        if (target.Command)
+        ConsumePhysical = chord != null || blockedText || modifier && KeyChord.Family(key) is not "Shift";
+        // Physical lock events can change native text but are not failures unless
+        // a lesson explicitly expects that particular key.
+        if (key is ("NumLock" or "CapsLock" or "ScrollLock") && chord?.Trigger != key)
+            return ConsumePhysical = false;
+        if (!held.Add(key)) return ConsumePhysical = ConsumePhysical || consumedTriggers.Contains(key);
+        bool onlyTrigger = held.All(k => KeyChord.IsModifier(k) || k == key);
+        bool matches = chord != null && (chord.Trigger == null ? modifier && chord.FitsModifiers(held) :
+            !modifier && onlyTrigger && (chord.Trigger == key && chord.FitsModifiers(held) ||
+            chord.AcceptsNavigationKeypad(key, held)));
+        // A modifier-only OS binding (e.g. Alt+Shift) has no trigger key. Its
+        // prefix must also remain unconsumed so a native frontend can route the
+        // full switch. Track it for exact matching; never credit an unrelated step.
+        bool switchingLayout = layoutBindings.Any(c => c.Trigger == null
+            ? modifier && held.All(active => KeyChord.IsModifier(active) &&
+                c.Modifiers.Any(expected => KeyChord.Fits(expected, active))) &&
+                held.Select(KeyChord.Family).Distinct().Count() == held.Count
+            : c.Trigger == key && onlyTrigger && c.FitsModifiers(held));
+        if (switchingLayout && !matches) return ConsumePhysical = false;
+        if (modifier && (chord == null || chord.Trigger != null)) return ConsumePhysical;
+        if (chord != null)
         {
-            var chord = target.Chord;
             if (!modifier) consumedTriggers.Add(key);
-            bool onlyTrigger = held.All(k => KeyChord.IsModifier(k) || k == key);
-            bool matches = chord.Trigger == null ? modifier && chord.FitsModifiers(held) :
-                !modifier && onlyTrigger && (chord.Trigger == key && chord.FitsModifiers(held) ||
-                chord.AcceptsNavigationKeypad(key, held));
             if (matches) Advance();
             else if (!modifier) Miss();
         }

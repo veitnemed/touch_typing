@@ -1178,7 +1178,7 @@ internal static partial class LiveUiSmoke
         Check(!File.Exists(profile), "The Workday project starts with a fresh profile");
 
         OpenLiveConfiguration("workday");
-        Select("LabMode", 1);
+        Select("LabMode", numLockMode.Length > 0 ? 0 : 1);
         Select("LabLevel", 0);
         Select("LabDuration", 0);
         Select("LabTimer", 0);
@@ -1223,6 +1223,15 @@ internal static partial class LiveUiSmoke
                 }
                 if (keypad)
                 {
+                    Check(!Visible("LiveAidPanel"), "Default aid stays hidden in the Workday run");
+                    Key("F4");
+                    Until(delegate
+                    {
+                        var aid = Find("LiveKeyboard");
+                        return Visible("LiveAidPanel") && aid != null &&
+                            aid.Current.HelpText.Contains("7 / Home (NumPad7)");
+                    }, "Visible MateBook key points to 7/Home on the number pad");
+                    CaptureReferenceFrame("workday-pad7-home");
                     Chord("Alt+7");
                     Check(ReadSolved() == before, "Top-row Alt+7 does not satisfy Alt+Home");
                 }

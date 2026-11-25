@@ -147,6 +147,9 @@ internal static partial class LiveUiSmoke
             MixedLandmark("wpf-09-mode-list");
 
             MixedChoose("WordsDigitsHotkeys");
+            Check(!Visible("TypingKeyboard"), "Fresh typing aids leave the work area clear");
+            Key("F4");
+            Until(delegate { return Visible("TypingKeyboard"); }, "keyboard aid enabled explicitly");
             var combinations = new HashSet<string>();
             for (int i=0; i<65 && combinations.Count<4; i++)
             {

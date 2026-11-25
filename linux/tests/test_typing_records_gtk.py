@@ -58,6 +58,7 @@ def run_window():
             assert "прежней версии" not in self.typing_rows["Digits"].get_tooltip_text()
             assert "Нет завершённых" in self.typing_rows["Hotkeys"].get_tooltip_text()
             self.capture_widget_png(out / "typing-course-records.png")
+            yield from self.video_hold("typing-menu-accuracy-and-time")
             self.typing_settings.set_expanded(True)
             self.typing_cycles.set_selected(1)
             for _ in range(8): yield

@@ -66,6 +66,32 @@ class GuideLayoutQA(QA):
             self.capture_widget_png(out / "live-en-physical-ctrl-l.png")
         print("PASS GTK: standard Ctrl+L and physical L/Д teach the selected layout", flush=True)
 
+        # Use an existing ordinary editable source→report mission, not a fake
+        # keyboard drawing, and route the actual keypad physical stroke in GTK.
+        pad_lesson = self.starter("workday", "workday-report")
+        for _ in range(45):
+            if pad_lesson.state["task"]["id"] == "file-home":
+                break
+            yield from self.advance_goal(pad_lesson)
+        assert pad_lesson.state["task"]["keys"] == "Alt+Home", pad_lesson.state["task"]
+        if not pad_lesson.guide.show_keys:
+            pad_lesson.aids["keys"].set_active(True)
+        for _ in range(10):
+            yield
+        board = pad_lesson.guide.board
+        pad = board.cells["NumPad7"][0]
+        assert not board.aux_groups["service"].get_mapped()
+        assert pad.get_mapped() and "target" in pad.get_css_classes()
+        assert "Home" in pad.get_label() and "7" in pad.get_label()
+        self.capture_widget_png(out / "live-matebook-pad7-home.png")
+        step = pad_lesson.state["solved"]
+        yield from self.chord("Alt+7")
+        assert pad_lesson.state["solved"] == step
+        yield from self.chord("Alt+NumPad7")
+        assert pad_lesson.state["solved"] == step + 1
+        print("PASS GTK: MateBook 7/Home cap rendered; keypad, not the top row, does the work", flush=True)
+
+
 
 if __name__ == "__main__":
     app = GuideLayoutQA()

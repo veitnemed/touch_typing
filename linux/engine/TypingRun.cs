@@ -36,9 +36,20 @@ internal sealed partial class TypingRun
     internal bool IsRunning => !saved && Attempt.Running && !Finished;
     internal bool HasFiniteDraft => classic != null && !Finished && !saved && (classic.Count != 0 || classic.MistakeCounts.Count > 0);
     internal bool IsSaved => saved;
+    private static readonly (string Id, string Title)[] PrimaryModes =
+    [
+        ("Russian", "Русские фразы"), ("English", "Английские фразы"),
+        ("WordsRU", "Русский словарь"), ("WordsEN", "Английский словарь"),
+        .. MixedTypingRun.Modes.Select(item => (item.Key, item.Value)),
+        ("Project", "Python · task-list"), ("Symbols", "Спецсимволы"),
+        ("WeakRU", "Работа над промахами · RU"), ("WeakEN", "Работа над промахами · EN"),
+    ];
+
     internal static object Catalog(StudioProfile profile) => new
     {
+        reviewDrafts = TypingReviewLedger.Drafts(profile),
         draft = DraftHeader(profile.ClassicTypingDraft) ?? MixedTypingRun.DraftSummary(profile.ClassicTypingDraft),
+        modes = PrimaryModes.Select(item => new { item.Id, item.Title }),
         actionModes = MixedTypingRun.Modes.Select(p => new { id = p.Key, title = p.Value }).ToArray(),
         lessons = Lessons.All.Select(item => new { id = "lesson:" + item.Id, title = item.Title, language = CodeText.LanguageName(item.Language) }),
         projects = NeutralProject.Exercises.Select(item => new { id = "project:" + item.Name, title = item.Name, source = item.Path }),
@@ -171,6 +182,7 @@ internal sealed partial class TypingRun
         TypingModeRecords.Record(profile, item, level, CycleCount, timeLimit, lesson == null ? -1 : variant, material: recordMaterial);
         profile.Results.Add(item);
         if (profile.Results.Count > 500) profile.Results.RemoveRange(0, profile.Results.Count - 500);
+        if (item.Completed) TypingReviewLedger.Register(profile, item, AttemptId, title, ReviewMisses());
         if (PracticeRecords.CanRecordTyping(score)) PracticeRecords.Record(profile, "linux-typing/" + tag, score.Cpm, score.Accuracy);
     }
 

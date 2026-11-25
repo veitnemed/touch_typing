@@ -39,6 +39,22 @@ namespace TouchTypingStudio
         public KeyHint(Cap cap, Key modifier, Layout layout) { Cap = cap; Modifier = modifier; Layout = layout; }
     }
 
+    // Extra physical sections are drawn only when they are relevant to the current
+    // hint/input. Do not put them into Rows: that map must still compose text from
+    // the main ANSI deck rather than quietly prefer numeric-lock-dependent keys.
+    internal sealed class AuxiliaryCap
+    {
+        public readonly string Key, Label, Group, Alias;
+        public readonly int Column, Row, Width, Height;
+
+        public AuxiliaryCap(string key, string label, string group, int column, int row,
+            int width = 1, int height = 1, string alias = null)
+        {
+            Key = key; Label = label; Group = group; Column = column; Row = row;
+            Width = width; Height = height; Alias = alias;
+        }
+    }
+
     internal static class TypingKeyboard
     {
         private static Cap K(Key key, int finger, string en, string ens, string ru, string rus)
@@ -90,6 +106,45 @@ namespace TouchTypingStudio
                 Control(Key.Right,.67,7,"→")
             }
         };
+
+        public static readonly AuxiliaryCap[] Auxiliary =
+        {
+            new AuxiliaryCap("ScrollLock", "Scroll", "service", 0, 0),
+            new AuxiliaryCap("Pause", "Pause", "service", 1, 0),
+            new AuxiliaryCap("Menu", "Menu", "service", 2, 0),
+            new AuxiliaryCap("Insert", "Ins", "service", 0, 1),
+            new AuxiliaryCap("Home", "Home", "service", 1, 1),
+            new AuxiliaryCap("PageUp", "PgUp", "service", 2, 1),
+            new AuxiliaryCap("Delete", "Del", "service", 0, 2),
+            new AuxiliaryCap("End", "End", "service", 1, 2),
+            new AuxiliaryCap("PageDown", "PgDn", "service", 2, 2),
+            new AuxiliaryCap("RSuper", "Win R", "service", 2, 3),
+            new AuxiliaryCap("NumLock", "Num", "pad", 0, 0),
+            new AuxiliaryCap("NumDivide", "/", "pad", 1, 0),
+            new AuxiliaryCap("NumMultiply", "×", "pad", 2, 0),
+            new AuxiliaryCap("NumSubtract", "−", "pad", 3, 0),
+            new AuxiliaryCap("NumPad7", "7", "pad", 0, 1, alias: "Home"),
+            new AuxiliaryCap("NumPad8", "8", "pad", 1, 1, alias: "Up"),
+            new AuxiliaryCap("NumPad9", "9", "pad", 2, 1, alias: "PageUp"),
+            new AuxiliaryCap("NumAdd", "+", "pad", 3, 1, height: 2),
+            new AuxiliaryCap("NumPad4", "4", "pad", 0, 2, alias: "Left"),
+            new AuxiliaryCap("NumPad5", "5", "pad", 1, 2),
+            new AuxiliaryCap("NumPad6", "6", "pad", 2, 2, alias: "Right"),
+            new AuxiliaryCap("NumPad1", "1", "pad", 0, 3, alias: "End"),
+            new AuxiliaryCap("NumPad2", "2", "pad", 1, 3, alias: "Down"),
+            new AuxiliaryCap("NumPad3", "3", "pad", 2, 3, alias: "PageDown"),
+            new AuxiliaryCap("NumEnter", "Enter", "pad", 3, 3, height: 2),
+            new AuxiliaryCap("NumPad0", "0", "pad", 0, 4, width: 2, alias: "Insert"),
+            new AuxiliaryCap("NumDecimal", ".", "pad", 2, 4, alias: "Delete"),
+        };
+        private static readonly Dictionary<string, string> PadAliases = Auxiliary
+            .Where(cap => cap.Alias != null).ToDictionary(cap => cap.Key, cap => cap.Alias);
+
+        public static string NavigationAlias(string key)
+        {
+            string alias;
+            return PadAliases.TryGetValue(key, out alias) ? alias : null;
+        }
 
         private static readonly Dictionary<char, KeyHint> English = Build(Layout.English);
         private static readonly Dictionary<char, KeyHint> Russian = Build(Layout.Russian);

@@ -37,6 +37,7 @@ class CourseWindowQA(QA):
                 "code-guide", 0, 0, 40)
             count = lab.state["scenarioLength"]
             self.capture_widget_png(out/"course-01-original.png")
+            yield from self.video_hold("VS Code: прежний курс при обычном входе")
             while lab.state["mission"] == "code-guide":
                 yield from self.advance_goal(lab)
             assert lab.active and lab.state["mission"] == "code-notebook-read" and lab.state["solved"] == count == 33
@@ -50,6 +51,7 @@ class CourseWindowQA(QA):
             assert (lab.state["solved"], notebook["selected"], notebook["editing"]) == (35, 0, True)
             assert notebook["anchor"] == notebook["caret"] + 1 and notebook["caret"] > 0
             self.capture_widget_png(out/"course-02-notebook-at-35.png")
+            yield from self.video_hold("Блокнот внутри курса после 33 действий редактора")
             expected = checkpoint(lab.state)
             self.return_live_catalog("code")
             for _ in range(20):
@@ -83,6 +85,7 @@ class CourseWindowQA(QA):
                 yield from self.advance_goal(lab)
             assert lab.active and lab.state["solved"] == 40 and lab.state["limitReached"] == "actions"
             self.capture_widget_png(out/"course-03-action-limit.png")
+            yield from self.video_hold("Общий лимит 40, можно доработать текущий эпизод")
             _, extend = lab.limit_actions
             extend.grab_focus()
             yield from self.chord("Enter")
@@ -96,6 +99,7 @@ class CourseWindowQA(QA):
                 yield from self.advance_goal(lab)
             assert lab.state["finished"] and lab.state["solved"] == 42
             self.capture_widget_png(out/"course-04-completed.png")
+            yield from self.video_hold("Результат полноценного курса")
             print("PASS GTK ordinary VS Code card: 33 editor steps → notebook → resume from 35 → 40 → 42", flush=True)
 
 

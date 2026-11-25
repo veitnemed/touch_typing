@@ -56,6 +56,7 @@ namespace TouchTypingStudio
         private FocusTape tape;
         private ProgressBar lessonProgress;
         private LiveKeyboard keyboard;
+        private Viewbox sessionKeyboardAid;
         private TextBlock timerLabel, sceneLabel, feedback, keyHints, titleLabel;
         private Button keyboardControl, handsControl, mistakeControl, pauseControl, stopControl;
         private string lastTypedKey = "";
@@ -374,18 +375,17 @@ namespace TouchTypingStudio
         private FrameworkElement BuildTyping()
         {
             var root = PagePanel("Печать", "Слова, фразы, упражнения и код учебного проекта");
-            var items = new List<Option>
-            {
-                new Option("Russian", "Русские фразы"), new Option("Project", "Python · task-list"),
-                new Option("English", "Английские фразы"), new Option("WordsRU", "Русские слова"),
-                new Option("WordsEN", "Английские слова"), new Option("Symbols", "Спецсимволы"),
-                new Option("Digits", "Цифры"), new Option("TopRow", "Цифры и знаки верхнего ряда"),
-                new Option("Hotkeys", "Горячие клавиши"), new Option("WordsDigits", "Слова и цифры"),
-                new Option("WordsDigitsHotkeys", "Слова, цифры и горячие клавиши"),
-                new Option("WeakRU", "Промахи · русский"), new Option("WeakEN", "Промахи · английский")
-            };
-            int mainCount = items.Count;
             var catalog = library.D("typing");
+            var items = catalog.Items("modes").Select(item => new Option(item.S("id"), item.S("title"))).ToList();
+            int mainCount = items.Count;
+            foreach (var pending in catalog.Items("reviewDrafts").Reverse())
+            {
+                string sourceId = pending.S("sourceId");
+                var action = ActionButton("Продолжить исправление · " + pending.S("title") + " · " +
+                    pending.I("position") + "/" + pending.I("total"), delegate { StartMistakeReview(sourceId); });
+                AutomationProperties.SetAutomationId(action, "TypingContinueReview_" + sourceId);
+                root.Children.Add(action);
+            }
             items.AddRange(catalog.Items("projects").Select(item => new Option(item.S("id"), "Python · " + item.S("title"))));
             items.AddRange(catalog.Items("sets").Select(item => new Option(item.S("id"), "Свой текст · " + item.S("title"))));
             items.AddRange(catalog.Items("lessons").Select(item => new Option(item.S("id"), "Урок · " + item.S("title"))));
@@ -555,6 +555,16 @@ namespace TouchTypingStudio
             if (answer.Exists) StartSession(answer);
         }
 
+        private void StartMistakeReview(string sourceId)
+        {
+            if (active) return;
+            var response = Request("typing-review-start", "sourceId", sourceId, "layout", CurrentLayout());
+            if (!response.Exists) return;
+            // StartSession creates the same real typing surface as an ordinary lesson.
+            ShowPage(TypingPage);
+            StartSession(response);
+        }
+
         private void StartSession(Data data)
         {
             active = true;
@@ -632,6 +642,7 @@ namespace TouchTypingStudio
             keyboard = new LiveKeyboard { Width = 950, IsHitTestVisible = false };
             if (page == TypingPage) AutomationProperties.SetAutomationId(keyboard, "TypingKeyboard");
             var typingAid = new Viewbox { Child = keyboard, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Stretch };
+            sessionKeyboardAid = typingAid;
             Action sizeAid = delegate
             {
                 typingAid.Margin = new Thickness(0, ActualHeight < 680 ? 9 : 22, 0, 0);
@@ -720,6 +731,9 @@ namespace TouchTypingStudio
             AutomationProperties.SetName(keyboardControl, (string)keyboardControl.ToolTip);
             AutomationProperties.SetName(handsControl, (string)handsControl.ToolTip);
             feedback.Visibility = feedback.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+            if (sessionKeyboardAid != null)
+                sessionKeyboardAid.Visibility = library.B("showKeys") || library.B("showHands")
+                    ? Visibility.Visible : Visibility.Collapsed;
             if (page == LivePage) lessonProgress.Value = (double)state.I("solved") / Math.Max(1, state.I("limit"));
             else
             {
@@ -740,6 +754,7 @@ namespace TouchTypingStudio
         private void PaintTyping()
         {
             titleLabel.Text = "Уроки  ›  " + (state.S("wantedLayout") == "RU" ? "Русская" : "Английская") + " раскладка  ›  " + state.S("title", TypingPage);
+            if (state.B("isReview") && state.S("source").Length > 0) titleLabel.Text += "  ·  " + state.S("source");
             var before = state.S("before");
             var after = state.S("after");
             bool command = state.S("expectedKind") == "command";
@@ -977,11 +992,11 @@ namespace TouchTypingStudio
             metrics.Children.Add(ReferenceResultMetric("speed", "Скорость", Format(speed), "зн/мин"));
             metrics.Children.Add(ReferenceResultMetric("accuracy", "Точность", Format(score.N("accuracy")) + "%", ""));
             card.Children.Add(metrics);
-            var details = new Expander { Header = ReferenceLabel("Работа над ошибками", 15, ReferenceText, true),
+            var details = new Expander { Header = ReferenceLabel("Разбор попытки", 15, ReferenceText, true),
                 Foreground = ReferenceText, Focusable = true };
             referenceErrorReview = details;
             AutomationProperties.SetAutomationId(details, "TypingErrorReview");
-            AutomationProperties.SetName(details, "Работа над ошибками");
+            AutomationProperties.SetName(details, "Разбор попытки");
             var review = Stack();
             review.Children.Add(ReferenceLabel("Промахи: " + score.I("errors"), 14, ReferenceMuted, false));
             if (tempo.Length > 0)
@@ -994,13 +1009,29 @@ namespace TouchTypingStudio
             var reviewFrame = ReferenceLessonPanel(details, new Thickness(10), 10);
             reviewFrame.Margin = new Thickness(0, 0, 0, 14);
             card.Children.Add(reviewFrame);
-            var actions = new UniformGrid { Columns = 3, Margin = new Thickness(0, 0, -8, 0) };
-            actions.Children.Add(ReferenceResultAction("К урокам", delegate { ShowPage(TypingPage); }, "TypingChoose", 0));
-            var repeat = ReferenceResultAction("Начать сначала", delegate { ShowPage(TypingPage); StartTyping(); }, "TypingRepeat", 2);
-            actions.Children.Add(repeat);
+            bool corrected = score.B("isReview") || score.B("isHistory"), offered = score.B("reviewAvailable");
+            Button corrective = null;
+            if (offered)
+            {
+                string sourceId = score.S("attemptId");
+                corrective = ReferenceResultAction("Работа над ошибками", delegate { StartMistakeReview(sourceId); }, "TypingStartReview", 2);
+                corrective.Margin = new Thickness(0, 0, 0, 8);
+                corrective.ToolTip = "Короткая практика только по промахам этой попытки";
+                card.Children.Add(corrective);
+            }
+            var actions = new UniformGrid { Columns = corrected ? 2 : 3, Margin = new Thickness(0, 0, -8, 0) };
+            var choose = ReferenceResultAction("К урокам", delegate { ShowPage(TypingPage); }, "TypingChoose", corrected ? 2 : 0);
+            actions.Children.Add(choose);
+            Button repeat = null;
+            if (!corrected)
+            {
+                repeat = ReferenceResultAction("Начать сначала", delegate { ShowPage(TypingPage); StartTyping(); }, "TypingRepeat", offered ? 0 : 2);
+                actions.Children.Add(repeat);
+            }
             actions.Children.Add(ReferenceResultAction("К прогрессу", delegate { ShowPage(ProgressPage); }, "TypingProgress", 1));
             card.Children.Add(actions);
-            beginControl = repeat;
+            var primary = corrective ?? repeat ?? choose;
+            beginControl = primary;
             var scroll = new ScrollViewer { Content = ReferenceLessonPanel(card, new Thickness(20), 17),
                 MaxWidth = 735, Margin = new Thickness(16), VerticalAlignment = VerticalAlignment.Center,
                 HorizontalAlignment = HorizontalAlignment.Stretch, Focusable = false,
@@ -1008,7 +1039,7 @@ namespace TouchTypingStudio
             ApplyLiveScrollStyle(scroll);
             root.Children.Add(scroll);
             Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(delegate
-            { if (ReferenceEquals(center.Content, root)) repeat.Focus(); }));
+            { if (ReferenceEquals(center.Content, root)) primary.Focus(); }));
             return root;
         }
 
@@ -1192,7 +1223,7 @@ namespace TouchTypingStudio
                     beginControl != null && beginControl.IsEnabled && (page == LivePage || page == TypingPage))
                 {
                     e.Handled = true;
-                    if (page == LivePage) StartLive(); else StartTyping();
+                    beginControl.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
                 }
                 return;
             }
@@ -1476,6 +1507,7 @@ namespace TouchTypingStudio
                 case Key.Apps: return "Menu";
                 case Key.Pause: return "Pause";
                 case Key.Scroll: return "ScrollLock";
+                case Key.NumLock: return "NumLock";
                 case Key.Add: return "NumAdd";
                 case Key.Subtract: return "NumSubtract";
                 case Key.Multiply: return "NumMultiply";

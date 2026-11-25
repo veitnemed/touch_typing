@@ -16,7 +16,7 @@ internal sealed record KeyChord(string[] Modifiers, string Trigger)
         .. "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".Select(c => c.ToString()),
         .. Enumerable.Range(1, 12).Select(n => $"F{n}"),
         "Esc", "Tab", "Space", "Enter", "Backspace", "CapsLock", "Print", "Up", "Down", "Left", "Right",
-        "Home", "End", "PageUp", "PageDown", "Insert", "Delete", "Menu", "Pause", "ScrollLock",
+        "Home", "End", "PageUp", "PageDown", "Insert", "Delete", "Menu", "Pause", "ScrollLock", "NumLock",
         "`", "-", "=", "[", "]", "\\", ";", "'", ",", ".", "/",
         .. Enumerable.Range(0, 10).Select(n => $"NumPad{n}"),
         "NumAdd", "NumSubtract", "NumMultiply", "NumDivide", "NumDecimal", "NumEnter"
@@ -42,13 +42,7 @@ internal sealed record KeyChord(string[] Modifiers, string Trigger)
     // navigation exercise may explicitly accept the same key's secondary
     // legend, regardless of how Num Lock was delivered by the platform.
     internal bool AcceptsNavigationKeypad(string physicalKey, IEnumerable<string> held) =>
-        Trigger != null && Trigger == (physicalKey switch
-        {
-            "NumPad7" => "Home", "NumPad1" => "End", "NumPad9" => "PageUp",
-            "NumPad3" => "PageDown", "NumPad8" => "Up", "NumPad2" => "Down",
-            "NumPad4" => "Left", "NumPad6" => "Right", "NumPad0" => "Insert",
-            "NumDecimal" => "Delete", _ => null
-        }) && FitsModifiers(held);
+        Trigger != null && Trigger == TypingKeyboard.NavigationAlias(physicalKey) && FitsModifiers(held);
 
 
     internal static bool TryParse(string value, out KeyChord chord)
@@ -160,7 +154,8 @@ internal sealed class GestureTracker
                 if (!invalid && chord.Trigger == null && chord.FitsModifiers(held))
                     Match(now);
             }
-            else if (key == chord.Trigger && characterMatches && chord.FitsModifiers(held) &&
+            else if ((key == chord.Trigger || chord.AcceptsNavigationKeypad(key, held)) &&
+                characterMatches && chord.FitsModifiers(held) &&
                 held.All(active => active == key || KeyChord.IsModifier(active)) && !invalid)
                 Match(now);
             else

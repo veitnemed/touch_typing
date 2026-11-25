@@ -19,6 +19,8 @@ internal sealed class NotebookFileHandoffState
     public int selected { get; set; }
     public int caret { get; set; }
     public int anchor { get; set; }
+    public int inputCursor { get; set; }
+    public int inputAnchor { get; set; }
     public int generation { get; set; }
     public int counter { get; set; }
     public bool finished { get; set; }
@@ -33,6 +35,8 @@ internal sealed class NotebookFileHandoffState
     public string url { get; set; }
     public string body { get; set; }
     public string focus { get; set; }
+    public string input { get; set; }
+    public string option { get; set; }
     public string status { get; set; }
     public string output { get; set; }
     public string outputLabel { get; set; }
@@ -72,11 +76,55 @@ internal static partial class LiveUiSmoke
             return BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(text))).Replace("-", "");
     }
 
+    private static string HandoffText(NotebookFileHandoffState view)
+    { return view.focus == "body" ? view.body : view.input; }
+
+    private static NotebookFileHandoffState TypeHandoffText(string text, string focus, int solved)
+    {
+        var prior = ReadNotebookFileHandoff();
+        Check(prior.focus == focus && prior.solved == solved, "Native text target: " + focus + " at " + solved);
+        int remainingRetries = 1;
+        foreach (char c in text)
+        {
+            int low = Math.Min(prior.inputCursor, prior.inputAnchor), high = Math.Max(prior.inputCursor, prior.inputAnchor);
+            string original = HandoffText(prior);
+            string expected = original.Substring(0, low) + c + original.Substring(high);
+            var view = prior;
+            while (true)
+            {
+                Send(Character(c));
+                var pending = Stopwatch.StartNew();
+                bool received = false;
+                while (pending.ElapsedMilliseconds < 1300)
+                {
+                    view = ReadNotebookFileHandoff();
+                    if (view.solved == solved && view.focus == focus && view.url == prior.url &&
+                        HandoffText(view) == expected && view.inputCursor == low + 1 && view.inputAnchor == low + 1)
+                    { received = true; break; }
+                    if (view.solved != solved || view.focus != focus || view.url != prior.url ||
+                        HandoffText(view) != original || view.inputCursor != prior.inputCursor || view.inputAnchor != prior.inputAnchor)
+                        throw new InvalidOperationException("Unexpected native edit at " + solved + "/" + focus +
+                            ": expected " + HandoffJson.Serialize(expected) + ", saw " + HandoffJson.Serialize(HandoffText(view)));
+                    Wait(35);
+                }
+                if (received) { prior = view; break; }
+                if (remainingRetries-- == 0)
+                    throw new TimeoutException("Native text receipt missing at " + solved + "/" + focus + ", offset " + low);
+                // One physical re-send only. Fail instead of replacing text or advancing
+                // when the actual window shows any other value, focus or position.
+                Console.WriteLine("RETRY native key " + HandoffJson.Serialize(c.ToString()) +
+                    " at " + solved + "/" + focus + ", unchanged offset " + low);
+            }
+        }
+        return prior;
+    }
+
     private static void ReplaceHandoffFragment(string old, string next, int solved)
     {
         Chord("Ctrl+F");
         Chord("Ctrl+A");
-        EnterCharacters(old);
+        var search = TypeHandoffText(old, "find", solved);
+        Check(search.input == old, "Find displays the exact query before Enter.");
         Key("Enter");
         Key("Esc");
         var found = ReadNotebookFileHandoff();
@@ -84,14 +132,27 @@ internal static partial class LiveUiSmoke
         int hi = Math.Max(found.position, found.selection);
         Check(found.solved == solved && found.focus == "body" && lo >= 0 && hi <= found.body.Length &&
               found.body.Substring(lo, hi - lo) == old, "Find selected exactly: " + old);
-        EnterCharacters(next);
+        TypeHandoffText(next, "body", solved);
         Check(ReadNotebookFileHandoff().solved == solved, "A text edit has not earned a Save credit.");
     }
 
     private static void AdvanceNotebookFileHandoff(NotebookFileHandoffState task)
     {
-        if (new[] { "quick-choose", "palette-choose", "file-name-commit" }.Contains(task.id))
-            EnterCharacters(task.value);
+        if (task.id == "quick-choose")
+        {
+            var picker = TypeHandoffText(task.value, "quick-open", task.solved);
+            Check(picker.input == task.value && picker.files.ContainsKey(picker.option) &&
+                picker.option.IndexOf("/" + task.value, StringComparison.OrdinalIgnoreCase) >= 0,
+                "Quick Open lists the existing file for the exact typed query before Enter: " + picker.option);
+        }
+        else if (task.id == "palette-choose")
+        {
+            var palette = TypeHandoffText(task.value, "palette", task.solved);
+            Check(palette.input == task.value && palette.option.Length > 0,
+                "Palette lists the command for the exact typed query before Enter: " + palette.option);
+        }
+        else if (task.id == "file-name-commit")
+            TypeHandoffText(task.value, "file-name", task.solved);
         if (task.id == "save" && task.value.Contains("from csv import"))
         {
             foreach (string pattern in ModuleEdits)
@@ -262,7 +323,12 @@ internal static partial class LiveUiSmoke
                 if (app != null && !app.HasExited)
                 {
                     DumpProcessWindows();
-                    if (GetForegroundWindow() == trainer) HandoffFrame("failure", "Unexpected state");
+                    if (GetForegroundWindow() == trainer)
+                    {
+                        HandoffFrame("failure", "Unexpected state");
+                        File.WriteAllText(Path.Combine(evidenceDirectory, "wpf-nb-flow-witness.json"),
+                            HandoffJson.Serialize(ReadNotebookFileHandoff()), Encoding.UTF8);
+                    }
                 }
             }
             catch (Exception extra) { Console.Error.WriteLine(extra.Message); }

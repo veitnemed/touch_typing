@@ -30,10 +30,7 @@ class TypingCycles(QA):
         for _ in range(7):
             yield
         self.capture_widget_png(out / (name + ".png"))
-        if os.environ.get("TOUCH_TYPING_QA_VIDEO") == "1":
-            end = time.monotonic() + 2.3
-            while time.monotonic() < end:
-                yield
+        yield from self.video_hold(name)
 
     def type_words(self, count):
         """Unmodified Latin/space events; read only what the application shows."""
@@ -89,6 +86,7 @@ class TypingCycles(QA):
         assert self.typing_time.get_selected() == 0
         yield from self.chord("F5")
         assert self.workout == "typing" and self.typing_progress.get_mapped()
+        assert not self.guide.board.get_mapped() and not any(h.get_mapped() for h in self.guide.hands.values())
         assert self.state["cycles"] == 1 and 350 <= self.state["progressTotal"] <= 550
         assert self.typing_counter.get_label() == f'0/{self.state["progressTotal"]}'
         yield from self.landmark("01-classic-one-cycle")
