@@ -79,6 +79,7 @@ internal static partial class LiveUiSmoke
         window = AutomationElement.FromHandle(trainer);
         Check(window.Current.ProcessId == app.Id, "owned ordinary WPF process");
         Focus(); Until(delegate { return Visible("HomeDashboard"); }, "default ordinary home");
+        TypingProofClient.Fit(app, trainer);
         uint pid; uint thread = GetWindowThreadProcessId(trainer, out pid);
         SetNativeLessonLayout(thread, "00000409", 0x0409);
         Chord("Alt+2");

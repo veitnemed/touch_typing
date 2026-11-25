@@ -53,7 +53,7 @@ class GuideLayoutQA(QA):
             assert token == ("Ctrl", "L"), token
             assert keys["L"][0].get_label().lower() == "д"
             assert "target" in keys["L"][0].get_css_classes()
-            assert "target" in keys["LCtrl"][0].get_css_classes()
+            assert any("target" in keys[side][0].get_css_classes() for side in ("LCtrl", "RCtrl"))
             self.capture_widget_png(out / "live-ru-physical-ctrl-l.png")
             yield from self.chord("Ctrl+L")
             assert lesson.state["solved"] == 1

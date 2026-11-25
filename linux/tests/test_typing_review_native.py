@@ -14,9 +14,11 @@ import subprocess
 import sys
 import time
 
-from gi.repository import Gtk
+import gi
+gi.require_version("GdkX11", "4.0")
+from gi.repository import GdkX11, Gtk
 from test_typing_cycles_native import TypingCycles
-from test_preview2_native import out
+from test_preview2_native import out, ptr, x
 
 
 class ReviewWindow(TypingCycles):
@@ -116,8 +118,21 @@ class ReviewWindow(TypingCycles):
         yield from self.landmark("review-03-before-restart")
         self.window.close()  # same window-manager close signal as the title-bar button (Xvfb has no WM)
         assert self.close_dialog is not None
+        for _ in range(50):
+            if self.close_dialog.get_mapped() and self.close_dialog.get_surface():
+                break
+            yield
+        # Xvfb has no window manager to transfer keyboard focus to this new
+        # top-level dialog. Target the owned transient, never unrelated windows.
+        xid = GdkX11.X11Surface.get_xid(self.close_dialog.get_surface())
+        x.XSetInputFocus(ptr, xid, 1, 0)
+        x.XFlush(ptr)
         self.close_dialog.get_widget_for_response(Gtk.ResponseType.ACCEPT).grab_focus()
         yield from self.chord("Space")
+        for _ in range(50):
+            if self.allow_close:
+                break
+            yield
         assert self.allow_close
         print("PASS: original errors came from real keys; closed actual correction at 12 units", flush=True)
 

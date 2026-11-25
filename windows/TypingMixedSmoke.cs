@@ -97,6 +97,7 @@ internal static partial class LiveUiSmoke
             uint pid, thread = GetWindowThreadProcessId(trainer, out pid);
             Check(window.Current.ProcessId == app.Id && pid == app.Id && thread != 0, "owned foreground UI thread");
             Focus(); Until(delegate { return Visible("HomeDashboard"); }, "fresh WPF home");
+            TypingProofClient.Fit(app, trainer);
             previous = GetKeyboardLayout(thread); originalNumLock = ProbeNumLock();
             MixedLayout(thread, false);
             Chord("Alt+2");

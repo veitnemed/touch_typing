@@ -83,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends xvfb xauth ffmpeg x11-xkb-utils gir1.2-gtk-4.0 python3-gi python3-cairo python3-gi-cairo libxtst6 libglib2.0-bin
+          sudo apt-get install -y --no-install-recommends xvfb xauth ffmpeg x11-utils x11-xkb-utils gir1.2-gtk-4.0 python3-gi python3-cairo python3-gi-cairo libxtst6 libglib2.0-bin
           p="$RUNNER_TEMP/archives"
           (cd "$p" && sha256sum -c SHA256SUMS.txt)
           temp=$(mktemp -d)
@@ -100,11 +100,12 @@ jobs:
             trap "kill -INT $video 2>/dev/null || true; wait $video || true" EXIT
             /usr/bin/python3 linux/tests/test_preview2_native.py
           ' | tee "$TOUCH_TYPING_QA_OUTPUT/gtk-test.log"
+          smoke_failures=()
           for scenario in test_editor_notebooks_x11.py test_project_files_x11.py test_typing_cycles_native.py test_typing_records_gtk.py test_typing_mixed_native.py test_typing_review_native.py test_live_guide_layout_native.py; do
             export TOUCH_TYPING_QA_OUTPUT="$RUNNER_TEMP/gtk-proof/${scenario%.py}" TOUCH_TYPING_QA_DATA_ROOT="$temp/${scenario%.py}"
             mkdir -m 700 "$TOUCH_TYPING_QA_OUTPUT" "$TOUCH_TYPING_QA_DATA_ROOT"
             export SCENARIO="$scenario" TOUCH_TYPING_QA_VIDEO=1
-            timeout 180s xvfb-run -a -s "-screen 0 1024x600x24 -nolisten tcp" bash -c '
+            if ! timeout 180s xvfb-run -a -s "-screen 0 1024x600x24 -nolisten tcp" bash -c '
               set -e
               ffmpeg -y -loglevel warning -f x11grab -framerate 15 -video_size 1024x600 -i "$DISPLAY" \
                 -c:v libx264 -preset fast -crf 25 -pix_fmt yuv420p "$TOUCH_TYPING_QA_OUTPUT/session.mp4" &
@@ -114,8 +115,14 @@ jobs:
                 test_typing_*) dbus-run-session -- /usr/bin/python3 "linux/tests/$SCENARIO";;
                 *) /usr/bin/python3 "linux/tests/$SCENARIO";;
               esac
-            ' | tee "$TOUCH_TYPING_QA_OUTPUT/gtk-test.log"
+            ' | tee "$TOUCH_TYPING_QA_OUTPUT/gtk-test.log"; then smoke_failures+=("$scenario"); fi
           done
+          if (( ${#smoke_failures[@]} )); then
+            printf 'Failed native scenarios: %s\n' "${smoke_failures[@]}"
+            exit 1
+          fi
+          timeout 55s xvfb-run -a -s "-screen 0 1366x768x24 -nolisten tcp" dbus-run-session -- \
+            /usr/bin/python3 linux/tests/test_typing_normal_launch_x11.py "$package/touch_typing.py" "$temp" "$RUNNER_TEMP/gtk-proof/ordinary"
           export TOUCH_TYPING_QA_OUTPUT="$RUNNER_TEMP/gtk-proof"
           unset TOUCH_TYPING_QA_DATA_ROOT
           export XDG_DATA_HOME="$temp/repeat-data"
@@ -170,19 +177,21 @@ jobs:
           $app = "$env:RUNNER_TEMP/TouchTyping Live Candidate"
           Expand-Archive -LiteralPath $zip -DestinationPath $app
           $proof = "$env:RUNNER_TEMP/windows-proof"
-          & "./windows/Test-Typing-Session.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-session"
-          & "./windows/Test-TypingCardRecords.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-records"
-          & "./windows/Test-Typing-Mixed.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-mixed"
-          & "$app/Test-TypingReview.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-review"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -NativeLayout -Seed 0 -OutputDirectory "$proof/live-layout"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -NotebookMission -Seed 0 -OutputDirectory "$proof/notebook"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -ProjectFileMission -Seed 0 -OutputDirectory "$proof/project-files"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -EditorProjectFileMission -Seed 0 -OutputDirectory "$proof/editor-project-files"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -BrowserClone -Seed 0 -OutputDirectory "$proof/browser"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock off -Seed 0 -OutputDirectory "$proof/keypad-off"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock on -Seed 0 -OutputDirectory "$proof/keypad-on"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock dedicated -Seed 0 -OutputDirectory "$proof/dedicated-home"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -LiveUxSmall -OutputDirectory "$proof/compact"
+          $failed = @()
+          try { & "./windows/Test-Typing-Session.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-session" } catch { $failed += $_.Exception.Message; Write-Host $_.Exception.Message }
+          try { & "./windows/Test-TypingCardRecords.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-records" } catch { $failed += $_.Exception.Message; Write-Host $_.Exception.Message }
+          try { & "./windows/Test-Typing-Mixed.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-mixed" } catch { $failed += $_.Exception.Message; Write-Host $_.Exception.Message }
+          try { & "$app/Test-TypingReview.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-review" } catch { $failed += $_.Exception.Message; Write-Host $_.Exception.Message }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -NativeLayout -Seed 0 -OutputDirectory "$proof/live-layout" } catch { $failed += $_.Exception.Message; Write-Host $_.Exception.Message }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -NotebookMission -Seed 0 -OutputDirectory "$proof/notebook" } catch { $failed += $_.Exception.Message; Write-Host $_.Exception.Message }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -ProjectFileMission -Seed 0 -OutputDirectory "$proof/project-files" } catch { $failed += $_.Exception.Message; Write-Host $_.Exception.Message }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -EditorProjectFileMission -Seed 0 -OutputDirectory "$proof/editor-project-files" } catch { $failed += $_.Exception.Message; Write-Host $_.Exception.Message }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -BrowserClone -Seed 0 -OutputDirectory "$proof/browser" } catch { $failed += $_.Exception.Message; Write-Host $_.Exception.Message }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock off -Seed 0 -OutputDirectory "$proof/keypad-off" } catch { $failed += $_.Exception.Message; Write-Host $_.Exception.Message }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock on -Seed 0 -OutputDirectory "$proof/keypad-on" } catch { $failed += $_.Exception.Message; Write-Host $_.Exception.Message }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock dedicated -Seed 0 -OutputDirectory "$proof/dedicated-home" } catch { $failed += $_.Exception.Message; Write-Host $_.Exception.Message }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -LiveUxSmall -OutputDirectory "$proof/compact" } catch { $failed += $_.Exception.Message; Write-Host $_.Exception.Message }
+          if ($failed.Count) { throw ("Native QA failures: " + ($failed -join "; ")) }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -205,6 +214,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+          fetch-depth: 2
       - id: download_candidate
         continue-on-error: true
         uses: actions/download-artifact@v4

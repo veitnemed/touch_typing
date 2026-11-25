@@ -11,14 +11,34 @@ import os
 from pathlib import Path
 import subprocess
 
-from gi.repository import Gdk
-from test_typing_cycles_native import TypingCycles, x, ptr, out
+import gi
+gi.require_version("Gdk", "4.0")
+gi.require_version("GdkX11", "4.0")
+gi.require_version("Graphene", "1.0")
+gi.require_version("Gtk", "4.0")
+from gi.repository import Gdk, GdkX11, Graphene, Gtk
+from test_typing_cycles_native import TypingCycles, x, xt, ptr, out
 
 # XkbUseCoreKbd; a new Xvfb with US/RU and the standard Mod2 NumLock mapping.
 DEV = 0x0100
 x.XkbLockGroup.argtypes = [C.c_void_p, C.c_uint, C.c_uint]
 x.XkbLockModifiers.argtypes = [C.c_void_p, C.c_uint, C.c_uint, C.c_uint]
 x.XSync.argtypes = [C.c_void_p, C.c_int]
+x.XkbGetState.argtypes = [C.c_void_p, C.c_uint, C.c_void_p]
+x.XDefaultRootWindow.argtypes = [C.c_void_p]
+x.XDefaultRootWindow.restype = C.c_ulong
+x.XTranslateCoordinates.argtypes = [C.c_void_p, C.c_ulong, C.c_ulong, C.c_int, C.c_int,
+                                   C.POINTER(C.c_int), C.POINTER(C.c_int), C.POINTER(C.c_ulong)]
+xt.XTestFakeMotionEvent.argtypes = [C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_ulong]
+xt.XTestFakeButtonEvent.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_ulong]
+
+
+def xkb_group():
+    # Witness the server state independently of the GDK effective event group
+    # and the production layout helper. The first byte in XkbStateRec is group.
+    snapshot = (C.c_ubyte * 32)()
+    assert x.XkbGetState(ptr, DEV, C.byref(snapshot)) == 0
+    return snapshot[0]
 
 
 class NativeMixed(TypingCycles):
@@ -34,31 +54,76 @@ class NativeMixed(TypingCycles):
         return super().key_pressed(controller, keyval, keycode, modifiers)
 
     def os_layout(self, layout):
-        assert x.XkbLockGroup(ptr, DEV, 1 if layout == "RU" else 0)
+        group = 1 if layout == "RU" else 0
+        assert x.XkbLockGroup(ptr, DEV, group)
         x.XSync(ptr, False)
         for _ in range(3):
             yield
+        assert xkb_group() == group, ("XKB group did not switch", layout, group, xkb_group())
 
-    def choose(self, mode):
+    def click_card(self, card):
+        assert card.get_mapped()
+        center = Graphene.Point().init(card.get_width()/2, card.get_height()/2)
+        ok, point = card.compute_point(self.window, center)
+        assert ok, "card has no position in the application window"
+        xid = GdkX11.X11Surface.get_xid(self.window.get_surface())
+        xx, yy, child = C.c_int(), C.c_int(), C.c_ulong()
+        assert x.XTranslateCoordinates(ptr, xid, x.XDefaultRootWindow(ptr), int(point.x), int(point.y),
+                                       C.byref(xx), C.byref(yy), C.byref(child))
+        assert xt.XTestFakeMotionEvent(ptr, -1, xx.value, yy.value, 0)
+        x.XSync(ptr, False)
+        for _ in range(3):
+            yield
+        assert xt.XTestFakeButtonEvent(ptr, 1, 1, 0)
+        assert xt.XTestFakeButtonEvent(ptr, 1, 0, 0)
+        x.XSync(ptr, False)
+        for _ in range(4):
+            yield
+
+    def choose(self, mode, layout=None, pointer=False):
         if self.workout:
             yield from self.chord("Esc")
             assert self.result_kind == "typing"
             yield from self.chord("Alt+2")
         b = self.typing_rows[mode]
-        # Find the visible card with the ordinary keyboard focus chain, activate
-        # with Space; no selection by protocol or programmatic button click.
+        if layout:
+            # Move focus with the *other* layout. Then switch OS group right
+            # before activation, with no letter event to refresh the app's cache.
+            yield from self.os_layout("RU" if layout == "EN" else "EN")
+        # Find the real card via the keyboard chain, then use an actual activation
+        # (Space or native mouse) rather than invoking its application handler.
         for _ in range(65):
             if self.window.get_focus() is b:
                 break
             yield from self.chord("Tab")
         assert self.window.get_focus() is b, (mode, self.window.get_focus())
-        yield from self.chord("Space")
+        old_layout = self.layout
+        if layout:
+            yield from self.os_layout(layout)
+        self.last_event = None
+        if pointer:
+            yield from self.click_card(b)
+        else:
+            yield from self.chord("Space")
         for _ in range(30):
             if self.workout == "typing":
                 break
             yield
         assert self.workout == "typing" and self.state["mode"] == mode, (mode, self.state)
         assert self.state["progressDone"] == 0 and self.typing_progress.get_mapped()
+        if layout:
+            keyboard = self.window.get_display().get_default_seat().get_keyboard()
+            get_index = getattr(keyboard, "get_active_layout_index", None)
+            row = dict(case="start-layout", mode=mode, activation="pointer" if pointer else "Space",
+                       wanted=layout, cached_before_switch=old_layout, xkb_group=xkb_group(),
+                       gtk=".".join(str(v()) for v in (Gtk.get_major_version, Gtk.get_minor_version, Gtk.get_micro_version)),
+                       gdk_active=get_index() if get_index else None, activation_key=self.last_event,
+                       app_layout=self.layout, exercise_layout=self.state["wantedLayout"])
+            print("GTK start layout: " + json.dumps(row, ensure_ascii=False), flush=True)
+            assert self.last_event is None if pointer else self.last_event["keysym"] == "space", row
+            assert row["xkb_group"] == (layout == "RU"), row
+            assert row["app_layout"] == row["exercise_layout"] == layout, row
+            self.evidence.append(row)
 
     def type_unit(self):
         s = self.state
@@ -145,9 +210,7 @@ class NativeMixed(TypingCycles):
         self.evidence.append(dict(case="numpad-numlock", expected=digit, off=event_off, on=event_on))
 
         for layout, sign, wrong in (("RU","№","#"),("EN","#","№")):
-            yield from self.os_layout(layout)
-            yield from self.choose("TopRow")
-            assert self.state["wantedLayout"] == layout
+            yield from self.choose("TopRow", layout=layout, pointer=layout == "RU")
             for _ in range(20):
                 if self.state["expected"] == sign:
                     break
@@ -163,6 +226,9 @@ class NativeMixed(TypingCycles):
             yield from self.type_unit()
             assert self.last_event["text"] == sign
             self.evidence.append(dict(case="shift-3", layout=layout, wrong=event_wrong, right=self.last_event.copy()))
+        # Cover switching the other way immediately before Space on older GDK:
+        # the Space event itself may still report a single effective group 0.
+        yield from self.choose("TopRow", layout="RU")
         (out / "mixed-native-results.json").write_text(json.dumps(self.evidence, ensure_ascii=False, indent=2))
         print("PASS GTK/XTest: native mixed RU/EN, physical Ctrl+V, NumLock off/on, RU № and EN #.", flush=True)
 

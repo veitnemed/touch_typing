@@ -20,8 +20,8 @@ try {
     $env:TOUCH_TYPING_QA_DATA_ROOT = $qaRoot
     & (Join-Path $net 'csc.exe') /nologo /target:exe /platform:x64 /codepage:65001 "/out:$exe" `
         "/reference:$net\WPF\UIAutomationClient.dll" "/reference:$net\WPF\UIAutomationTypes.dll" `
-        "/reference:$net\WPF\WindowsBase.dll" "/reference:$net\System.Drawing.dll" `
-        (Join-Path $PSScriptRoot 'TypingRecordUiChecks.cs')
+        "/reference:$net\WPF\WindowsBase.dll" "/reference:$net\System.Drawing.dll" "/reference:$net\System.Windows.Forms.dll" `
+        (Join-Path $PSScriptRoot 'TypingRecordUiChecks.cs') (Join-Path $PSScriptRoot 'TypingProofClient.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Unable to compile typing record UI check.' }
     & $exe $app $out | Tee-Object -FilePath (Join-Path $out 'typing-card-records.log')
     if ($LASTEXITCODE -ne 0) { throw 'WPF typing card records did not match the learner profile.' }

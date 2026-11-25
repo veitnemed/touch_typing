@@ -176,6 +176,25 @@ class TypingReviewProtocol(unittest.TestCase):
         self.assertEqual(self.ticket(id).findtext("Completed"), "true")
         self.assertEqual(sum(r.findtext("ReviewOf")==id for r in self.xml().findall("./Results/TypingResult")), 1)
 
+    def test_a_failed_source_save_never_offers_a_phantom_correction(self):
+        original = self.eng.call("typing-save-set", title="Durable source", content="a" * 390)
+        state = self.eng.call("typing-start", mode=original["typing"]["sets"][-1]["id"])
+        for _ in range(10):
+            self.eng.call("typing-key", text="z")
+        for _ in range(state["progressTotal"] - 1):
+            self.eng.call("typing-key", text="a")
+        barrier = self.root / "TouchTypingStudio-QA" / "progress.xml.writing"
+        barrier.mkdir()
+        try:
+            self.eng.call("typing-key", text="a")
+            with self.assertRaises(EngineError):
+                self.result()
+            self.assertFalse(self.xml().findall("./TypingReviews/TypingReviewTicket"))
+        finally:
+            barrier.rmdir()
+        self.eng.call("typing-stop")
+        self.assertTrue(self.result()["reviewAvailable"])
+
     def test_second_window_cannot_rewind_or_duplicate_a_review(self):
         source = self.main("a", errors={0:20})
         id = source["attemptId"]

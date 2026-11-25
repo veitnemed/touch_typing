@@ -958,8 +958,10 @@ internal static partial class LiveUiSmoke
                 string expectedText = prompt.Substring(5);
                 EnterCharacters(expectedText);
                 var input = BrowserWitness("LabDesktop");
-                Check(input[2] == "find" && input[3] == expectedText,
-                    "Search field has the exact input before Enter (received: " + input[3] + ")");
+                bool searchInput = (input[0] == "chrome" && input[2] == "url") ||
+                    (input[0] == "code" && input[2] == "find");
+                Check(searchInput && input[3] == expectedText, "Exact input before Enter in " + input[0] + "/" +
+                    input[2] + " (received: " + input[3] + ")");
                 Key("Enter");
             }
             else

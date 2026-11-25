@@ -11,6 +11,7 @@
   <ItemGroup>
     <Compile Include="LiveUiSmoke.cs" />
     <Compile Include="TypingUiSmoke.cs" />
+    <Compile Include="TypingProofClient.cs" />
     <Reference Include="UIAutomationClient;UIAutomationTypes;WindowsBase;System.Drawing;System.Windows.Forms" />
   </ItemGroup>
 </Project>

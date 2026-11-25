@@ -87,8 +87,13 @@ internal sealed partial class PracticeService
         if (review == null)
         {
             if (command != "typing-result") return false;
+            if (StorageError != null) throw new InvalidOperationException(StorageError);
             var result = mixedTyping?.Result(lang) ?? typing?.Result(lang);
-            response = TypingReviewSession.AttachOffer(result, mixedTyping?.AttemptId ?? typing?.AttemptId, profile);
+            // An I/O failure can leave a mutated in-memory profile; a second window may
+            // also have completed this source's review. Only persisted tickets are offers.
+            var durable = store.Read();
+            if (store.Error != null) throw new InvalidOperationException(store.Error);
+            response = TypingReviewSession.AttachOffer(result, mixedTyping?.AttemptId ?? typing?.AttemptId, durable);
             return true;
         }
         switch (command)

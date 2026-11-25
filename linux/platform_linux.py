@@ -1,4 +1,6 @@
 """GTK input and the local C# practice engine."""
+import ctypes
+from functools import lru_cache
 import json
 import os
 from pathlib import Path
@@ -46,6 +48,80 @@ def key_label(key):
 def chord_label(chord):
     return " → ".join(" + ".join(key_label(token) for token in part.split("+"))
                       for part in chord.split(" → "))
+
+
+# XkbStateRec, X11/extensions/XKBstr.h. Only the effective group byte is
+# needed, but XkbGetState writes the complete record.
+class _XkbState(ctypes.Structure):
+    _fields_ = [("group", ctypes.c_ubyte), ("locked_group", ctypes.c_ubyte),
+                ("base_group", ctypes.c_ushort), ("latched_group", ctypes.c_ushort),
+                ("modifier_fields", ctypes.c_ubyte * 9), ("ptr_buttons", ctypes.c_ushort)]
+
+
+@lru_cache(maxsize=1)
+def _x11_library():
+    try:
+        x11 = ctypes.CDLL("libX11.so.6")
+        x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        x11.XOpenDisplay.restype = ctypes.c_void_p
+        x11.XkbGetState.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.POINTER(_XkbState)]
+        x11.XkbGetState.restype = ctypes.c_int
+        x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        x11.XCloseDisplay.restype = ctypes.c_int
+        return x11
+    except (OSError, AttributeError):
+        return None
+
+
+def _x11_active_group(display_name):
+    # On GTK < 4.18 a Tab, Space or number event's effective group need not
+    # be the actual XKB group. Read the same already-open app display without
+    # changing its layout. Only queried at session start, not per keystroke.
+    if not display_name or (x11 := _x11_library()) is None:
+        return None
+    connection = x11.XOpenDisplay(os.fsencode(display_name))
+    if not connection:
+        return None
+    try:
+        state = _XkbState()
+        return state.group if x11.XkbGetState(connection, 0x0100, ctypes.byref(state)) == 0 else None
+    finally:
+        x11.XCloseDisplay(connection)
+
+
+# The same physical ANSI position from which GDK reports an A or Ф event.
+_LAYOUT_PROBE = next(code for code, key in PHYSICAL.items() if key == "A")
+
+
+def layout_for_group(Gdk, display, group):
+    if group is None or group < 0:
+        return None
+    success, keyval, *_ = display.translate_key(_LAYOUT_PROBE, Gdk.ModifierType(0), group)
+    if success and (symbol := Gdk.keyval_to_unicode(keyval)):
+        return {"a": "EN", "ф": "RU"}.get(chr(symbol).lower())
+    return None
+
+
+def active_keyboard_layout(Gdk, display):
+    """Read the actual layout at a user action, independent of its key or glyph."""
+    if display is None:
+        return None
+    seat = display.get_default_seat()
+    keyboard = seat.get_keyboard() if seat else None
+    index = getattr(keyboard, "get_active_layout_index", None)
+    if index and (layout := layout_for_group(Gdk, display, index())):
+        return layout
+    if display.__gtype__.name == "GdkX11Display":
+        return layout_for_group(Gdk, display, _x11_active_group(display.get_name()))
+
+    # Older Wayland may supply a fresh, single-layout keymap for each source.
+    # Never select the first of several groups as if it were the active one.
+    success, entries, _ = display.map_keycode(_LAYOUT_PROBE)
+    if success:
+        groups = {entry.group for entry in entries}
+        if len(groups) == 1:
+            return layout_for_group(Gdk, display, groups.pop())
+    return None
 
 
 class EngineError(Exception):
@@ -165,10 +241,10 @@ class InputSources:
                  "org.gnome.Console": "terminal", "code": "code", "com.microsoft.VSCode": "code"}
         return [known.get(name.removesuffix(".desktop"), name.removesuffix(".desktop")) for name in shell.get_strv("favorite-apps")[:9]]
 
-    def guess(self):
+    def guess(self, fallback="EN"):
         settings = self.settings.get(self.languages)
         if settings:
             for index in settings.get_value("mru-sources").unpack():
                 if index[0] == "xkb":
                     return "RU" if index[1].split("+")[0] == "ru" else "EN"
-        return "EN"
+        return fallback

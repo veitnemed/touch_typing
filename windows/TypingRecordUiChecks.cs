@@ -12,13 +12,9 @@ using System.Windows.Automation;
 internal static class TypingRecordUiChecks
 {
     [StructLayout(LayoutKind.Sequential)] private struct Pt { internal int X, Y; }
-    [StructLayout(LayoutKind.Sequential)] private struct R { internal int L, T, Rgt, B; }
     [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr token);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr window, int mode);
-    [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr window, out R rect);
-    [DllImport("user32.dll")] private static extern bool ClientToScreen(IntPtr window, ref Pt point);
     [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Pt point);
     [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr window, uint flags);
     [DllImport("user32.dll")] private static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr info);
@@ -76,8 +72,9 @@ internal static class TypingRecordUiChecks
                 WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(args[0])) });
             Until(delegate { trainer.Refresh(); window = trainer.MainWindowHandle; return window != IntPtr.Zero; }, "own WPF window");
             root = AutomationElement.FromHandle(window);
-            ShowWindow(window, 3); SetForegroundWindow(window);
+            SetForegroundWindow(window);
             Until(delegate { return window == GetForegroundWindow() && Find("ReferenceNav-learn") != null; }, "active Live shell");
+            TypingProofClient.Fit(trainer, window);
             EnterCourse();
             // This seed is deliberately shared with GTK. The 4s English attempt lost
             // on accuracy; the 60s tied attempt lost on *active duration*.
@@ -89,12 +86,11 @@ internal static class TypingRecordUiChecks
             Until(delegate { var b = Find("TypingRow-English"); return b != null && b.Current.Name.Contains("00:25"); }, "paired record load");
             Thread.Sleep(300);
             Own();
-            Pt origin = new Pt(); R frame = new R();
-            Assert(ClientToScreen(window, ref origin) && GetClientRect(window, out frame), "Client coordinates");
-            using (var image = new Bitmap(frame.Rgt, frame.B, PixelFormat.Format32bppRgb))
+            var frame = TypingProofClient.Visible(trainer, window);
+            using (var image = new Bitmap(frame.Width, frame.Height, PixelFormat.Format32bppRgb))
             {
                 using (var graphics = Graphics.FromImage(image))
-                    graphics.CopyFromScreen(origin.X, origin.Y, 0, 0, image.Size, CopyPixelOperation.SourceCopy);
+                    graphics.CopyFromScreen(frame.X, frame.Y, 0, 0, image.Size, CopyPixelOperation.SourceCopy);
                 Own();
                 for (int i = 0; i < checks.GetLength(0); i++)
                 {
@@ -109,7 +105,7 @@ internal static class TypingRecordUiChecks
                     else Assert(name.Contains("точность: " + checks[i,1] + ".") &&
                                 name.Contains("попытки: " + checks[i,2] + "."), name);
                     Assert(name.Contains("прежней версии") == (mode == "WordsRU"), name);
-                    Assert(ColorInMark(image, origin.X, origin.Y, b, ColorTranslator.FromHtml(checks[i,3])),
+                    Assert(ColorInMark(image, frame.X, frame.Y, b, ColorTranslator.FromHtml(checks[i,3])),
                         "Leading mark " + checks[i,3] + " not on " + mode);
                     Console.WriteLine("PASS WPF " + mode + " " + checks[i,1] + " " + checks[i,2] + " " + checks[i,3]);
                 }

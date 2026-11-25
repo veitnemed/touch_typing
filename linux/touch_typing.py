@@ -17,7 +17,7 @@ gi.require_version("Graphene", "1.0")
 gi.require_version("PangoCairo", "1.0")
 from gi.repository import Gdk, Gio, GLib, Graphene, Gtk, Pango, PangoCairo
 
-from platform_linux import APP_ID, Engine, EngineError, FINGERS, InputSources, MODIFIERS, PHYSICAL, ROOT, chord_label, key_label
+from platform_linux import APP_ID, Engine, EngineError, FINGERS, InputSources, MODIFIERS, PHYSICAL, ROOT, active_keyboard_layout, chord_label, key_label, layout_for_group
 from lab_view import DesktopView
 from visuals import PracticeLine, fingers as paint_fingers, hand_picture, series_chart
 
@@ -1732,10 +1732,7 @@ class Studio(Gtk.Application):
         elif controller is not None:
             # GNOME can replace the Wayland keymap when switching sources. Ask GDK
             # how it translates physical A in this event, independent of source-list order.
-            translated, probe, *_ = self.window.get_display().translate_key(
-                38, Gdk.ModifierType(0), controller.get_group())
-            if translated and (codepoint := Gdk.keyval_to_unicode(probe)):
-                candidate = {"a": "EN", "ф": "RU"}.get(chr(codepoint).lower())
+            candidate = layout_for_group(Gdk, self.window.get_display(), controller.get_group())
         if candidate and candidate != self.layout:
             self.layout = candidate
             self.show_layout()
@@ -2077,6 +2074,12 @@ class Studio(Gtk.Application):
             return
         self.typing_choice = self.typing_options[self.typing_pick.get_selected()][0]
         choice = self.typing_cycles.get_selected()
+        # A pointer click or Space can start an exercise immediately after the
+        # system layout changed. Neither input is evidence for the last letter's layout.
+        active = active_keyboard_layout(Gdk, self.window.get_display()) or self.sources.guess(self.layout)
+        if active != self.layout:
+            self.layout = active
+            self.show_layout()
         state = self.call("typing-start", mode=self.typing_choice, level=self.typing_level.get_selected(),
                           cycles=choice + 1 if choice < 5 else 0, infinite=choice == 5,
                           seconds=[0, 60, 180, 300, 600][self.typing_time.get_selected()], layout=self.layout)

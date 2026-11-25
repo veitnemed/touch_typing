@@ -46,6 +46,7 @@ internal static partial class LiveUiSmoke
         window = AutomationElement.FromHandle(trainer);
         Check(window.Current.ProcessId == app.Id, "All upcoming input is scoped to the owned QA window");
         Focus();
+        TypingProofClient.Fit(app, trainer);
         uint owner;
         var thread = GetWindowThreadProcessId(trainer, out owner);
         if (owner != (uint)app.Id) throw new InvalidOperationException("Layout target is not the QA application.");
@@ -92,14 +93,14 @@ internal static partial class LiveUiSmoke
             Check(Name("TypingCount") == "0/390", "errors do not advance the primary position");
             EnterReviewedText(text, 0, 390, 390);
             Until(delegate { return Visible("PracticeResult") && Visible("TypingStartReview"); }, "97.5 percent review offer", 20000);
-            CaptureLiveUxFrame("review-wpf-01-source-result");
+            CaptureReferenceFrame("review-wpf-01-source-result");
             Find("TypingStartReview").SetFocus();
             Key("Enter");
             Until(delegate { return Exists("TypingCount") && Name("TypingCount").StartsWith("0/"); }, "actual corrective exercise");
             int total = int.Parse(Name("TypingCount").Split('/')[1]);
             Check(total >= 150 && total <= 200, "Correction requests 150–200 actual actions");
             string id = ReviewProfile().SelectSingleNode("/StudioProfile/TypingReviews/TypingReviewTicket/SourceId").InnerText;
-            CaptureLiveUxFrame("review-wpf-02-started");
+            CaptureReferenceFrame("review-wpf-02-started");
             string corrective = new string('s', total);
             Key("X");
             EnterReviewedText(corrective, 0, 12, total);
@@ -112,13 +113,13 @@ internal static partial class LiveUiSmoke
             OpenReviewApp(path);
             var continuation = Find("TypingContinueReview_" + id);
             Check(continuation.Current.Name.Contains("12/" + total), "Catalog names the exact prior review position");
-            CaptureLiveUxFrame("review-wpf-03-continue");
+            CaptureReferenceFrame("review-wpf-03-continue");
             continuation.SetFocus(); Key("Space");
             Until(delegate { return Exists("TypingCount") && Name("TypingCount") == "12/" + total; }, "same session reopened");
             EnterReviewedText(corrective, 12, total, total);
             Until(delegate { return Visible("PracticeResult"); }, "normal final result", 15000);
             Check(!Visible("TypingStartReview") && !Visible("TypingRepeat"), "No duplicate or chained review on its result");
-            CaptureLiveUxFrame("review-wpf-04-done");
+            CaptureReferenceFrame("review-wpf-04-done");
             Invoke("TypingProgress");
             var original = Find("TypingHistoryResult_" + id);
             ((InvokePattern)original.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
@@ -132,7 +133,7 @@ internal static partial class LiveUiSmoke
         catch (Exception e)
         {
             Console.Error.WriteLine("FAIL WPF corrective exercise: " + e);
-            try { DumpProcessWindows(); if (app != null && !app.HasExited && GetForegroundWindow() == trainer) CaptureLiveUxFrame("review-failure"); } catch (Exception) { }
+            try { DumpProcessWindows(); if (app != null && !app.HasExited && GetForegroundWindow() == trainer) CaptureReferenceFrame("review-failure"); } catch (Exception) { }
             return 1;
         }
         finally

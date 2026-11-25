@@ -13,7 +13,8 @@ $options = @('/nologo','/target:exe','/platform:x64','/codepage:65001','/main:Mi
     "/reference:$framework\WPF\UIAutomationClient.dll", "/reference:$framework\WPF\UIAutomationTypes.dll",
     "/reference:$framework\WPF\WindowsBase.dll", "/reference:$framework\System.Xml.dll",
     "/reference:$framework\System.Drawing.dll", "/reference:$framework\System.Windows.Forms.dll",
-    (Join-Path $PSScriptRoot 'LiveUiSmoke.cs'), (Join-Path $PSScriptRoot 'TypingMixedSmoke.cs'))
+    (Join-Path $PSScriptRoot 'LiveUiSmoke.cs'), (Join-Path $PSScriptRoot 'TypingMixedSmoke.cs'),
+    (Join-Path $PSScriptRoot 'TypingProofClient.cs'))
 & (Join-Path $framework 'csc.exe') @options
 if ($LASTEXITCODE) { throw "Cannot compile WPF keyboard observer ($LASTEXITCODE)." }
 $oldRoot = $env:TOUCH_TYPING_QA_DATA_ROOT

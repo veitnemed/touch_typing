@@ -16,7 +16,7 @@ try {
         "/reference:$framework\WPF\UIAutomationClient.dll" "/reference:$framework\WPF\UIAutomationTypes.dll" `
         "/reference:$framework\WPF\WindowsBase.dll" "/reference:$framework\System.Drawing.dll" `
         "/reference:$framework\System.Web.Extensions.dll" "/reference:$framework\System.Windows.Forms.dll" `
-        (Join-Path $PSScriptRoot 'LiveUiSmoke.cs') (Join-Path $PSScriptRoot 'TypingReviewWindowSmoke.cs')
+        (Join-Path $PSScriptRoot 'LiveUiSmoke.cs') (Join-Path $PSScriptRoot 'TypingReviewWindowSmoke.cs') (Join-Path $PSScriptRoot 'TypingProofClient.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Review test driver did not compile.' }
     & $fixture $exe $out | Tee-Object -FilePath (Join-Path $out 'windows-typing-review.log')
     if ($LASTEXITCODE -ne 0) { throw 'Native WPF correction test failed; inspect the recorded UI and log.' }
