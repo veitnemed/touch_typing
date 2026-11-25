@@ -138,13 +138,17 @@ class LiveRoutePolicyTests(unittest.TestCase):
             for level, original in enumerate(TERMINAL_FULL):
                 with self.subTest(desktop=desktop, level=level):
                     def check(e):
-                        # Bash remains selectable in its original simulation on either physical host.
-                        catalog = e.call("lab-catalog", desktopProfile="ubuntu")
+                        # Windows ordinary practice is PowerShell. Its manual catalog still exposes
+                        # the old Bash lessons under a precise label, not disguised as PowerShell.
+                        catalog = e.call("lab-catalog", desktopProfile=desktop)
                         ids = {m["id"] for m in catalog["missions"] if m["app"] == "terminal" and m["level"] == level}
                         self.assertTrue(original <= ids)
+                        if desktop == "windows":
+                            self.assertTrue(all(m["title"].startswith("Bash (учебный Ubuntu) · ")
+                                                for m in catalog["missions"] if m["id"] in original))
                         self.assertFalse(set.union(*[ids for i, ids in enumerate(TERMINAL_FULL) if i != level]) & ids)
                         for mission in sorted(original):
-                            s = begin(e, "terminal", level, "ubuntu", routeKind="mission", mission=mission,
+                            s = begin(e, "terminal", level, desktop, routeKind="mission", mission=mission,
                                       actionLimit=0, seconds=0)
                             self.assertGreaterEqual(s["scenarioLength"], 20)
                             for _ in range(s["scenarioLength"]):

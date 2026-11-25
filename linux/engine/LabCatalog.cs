@@ -237,7 +237,7 @@ internal static class LabCatalog
                     "windows" => "Пуск, Проводник, окна и виртуальные рабочие столы Windows 10",
                     "chrome" => "Вкладки, навигация, поиск и адресная строка",
                     "code" => "Файлы, код, блокноты, панели и встроенный терминал",
-                    _ => environment == "windows" ? "Windows PowerShell: сбои синхронизации и журнал" :
+                    _ => environment == "windows" ? "Windows PowerShell: журнал. Дополнительные задания Bash доступны в параметрах." :
                         "Ubuntu Bash: поиск сбоя и живой журнал"
                 },
                 desktopProfile = app is "windows" or "ubuntu" ? app : null,
@@ -248,7 +248,10 @@ internal static class LabCatalog
             }),
             missions = (neutralProject ? NeutralProject.MissionCatalog : LiveCourse.Missions)
                 .Where(m => LabScene.MissionEnvironment(m) is null || LabScene.MissionEnvironment(m) == environment)
-                .Select(m => new { m.App, m.Level, m.Id, m.Title, m.Curated, desktopProfile = LabScene.MissionEnvironment(m) }),
+                .Select(m => new { m.App, m.Level, m.Id,
+                    Title = environment == "windows" && m.App == "terminal" && m.Id != LiveCourse.PracticalPowerShellId
+                        ? "Bash (учебный Ubuntu) · " + m.Title : m.Title,
+                    m.Curated, desktopProfile = LabScene.MissionEnvironment(m) }),
             duration = 0, blockSize = 20
         };
     }

@@ -16,7 +16,7 @@ internal sealed partial class LabScene
     internal static string MissionEnvironment(LiveMission mission) =>
         mission.App == "windows" || mission.Id == LiveCourse.PracticalPowerShellId ||
             mission.Id.StartsWith("workday-windows-", StringComparison.Ordinal) ? "windows"
-        : mission.App is "ubuntu" or "workday" or "terminal" ? "ubuntu" : null;
+        : mission.App is "ubuntu" or "workday" || mission.Id == LiveCourse.PracticalBashId ? "ubuntu" : null;
 
     internal void PrepareWindowsDesktop()
     {

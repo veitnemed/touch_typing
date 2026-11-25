@@ -113,11 +113,11 @@ internal sealed partial class PracticeService
                 string suggestApp = Text(message, "app");
                 string suggestEnvironment = RequestedDesktop(message, suggestApp);
                 int suggestLevel = Math.Clamp(Number(message, "level"), 0, 2);
+                if (suggestApp == "terminal") return new { mission = suggestEnvironment == "windows" ?
+                    LiveCourse.PracticalPowerShellId : LiveCourse.PracticalBashId };
                 var routes = (neutralProject ? NeutralProject.MissionCatalog : LiveCourse.Missions)
                     .Where(m => m.App == suggestApp && m.Level == suggestLevel &&
                         (LabScene.MissionEnvironment(m) is null || LabScene.MissionEnvironment(m) == suggestEnvironment)).ToArray();
-                var preferred = routes.Where(m => m.Id.StartsWith("terminal-essentials-", StringComparison.Ordinal)).ToArray();
-                if (preferred.Length > 0) routes = preferred;
                 if (suggestApp == "code") routes = routes.Where(m => !LiveRoutePolicy.EditorSupplement(m.Id)).ToArray();
                 var lastUsed = profile.ShortcutHistory.Where(a => a.Correct && a.Mission != null)
                     .GroupBy(a => a.Mission).ToDictionary(g => g.Key, g => g.Max(a => a.Date));
