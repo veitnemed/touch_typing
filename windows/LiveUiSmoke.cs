@@ -1178,7 +1178,9 @@ internal static partial class LiveUiSmoke
         Check(!File.Exists(profile), "The Workday project starts with a fresh profile");
 
         OpenLiveConfiguration("workday");
-        Select("LabMode", numLockMode.Length > 0 ? 0 : 1);
+        // Inspect the suggested physical key in the explicitly guided mode.
+        // An independent lesson must never reveal the answer merely via F4.
+        Select("LabMode", 1);
         Select("LabLevel", 0);
         Select("LabDuration", 0);
         Select("LabTimer", 0);
@@ -1223,6 +1225,7 @@ internal static partial class LiveUiSmoke
                 }
                 if (keypad)
                 {
+                    Check(Visible("LabKeys"), "Explicit guided mode shows the Alt+Home cue");
                     Check(!Visible("LiveAidPanel"), "Default aid stays hidden in the Workday run");
                     Key("F4");
                     Until(delegate { return Visible("LiveAidPanel"); }, "F4 reveals the real keyboard rail");
