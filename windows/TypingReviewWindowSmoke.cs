@@ -4,10 +4,8 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Windows.Automation;
 using System.Xml;
-using System.Web.Script.Serialization;
 
 internal static partial class LiveUiSmoke
 {
@@ -18,25 +16,6 @@ internal static partial class LiveUiSmoke
         using (var fs = new FileStream(ReviewFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
             doc.Load(fs);
         return doc;
-    }
-
-    // Only author a reusable custom exercise; do not seed results, errors or positions.
-    private static string AuthorReviewSet(string appPath, string text)
-    {
-        var start = new ProcessStartInfo(Path.Combine(Path.GetDirectoryName(appPath), "engine", "TouchTyping.Engine.exe"), "--verify");
-        start.UseShellExecute = false; start.CreateNoWindow = true;
-        start.RedirectStandardInput = true; start.RedirectStandardOutput = true;
-        start.StandardOutputEncoding = Encoding.UTF8;
-        using (var engine = Process.Start(start))
-        {
-            var data = new JavaScriptSerializer().Serialize(new { command = "typing-save-set", title = "Practice: correction", content = text });
-            engine.StandardInput.WriteLine(data);
-            engine.StandardInput.Close();
-            string answer = engine.StandardOutput.ReadToEnd();
-            if (!engine.WaitForExit(12000) || engine.ExitCode != 0 || !answer.Contains("\"ok\":true"))
-                throw new InvalidOperationException("Could not author the isolated practice set: " + answer.Substring(0, Math.Min(200, answer.Length)));
-        }
-        return ReviewProfile().SelectSingleNode("/StudioProfile/PracticeSets/PracticeSet[Name='Practice: correction']/Id").InnerText;
     }
 
     private static void OpenReviewApp(string path)
@@ -77,13 +56,18 @@ internal static partial class LiveUiSmoke
             if (args.Length != 2 || string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT")))
                 throw new ArgumentException("An isolated QA root, extracted executable path, output folder are required.");
             string path = Path.GetFullPath(args[0]);
-            if (File.Exists(ReviewFile)) throw new ArgumentException("Use a new QA profile.");
             evidenceDirectory = Directory.CreateDirectory(Path.GetFullPath(args[1])).FullName;
             if (SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
                 throw new InvalidOperationException("Cannot configure truthful per-monitor screenshots.");
-            // Nongenerated, 390 characters, all observable in the practice surface.
-            string text = string.Concat(Enumerable.Repeat("save notes. ", 40)).Substring(0, 390);
-            string set = AuthorReviewSet(path, text);
+            // The extractor's launcher authors material through the release engine,
+            // into a fresh profile. Neither setup nor this read inserts any scores.
+            var profile = ReviewProfile();
+            var fixture = profile.SelectSingleNode("/StudioProfile/PracticeSets/PracticeSet[Name='Practice: correction']");
+            Check(fixture != null && profile.SelectSingleNode("/StudioProfile/Results/TypingResult | /StudioProfile/TypingReviews/TypingReviewTicket") == null,
+                "Only the exercise, no result or review, is present in the isolated fixture");
+            string text = fixture.SelectSingleNode("Content").InnerText;
+            Check(text.Length == 390 && text[0] == 's', "Known 390-character source exercise authored by the engine");
+            string set = fixture.SelectSingleNode("Id").InnerText;
             OpenReviewApp(path);
             ((ExpandCollapsePattern)Find("TypingMore").GetCurrentPattern(ExpandCollapsePattern.Pattern)).Expand();
             Invoke("TypingRow-set:" + set);

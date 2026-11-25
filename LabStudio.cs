@@ -476,7 +476,7 @@ namespace TouchTypingStudio
                 library.B("showMistakeKey", true) && state.S("feedback") == "error" ? state.S("lastKey") : "",
                 library.B("liveShowKeys"), library.B("liveShowHands"), true,
                 library.S("keyboardProfile", "matebook-d16"), library.S("fnMode", "hotkeys"));
-            AutomationProperties.SetHelpText(labGuide, "Раскладка клавиатуры: " + exerciseLayout);
+            AutomationProperties.SetItemType(labGuide, "Раскладка клавиатуры: " + exerciseLayout);
             labKeyAid.Opacity = library.B("liveShowKeys") ? 1 : .5;
             labHandAid.Opacity = library.B("liveShowHands") ? 1 : .5;
             labMistakeAid.Opacity = library.B("showMistakeKey", true) ? 1 : .5;

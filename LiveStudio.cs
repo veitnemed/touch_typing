@@ -95,7 +95,11 @@ namespace TouchTypingStudio
             SourceInitialized += delegate
             {
                 nativeWindow = PresentationSource.FromVisual(this) as HwndSource;
-                if (nativeWindow != null) nativeWindow.AddHook(NativeInput);
+                if (nativeWindow != null)
+                {
+                    nativeWindow.AddHook(NativeInput);
+                    ComponentDispatcher.ThreadFilterMessage += FilterTypingPhysical;
+                }
             };
             Activated += delegate { if (!active && (page == LivePage || page == HomePage)) RefreshLayoutIfChanged(); };
             Deactivated += delegate
@@ -140,6 +144,7 @@ namespace TouchTypingStudio
             {
                 StopLabCapture();
                 timer.Stop();
+                ComponentDispatcher.ThreadFilterMessage -= FilterTypingPhysical;
                 if (nativeWindow != null && !nativeWindow.IsDisposed) nativeWindow.RemoveHook(NativeInput);
                 engine.Dispose();
             };
@@ -1288,14 +1293,13 @@ namespace TouchTypingStudio
                 e.Handled = HandleLiveKey(key, true, e.IsRepeat, Translated(vk, 0));
                 return;
             }
-            // The HwndSource normalizes scan code + extended bit for this real device,
-            // independently of the translated text later sent by WPF TextComposition.
+            // The native message filter already sent scan code + extended bit.
+            // Routed TextComposition, not the physical ID, supplies printable text.
             if (nativeWindow == null && state.B("typedActions") && !paused &&
                 !IsStandaloneTypingControl(key) && SendTypingPhysical(key, true)) { e.Handled = true; return; }
             if (!IsModifier(key)) lastTypedKey = key;
             if (!TypingWantsPhysical(key) && HandleControls(key, e.IsRepeat)) { e.Handled = true; return; }
             if (paused) { e.Handled = true; return; }
-            if (state.B("typedActions") && typingSuppressText) { e.Handled = true; return; }
             string value = (key == "Enter" || key == "NumEnter") ? "\n" : key == "Tab" ? "\t" : key == "Backspace" ? "\b" : null;
             if (value != null)
             {
@@ -1398,6 +1402,27 @@ namespace TouchTypingStudio
             return consume;
         }
 
+        private void FilterTypingPhysical(ref MSG msg, ref bool handled)
+        {
+            if (handled || nativeWindow == null || nativeWindow.IsDisposed || msg.hwnd != nativeWindow.Handle ||
+                !IsActive || !active || labActive || page != TypingPage || paused || !state.B("typedActions"))
+                return;
+            int message = msg.message;
+            if (message != 0x100 && message != 0x101 && message != 0x104 && message != 0x105) return;
+            bool down = message == 0x100 || message == 0x104;
+            long code = msg.lParam.ToInt64();
+            int vk = msg.wParam.ToInt32(), scan = (int)((code >> 16) & 0xff);
+            string key = scan == 0 ? PhysicalKey(KeyInterop.KeyFromVirtualKey(vk)) : ScanKey(scan, (code & (1L << 24)) != 0, vk);
+            if (key.Length == 0) return;
+            if (down && IsStandaloneTypingControl(key)) { typingSuppressText = false; return; }
+
+            // WPF preprocesses keys before the HwndSource window procedure.
+            // Score the physical stroke here, so it cannot swallow the first
+            // printable key after a chord using that previous stroke's flag.
+            // Unconsumed events still produce text through Windows and OnText.
+            handled = SendTypingPhysical(key, down);
+        }
+
         private IntPtr NativeInput(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
             if (message == 0x51 && labActive)
@@ -1419,20 +1444,12 @@ namespace TouchTypingStudio
                 handled = true;
                 return IntPtr.Zero;
             }
-            if (!IsActive || (page != LivePage && (page != TypingPage || !state.B("typedActions") || paused))) return IntPtr.Zero;
+            if (!IsActive || page != LivePage) return IntPtr.Zero;
             if (message != 0x100 && message != 0x101 && message != 0x104 && message != 0x105) return IntPtr.Zero;
             bool down = message == 0x100 || message == 0x104;
             int vk = wParam.ToInt32(), scan = (int)((code >> 16) & 0xff);
             string key = scan == 0 ? PhysicalKey(KeyInterop.KeyFromVirtualKey(vk)) : ScanKey(scan, (code & (1L << 24)) != 0, vk);
             if (key.Length == 0) return IntPtr.Zero;
-            if (page == TypingPage)
-            {
-                if (down && IsStandaloneTypingControl(key)) { typingSuppressText = false; return IntPtr.Zero; }
-                // The physical channel scores the chord. Unhandled printable input
-                // continues through Windows’ real layout/IME to OnText.
-                handled = SendTypingPhysical(key, down);
-                return IntPtr.Zero;
-            }
             handled = HandleLiveKey(key, down, (code & (1L << 30)) != 0, down ? Translated(vk, scan) : "");
             return IntPtr.Zero;
         }
