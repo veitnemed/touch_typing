@@ -1,64 +1,37 @@
-name: Exercise new Workday, Explorer, VS Code and Chrome paths in WPF (QA only)
+name: Check the actual Preview 11 Windows archive bilingual note (QA only)
 on:
   push:
     branches: [qa/touchtyping-new-workflows-11]
 permissions:
   contents: read
+  actions: read
 jobs:
-  pack:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 12
-    steps:
-      - uses: actions/checkout@v4
-        with: {persist-credentials: false}
-      - uses: actions/setup-dotnet@v4
-        with: {dotnet-version: '10.0.x'}
-      - run: |
-          set -euo pipefail
-          p="$RUNNER_TEMP/chrome-pack"
-          mkdir -p "$p"
-          bash windows/build-release.sh "$p/windows"
-          (cd "$p/windows" && zip -qr "$p/chrome-windows-x64.zip" .)
-          (cd "$p" && sha256sum chrome-windows-x64.zip > SHA256SUMS.txt)
-          git rev-parse HEAD >"$p/SOURCE-SHA.txt"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: preview11-wpf-archive
-          path: |
-            ${{ runner.temp }}/chrome-pack/chrome-windows-x64.zip
-            ${{ runner.temp }}/chrome-pack/SHA256SUMS.txt
-            ${{ runner.temp }}/chrome-pack/SOURCE-SHA.txt
   windows-native:
     runs-on: windows-2025
-    needs: pack
-    timeout-minutes: 12
+    timeout-minutes: 8
+    env:
+      CANDIDATE_SHA: 43052e12cb3350a960b788d678299ae34065ffa7
     steps:
       - uses: actions/checkout@v4
         with: {persist-credentials: false}
       - uses: actions/download-artifact@v4
         with:
-          name: preview11-wpf-archive
-          path: ${{ runner.temp }}/chrome-pack
+          name: live-verified-archives
+          run-id: 45591873575
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/note-archive
       - shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $p = "$env:RUNNER_TEMP/chrome-pack"
-          if ((Get-Content "$p/SOURCE-SHA.txt" -Raw).Trim() -ne $env:GITHUB_SHA) { throw 'Source mismatch' }
-          $zip = "$p/chrome-windows-x64.zip"
-          $hash = ((Get-Content "$p/SHA256SUMS.txt" -Raw).Trim() -split '\s+')[0]
+          $p = "$env:RUNNER_TEMP/note-archive"
+          if ((Get-Content "$p/SOURCE-SHA.txt" -Raw).Trim() -ne $env:CANDIDATE_SHA) { throw 'Source mismatch' }
+          $zip = "$p/touch-typing-candidate-windows-x64.zip"
+          $hash = ((Get-Content "$p/SHA256SUMS.txt" | Where-Object { $_ -match 'windows-x64\.zip$' }) -split '\s+')[0]
           if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $hash) { throw 'SHA256 mismatch' }
-          $app = "$env:RUNNER_TEMP/TouchTyping Chrome Candidate"
-          $out = "$env:RUNNER_TEMP/preview11-wpf-proof"
-          Expand-Archive "$zip" -DestinationPath $app
-          $failures = @()
-          foreach ($name in @("Desktop-File-Search","Chrome-TabSearch","EditorTraceback","WorkdaySourceRevision")) {
-            try {
-              & "./windows/Test-$name.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$out/$name"
-            } catch { $failures += "${name}: $_" }
-          }
-          if($failures.Count) { throw ($failures -join '; ') }
+          $app = "$env:RUNNER_TEMP/TouchTyping Live Candidate"
+          $out = "$env:RUNNER_TEMP/work-note-proof"
+          Expand-Archive -LiteralPath $zip -DestinationPath $app
+          & "./windows/Test-Typing-Work-Note.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory $out
       - uses: actions/upload-artifact@v4
         if: always()
-        with:
-          name: preview11-wpf-proof
-          path: ${{ runner.temp }}/preview11-wpf-proof/
+        with: {name: typing-work-note-wpf-proof, path: "${{ runner.temp }}/work-note-proof/"}
