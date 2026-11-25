@@ -106,7 +106,7 @@ namespace TouchTypingStudio
                     focus == "project-results" ? "Поиск «" + editor.S("projectSearchQuery") + "»: " +
                     string.Join("; ", editor.Items("entries").Select(item => item.S("title"))) :
                     focus == "symbol-rename" ? "Переименовать символ: " + editor.S("input") :
-                    focus == "body" && editor.D("notebook").Exists ? editor.S("notebookDescription") :
+                    focus == "body" && editor.D("notebook").Exists ? editor.S("url").Split('/').Last() + " · " + editor.S("notebookDescription") :
                     editor.Items("tabs").Skip(Math.Max(0, editor.I("activeTab"))).Select(item => item.S("title")).FirstOrDefault();
                 System.Windows.Automation.AutomationProperties.SetHelpText(this, description ?? "");
             }
