@@ -12,6 +12,9 @@ internal sealed partial class LabScene
         new("/mnt/export", "E", "Exports", "reports.zip", 1024, 3072),
         new("/srv/reports", "F", "Reports", "quarter.zip", 4096, 1024),
     ];
+    // Keep this separate from the original fixtures, which are replayed to resume existing drafts.
+    private static readonly DiskSpaceCase RepeatRequest = new("/mnt/team", "D", "Dispatch", "batch.zip", 2048, 512);
+    private static readonly int[] RepeatFreeMiB = [3072, 512, 3072];
     private DiskSpaceCase diskCase;
     private string diskTarget;
     private bool? diskSpaceEnough;
@@ -24,9 +27,10 @@ internal sealed partial class LabScene
     private string DiskLessonCommand => Terminal.IsPowerShell ? "Get-PSDrive " + diskCase.Letter :
         "df -h " + DiskDestinationLabel;
 
-    internal void PrepareDiskCapacity(bool powershell)
+    internal void PrepareDiskCapacity(bool powershell, bool repeat = false)
     {
-        diskCase = DiskSpaceCases[browserCaseVariant];
+        diskCase = repeat ? RepeatRequest with { FreeMiB = RepeatFreeMiB[browserCaseVariant] }
+            : DiskSpaceCases[browserCaseVariant];
         diskTarget = powershell ? diskCase.Letter : diskCase.Mount;
         if (powershell) Terminal.UsePowerShell();
         Terminal.SetTrainingVolumes(
@@ -89,13 +93,21 @@ internal static partial class LiveCourse
     internal const string BashDiskId = "terminal-disk-space-bash";
     internal const string PowerShellDiskId = "terminal-disk-space-powershell";
 
+    internal const string BashDiskRepeatId = "terminal-disk-repeat-bash";
+    internal const string PowerShellDiskRepeatId = "terminal-disk-repeat-powershell";
+
     private static void AddTerminalDiskSpace(List<LiveMission> list)
     {
         foreach (bool powershell in new[] {false, true})
-            list.Add(new("terminal", 0, powershell ? PowerShellDiskId : BashDiskId, "Не сохранился архив: проверить место",
+        {
+            Add(powershell ? PowerShellDiskId : BashDiskId, "Не сохранился архив: проверить место", powershell, false);
+            Add(powershell ? PowerShellDiskRepeatId : BashDiskRepeatId, "Проверить место без подсказки", powershell, true);
+        }
+        void Add(string id, string title, bool powershell, bool repeat) =>
+            list.Add(new("terminal", 0, id, title,
             [
                 new("Прочитайте заявку и проверьте диск назначения", "disk-capacity-query"),
                 new("Хватит места для архива? 1 — нет, 2 — да", "disk-capacity-verdict"),
-            ], FinishAfterRoute: true, Curated: true, Prepare: scene => scene.PrepareDiskCapacity(powershell)));
+            ], FinishAfterRoute: true, Curated: true, Prepare: scene => scene.PrepareDiskCapacity(powershell, repeat)));
     }
 }

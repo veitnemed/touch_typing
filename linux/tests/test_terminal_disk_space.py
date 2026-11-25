@@ -20,9 +20,10 @@ class DiskCapacityTests(unittest.TestCase):
     setUp = harness.TerminalPracticalTests.setUp
     open = harness.TerminalPracticalTests.open
 
-    def launch(self, e, desktop, seed=1, guidance="guided", **extra):
+    def launch(self, e, desktop, seed=1, guidance="guided", repeat=False, **extra):
         e.call("lab-start", **options(desktop, seed=seed, guidance=guidance,
-            routeKind="mission", mission="terminal-disk-space-" + ("powershell" if desktop=="windows" else "bash"), **extra))
+            routeKind="mission", mission="terminal-disk-" + ("repeat-" if repeat else "space-")
+            + ("powershell" if desktop == "windows" else "bash"), **extra))
         return e.call("lab-resume")
 
     def test_exact_destination_and_both_conclusions_for_each_shell(self):
@@ -42,7 +43,6 @@ class DiskCapacityTests(unittest.TestCase):
                     output = terminal(s)["output"]
                     files = terminal(s)["files"]
                     self.assertTrue(any("Назначение:" in line for line in output))
-                    enough = any("Размер архива: 1 ГиБ" in line for line in output)
                     bad = ("Get-PSDrive C", "Get-PSDrive " + expected[-1] + ":", 'Get-PSDrive X',
                            'Get-PSDrive ' + expected[-1] + '; rm something') if ps else (
                            "df -h .", "df -h /a/real/path", "rm notes.txt", "df -h / > stolen.txt")
@@ -73,6 +73,38 @@ class DiskCapacityTests(unittest.TestCase):
                     self.assertIn("Места хватает:" if enough else "Места не хватает.", e.call("lab-result")["diskCapacityConclusion"])
                     self.assertEqual(terminal(state)["files"], files)
             self.assertEqual(capacities, {False, True})
+
+    def test_independent_repeat_identical_request_opposite_visible_results(self):
+        for desktop in ("ubuntu", "windows"):
+            ps = desktop == "windows"
+            e = self.open("windows" if ps else "linux")
+            catalog = e.call("lab-catalog", desktopProfile=desktop)
+            variants = [r for r in catalog["missions"] if r["id"].startswith("terminal-disk-repeat-")]
+            self.assertEqual([r["title"] for r in variants], ["Проверить место без подсказки"])
+            requests, readings = [], []
+            for seed in (1, 5):
+                with self.subTest(desktop=desktop, seed=seed):
+                    state = self.launch(e, desktop, seed, repeat=True)
+                    self.assertFalse(state["showGuide"])
+                    requests.append(tuple(terminal(state)["output"]))
+                    target_command = state["task"]["text"]
+                    self.assertEqual(submit(e, "Get-PSDrive C" if ps else "df -h .")["solved"], 0)
+                    state = submit(e, target_command)
+                    self.assertEqual(state["solved"], 1)
+                    self.assertTrue(e.call("lab-stop")["saved"])
+                    e = self.open("windows" if ps else "linux")
+                    restored = self.launch(e, desktop, 0 if seed == 1 else 1, guidance="independent", repeat=True, **{"continue": True})
+                    self.assertEqual(restored["solved"], 1)
+                    self.assertEqual(terminal(restored)["output"], terminal(state)["output"])
+                    needed, free = visible_capacity(terminal(restored)["output"], ps)
+                    readings.append((needed, int(free)))
+                    completed = chord(e, "2" if free >= needed else "1")
+                    self.assertTrue(completed["finished"])
+                    self.assertEqual(completed["solved"], 2)
+                    self.assertIn("Места хватает:" if free >= needed else "Места не хватает.",
+                                  e.call("lab-result")["diskCapacityConclusion"])
+            self.assertEqual(requests[0], requests[1])
+            self.assertCountEqual(readings, [(2048, 512), (2048, 3072)])
 
     def test_restore_destination_report_and_choice_after_restart(self):
         e = self.open()

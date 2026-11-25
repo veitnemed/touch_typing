@@ -13,7 +13,8 @@ class CapacityWindow(CourseCards):
 
     def exercise(self):
         seen = []
-        for profile in ("ubuntu", "windows"):
+        for profile, repeat in ((profile, repeat) for profile in ("ubuntu", "windows") for repeat in (False, True)):
+            label = profile + ("-repeat" if repeat else "")
             self.navigate("home")
             for _ in range(24):
                 yield
@@ -26,8 +27,8 @@ class CapacityWindow(CourseCards):
             settings.grab_focus()
             yield from self.chord("Space")
             titles = chooser.get_model()
-            chooser.set_selected(next(i for i in range(titles.get_n_items())
-                                     if titles.get_string(i)=="Не сохранился архив: проверить место"))
+            title = "Проверить место без подсказки" if repeat else "Не сохранился архив: проверить место"
+            chooser.set_selected(next(i for i in range(titles.get_n_items()) if titles.get_string(i) == title))
             start.grab_focus()
             yield from self.chord("Enter")
             for _ in range(90):
@@ -36,20 +37,27 @@ class CapacityWindow(CourseCards):
                 yield
             lab = self.lab
             ps = profile == "windows"
-            assert lab.state["mission"] == "terminal-disk-space-" + ("powershell" if ps else "bash")
-            assert lab.theory_rail.get_mapped() and lab.state["scenarioLength"] == 2
-            assert ("Free (GB)" if ps else "Avail") in lab.theory_observe.get_label()
+            suffix = "powershell" if ps else "bash"
+            assert lab.state["mission"] == "terminal-disk-" + ("repeat-" if repeat else "space-") + suffix
+            assert lab.state["scenarioLength"] == 2
+            assert lab.theory_rail.get_mapped() != repeat
+            if repeat:
+                assert not lab.state["showGuide"]
+            else:
+                assert ("Free (GB)" if ps else "Avail") in lab.theory_observe.get_label()
             current = terminal(lab.state)
             expected = lab.state["task"]["text"]
-            self.capture_widget_png(out / (profile+"-01-capacity-theory.png"))
+            self.capture_widget_png(out / (label+"-01-capacity-theory.png"))
             yield from self.shell_line("Get-PSDrive C" if ps else "df -h .")
             assert lab.state["solved"] == 0 and "другой диск" in lab.state["status"]
             yield from self.shell_line(expected)
             assert lab.state["solved"] == 1 and not lab.theory_rail.get_mapped()
             decision = terminal(lab.state)
             needed, free = visible_capacity(decision["output"], ps)
+            if repeat:
+                assert needed == 2048 and free in (512, 3072)
             answer = "2" if free >= needed else "1"
-            self.capture_widget_png(out / (profile+"-02-decision.png"))
+            self.capture_widget_png(out / (label+"-02-decision.png"))
             yield from self.chord("1" if answer=="2" else "2")
             assert lab.state["solved"] == 1
             yield from self.chord(answer)
@@ -60,8 +68,8 @@ class CapacityWindow(CourseCards):
             assert decision["lastCommand"]==terminal(lab.state)["lastCommand"], "The quiz choice is not a shell command"
             for _ in range(6):
                 yield
-            self.capture_widget_png(out / (profile+"-03-conclusion.png"))
-            seen.append(dict(profile=profile, command=expected, result=verdict))
+            self.capture_widget_png(out / (label+"-03-conclusion.png"))
+            seen.append(dict(profile=profile, repeat=repeat, command=expected, result=verdict))
             self.return_live_catalog("terminal")
             for _ in range(22):
                 yield

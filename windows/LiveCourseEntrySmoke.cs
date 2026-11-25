@@ -120,7 +120,10 @@ internal static partial class LiveUiSmoke
                 }
             }
             foreach (string desktop in new[] {"ubuntu", "windows"})
-                CheckDiskCapacityMission(desktop);
+            {
+                CheckDiskCapacityMission(desktop, false);
+                CheckDiskCapacityMission(desktop, true);
+            }
             Console.WriteLine("PASS real WPF course cards, both shell profiles and ordinary mission boundaries.");
             return 0;
         }
@@ -134,7 +137,7 @@ internal static partial class LiveUiSmoke
         finally { if(app!=null && !app.HasExited){app.Kill();app.WaitForExit(4000);} }
     }
 
-    private static void CheckDiskCapacityMission(string desktop)
+    private static void CheckDiskCapacityMission(string desktop, bool repeat)
     {
         bool ps = desktop == "windows";
         Invoke("LabDesktopProfile-" + desktop);
@@ -144,11 +147,14 @@ internal static partial class LiveUiSmoke
         Select("LabLevel", 0);
         Select("LabDuration", 0);
         Select("LabTimer", 0);
-        SelectMissionByName("Не сохранился архив: проверить место");
+        SelectMissionByName(repeat ? "Проверить место без подсказки" : "Не сохранился архив: проверить место");
         Key("F5");
-        Until(delegate {return Visible("LabTask") && Visible("LabTheoryObserve") && Name("LabPause").StartsWith("Пауза");},
+        Until(delegate {return Visible("LabTask") && (repeat || Visible("LabTheoryObserve")) && Name("LabPause").StartsWith("Пауза");},
             "visible disk capacity explanation");
-        Check(Name("LabTheoryObserve").Contains(ps ? "Free (GB)" : "Avail"), "The real table column is taught for this shell");
+        if (repeat)
+            Check(!Visible("LabTheoryObserve"), "Independent practice starts without an explanation");
+        else
+            Check(Name("LabTheoryObserve").Contains(ps ? "Free (GB)" : "Avail"), "The real table column is taught for this shell");
         string expected = Find("LabTask").Current.ItemStatus;
         Check(expected.StartsWith(ps ? "text:Get-PSDrive " : "text:df -h /"), "Visible working task uses the destination disk");
         EnterCharacters(ps ? "Get-PSDrive C" : "df -h .");
@@ -158,12 +164,14 @@ internal static partial class LiveUiSmoke
         Key("Enter");
         Until(delegate {return ReadSolved()==1 && Name("LabTask").Contains("Хватит места");}, "actual decision step after volume query");
         Check(!Visible("LabTerminalTheory"), "Decision is not a shell command");
-        Key("2");
+        // The native course smoke pins seed zero: the original request is short on space,
+        // while the paired independent request has 3 GiB free for a 2 GiB archive.
+        Key(repeat ? "1" : "2");
         Check(ReadSolved()==1 && !Visible("LabResult"), "A wrong answer does not score");
-        Key("1");
+        Key(repeat ? "2" : "1");
         Until(delegate {return Visible("LabDiskCapacityConclusion");}, "visible verified conclusion");
-        Check(Name("LabDiskCapacityConclusion").Contains("Места не хватает"), "Seed zero disk case needs more space");
-        CaptureReferenceFrame("disk-space-" + desktop);
+        Check(Name("LabDiskCapacityConclusion").Contains(repeat ? "Места хватает" : "Места не хватает"), "Conclusion matches the seeded free space");
+        CaptureReferenceFrame("disk-space-" + desktop + (repeat ? "-repeat" : ""));
         Invoke("LabChooseClass");
         Until(delegate {return Visible("HomeClass-terminal");}, "return to Live after capacity result");
     }
