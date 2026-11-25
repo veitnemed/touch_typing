@@ -112,7 +112,7 @@ namespace TouchTypingStudio
         private string layout = "EN", incorrect = "", keyboardProfile = "", fnMode = "";
         private bool keys = true, hands = true, functionRow;
         internal bool ReferenceAidRail { get; set; }
-        internal string ReferenceAidDescription { get; private set; } = "";
+        internal string ReferenceAidDescription { get; private set; }
 
         private double ReferenceHandScale
         {

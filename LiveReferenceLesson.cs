@@ -44,7 +44,7 @@ namespace TouchTypingStudio
             protected override string GetItemStatusCore()
             {
                 var guide = ((LiveAidRail)Owner).Child as LiveKeyboard;
-                return guide == null ? base.GetItemStatusCore() : guide.ReferenceAidDescription;
+                return guide == null ? base.GetItemStatusCore() : (guide.ReferenceAidDescription ?? "");
             }
         }
 
