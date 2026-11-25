@@ -40,6 +40,8 @@ install -m 755 -- "$source_dir/check.sh" "$target/"
 install -m 644 -- "$source_dir/qa_runner.py" "$target/"
 mkdir -p -- "$target/qa/fixtures"
 install -m 644 -- "$source_dir/tests/test_live_missions.py" "$source_dir/tests/test_practice.py" "$source_dir/tests/test_lab_window.py" "$source_dir/tests/test_source_note_window.py" "$source_dir/tests/test_wayland_window.py" "$source_dir/tests/test_ui_controls.py" "$target/qa/"
+install -m 644 -- "$source_dir/tests/test_editor_course.py" "$source_dir/tests/test_editor_notebooks.py" \
+    "$source_dir/tests/test_python_editor.py" "$source_dir/tests/test_project_file_practice.py" "$target/qa/"
 install -m 644 -- "$source_dir/tests/capture_home_reference.py" "$target/qa/"
 install -m 644 -- "$source_dir/tests/record_terminal_window.py" "$target/qa/"
 install -m 644 -- "$source_dir/tests/test_native_selection_render.py" "$target/qa/"

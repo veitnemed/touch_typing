@@ -45,8 +45,9 @@ internal static partial class LiveUiSmoke
             bool notebookMission = arguments.Contains("--notebook-mission");
             bool projectFileMission = arguments.Contains("--project-file-mission");
             bool editorProjectFileMission = arguments.Contains("--editor-project-file-mission");
+            bool editorCourse = arguments.Contains("--editor-course");
             bool nativeLayout = arguments.Contains("--native-layout");
-            bool referenceEvidence = notebookMission || projectFileMission || editorProjectFileMission || liveUx || nativeLayout || referenceBrowser || browserClone || numLockMode.Length > 0 || dailyUse || gnomeProfile || debugDay || codeTheme || pythonEditor || arguments.Contains("--reference-evidence");
+            bool referenceEvidence = notebookMission || projectFileMission || editorProjectFileMission || editorCourse || liveUx || nativeLayout || referenceBrowser || browserClone || numLockMode.Length > 0 || dailyUse || gnomeProfile || debugDay || codeTheme || pythonEditor || arguments.Contains("--reference-evidence");
             if (referenceEvidence && SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
                 throw new InvalidOperationException("Per-monitor-aware evidence capture cannot be enabled.");
             string path = Path.GetFullPath(arguments[0]);
@@ -58,7 +59,7 @@ internal static partial class LiveUiSmoke
                 Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_SOFT_FINISH_SECONDS", "7");
             Console.WriteLine("UI test seed " + Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"));
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_NAV_TRACE", gnomeProfile ? "workspace" : numLockMode.Length > 0 ? "workday-keypad" :
-                referenceEvidence && !nativeLayout && !referenceBrowser && !dailyUse && !debugDay && !codeTheme && !pythonEditor && !browserClone && !notebookMission && !projectFileMission && !editorProjectFileMission ? "terminal" : null);
+                referenceEvidence && !nativeLayout && !referenceBrowser && !dailyUse && !debugDay && !codeTheme && !pythonEditor && !browserClone && !notebookMission && !projectFileMission && !editorProjectFileMission && !editorCourse ? "terminal" : null);
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_BROWSER_CLONE", browserClone || projectFileMission || editorProjectFileMission ? "1" : null);
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_PYTHON_EDITOR", pythonEditor ? "1" : null);
             app = Process.Start(new ProcessStartInfo(path, "--qa --live") { WorkingDirectory = Path.GetDirectoryName(path) });
@@ -88,6 +89,12 @@ internal static partial class LiveUiSmoke
             {
                 CheckProjectFileMission();
                 Console.WriteLine("PASS: " + count + " native WPF download and project file checks");
+                return 0;
+            }
+            if (editorCourse)
+            {
+                CheckEditorCourse(path);
+                Console.WriteLine("PASS: " + count + " native WPF direct VS Code course checks");
                 return 0;
             }
             if (editorProjectFileMission)
@@ -731,6 +738,62 @@ internal static partial class LiveUiSmoke
             }
         }
         throw new InvalidOperationException("Mission did not finish: " + title);
+    }
+
+    private static void CheckEditorCourse(string executable)
+    {
+        Find("HomeClass-code").SetFocus();
+        Key("Enter");
+        Until(delegate { return Visible("LabDesktop") && ReadSolved() == 0 && Name("LabPause").StartsWith("Пауза"); },
+            "VS Code card opens its first section directly");
+        Check(!Visible("LabMission") && Find("LabTask").Current.ItemType.StartsWith("Составить заметку по проекту") &&
+            Name("LabScenarioProgress") == "Прогресс занятия: 0 из 40", "Established editor work starts a 40-action course");
+        VirtualEnglish();
+        CaptureReferenceFrame("course-01-original");
+
+        Action<int> next = delegate(int solved)
+        {
+            string prompt = Find("LabTask").Current.ItemStatus;
+            Check(prompt.StartsWith("keys:"), "Input instruction at " + solved + " describes a real key chord");
+            string keys = prompt.Substring(5);
+            string prefix = Exists("LabKeys") ? Find("LabKeys").Current.ItemStatus : "";
+            if (prefix.Length > 0) EnterCharacters(prefix);
+            for (int attempt = 0; attempt < (keys == "Down" || keys == "Tab" ? 24 : 1); attempt++)
+            {
+                Chord(keys);
+                if (ReadSolved() > solved) break;
+            }
+            Until(delegate { return ReadSolved() == solved + 1; }, "one exact key credit for " + keys + " at " + solved);
+        };
+
+        for (int solved = 0; solved < 33; solved++) next(solved);
+        Check(!Visible("LabResult") && Find("LabTask").Current.ItemType.StartsWith("Проверить расчёт из блокнота") &&
+            Name("LabScenarioProgress") == "Прогресс занятия: 33 из 40", "The original route rolls into notebook without ending or resetting progress");
+        next(33); next(34);
+        Check(Find("LabDesktop").Current.Name.Contains(".ipynb") || Find("LabDesktop").Current.HelpText.Contains(".ipynb"),
+            "The learner opened a notebook from the integrated course");
+        CaptureReferenceFrame("course-02-notebook-at-35");
+
+        Invoke("LabBack");
+        Until(delegate { return Visible("LiveResume-code") && FocusedLiveCard("code"); }, "Save to the original VS Code card");
+        RequestClose();
+        UntilExit();
+        app.Dispose();
+        app = Process.Start(new ProcessStartInfo(executable, "--qa --live") { WorkingDirectory = Path.GetDirectoryName(executable) });
+        Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "restart extracted Windows application", 12000);
+        window = AutomationElement.FromHandle(trainer);
+        Focus();
+        Invoke("LiveResume-code");
+        Until(delegate { return Visible("LabDesktop") && ReadSolved() == 35; }, "the saved notebook resumes at action 35");
+        Check(Name("LabScenarioProgress") == "Прогресс занятия: 35 из 40", "The course budget survived restart");
+        for (int solved = 35; solved < 40; solved++) next(solved);
+        Until(delegate { return Visible("LabLimitChoice"); }, "40 actions show the real limit decision, not an early result");
+        Check(!Visible("LabResult") && ReadSolved() == 40, "The user reached 40 credited actions before deciding");
+        CaptureReferenceFrame("course-03-action-limit");
+        Invoke("LabLimitFinish");
+        Until(delegate { return Visible("LabResult"); }, "explicit completion after 40 actions");
+        Check(Find("LabResult").Current.HelpText.Contains("Выполнено 40."), "The result includes the whole course");
+        CaptureReferenceFrame("course-04-completed");
     }
 
     private static void CheckNotebookMission()
@@ -2069,12 +2132,12 @@ internal static partial class LiveUiSmoke
                 "English-only text receives a non-error native layout instruction");
             CheckTerminalState("", 0);
             Check(ReadSolved() == before, "RU physical input earned no credit");
-            Check(Find("LiveAidPanel").Current.HelpText.Contains("RU"), "Keyboard aid follows native RU");
+            Check(Find("LiveAidPanel").Current.ItemType == "Раскладка клавиатуры: RU", "Keyboard aid follows native RU");
             CaptureLiveUxFrame("native-layout-ru");
             SetNativeLessonLayout(thread, "00000409", 0x0409);
             Send(PhysicalText("W H O A M I"));
             CheckTerminalState("whoami", 6);
-            Check(Find("LiveAidPanel").Current.HelpText.Contains("EN"), "Keyboard aid returns to native EN");
+            Check(Find("LiveAidPanel").Current.ItemType == "Раскладка клавиатуры: EN", "Keyboard aid returns to native EN");
             CaptureLiveUxFrame("native-layout-en");
             Key("Enter");
             Until(delegate { return ReadSolved() == before + 1; }, "switching the real source resumes English entry");

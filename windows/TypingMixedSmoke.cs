@@ -52,33 +52,73 @@ internal static partial class LiveUiSmoke
         Until(delegate { return Visible("TypingTape") && Visible("TypingCount"); }, mode + " started via card + Space");
         Check(MixedCount() == 0, mode + " starts at zero");
     }
+    private static void MixedGlyph(char glyph, bool ru)
+    {
+        // Use the keyboard positions, not Unicode injection or clipboard text.
+        // At Windows HKL 0409/0419 the same positions yield different glyphs.
+        const string lower = "ёйцукенгшщзхъфывапролджэячсмитьбю";
+        const string scans = "`QWERTYUIOP[]ASDFGHJKL;'ZXCVBNM,.";
+        const string signsRu = ")!\"№;%:?*(", signsEn = ")!@#$%^&*(";
+        int letter = lower.IndexOf(char.ToLowerInvariant(glyph));
+        int sign = (ru ? signsRu : signsEn).IndexOf(glyph);
+        if (letter >= 0) Chord((char.IsUpper(glyph) ? "Shift+" : "") + scans[letter]);
+        else if (sign >= 0) Chord("Shift+" + sign.ToString(CultureInfo.InvariantCulture));
+        else Send(Character(glyph));
+    }
     private static void MixedStep(uint thread, string atom, string group)
     {
         int before = MixedCount();
         if (atom[0] == '⟦') Chord(atom.Substring(1, atom.Length-2));
         else
         {
-            // Known complete physical row mapping. Do not inject Unicode/paste:
-            // keycode 0x2f = V physically, producing Latin v or Cyrillic м via HKL.
-            char glyph = atom[0];
             bool ru = group == "RU";
             MixedLayout(thread, ru);
-            const string lower = "ёйцукенгшщзхъфывапролджэячсмитьбю";
-            const string scans = "`QWERTYUIOP[]ASDFGHJKL;'ZXCVBNM,.";
-            const string signsRu = ")!\"№;%:?*(", signsEn = ")!@#$%^&*(";
-            int letter = lower.IndexOf(char.ToLowerInvariant(glyph));
-            int sign = (ru ? signsRu : signsEn).IndexOf(glyph);
-            if (letter >= 0) Chord((char.IsUpper(glyph) ? "Shift+" : "") + scans[letter]);
-            else if (sign >= 0) Chord("Shift+" + sign.ToString(CultureInfo.InvariantCulture));
-            else Send(Character(glyph));
+            MixedGlyph(atom[0], ru);
         }
-        Until(delegate { return MixedCount() == before+1; }, "one action for " + atom + " in " + group);
+        try { Until(delegate { return MixedCount() == before+1; }, "one action for " + atom + " in " + group); }
+        catch (TimeoutException e)
+        {
+            throw new InvalidOperationException("Mixed scan at HKL 0x" + NativeLanguage(thread).ToString("X4") +
+                ": expected " + atom + ", before " + before + ", current " + MixedCount() +
+                ", next " + MixedAtom(), e);
+        }
     }
     private static void MixedLandmark(string title)
     {
         Wait(180);
         CaptureReferenceFrame(title);
         if (Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_VIDEO") == "1") Wait(2300);
+    }
+    private static bool MixedPaused()
+    {
+        var texts = window.FindAll(TreeScope.Descendants,
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text));
+        return texts.Cast<AutomationElement>().Any(t => !t.Current.IsOffscreen &&
+            t.Current.Name.StartsWith("Пауза.", StringComparison.Ordinal));
+    }
+    private static void FocusMixedNumLockProbe()
+    {
+        if (focusProbe == IntPtr.Zero)
+            focusProbe = CreateWindowEx(0, "STATIC", "TouchTyping mixed Num Lock probe", 0x10cf0000,
+                50, 50, 330, 110, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+        uint owner;
+        Check(focusProbe != IntPtr.Zero && GetWindowThreadProcessId(focusProbe, out owner) != 0 &&
+            owner == (uint)Process.GetCurrentProcess().Id, "test controls only its own Num Lock probe");
+        SetForegroundWindow(focusProbe);
+        Until(delegate { return GetForegroundWindow() == focusProbe; }, "owned Num Lock probe");
+        Wait(100);
+    }
+    private static void MixedNumLock(bool enabled)
+    {
+        int before = MixedCount();
+        FocusMixedNumLockProbe();
+        Until(MixedPaused, "the typing lesson paused when the owned probe took focus");
+        if (!originalNumLock.HasValue) originalNumLock = ProbeNumLock();
+        SetProbeNumLock(enabled);
+        Focus();
+        Check(MixedPaused() && MixedCount()==before, "returning from Num Lock probe preserves position and pause");
+        Key("F8");
+        Until(delegate { return !MixedPaused(); }, "resume typing after Num Lock probe");
     }
     internal static int RunTypingMixed(string executable, string target)
     {
@@ -98,7 +138,7 @@ internal static partial class LiveUiSmoke
             Check(window.Current.ProcessId == app.Id && pid == app.Id && thread != 0, "owned foreground UI thread");
             Focus(); Until(delegate { return Visible("HomeDashboard"); }, "fresh WPF home");
             TypingProofClient.Fit(app, trainer);
-            previous = GetKeyboardLayout(thread); originalNumLock = ProbeNumLock();
+            previous = GetKeyboardLayout(thread);
             MixedLayout(thread, false);
             Chord("Alt+2");
             Until(delegate { return Visible("TypingStart"); }, "catalog through Alt+2");
@@ -114,8 +154,20 @@ internal static partial class LiveUiSmoke
                 Check(layout=="RU" || layout=="EN", "visible exercise layout in the header");
                 bool newPair = combinations.Add((atom[0]=='⟦' ? "command/" : "text/")+layout);
                 if (newPair && atom[0]=='⟦') MixedLandmark("wpf-10-mixed-chord-"+layout);
-                if (newPair && atom[0]!='⟦' && layout=="RU") MixedLandmark("wpf-11-mixed-russian");
-                MixedStep(thread, atom, layout);
+                if (newPair && atom[0]!='⟦' && layout=="RU")
+                {
+                    // The very first character after the accepted physical shortcut.
+                    // Wrong language must not pass just because the scan position fits.
+                    int before = MixedCount();
+                    MixedLayout(thread, false);
+                    MixedGlyph(atom[0], true);
+                    Check(MixedCount()==before && MixedAtom()==atom,
+                        "wrong-layout glyph after chord does not advance the Russian exercise");
+                    MixedStep(thread, atom, layout);
+                    Check(MixedCount()==before+1, "first composed Russian character after chord is accepted once");
+                    MixedLandmark("wpf-11-mixed-russian");
+                }
+                else MixedStep(thread, atom, layout);
             }
             Check(combinations.Count==4, "Cyrillic and Latin compositions, digits and chords alternate without skipping the next unit");
 
@@ -150,9 +202,9 @@ internal static partial class LiveUiSmoke
             int digit = int.Parse(MixedAtom(), CultureInfo.InvariantCulture);
             int[] keypad = {0x52,0x4f,0x50,0x51,0x4b,0x4c,0x4d,0x47,0x48,0x49};
             var k = new Stroke(keypad[digit], false);
-            SetProbeNumLock(false); Send(new[] {k.Down(),k.Up()});
+            MixedNumLock(false); Send(new[] {k.Down(),k.Up()});
             Check(MixedCount()==0, "NumLock off: keypad navigation is not a typed digit");
-            SetProbeNumLock(true); Send(new[] {k.Down(),k.Up()});
+            MixedNumLock(true); Send(new[] {k.Down(),k.Up()});
             Until(delegate { return MixedCount()==1; }, "NumLock on: same physical switch produces the expected digit");
             foreach (bool ru in new[] {true,false})
             {
@@ -193,16 +245,17 @@ internal static partial class LiveUiSmoke
         {
             if (app!=null && !app.HasExited)
             {
-                if (GetForegroundWindow()==trainer)
+                if (originalNumLock.HasValue && (GetForegroundWindow()==trainer || GetForegroundWindow()==focusProbe))
                 {
-                    try { if(originalNumLock.HasValue) SetProbeNumLock(originalNumLock.Value); }
-                    catch(Exception cleanup) { Console.Error.WriteLine(cleanup.Message); }
+                    try { FocusMixedNumLockProbe(); SetProbeNumLock(originalNumLock.Value); Focus(); }
+                    catch(Exception cleanup) { Console.Error.WriteLine("Num Lock restore: " + cleanup.Message); }
                 }
                 if (previous!=IntPtr.Zero) SendMessage(trainer,0x50,IntPtr.Zero,previous);
                 try { RequestClose(); Until(delegate { return ExitDialog()!=null; }, "close confirmation",3000); InvokeDialog("LabExitSave"); app.WaitForExit(4000); }
                 catch(Exception cleanup) { Console.Error.WriteLine(cleanup.Message); }
                 if (!app.HasExited) { app.Kill(); app.WaitForExit(4000); }
             }
+            if (focusProbe != IntPtr.Zero) DestroyWindow(focusProbe);
         }
     }
 }

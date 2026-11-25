@@ -17,6 +17,8 @@ namespace TouchTypingStudio
         public bool VirtualLayout;
         // Older drafts continue replaying their original virtual prerequisite goals.
         public bool NativeEnglishInput;
+        // Opt-in card route. Old profiles continue their selected individual mission.
+        public bool EditorCourse;
         // Absent in older drafts, including explicit unlimited sessions.
         public LiveDraftProgress Progress;
     }

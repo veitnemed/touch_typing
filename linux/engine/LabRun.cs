@@ -69,6 +69,8 @@ internal sealed class LabRun
     private readonly bool windowsBindings;
     private readonly string[] dockProfile, desktopProfile;
     private readonly string layoutBinding;
+    internal const int DefaultEditorCourseActions = 40;
+    internal bool EditorCourse { get; }
     internal string MissionId => mission?.Id;
     internal string PhaseTitle => mission == null || pending.Count == 0 ? "" : mission.Phases[pending[0].Phase].Title;
     private int missionLength;
@@ -98,9 +100,11 @@ internal sealed class LabRun
         missionId is "workday-download-handoff" or "workday-project-file-inbox" ||
         missionId?.StartsWith("code-notebook-", StringComparison.Ordinal) == true ||
         missionId?.StartsWith("code-project-file-", StringComparison.Ordinal) == true;
+    internal static bool IsEditorSupplement(string missionId) =>
+        missionId.StartsWith("code-notebook-", StringComparison.Ordinal) || missionId.StartsWith("code-project-file-", StringComparison.Ordinal);
     private bool CompletedRoute => !restoring && mission != null && pending.Count == 0 &&
         (FinishingMission || softFinish && ReachedLimit ||
-            (finishSingleRoute || mission.Curated && (EnvironmentProfile != "windows" && !IsEssentials(mission.Id) && !JoinsTimedRotation(mission.Id) || TimeLimit == 0 && ActionLimit == 0))
+            !EditorCourse && (finishSingleRoute || mission.Curated && (EnvironmentProfile != "windows" && !IsEssentials(mission.Id) && !JoinsTimedRotation(mission.Id) || TimeLimit == 0 && ActionLimit == 0))
                 && mission.FinishAfterRoute);
     private bool PendingLimitChoice => softFinish && !restoring && ReachedLimit &&
         !limitAccepted && !FinishingMission && !CompletedRoute;
@@ -113,13 +117,14 @@ internal sealed class LabRun
     internal string[] Held => held.ToArray();
 
     internal LabRun(string app, string mode, int level, int seconds, string layout, IEnumerable<ShortcutAttempt> history,
-        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null, bool softFinish = false, bool combinedLimits = false, bool windowsBindings = false, string[] desktopProfile = null, bool neutralProject = false, string environment = "ubuntu", bool nativeEnglishInput = false)
+        Random random = null, Func<double> clock = null, int actionLimit = 0, string guidance = "guided", string[] dock = null, string layoutKey = "Super+Space", string missionId = null, LiveDraft draft = null, bool softFinish = false, bool combinedLimits = false, bool windowsBindings = false, string[] desktopProfile = null, bool neutralProject = false, string environment = "ubuntu", bool nativeEnglishInput = false, bool editorCourse = false)
     {
         if (!LabCatalog.Apps.Contains(app)) throw new ArgumentException("Выберите Ubuntu, Chrome, VS Code или Терминал.");
         if (mode is not ("drill" or "sandbox")) throw new ArgumentException("Выберите тренировку или учебный рабочий стол.");
         var progress = draft?.Progress;
         this.neutralProject = draft == null ? neutralProject : draft.ProjectFixture == NeutralProject.FixtureId;
         this.nativeEnglishInput = draft?.NativeEnglishInput ?? nativeEnglishInput;
+        EditorCourse = app == "code" && (draft?.EditorCourse ?? (editorCourse && string.IsNullOrEmpty(missionId)));
         this.softFinish = softFinish;
         this.windowsBindings = windowsBindings;
         EnvironmentProfile = app == "windows" ? "windows" : app == "workday" ? LabScene.DesktopEnvironment(draft?.DesktopEnvironment ?? environment) : "ubuntu";
@@ -229,7 +234,7 @@ internal sealed class LabRun
     }
 
     internal LiveDraft Draft() => new() { App = App, DesktopEnvironment = EnvironmentProfile, Level = Level, Mission = MissionId, Layout = initialLayout, Guidance = Guidance,
-        Dock = Scene.Dock, ProjectFixture = neutralProject ? NeutralProject.FixtureId : null, DesktopProfile = Scene.GnomePractice.Length == 0 ? null : Scene.DesktopProfile, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, NativeEnglishInput = nativeEnglishInput, Trace = JsonSerializer.Serialize(trace),
+        Dock = Scene.Dock, ProjectFixture = neutralProject ? NeutralProject.FixtureId : null, DesktopProfile = Scene.GnomePractice.Length == 0 ? null : Scene.DesktopProfile, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, NativeEnglishInput = nativeEnglishInput, EditorCourse = EditorCourse, Trace = JsonSerializer.Serialize(trace),
         Progress = new() { Session = Session, Mode = Mode, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Solved = Solved,
             Errors = Errors, ActiveMilliseconds = ActiveMilliseconds, Series = JsonSerializer.Serialize(points),
             LimitDecisionPending = PendingLimitChoice, LimitReached = LimitReached,
@@ -601,17 +606,25 @@ internal sealed class LabRun
             // Keep standalone projects out of other modes. Chrome research cases are part
             // of the same rotation as the older browser routes.
             bool essentials = IsEssentials(last);
-            var rotation = courses.Where(m => essentials
+            var rotation = EditorCourse ? courses : courses.Where(m => essentials
                 ? IsEssentials(m.Id)
                 : !m.FinishAfterRoute || (EnvironmentProfile == "windows" || JoinsTimedRotation(m.Id)) && m.Curated).ToArray();
             var available = rotation.Where(m => !used.Contains(m.Id)).ToArray();
             if (available.Length == 0) { used.Clear(); available = rotation.Where(m => m.Id != last || rotation.Length == 1).ToArray(); }
             var recent = past.Concat(Attempts).Where(a => a.Mission != null).Select(a => a.Mission).Reverse().Distinct().Take(2).ToHashSet();
             var fresh = available.Where(m => !recent.Contains(m.Id)).ToArray();
-            if (fresh.Length > 0) available = fresh;
+            if (!EditorCourse && fresh.Length > 0) available = fresh;
             initialLayout = Scene.Layout;
             initialVirtual = Scene.LayoutIsVirtual;
-            if (string.IsNullOrEmpty(requestedMission))
+            if (EditorCourse && string.IsNullOrEmpty(requestedMission))
+            {
+                mission = PickEditorCourseMission(available, rotation, last);
+                variant = random.Next(3);
+                Scene = PrepareMissionScene();
+                mission.Prepare?.Invoke(Scene);
+                pending = LiveCourse.Compile(mission, Scene, prepared: true, nativeEnglishInput: nativeEnglishInput);
+            }
+            else if (string.IsNullOrEmpty(requestedMission))
             {
                 // Keep the original seeded order: one draw per eligible mission, then the case variant.
                 var draws = available.Select(m => (Mission: m, Draw: random.NextDouble())).ToArray();
@@ -670,6 +683,19 @@ internal sealed class LabRun
         }
         Task = pending[0].Task;
         sinceTask = clock(); HintVisible = hadError = false;
+    }
+
+    private LiveMission PickEditorCourseMission(LiveMission[] available, LiveMission[] rotation, string previous)
+    {
+        // Lead with established editor practice. Notebooks or project-file
+        // operations enrich it; two supplemental sections never run together.
+        bool wantCore = previous == null || IsEditorSupplement(previous);
+        var candidates = available.Where(m => IsEditorSupplement(m.Id) != wantCore).ToArray();
+        if (candidates.Length == 0)
+            candidates = wantCore ? rotation.Where(m => !IsEditorSupplement(m.Id)).ToArray() : available;
+        var lastPracticed = past.Concat(Attempts).Where(a => a.Correct && a.Mission != null)
+            .GroupBy(a => a.Mission).ToDictionary(g => g.Key, g => g.Max(a => a.Date));
+        return candidates.OrderBy(m => lastPracticed.GetValueOrDefault(m.Id)).First();
     }
 
     private LabScene PrepareMissionScene()

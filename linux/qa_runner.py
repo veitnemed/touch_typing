@@ -130,6 +130,7 @@ def run_checks(args):
                 check(name, [dotnet, "run", "--project", str(tests / (name + ".csproj"))], timeout=300)
         if not args.terminal_only:
             check("missions", [sys.executable, str(tests / "test_live_missions.py")], timeout=300)
+            check("editor-course", [sys.executable, str(tests / "test_editor_course.py")])
             check("protocol", [sys.executable, str(tests / "test_practice.py")])
             check("live-entry-preferences", [sys.executable, str(tests / "test_live_entry_preferences.py")])
             check("live-capture-generation", [sys.executable, str(tests / "test_live_capture_generation.py")])

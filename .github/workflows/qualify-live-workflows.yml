@@ -42,6 +42,8 @@ jobs:
           /usr/bin/python3 linux/tests/test_active_keyboard_layout.py
           /usr/bin/python3 linux/tests/test_live_entry_preferences.py
           /usr/bin/python3 linux/tests/test_live_missions.py
+          /usr/bin/python3 linux/tests/test_live_catalog_contract.py
+          /usr/bin/python3 linux/tests/test_editor_course.py
           /usr/bin/python3 linux/tests/test_editor_notebooks.py
           /usr/bin/python3 linux/tests/test_project_file_practice.py
           /usr/bin/python3 linux/tests/test_win10_protocol.py "$TOUCH_TYPING_ENGINE"
@@ -100,7 +102,7 @@ jobs:
             trap "kill -INT $video 2>/dev/null || true; wait $video || true" EXIT
             /usr/bin/python3 linux/tests/test_preview2_native.py
           ' | tee "$TOUCH_TYPING_QA_OUTPUT/gtk-test.log"
-          for scenario in test_editor_notebooks_x11.py test_project_files_x11.py test_typing_cycles_native.py test_typing_records_gtk.py test_typing_mixed_native.py test_live_guide_layout_native.py; do
+          for scenario in test_editor_notebooks_x11.py test_project_files_x11.py test_editor_course_x11.py test_typing_cycles_native.py test_typing_records_gtk.py test_typing_mixed_native.py test_live_guide_layout_native.py; do
             export TOUCH_TYPING_QA_OUTPUT="$RUNNER_TEMP/gtk-proof/${scenario%.py}" TOUCH_TYPING_QA_DATA_ROOT="$temp/${scenario%.py}"
             mkdir -m 700 "$TOUCH_TYPING_QA_OUTPUT" "$TOUCH_TYPING_QA_DATA_ROOT"
             export SCENARIO="$scenario" TOUCH_TYPING_QA_VIDEO=1
@@ -177,6 +179,7 @@ jobs:
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -NotebookMission -Seed 0 -OutputDirectory "$proof/notebook"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -ProjectFileMission -Seed 0 -OutputDirectory "$proof/project-files"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -EditorProjectFileMission -Seed 0 -OutputDirectory "$proof/editor-project-files"
+          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -EditorCourse -Seed 0 -OutputDirectory "$proof/editor-course"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -BrowserClone -Seed 0 -OutputDirectory "$proof/browser"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock off -Seed 0 -OutputDirectory "$proof/keypad-off"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock on -Seed 0 -OutputDirectory "$proof/keypad-on"

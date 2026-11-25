@@ -738,6 +738,7 @@ class Studio(Gtk.Application):
             return
         lab = self.lab
         lab.direct_module = module
+        lab.editor_course = module == "code" and launch is None and not draft
         index = next((i for i, item in enumerate(lab.classes) if item["id"] == module), None)
         if index is None:
             self.return_live_catalog(module)
@@ -754,8 +755,10 @@ class Studio(Gtk.Application):
                                  ("actions", lab.limit), ("time", lab.time_limit)):
                 picker.set_selected(defaults.get(name, 0))
             level = lab.level.get_selected()
-            choice = self.call("lab-next-mission", app=module, level=level, desktopProfile=environment) or {}
-            target = defaults.get("mission") or choice.get("mission", "")
+            target = defaults.get("mission", "")
+            if not target and not lab.editor_course:
+                choice = self.call("lab-next-mission", app=module, level=level, desktopProfile=environment) or {}
+                target = choice.get("mission", "")
         selected = next((i for i, (k, _) in enumerate(lab.choices) if k == target), None)
         if selected is None:
             self.return_live_catalog(module)
@@ -1005,7 +1008,8 @@ class Studio(Gtk.Application):
                 tile.add_css_class("reference-selected")
             if index > 2:
                 tile.add_css_class("reference-card-lower")
-            tile.set_tooltip_text(f"Начать первое занятие «{title}». Прогресс подтверждённых сочетаний для текущей раскладки.")
+            tile.set_tooltip_text("Начать маршрут VS Code: 40 действий без таймера." if module == "code" else
+                                  f"Начать первое занятие «{title}». Прогресс подтверждённых сочетаний для текущей раскладки.")
             inner = box(Gtk.Orientation.VERTICAL, 0, "reference-card-inner")
             picture = ReferenceGlyph(module, 43 if index > 2 else 48)
             picture.add_css_class("reference-app-icon")
@@ -2708,6 +2712,7 @@ class LabPage(Gtk.Box):
         self.level = dropdown(self.level_titles)
         self.begin = button("Начать · Пробел", self.start, "primary")
         self.direct_module = None
+        self.editor_course = False
         self.prep = box(Gtk.Orientation.VERTICAL, 12, "lab-prep")
         self.prep.append(text("Практика без мыши", "h2"))
         self.os_selector = bind_name(dropdown(["Ubuntu", "Windows 10"]), "Учебная операционная система")
@@ -3138,13 +3143,14 @@ class LabPage(Gtk.Box):
         self.host.refresh()
         app = self.classes[self.picker.get_selected()]["id"]
         mission = self.choices[self.mission_picker.get_selected()][0]
+        budget = ({"editorCourse": True} if self.editor_course else
+                  {"seconds": self.time_limits[self.time_limit.get_selected()],
+                   "actionLimit": self.action_limits[self.limit.get_selected()]})
         self.state = self.host.call("lab-start", app=app, mode="sandbox", level=self.level.get_selected(), mission="" if mission == "@resume" else mission,
                                     **{"continue": mission == "@resume"}, softFinish=True, combinedLimits=True, nativeEnglishInput=True,
                                     desktopProfile=self.desktop_profile,
                                     preserveDraft=bool(self.direct_module and mission != "@resume"),
-                                    guidance="guided" if self.mode.get_selected() == 0 else "independent",
-                                    seconds=self.time_limits[self.time_limit.get_selected()],
-                                    actionLimit=self.action_limits[self.limit.get_selected()])
+                                    guidance="guided" if self.mode.get_selected() == 0 else "independent", **budget)
         if not self.state:
             return
         self.active = True
@@ -3399,9 +3405,11 @@ class LabPage(Gtk.Box):
         self.state = state
         if self.save_pending or self.limit_resume_wait:
             return
-        total = state.get("scenarioLength", 0)
-        complete = state.get("scenarioCompletedGoals", 0)
+        bounded_editor_course = state.get("editorCourse") and state.get("actionLimit", 0) > 0
+        total = state.get("actionLimit" if bounded_editor_course else "scenarioLength", 0)
+        complete = state.get("solved" if bounded_editor_course else "scenarioCompletedGoals", 0)
         self.lesson_meter.set_fraction(max(0.0, min(1.0, complete / total)) if total else 0.0)
+        bind_name(self.lesson_meter, "Прогресс занятия" if bounded_editor_course else "Прогресс упражнения")
         if state["finished"]:
             self.stop()
             return
@@ -3584,6 +3592,9 @@ class LabPage(Gtk.Box):
             return
         direct_module = self.direct_module
         selected_class = self.classes[self.picker.get_selected()]["id"]
+        if (self.state or {}).get("editorCourse"):
+            self.host.open_reference_module(direct_module or selected_class)
+            return
         desktop_profile = self.desktop_profile
         selected_mode = self.mode.get_selected()
         selected_level = self.level.get_selected()

@@ -21,6 +21,7 @@ namespace TouchTypingStudio
         private static readonly int[] LabTimeLimits = { 0, 180, 600 };
         private int lastLabLimit, lastLabTimer;
         private string lastLabMission = "";
+        private bool lastLabEditorCourse;
         private Button labHint;
         private Button labLimitContinue, labLimitFinish, labLimitArmedButton;
         private Key labLimitArmedKey;
@@ -42,6 +43,7 @@ namespace TouchTypingStudio
             if (labApp == "ubuntu" || labApp == "windows") labApp = id;
             labDesktopProfile = id;
             lastLabMission = "";
+            lastLabEditorCourse = false;
         }
 
         private FrameworkElement BuildDesktopProfileChoice(Action redraw)
@@ -148,14 +150,15 @@ namespace TouchTypingStudio
         {
             if (active) return;
             labApp = liveReturnApp = app;
+            bool editorCourse = !resume && app == "code";
             string mission = "";
-            if (!resume)
+            if (!resume && !editorCourse)
             {
                 var selection = Request("lab-next-mission", "app", app, "level", labLevel, "desktopProfile", labDesktopProfile);
                 if (!selection.Exists) return;
                 mission = selection.S("mission");
             }
-            StartLabAttempt(mission, resume);
+            StartLabAttempt(mission, resume, editorCourse);
         }
 
         private void ReturnToLiveCatalog()
@@ -169,7 +172,7 @@ namespace TouchTypingStudio
 
         private bool labSavePending, labSaveClosePending, labSaveBackPending, labExplicitFinishPending;
 
-        private void StartLabAttempt(string mission, bool resume)
+        private void StartLabAttempt(string mission, bool resume, bool editorCourse = false)
         {
             if (active) return;
             if (Keyboard.Modifiers != ModifierKeys.None)
@@ -184,13 +187,21 @@ namespace TouchTypingStudio
             if (verifyMode && seconds > 0 && int.TryParse(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SOFT_FINISH_SECONDS"), out testSeconds))
                 seconds = Math.Max(1, Math.Min(seconds, testSeconds));
             string guidance = labMode == "drill" ? "independent" : "guided";
+            var fields = new List<object> {
+                "desktopProfile", labDesktopProfile, "app", labApp, "mode", labMode, "level", labLevel,
+                "guidance", guidance, "mission", mission, "continue", resume, "preserveDraft", !resume,
+                "softFinish", true, "combinedLimits", true, "nativeEnglishInput", true
+            };
+            if (editorCourse) fields.AddRange(new object[] { "editorCourse", true });
+            else fields.AddRange(new object[] { "seconds", seconds, "actionLimit", actions });
             int seed;
-            var initial = verifyMode && int.TryParse(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"), out seed)
-                ? Request("lab-start", "desktopProfile", labDesktopProfile, "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "preserveDraft", !resume, "softFinish", true, "combinedLimits", true, "nativeEnglishInput", true, "seed", seed)
-                : Request("lab-start", "desktopProfile", labDesktopProfile, "app", labApp, "mode", labMode, "level", labLevel, "seconds", seconds, "actionLimit", actions, "guidance", guidance, "mission", mission, "continue", resume, "preserveDraft", !resume, "softFinish", true, "combinedLimits", true, "nativeEnglishInput", true);
+            if (verifyMode && int.TryParse(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"), out seed))
+                fields.AddRange(new object[] { "seed", seed });
+            var initial = Request("lab-start", fields.ToArray());
             if (!initial.Exists || initial.B("startBlocked")) return;
             labSavePending = labSaveClosePending = labSaveBackPending = labExplicitFinishPending = false;
             lastLabMission = initial.S("mission");
+            lastLabEditorCourse = initial.B("editorCourse");
             labActive = active = true;
             paused = true;
             pressed.Clear();
@@ -476,7 +487,7 @@ namespace TouchTypingStudio
                 library.B("showMistakeKey", true) && state.S("feedback") == "error" ? state.S("lastKey") : "",
                 library.B("liveShowKeys"), library.B("liveShowHands"), true,
                 library.S("keyboardProfile", "matebook-d16"), library.S("fnMode", "hotkeys"));
-            AutomationProperties.SetHelpText(labGuide, "Раскладка клавиатуры: " + exerciseLayout);
+            AutomationProperties.SetItemType(labGuide, "Раскладка клавиатуры: " + exerciseLayout);
             labKeyAid.Opacity = library.B("liveShowKeys") ? 1 : .5;
             labHandAid.Opacity = library.B("liveShowHands") ? 1 : .5;
             labMistakeAid.Opacity = library.B("showMistakeKey", true) ? 1 : .5;
@@ -673,7 +684,7 @@ namespace TouchTypingStudio
         {
             if (labActive) FinishLab();
             if (labActive) return; // Retain the paused lesson until its save succeeds.
-            StartLabAttempt(lastLabMission, false);
+            StartLabAttempt(lastLabEditorCourse ? "" : lastLabMission, false, lastLabEditorCourse);
         }
 
         private FrameworkElement BuildLabResult(Data result, FrameworkElement backdrop, bool preview = false)
