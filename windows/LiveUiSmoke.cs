@@ -427,7 +427,10 @@ internal static partial class LiveUiSmoke
         Key("F4");
         Until(delegate { return Visible("LiveAidPanel") && Find("LiveAidPanel").Current.ItemStatus == "keyboard;no-hands"; },
             "Keyboard appears independently without enabling hands");
-        Check(Name("LiveAidPanel") == "Клавиатура", "Live keyboard has a real accessibility name");
+        string accessibleKeyboard = Name("LiveAidPanel");
+        Check(accessibleKeyboard.StartsWith("Клавиатура. Раскладка: ", StringComparison.Ordinal) &&
+            accessibleKeyboard.Contains("Подсвечены: ") && !accessibleKeyboard.EndsWith("Подсвечены: ", StringComparison.Ordinal),
+            "Live keyboard names the actual layout and highlighted keys for screen readers");
         CaptureLiveUxFrame("live-ux-03b-keyboard-only");
         if (small)
         {
