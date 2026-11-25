@@ -442,6 +442,7 @@ namespace TouchTypingStudio
             if (verifyMode)
             {
                 string keys = task.S("keys"), text = task.S("text");
+                AutomationProperties.SetItemStatus(labKeys, keys.Length > 0 ? text : "");
                 AutomationProperties.SetItemStatus(labTask,
                     keys.Length > 0 ? "keys:" + keys : text.Length > 0 ? "text:" + text : "none:");
             }

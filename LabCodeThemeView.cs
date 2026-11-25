@@ -81,6 +81,32 @@ namespace TouchTypingStudio
                 window.Items(view == "changes" ? "changedFiles" : view == "project-search" ? "searchResults" : "projectFiles").Select(item => item.Value()).ToArray();
             string active = CodeRelativePath(window);
             double row = projectView ? 85 : 68;
+            if (projectView && (window.S("focus") == "explorer" || window.S("focus") == "file-name"))
+            {
+                var entries = window.Items("entries").ToArray();
+                var expanded = new HashSet<string>(window.Items("expandedFolders").Select(item => item.Value()), StringComparer.Ordinal);
+                int selected = window.I("item", -1), capacity = Math.Max(1, (int)((h - 39 - row)/22));
+                int first = Math.Max(0, selected-capacity+1);
+                for (int i = first; i < Math.Min(entries.Length, first+capacity); i++, row += 22)
+                {
+                    var entry = entries[i];
+                    string path = entry.S("path");
+                    int depth = Math.Max(0, path.Count(c => c == '/') - window.I("projectRootDepth", 3) - 1);
+                    double left = x + 8 + depth * 13;
+                    if (i == selected) Rectangle(x+1, row, width-3, 22, CodeSelection);
+                    Text(entry.S("kind") == "folder" ? expanded.Contains(path) ? "⌄" : "›" : "▤",
+                        left, row+2, 12, CodeMuted, 16);
+                    left += 16;
+                    double textWidth = Math.Max(1, x + width - left - 5);
+                    if (i == selected && window.S("focus") == "file-name")
+                    {
+                        Rounded(left-2, row+1, textWidth, 20, CodeCanvas, 2);
+                        Field(window.S("input"), window, left, row+2, textWidth-2, 12, CodeForeground, 0, true, face: regular);
+                    }
+                    else Text(entry.S("title"), left, row+2, 12, CodeForeground, textWidth);
+                }
+                return;
+            }
             var shownFolders = new HashSet<string>(StringComparer.Ordinal);
             foreach (string value in names)
             {
@@ -128,6 +154,8 @@ namespace TouchTypingStudio
             double rightWidth = Math.Min(w * .64, 345);
             Text("⑂ main   ⓧ " + scene.I("diagnosticProblemCount") + "   ⚠ 0",
                 12, h - 19, 12, CodeMuted, w - rightWidth - 18);
+            if (window.D("notebook").Exists)
+            { Text("Ячейка " + (window.D("notebook").I("selected") + 1) + "    Jupyter Notebook", w - rightWidth, h - 19, 12, CodeMuted, rightWidth - 6); return; }
             Text(string.Format(CultureInfo.InvariantCulture, "Ln {0}, Col {1}     Spaces: 4     UTF-8     LF     {2}", line, column, language),
                 w - rightWidth, h - 19, 12, CodeMuted, rightWidth - 6);
         }

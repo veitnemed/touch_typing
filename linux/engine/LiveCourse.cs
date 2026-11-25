@@ -27,6 +27,7 @@ internal static partial class LiveCourse
         DesktopMissions(result);
         WindowsDesktopMissions(result);
         WorkdayDebugMissions(result);
+        ProjectFileMissions(result);
         return result;
     }
 
@@ -40,9 +41,9 @@ internal static partial class LiveCourse
         {
             foreach (string token in RouteTokens(mission.Phases[phase]))
             {
-                if (!nativeEnglishInput && (IsCommandToken(token) || IsProjectSearchQuery(token) || token is "browser-search" or "code-clone-command" or "research-find" ||
+                if (!nativeEnglishInput && (IsCommandToken(token) || IsProjectSearchQuery(token) || token is "browser-search" or "code-clone-command" or "research-find" or "file-name-commit" ||
                     token is "code-rename-confirm" or "debug-unit" or "debug-report-check"
-                    or "debug-project-query" or "debug-doc-submit" or "debug-rewrite" or "exact-find-submit" or "python-edit-write" ||
+                    or "debug-project-query" or "debug-doc-submit" or "debug-rewrite" or "exact-find-submit" or "python-edit-write" or "notebook-file" or "notebook-report" or "notebook-type" or "notebook-report-save" ||
                     trial.ExactEdit && token is "quick-choose" or "save") && trial.Layout == "RU")
                 {
                     var change = trial.WithBinding(Actions["layout"]);
@@ -105,7 +106,12 @@ internal static partial class LiveCourse
     private static readonly Dictionary<string, LabTask> Actions = LabCatalog.AllTasks.ToDictionary(task => task.Id);
     private static LabTask MakeTask(string token, LabScene scene)
     {
+        if (NotebookTask(token, scene) is LabTask notebook) return notebook;
         if (PythonEditTask(token) is LabTask edit) return edit;
+        if (token == "file-route-parent") token = scene.WindowsDesktop ? "win-explorer-parent" : "file-parent";
+        if (token == "file-name-commit") return Actions[token] with { Keys = "", Text = scene.FileStem,
+            Title = "Введите «" + scene.FileStem + "» вместо выделенного имени и нажмите Enter",
+            Hint = "Сохраните расширение .csv. Если передумали, Esc отменит переименование." };
         if (token == "browser-search")
             return Actions["navigate-pasted"] with { Keys = "", Text = scene.BrowserPracticeQuery,
                 Title = "Введите «" + scene.BrowserPracticeQuery + "» и нажмите Enter",
@@ -131,12 +137,12 @@ internal static partial class LiveCourse
         if (IsPickerToken(token))
         {
             var w = scene.Active;
-            string raw = scene.ResolveBrowserRouteTarget(token[(token.IndexOf(':') + 1)..]);
+            string raw = scene.FileRouteTarget(scene.ResolveBrowserRouteTarget(token[(token.IndexOf(':') + 1)..]));
             string query = raw.Replace('_', ' ');
             var entry = scene.Entries(w).FirstOrDefault(item => item.Path == raw || item.Path.EndsWith("/" + raw, StringComparison.Ordinal) ||
                 item.Path == query || item.Title == query || item.Path.EndsWith("/" + query, StringComparison.Ordinal));
             if (entry == null) throw new InvalidOperationException("Не найден объект: " + query + " в " + w.Url + w.Folder);
-            var picker = Actions[w.Focus == "quick-open" ? "quick-next" : w.Focus == "symbols" ? "symbol-next" : w.App == "files" ? "file-next" : "link-next"];
+            var picker = Actions[w.Focus == "quick-open" ? "quick-next" : w.Focus == "symbols" ? "symbol-next" : (w.App == "files" || w.Focus == "explorer") ? "file-next" : "link-next"];
             return picker with { Title = "Выберите «" + entry.Title + "»", Text = entry.Title };
         }
         if (IsCommandToken(token))
@@ -183,6 +189,9 @@ internal static partial class LiveCourse
         if (task.Action == "item-open")
         {
             var item = scene.Entries(scene.Active).ElementAtOrDefault(scene.Active.Item);
+            if (item?.Kind == "reveal") return task with {
+                Title = "Покажите «" + System.IO.Path.GetFileName(item.Path) + "» в папке загрузок",
+                Hint = "Здесь Chrome откроет папку с выбранным файлом. Переименование делается в файловом менеджере." };
             if (item != null) return task with { Title = (item.Kind == "download" ? "Скачайте" : "Откройте") + " «" + item.Title + "»" };
         }
         return task;
@@ -190,6 +199,12 @@ internal static partial class LiveCourse
 
     private static bool Demonstrate(LabTask task, LabScene trial)
     {
+        if (trial.NotebookCourse)
+        {
+            if (task.Action == "notebook-type") return trial.Text("Text", task.Text);
+            if (task.Action == "quick-choose" && task.Text.Length > 0) { trial.Active.Input = task.Text; trial.Active.OptionIndex = 0; }
+            if (task.Action == "save" && task.Text.Length > 0) trial.Insert(trial.Active, task.Text);
+        }
         if (task.Action.StartsWith("python-edit-", StringComparison.Ordinal)) return trial.PerformPythonEdit(task.Action);
         if (task.Action == "launch") { trial.Ensure(task.Id[5..]); return true; }
         if (task.Action == "gnome-write")
@@ -198,6 +213,7 @@ internal static partial class LiveCourse
                 if (!trial.Text(ch.ToString().ToUpperInvariant(), ch.ToString())) return false;
             return trial.Text("Enter", "");
         }
+        if (task.Action == "file-name-commit") trial.Insert(trial.Active, task.Text);
         if (task.Action == "research-find")
         {
             trial.Active.Input = task.Text;
@@ -224,6 +240,8 @@ internal static partial class LiveCourse
         }
         if (task.Action == "code-rename-confirm") trial.Active.Input = LabScene.RenameTarget;
         if (!LabCatalog.Available(task, trial) || !trial.Apply(task.Action)) return false;
+        if (trial.NotebookCourse && task.Action == "save" && !trial.NotebookSavedCorrect())
+            throw new InvalidOperationException("Маршрут не подтвердил содержимое сохранённого блокнота.");
         if (trial.Switcher) trial.CommitSwitch();
         return true;
     }
@@ -232,6 +250,8 @@ internal static partial class LiveCourse
     {
         var w = scene.Active;
         string app = w?.App ?? "", action = task.Action;
+        if (scene.ProjectFileEvidence(task) is object files) return JsonSerializer.Serialize(files);
+        if (scene.NotebookCourse) return JsonSerializer.Serialize(scene.NotebookEvidence(action));
         if (scene.WindowsDesktop && (!scene.BrowserResearchActive || action.StartsWith("win-", StringComparison.Ordinal)))
             return JsonSerializer.Serialize(scene.WindowsDesktopEvidence());
         if (scene.PythonEditingExercise) return JsonSerializer.Serialize(scene.PythonEditEvidence());

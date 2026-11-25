@@ -42,8 +42,10 @@ internal static class LiveUiSmoke
             bool debugDay = arguments.Contains("--debug-day");
             bool codeTheme = arguments.Contains("--code-theme");
             bool pythonEditor = arguments.Contains("--python-editor");
+            bool notebookMission = arguments.Contains("--notebook-mission");
+            bool projectFileMission = arguments.Contains("--project-file-mission");
             bool nativeLayout = arguments.Contains("--native-layout");
-            bool referenceEvidence = liveUx || nativeLayout || referenceBrowser || browserClone || numLockMode.Length > 0 || dailyUse || gnomeProfile || debugDay || codeTheme || pythonEditor || arguments.Contains("--reference-evidence");
+            bool referenceEvidence = notebookMission || projectFileMission || liveUx || nativeLayout || referenceBrowser || browserClone || numLockMode.Length > 0 || dailyUse || gnomeProfile || debugDay || codeTheme || pythonEditor || arguments.Contains("--reference-evidence");
             if (referenceEvidence && SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
                 throw new InvalidOperationException("Per-monitor-aware evidence capture cannot be enabled.");
             string path = Path.GetFullPath(arguments[0]);
@@ -55,8 +57,8 @@ internal static class LiveUiSmoke
                 Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_SOFT_FINISH_SECONDS", "7");
             Console.WriteLine("UI test seed " + Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"));
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_NAV_TRACE", gnomeProfile ? "workspace" : numLockMode.Length > 0 ? "workday-keypad" :
-                referenceEvidence && !nativeLayout && !referenceBrowser && !dailyUse && !debugDay && !codeTheme && !pythonEditor && !browserClone ? "terminal" : null);
-            Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_BROWSER_CLONE", browserClone ? "1" : null);
+                referenceEvidence && !nativeLayout && !referenceBrowser && !dailyUse && !debugDay && !codeTheme && !pythonEditor && !browserClone && !notebookMission && !projectFileMission ? "terminal" : null);
+            Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_BROWSER_CLONE", browserClone || projectFileMission ? "1" : null);
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_PYTHON_EDITOR", pythonEditor ? "1" : null);
             app = Process.Start(new ProcessStartInfo(path, "--qa --live") { WorkingDirectory = Path.GetDirectoryName(path) });
             Until(delegate { app.Refresh(); trainer = app.MainWindowHandle; return trainer != IntPtr.Zero; }, "trainer window", 12000);
@@ -68,6 +70,18 @@ internal static class LiveUiSmoke
                 if (liveUxSmall) ResizeOwnedEditorClient(1024, 600, true);
                 CheckLiveUx(path, liveUxSmall);
                 Console.WriteLine("PASS: " + count + " WPF Live direct-catalog and Configure assertions");
+                return 0;
+            }
+            if (notebookMission)
+            {
+                CheckNotebookMission();
+                Console.WriteLine("PASS: " + count + " native WPF notebook checks");
+                return 0;
+            }
+            if (projectFileMission)
+            {
+                CheckProjectFileMission();
+                Console.WriteLine("PASS: " + count + " native WPF download and project file checks");
                 return 0;
             }
             if (pythonEditor)
@@ -648,6 +662,116 @@ internal static class LiveUiSmoke
         Check(task.Width > 0 && keys.Width > 0 && task.Bottom <= keys.Top + 1 &&
             Math.Abs((task.Left + task.Width / 2) - (keys.Left + keys.Width / 2)) < 5,
             "Keycaps are below the instruction, with the two rows horizontally centered.");
+    }
+
+    // Walk a route from the normal catalog with real input. Each credited
+    // step must advance once, and a curated mission must reach its result.
+    private static void CheckCatalogMission(string area, int level, string title, Action<int, string> inspect)
+    {
+        OpenLiveConfiguration(area);
+        Select("LabMode", 1); Select("LabLevel", level); Select("LabDuration", 0); Select("LabTimer", 0);
+        SelectMissionByName(title);
+        Key("F5");
+        Until(delegate { return Visible("LabTask") && Visible("LabDesktop") && Name("LabPause").StartsWith("Пауза"); },
+            "mission opened from the normal catalog: " + title);
+        VirtualEnglish();
+        for (int step = 0; step < 75; step++)
+        {
+            if (Visible("LabResult")) return;
+            string prompt = Find("LabTask").Current.ItemStatus;
+            Check(ReadSolved() == step, "Exactly one credit per route action");
+            Console.WriteLine("MISSION " + step + " " + Name("LabTask") + " | " + prompt);
+            inspect(step, prompt);
+            if (prompt.StartsWith("text:", StringComparison.Ordinal))
+            {
+                EnterCharacters(prompt.Substring(5));
+                if (!Visible("LabResult") && ReadSolved() == step) Key("Enter");
+            }
+            else
+            {
+                Check(prompt.StartsWith("keys:", StringComparison.Ordinal), "Mission supplies a real keyboard action");
+                string keys = prompt.Substring(5);
+                if (Exists("LabKeys"))
+                {
+                    string prefixText = Find("LabKeys").Current.ItemStatus;
+                    if (!String.IsNullOrEmpty(prefixText)) EnterCharacters(prefixText);
+                }
+                for (int i = 0; i < (keys == "Tab" || keys == "Down" ? 20 : 1); i++)
+                {
+                    Chord(keys);
+                    if (Visible("LabResult") || ReadSolved() > step) break;
+                }
+            }
+            int expected = step + 1;
+            Until(delegate { return Visible("LabResult") || ReadSolved() == expected; },
+                "native credit for " + prompt + " in " + title);
+            if (Visible("LabResult"))
+            {
+                string result = Find("LabResult").Current.HelpText;
+                Check(result.Contains("Выполнено " + expected + "."), "Result records the exact credited step count");
+                inspect(expected, "result");
+                return;
+            }
+        }
+        throw new InvalidOperationException("Mission did not finish: " + title);
+    }
+
+    private static void CheckNotebookMission()
+    {
+        bool opened = false;
+        var outputs = new List<string>();
+        CheckCatalogMission("code", 1, "Исправить формулу в блокноте по заявке", (step, prompt) =>
+        {
+            if (prompt == "result")
+            {
+                Check(opened && outputs.Count >= 2, "VS Code showed distinct original and corrected cell outputs");
+                CaptureReferenceFrame("notebook-03-result");
+                return;
+            }
+            var scene = Find("LabDesktop").Current;
+            string description = scene.Name + " " + scene.HelpText;
+            if (!opened && description.Contains(".ipynb") && description.Contains("ячейк"))
+            {
+                opened = true;
+                CaptureReferenceFrame("notebook-01-opened");
+            }
+            var output = Regex.Match(scene.HelpText, @"Вывод:\s*(-?\d+)\b");
+            if (opened && output.Success && !outputs.Contains(output.Groups[1].Value))
+            {
+                outputs.Add(output.Groups[1].Value);
+                CaptureReferenceFrame("notebook-02-output-" + outputs.Count);
+            }
+        });
+    }
+
+    private static void CheckProjectFileMission()
+    {
+        Invoke("LabDesktopProfile-windows");
+        Until(delegate { return Exists("HomeClass-windows"); }, "Windows 10 simulation selected");
+        bool rename = false, move = false;
+        CheckCatalogMission("workday", 1, "Скачать CSV, переименовать и передать в проект", (step, prompt) =>
+        {
+            if (prompt == "result")
+            {
+                var end = BrowserWitness("LabResult");
+                Check(rename && move && end[0] == "code" &&
+                    end[1].Contains("/project/reports/") && end[1].EndsWith(".csv", StringComparison.Ordinal),
+                    "Transferred CSV is opened in the project after the rename");
+                CaptureReferenceFrame("project-files-03-result");
+                return;
+            }
+            var scene = BrowserWitness("LabDesktop");
+            if (!rename && scene[0] == "files" && scene[2] == "file-name")
+            {
+                rename = true;
+                CaptureReferenceFrame("project-files-01-rename");
+            }
+            if (!move && scene[6].Contains("/project/reports/") && scene[6].Contains(".csv"))
+            {
+                move = true;
+                CaptureReferenceFrame("project-files-02-moved");
+            }
+        });
     }
 
     private static string[] BrowserWitness(string id)

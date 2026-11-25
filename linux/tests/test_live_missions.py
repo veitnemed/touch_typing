@@ -1584,6 +1584,11 @@ class MissionTest(unittest.TestCase):
             self.assertEqual(state["mission"], mission["id"])
             task = state["task"]
             for attempt in range(24):
+                if (mission["id"].startswith("code-notebook-") and task["text"] and attempt == 0
+                        and task["id"] in {"quick-choose", "save", "notebook-type"}):
+                    from test_editor_notebooks import chord_for
+                    for char in task["text"]:
+                        state = chord([sides.get(k, k) for k in chord_for(char).split("+")], char)
                 if task["keys"]:
                     expects_text = task["id"] in {"code-rename-confirm", "project-search-submit"} or (
                         mission["id"] == "code-find-exact-edit" and task["id"] in {"quick-choose", "exact-find-submit", "save"})
@@ -1599,6 +1604,8 @@ class MissionTest(unittest.TestCase):
                         state = chord([sides.get(k, k) for k in task["keys"].split("+")], png_fixture())
                     else:
                         state = chord([sides.get(k, k) for k in task["keys"].split("+")])
+                elif task["id"] == "notebook-type":
+                    pass  # The final character credits the edit. Enter would modify the cell.
                 elif task["id"] == "python-edit-write":
                     for char in task["text"]:
                         keys = {" ": ["Space"], "=": ["="], "+": ["LShift", "="]}.get(char, [char.upper()])

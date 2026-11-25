@@ -198,6 +198,7 @@ class QA(LabWindowTest):
         self.capture_widget_png(out/'06-terminal.png')
         print('PASS Gtk native workflow and keypad',json.dumps(self.witness),flush=True)
 
-app=QA()
-result=app.run([])
-raise SystemExit(1 if app.smoke_failure else result)
+if __name__ == "__main__":
+    app=QA()
+    result=app.run([])
+    raise SystemExit(1 if app.smoke_failure else result)

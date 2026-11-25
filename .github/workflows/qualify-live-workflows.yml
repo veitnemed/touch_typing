@@ -1,4 +1,4 @@
-name: Qualify TouchTyping Preview 3 (no publication)
+name: Qualify TouchTyping Live workflows (no publication)
 on:
   push:
     branches: [feature/live-ux-acceptance]
@@ -23,13 +23,13 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$PRODUCT_SHA"
-          p="$RUNNER_TEMP/preview3"
+          p="$RUNNER_TEMP/live-workflows"
           mkdir -p "$p"
           bash linux/build-release.sh "$p/touch-typing-linux-x64"
           bash windows/build-release.sh "$p/windows-x64"
-          tar --sort=name --mtime='UTC 2026-11-24' --owner=0 --group=0 --numeric-owner -czf "$p/touch-typing-v1.9.0-preview.3-linux-x64.tar.gz" -C "$p" touch-typing-linux-x64
-          (cd "$p/windows-x64" && zip -qr "$p/touch-typing-v1.9.0-preview.3-windows-x64.zip" .)
-          (cd "$p" && sha256sum touch-typing-v1.9.0-preview.3-* > SHA256SUMS.txt)
+          tar --sort=name --mtime='UTC 2026-11-25' --owner=0 --group=0 --numeric-owner -czf "$p/touch-typing-candidate-linux-x64.tar.gz" -C "$p" touch-typing-linux-x64
+          (cd "$p/windows-x64" && zip -qr "$p/touch-typing-candidate-windows-x64.zip" .)
+          (cd "$p" && sha256sum touch-typing-candidate-* > SHA256SUMS.txt)
           printf '%s\n' "$PRODUCT_SHA" > "$p/SOURCE-SHA.txt"
           for suite in SharedRegression LabRegression TerminalRegression LabStressTests; do
             dotnet run --project "linux/tests/$suite.csproj" -c Release
@@ -38,15 +38,17 @@ jobs:
           /usr/bin/python3 linux/tests/test_practice.py
           /usr/bin/python3 linux/tests/test_live_entry_preferences.py
           /usr/bin/python3 linux/tests/test_live_missions.py
+          /usr/bin/python3 linux/tests/test_editor_notebooks.py
+          /usr/bin/python3 linux/tests/test_project_file_practice.py
           /usr/bin/python3 linux/tests/test_win10_protocol.py "$TOUCH_TYPING_ENGINE"
           /usr/bin/python3 linux/tests/audit_live_shortcuts.py
       - uses: actions/upload-artifact@v4
         with:
-          name: preview3-verified-archives
+          name: live-verified-archives
           path: |
-            ${{ runner.temp }}/preview3/touch-typing-v1.9.0-preview.3-*
-            ${{ runner.temp }}/preview3/SHA256SUMS.txt
-            ${{ runner.temp }}/preview3/SOURCE-SHA.txt
+            ${{ runner.temp }}/live-workflows/touch-typing-candidate-*
+            ${{ runner.temp }}/live-workflows/SHA256SUMS.txt
+            ${{ runner.temp }}/live-workflows/SOURCE-SHA.txt
           if-no-files-found: error
   linux-native:
     needs: build
@@ -59,7 +61,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: preview3-verified-archives
+          name: live-verified-archives
           path: ${{ runner.temp }}/archives
       - name: Run installed GTK from the actual archive on a clean X11 profile
         shell: bash
@@ -70,7 +72,7 @@ jobs:
           p="$RUNNER_TEMP/archives"
           (cd "$p" && sha256sum -c SHA256SUMS.txt)
           temp=$(mktemp -d)
-          tar -xzf "$p/touch-typing-v1.9.0-preview.3-linux-x64.tar.gz" -C "$temp"
+          tar -xzf "$p/touch-typing-candidate-linux-x64.tar.gz" -C "$temp"
           package="$temp/touch-typing-linux-x64"
           export TOUCH_TYPING_QA_OUTPUT="$RUNNER_TEMP/gtk-proof" TOUCH_TYPING_ENGINE="$package/engine/TouchTyping.Engine"
           export XDG_DATA_HOME="$temp/data" XDG_RUNTIME_DIR="$temp/runtime" TOUCH_TYPING_QA_DATA_ROOT="$temp/profile"
@@ -83,6 +85,13 @@ jobs:
             trap "kill -INT $video 2>/dev/null || true; wait $video || true" EXIT
             /usr/bin/python3 linux/tests/test_preview2_native.py
           ' | tee "$TOUCH_TYPING_QA_OUTPUT/gtk-test.log"
+          for scenario in test_editor_notebooks_x11.py test_project_files_x11.py; do
+            export TOUCH_TYPING_QA_OUTPUT="$RUNNER_TEMP/gtk-proof/${scenario%.py}" TOUCH_TYPING_QA_DATA_ROOT="$temp/${scenario%.py}"
+            mkdir -m 700 "$TOUCH_TYPING_QA_OUTPUT" "$TOUCH_TYPING_QA_DATA_ROOT"
+            timeout 180s xvfb-run -a -s "-screen 0 1024x600x24 -nolisten tcp" /usr/bin/python3 "linux/tests/$scenario" |
+              tee "$TOUCH_TYPING_QA_OUTPUT/gtk-test.log"
+          done
+          export TOUCH_TYPING_QA_OUTPUT="$RUNNER_TEMP/gtk-proof"
           unset TOUCH_TYPING_QA_DATA_ROOT
           export XDG_DATA_HOME="$temp/repeat-data"
           mkdir -p -m 700 "$XDG_DATA_HOME"
@@ -95,7 +104,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: preview3-gtk-proof
+          name: live-gtk-proof
           path: ${{ runner.temp }}/gtk-proof/
           if-no-files-found: warn
   windows-native:
@@ -105,7 +114,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: preview3-verified-archives
+          name: live-verified-archives
           path: ${{ runner.temp }}/archives
       - name: Verify and run the extracted WPF application
         shell: powershell
@@ -115,12 +124,14 @@ jobs:
           Write-Host "$($os.Caption) $($os.BuildNumber) $env:RUNNER_ARCH"
           $pkg = "$env:RUNNER_TEMP/archives"
           if ((Get-Content "$pkg/SOURCE-SHA.txt" -Raw).Trim() -ne $env:PRODUCT_SHA) { throw 'Source mismatch' }
-          $zip = "$pkg/touch-typing-v1.9.0-preview.3-windows-x64.zip"
+          $zip = "$pkg/touch-typing-candidate-windows-x64.zip"
           $hash = ((Get-Content "$pkg/SHA256SUMS.txt" | Where-Object { $_ -match 'windows-x64\.zip$' }) -split '\s+')[0]
           if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $hash) { throw 'Archive mismatch' }
-          $app = "$env:RUNNER_TEMP/TouchTyping Preview 3"
+          $app = "$env:RUNNER_TEMP/TouchTyping Live Candidate"
           Expand-Archive -LiteralPath $zip -DestinationPath $app
           $proof = "$env:RUNNER_TEMP/windows-proof"
+          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -NotebookMission -Seed 0 -OutputDirectory "$proof/notebook"
+          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -ProjectFileMission -Seed 0 -OutputDirectory "$proof/project-files"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -BrowserClone -Seed 0 -OutputDirectory "$proof/browser"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock off -Seed 0 -OutputDirectory "$proof/keypad-off"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock on -Seed 0 -OutputDirectory "$proof/keypad-on"
@@ -129,6 +140,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: preview3-wpf-proof
+          name: live-wpf-proof
           path: ${{ runner.temp }}/windows-proof/
           if-no-files-found: warn

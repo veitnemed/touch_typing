@@ -37,12 +37,13 @@ internal sealed partial class LabScene
         if (w.App == "chrome") return w.Url switch
         {
             "chrome://history" => recentUrls.Where(url => !url.StartsWith("chrome:")).Select(PageEntry).ToArray(),
-            "chrome://downloads" => downloads.Select(path => new LabEntry(NameOf(path), path, "file")).ToArray(),
+            "chrome://downloads" => DownloadEntries(),
             "chrome://bookmarks" => w.SavedBookmarks.Order().Select(PageEntry).ToArray(),
             _ when BrowserPracticeActive && IsSearchResult(w.Url) => PracticeSearchEntries(w.Url),
             _ when BrowserPracticeActive => BrowserResearchLinks(w.Url),
             _ => Links
         };
+        if (w.App == "code" && w.Focus is "explorer" or "file-name") return ProjectTree(EditorProjectRoot, w.ExpandedProjectFolders).ToArray();
         if (w.Focus == "project-results") return ProjectMatchEntries(w);
         if (w.App == "code" && DiagnosticWorkspace &&
             (w.Focus is "code-problems" or "code-quick-fix" || w.Panel && w.Focus == "body"))
@@ -60,15 +61,16 @@ internal sealed partial class LabScene
             return result.ToArray();
         }
         if (ExactEdit && w.Focus == "quick-open") return ExactFileEntries(w.Input);
-        if (w.App == "code" && w.Focus is "quick-open" or "explorer")
+        if (w.App == "code" && w.Focus == "quick-open")
             return ProjectDocuments()
                 .Where(path => (w.Focus != "quick-open" || path.Contains(w.Input, StringComparison.OrdinalIgnoreCase))).Select(path => new LabEntry(NameOf(path), path, "file")).ToArray();
         return [];
     }
 
     private readonly Dictionary<string, string> originalFiles = [];
-    private string EditorProjectRoot => RepoCloned ? CloneRoot : ExactEdit ? ExactRoot : PythonEditingExercise ? PythonEditRoot : DiagnosticWorkspace ? DiagnosticRoot : SearchProjectRoot ?? (symbolWorkspace ? SymbolProject : Project);
-    private IEnumerable<string> ProjectDocuments() => DebugDay ? DebugProjectDocuments() :
+    private string EditorProjectRoot => NotebookCourse ? NotebookRoot : RepoCloned ? CloneRoot : ExactEdit ? ExactRoot : PythonEditingExercise ? PythonEditRoot : DiagnosticWorkspace ? DiagnosticRoot : SearchProjectRoot ?? (symbolWorkspace ? SymbolProject : Project);
+    private IEnumerable<string> ProjectDocuments() => projectFileFamily != null ?
+        ProjectTree(EditorProjectRoot, null, recursive: true).Where(e => e.Kind == "file").Select(e => e.Path) : DebugDay ? DebugProjectDocuments() :
         DiagnosticWorkspace ? Terminal.Entries(DiagnosticRoot).Where(path => !Terminal.DirectoryExists(path)) :
         Terminal.Entries(EditorProjectRoot)
         .Concat(Terminal.Entries(EditorProjectRoot + "/src"))
@@ -86,7 +88,7 @@ internal sealed partial class LabScene
             DebugDay && activePath.StartsWith(debugDay.Root + "/", StringComparison.Ordinal) ? DebugRelative(activePath) : activePath.StartsWith(EditorProjectRoot + "/", StringComparison.Ordinal)
                 ? Relative(activePath) : NameOf(activePath);
         return w.Snapshot(w.Id == ActiveWindow, Entries(w), paths.Select(Relative), changes, results, projectName, projectRelative,
-            WindowsDesktop && w.App == "files" ? WindowsPath(w.Folder) : null, BrowserPracticeActive);
+            WindowsDesktop && w.App == "files" ? WindowsPath(w.Folder) : null, BrowserPracticeActive, EditorProjectRoot.Count(ch => ch == '/'));
     }
 
     private static bool IsIdentifier(char c) => char.IsLetterOrDigit(c) || c == '_';
@@ -247,7 +249,15 @@ internal sealed partial class LabScene
                 if (entry == null) return false;
                 switch (entry.Kind)
                 {
-                    case "folder": ChangeFolder(w, entry.Path); break;
+                    case "reveal": return RevealDownload(entry.Path, w);
+                    case "folder":
+                        if (w.App == "code")
+                        {
+                            if (!w.ExpandedProjectFolders.Add(entry.Path)) w.ExpandedProjectFolders.Remove(entry.Path);
+                            SelectPath(w, entry.Path);
+                        }
+                        else ChangeFolder(w, entry.Path);
+                        break;
                     case "download":
                         string path = "/home/student/Downloads/" + entry.Path;
                         for (int copy = 1; Terminal.Exists(path); copy++)
@@ -256,6 +266,7 @@ internal sealed partial class LabScene
                         w.Status = "Загружен " + entry.Path; break;
                     case "file":
                         string content = Terminal.ReadFile(entry.Path);
+                        if (content == null) { w.Status = "Файл был перемещён или переименован"; return false; }
                         if (content?.StartsWith("data:image/png;base64,") == true)
                         { w.Focus = "image-preview"; w.ImagePreview = content; }
                         else OpenDocument(entry.Path);
@@ -263,6 +274,9 @@ internal sealed partial class LabScene
                     default: Navigate(w, entry.Path); break;
                 }
                 return true;
+            case "file-name-start": return BeginFileName(w);
+            case "file-name-cancel": return EndFileName(w, true);
+            case "file-name-commit": return EndFileName(w, false);
             case "file-home": ChangeFolder(w, "/home/student"); return true;
             case "file-parent": ChangeFolder(w, w.Folder[..Math.Max(1, w.Folder.LastIndexOf('/'))]); return true;
             case "file-back": case "file-forward":
@@ -273,15 +287,9 @@ internal sealed partial class LabScene
             case "file-copy": case "file-cut":
                 var file = Entries(w).ElementAtOrDefault(w.Item);
                 if (file == null) return false;
-                Clipboard = fileTransfer = file.Path; fileCut = action == "file-cut"; return true;
-            case "file-paste":
-                if (fileTransfer.Length == 0 || Clipboard != fileTransfer ||
-                    !Terminal.Exists(fileTransfer) || !Terminal.DirectoryExists(w.Folder) ||
-                    fileTransfer == w.Folder || fileTransfer[..Math.Max(1, fileTransfer.LastIndexOf('/'))] == w.Folder)
-                    return false;
-                Terminal.Transfer(fileTransfer, w.Folder, fileCut);
-                if (fileCut) fileTransfer = "";
-                w.Item = Array.FindIndex(Entries(w), item => item.Title == NameOf(Clipboard)); return true;
+                Clipboard = fileTransfer = file.Path; fileCut = action == "file-cut";
+                w.Status = (fileCut ? "К переносу: " : "К копированию: ") + file.Title; return true;
+            case "file-paste": return PasteProjectFile(w);
             case "trash":
                 var selected = Entries(w).ElementAtOrDefault(w.Item);
                 if (selected == null) return false;

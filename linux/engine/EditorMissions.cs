@@ -41,14 +41,17 @@ internal static partial class LiveCourse
         void Add(int level, string id, string title, params string[] parts) =>
             list.Add(new("code", level, "code-" + id, title, parts.Select(p => EditorParts[p]).ToArray()));
         Add(0,"guide","Составить заметку по проекту","signal","note","spectrum","readme","search");
+        NotebookMission(list, 0);
         Add(0,"first-fix","Подготовить первую правку модели","model","patch","signal","review","tools");
         Add(0,"scratch","Собрать два фрагмента в рабочие копии","spectrum","note","model","readme","layout");
         Add(0,"navigation","Найти путь от расчёта к документации","signal","search","model","spectrum","readme");
         Add(1,"refactor","Перестроить фрагмент обработки сигнала","signal","reorder","deduplicate","model","search");
+        NotebookMission(list, 1);
         Add(1,"extract","Извлечь код для сравнения","model","archive","spectrum","note","layout");
         Add(1,"console","Подготовить рабочее место для проверки","spectrum","layout","signal","patch","tools");
         Add(1,"symbols","Сопоставить определения функций","model","spectrum","identifiers","signal","note");
         Add(2,"handover","Передать код и пояснение на ревью","signal","archive","model","patch","readme","tools");
+        NotebookMission(list, 2);
         Add(2,"repair","Восстановить рабочую версию после правки","spectrum","reorder","model","review","search","layout");
         Add(2,"inspection","Проверить связанные правки в двух модулях","signal","patch","spectrum","reorder","identifiers","deduplicate");
         list.Add(new("code", 0, "code-go-definition", "Перейти к определению и вернуться",

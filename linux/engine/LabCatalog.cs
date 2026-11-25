@@ -60,6 +60,9 @@ internal static class LabCatalog
         T("link-next", "Перейдите к следующей ссылке", "Tab", "item-next"),
         T("link-prev", "Вернитесь к предыдущей ссылке", "Shift+Tab", "item-prev"),
         T("link-open", "Откройте выбранную ссылку", "Enter", "item-open"),
+        T("file-name-start", "Переименуйте выбранный файл", "F2", "file-name-start"),
+        T("file-name-commit", "Подтвердите новое имя", "Enter", "file-name-commit"),
+        T("file-name-cancel", "Отмените переименование", "Esc", "file-name-cancel"),
         T("file-next", "Выберите следующий объект", "Down", "item-next"),
         T("file-prev", "Выберите предыдущий объект", "Up", "item-prev"),
         T("file-open", "Откройте выбранный объект", "Enter", "item-open"),
@@ -203,7 +206,7 @@ internal static class LabCatalog
     ]);
     private static readonly HashSet<string> FilesIds = new(Shortcuts.Where(task => task.Id.StartsWith("file-") || task.Id is "trash" or "restore-trash").Select(task => task.Id));
     private static readonly HashSet<string> ChromeIds = new(["history", "downloads", "bookmark-manager", "link-next", "link-prev", "link-open", "new-tab", "close-tab", "restore-tab", "next-tab", "prev-tab", "first-tab", "last-tab", "url", "navigate-pasted", "find", "find-next", "refresh", "back", "forward", "fullscreen", "zoom-in", "zoom-out", "zoom-reset", "bookmark", "bookmarks", "select-all", "copy", "cut", "paste", "escape", "layout"]);
-    private static readonly HashSet<string> CodeIds = new(["document-start", "move-line-up", "move-line-down", "occurrence", "replace", "replace-field", "replace-one", "symbols", "symbol-next", "symbol-open", "changes", "focus-editor", "focus-second", "panel", "extensions", "select-line", "new-file", "close-tab", "next-tab", "prev-tab", "quick-open", "quick-next", "quick-choose", "palette", "palette-next", "palette-choose", "goto-line", "explorer", "project-search", "sidebar", "split", "terminal-toggle", "save", "select-all", "copy", "cut", "paste", "undo", "redo", "comment", "delete-line", "find", "escape", "layout"]);
+    private static readonly HashSet<string> CodeIds = new(["file-next", "file-prev", "file-open", "file-cut", "file-copy", "file-paste", "file-name-start", "file-name-commit", "file-name-cancel", "document-start", "move-line-up", "move-line-down", "occurrence", "replace", "replace-field", "replace-one", "symbols", "symbol-next", "symbol-open", "changes", "focus-editor", "focus-second", "panel", "extensions", "select-line", "new-file", "close-tab", "next-tab", "prev-tab", "quick-open", "quick-next", "quick-choose", "palette", "palette-next", "palette-choose", "goto-line", "explorer", "project-search", "sidebar", "split", "terminal-toggle", "save", "select-all", "copy", "cut", "paste", "undo", "redo", "comment", "delete-line", "find", "escape", "layout"]);
     static LabCatalog()
     {
         CodeIds.UnionWith(Shortcuts.Where(task => task.Id.StartsWith("code-", StringComparison.Ordinal) || task.Id.StartsWith("project-search-", StringComparison.Ordinal)).Select(task => task.Id));
@@ -228,13 +231,14 @@ internal static class LabCatalog
                     "ubuntu" => "Окна, рабочие столы и системные сочетания",
                     "windows" => "Пуск, Проводник, окна и виртуальные рабочие столы Windows 10",
                     "chrome" => "Вкладки, навигация, поиск и адресная строка",
-                    "code" => "Файлы, код, панели и встроенный терминал",
+                    "code" => "Файлы, код, блокноты, панели и встроенный терминал",
                     _ => "Сочетания, команды и учебная файловая система"
                 },
                 desktopProfile = app is "windows" or "ubuntu" ? app : null,
                 shortcuts = app == "windows" || app == "workday" && environment == "windows"
                     ? WindowsTasks.Concat(Shortcuts.Where(task => FilesIds.Contains(task.Id))).Select(task => task.Snapshot())
-                    : Shortcuts.Where(task => InApp(task, app)).Select(task => task.Snapshot())
+                    : Shortcuts.Where(task => InApp(task, app))
+                        .Concat(app == "code" ? LiveCourse.NotebookActions : []).Select(task => task.Snapshot())
             }),
             missions = (neutralProject ? NeutralProject.MissionCatalog : LiveCourse.Missions)
                 .Where(m => LabScene.MissionEnvironment(m) is null || LabScene.MissionEnvironment(m) == environment)
@@ -250,8 +254,12 @@ internal static class LabCatalog
         if (task.Id.StartsWith("win-", StringComparison.Ordinal)) return scene.WindowsActionAvailable(task.Action);
         var window = scene.Active;
         bool terminal = window != null && (window.App == "terminal" || window.Focus == "terminal");
+        bool fileList = window?.App == "files" && window.Focus == "body" || window?.App == "code" && window.Focus == "explorer";
         return task.Id switch
         {
+            "file-name-commit" or "file-name-cancel" => window?.Focus == "file-name",
+            "file-name-start" => fileList && scene.Entries(window).ElementAtOrDefault(window.Item)?.Kind == "file",
+            "file-next" or "file-prev" or "file-paste" => fileList,
             "code-clone-command" => scene.BrowserPracticeActive && window?.Focus == "palette" && window.Input.Trim().Equals("Git: Clone", StringComparison.OrdinalIgnoreCase),
             "code-clone-confirm" => scene.BrowserPracticeActive && window?.Focus == "clone-url",
             "code-problem-next" or "code-fix-open" or "code-fix-next" or "code-fix-prev" or
@@ -269,7 +277,8 @@ internal static class LabCatalog
             "replace-field" => window?.Focus == "replace-find",
             "replace-one" => window?.Focus == "replace-with",
             "symbol-next" or "symbol-open" => window?.Focus == "symbols",
-            "file-open" or "file-copy" or "file-cut" or "trash" => window?.App == "files" && window.Item >= 0,
+            "file-open" or "file-copy" or "file-cut" => fileList && window.Item >= 0,
+            "trash" => window?.App == "files" && window.Focus == "body" && window.Item >= 0,
             "link-open" => window?.App == "chrome" && window.Focus == "body" && window.Item >= 0,
             "link-next" or "link-prev" => window?.App == "chrome" && window.Focus == "body",
             "switch-next" or "switch-prev" => scene.Windows.Count(item => item.Workspace == scene.Workspace)
@@ -352,6 +361,7 @@ internal static class LabCatalog
         { "chrome" => ChromeIds, "code" => CodeIds, "files" => FilesIds, _ => UbuntuIds };
         int Priority(LabTask task)
         {
+            if ((scene.Active?.Focus is "file-name" or "explorer") && task.Id.StartsWith("file-", StringComparison.Ordinal)) return 3;
             if (task.Id.StartsWith("code-fix-", StringComparison.Ordinal) && scene.DiagnosticActionAvailable(task.Action))
                 return 2;
             if (task.Id == "copy-shot" && scene.ScreenshotReady && !scene.ScreenshotCopied) return 2;
@@ -379,6 +389,7 @@ internal static class LabCatalog
             var chord = Gesture.Parse(task.Keys).Chords[0];
             bool trigger = chord.Trigger == null ? KeyChord.IsModifier(key) : chord.Trigger == key;
             if (!trigger || !chord.FitsModifiers(held) || !Available(task, scene)) return false;
+            if (scene.Active?.Focus == "file-name") return task.Id is "file-name-commit" or "file-name-cancel" or "select-all" or "copy" or "cut" or "paste";
             if (scene.DebugDay && task.Id.StartsWith("debug-", StringComparison.Ordinal)) return true;
             if (scene.ExactEdit && task.Id.StartsWith("exact-", StringComparison.Ordinal)) return true;
             if (task.Id == "escape" && scene.BrowserResearchActive && context.Contains(task.Id))

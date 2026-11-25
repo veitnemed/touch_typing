@@ -16,12 +16,14 @@ param(
     [switch]$DebugDay,
     [switch]$CodeTheme,
     [switch]$PythonEditor,
+    [switch]$NotebookMission,
+    [switch]$ProjectFileMission,
     [int]$Seed = 20261122,
     [string]$OutputDirectory = (Join-Path $PSScriptRoot ('ui-check-' + (Get-Date -Format 'yyyyMMdd-HHmmss')))
 )
 $ErrorActionPreference = 'Stop'
 if ($WorkdayNumLock) { $WorkdaySourceNote = $true }
-$modes = @($FullSession,$WorkdaySourceNote,$BrowserClone,$ReferenceBrowser,$SoftFinish,$NativeLayout,$DailyUse,$GnomeProfilePractice,$DebugDay,$CodeTheme,$PythonEditor) | Where-Object { [bool]$_ }
+$modes = @($FullSession,$WorkdaySourceNote,$BrowserClone,$ReferenceBrowser,$SoftFinish,$NativeLayout,$DailyUse,$GnomeProfilePractice,$DebugDay,$CodeTheme,$PythonEditor,$NotebookMission,$ProjectFileMission) | Where-Object { [bool]$_ }
 if (@($modes).Count -gt 1) { throw 'Choose only one standalone UI test mode.' }
 if ($ReferenceBrowser) { $Seed = 0 }
 if (-not $Application) {
@@ -57,13 +59,15 @@ $report = [ordered]@{
     debugDay = [bool]$DebugDay
     codeTheme = [bool]$CodeTheme
     pythonEditor = [bool]$PythonEditor
+    notebookMission = [bool]$NotebookMission
+    projectFileMission = [bool]$ProjectFileMission
     profile = 'TouchTypingStudio-QA'
     log = 'windows-ui.log'
 }
 try {
     $env:TOUCH_TYPING_QA_SEED = $Seed.ToString([Globalization.CultureInfo]::InvariantCulture)
     $env:TOUCH_TYPING_QA_DATA_ROOT = Join-Path $OutputDirectory 'profile'
-    if (($WorkdaySourceNote -or $BrowserClone -or $ReferenceBrowser -or $SoftFinish -or $NativeLayout -or $DailyUse -or $GnomeProfilePractice -or $DebugDay -or $CodeTheme -or $PythonEditor) -and (Test-Path -LiteralPath $env:TOUCH_TYPING_QA_DATA_ROOT)) {
+    if (($WorkdaySourceNote -or $BrowserClone -or $ReferenceBrowser -or $SoftFinish -or $NativeLayout -or $DailyUse -or $GnomeProfilePractice -or $DebugDay -or $CodeTheme -or $PythonEditor -or $NotebookMission -or $ProjectFileMission) -and (Test-Path -LiteralPath $env:TOUCH_TYPING_QA_DATA_ROOT)) {
         throw 'Use a new output directory for the standalone UI check.'
     }
     $report | ConvertTo-Json | Set-Content -LiteralPath $reportFile -Encoding UTF8
@@ -87,6 +91,8 @@ try {
     if ($DebugDay) { $arguments += '--debug-day' }
     if ($CodeTheme) { $arguments += '--code-theme' }
     if ($PythonEditor) { $arguments += '--python-editor' }
+    if ($NotebookMission) { $arguments += '--notebook-mission' }
+    if ($ProjectFileMission) { $arguments += '--project-file-mission' }
     # Windows PowerShell 5 wraps native stderr as errors. Do not abort the
     # pipeline on the first diagnostic line; the native exit code is the gate.
     $oldPreference = $ErrorActionPreference

@@ -56,7 +56,7 @@ class DesktopView(Gtk.Widget):
                 ("Учебный рабочий стол Windows 10. " if scene.get("desktopStyle") == "win10" else "Учебная сцена. ")
                 + {"start": "Пуск. ", "task-view": "Представление задач. ", "snap": "Выберите второе окно. "}
                   .get(scene.get("desktopOverlay"), "")
-                + active.get("title", "Рабочий стол") + ". " + active.get("body", "")[:300] + choices])
+                + active.get("title", "Рабочий стол") + ". " + (active.get("notebookDescription") or active.get("body", "")[:300]) + choices])
 
     @staticmethod
     def rect(x, y, width, height):
@@ -768,7 +768,13 @@ class DesktopView(Gtk.Widget):
                 self.fill("#faf9f8", x + side + 1, ty, w - side - 1, row - 1)
             self.files_glyph("folder" if is_folder else "picture" if extension == "png" else "file",
                              x + side + 11, ty + (row - 12) / 2, win10)
-            self.label(name, x + side + 31, ty + (row - 15) / 2, 11, fg, width=kind_x - x - side - 39)
+            if i == selected and window.get("focus") == "file-name":
+                self.fill("#ffffff", x + side + 28, ty+1, kind_x - x - side - 35, row-3, 2)
+                self.field(window.get("input", ""), window, x + side + 31, ty + (row - 15) / 2,
+                           kind_x - x - side - 39, 11, fg, mono=False, selection_color="#9bc8fa",
+                           caret_color="#151515")
+            else:
+                self.label(name, x + side + 31, ty + (row - 15) / 2, 11, fg, width=kind_x - x - side - 39)
             kind = ("Папка с файлами" if win10 else "Папка") if is_folder else {
                 "py": "Файл Python", "txt": "Текстовый документ", "md": "Документ Markdown",
                 "csv": "Таблица CSV", "json": "Файл JSON", "png": "Изображение PNG",
@@ -782,6 +788,8 @@ class DesktopView(Gtk.Widget):
         status = f"Объектов: {len(entries)}"
         if 0 <= selected < len(entries):
             status += "   |   Выбран: " + entries[selected].get("title", "")
+        if window.get("focus") == "file-name":
+            status = window.get("status") or status
         self.label(status, x + 10, status_y + 2, 10, muted, width=w - 20)
 
     def files_glyph(self, kind, x, y, win10):
@@ -1002,6 +1010,28 @@ class DesktopView(Gtk.Widget):
             return
         visible = max(1, int((bottom - row_y) / pitch))
         selected = window.get("item", -1)
+        if url == "chrome://downloads" and any(entry.get("kind") == "reveal" for entry in entries):
+            # The filename and its Show in folder control share one download card.
+            # They remain distinct keyboard targets in the original entries list.
+            files = [(i, row) for i, row in enumerate(entries) if row.get("kind") == "file"]
+            current = next((n for n, (i, _) in enumerate(files) if selected in (i, i+1)), -1)
+            first = max(0, current-visible+1)
+            for idx, entry in files[first:first+visible]:
+                bw = min(148, panel_w * .43)
+                bx = panel_x + panel_w - bw - 8
+                self.fill("#ffffff", panel_x, row_y, panel_w, pitch-3, 8)
+                if selected == idx:
+                    self.fill("#dbe9fc", panel_x+5, row_y+3, bx-panel_x-10, pitch-9, 5)
+                label("↓", panel_x+12, row_y+10, 17, "#365e98")
+                label(entry["title"], panel_x+36, row_y+4, 14, "#1a427e", width=bx-panel_x-45)
+                label("Загрузки", panel_x+36, row_y+22, 11, "#5f6368", width=bx-panel_x-45)
+                focused = selected == idx+1
+                self.fill("#1a5ea9" if focused else "#e6edf8", bx, row_y+6, bw, pitch-16, 12)
+                if focused: self.fill("#dbe9fc", bx+2, row_y+8, bw-4, pitch-20, 10)
+                self.browser_centered("Показать в папке" if bw>113 else "В папку",
+                                      bx+bw/2, row_y+11, 12, "#174682", bw-8)
+                row_y += pitch
+            return
         start = max(0, selected - visible + 1)
         self.fill("#ffffff", panel_x, row_y, panel_w, min(len(entries), visible) * pitch, 9)
         for i, entry in enumerate(entries[start:start + visible], start):
@@ -1093,6 +1123,61 @@ class DesktopView(Gtk.Widget):
         self.fill(CODE_BG, x + 6, y + 3, 1, 1)
         self.fill(CODE_BG, x + 9, y + 11, 1, 1)
 
+    def notebook_page(self, nb, x, y, w, h, active):
+        """One view of the open VS Code document, with a focus-following cell viewport."""
+        if w < 54 or h < 24:
+            return
+        cells = nb["cells"]
+        selected = nb["selected"]
+        heights = [min(3, len(c["source"].split("\n"))) * 19 + (37 if c["output"] else 13) for c in cells]
+        view_h = max(1, h - 24)
+        first = selected
+        used = heights[first]
+        while first and used + heights[first - 1] <= view_h:
+            first -= 1
+            used += heights[first]
+        self.label("JUPYTER   ·   Учебное ядро Python", x + 12, y, 11, CODE_MUTED, width=w - 20)
+        row = y + 24
+        self.snapshot.push_clip(self.rect(x, row, w, view_h))
+        for index in range(first, len(cells)):
+            if row >= y + h:
+                break
+            cell = cells[index]
+            chosen = index == selected
+            editing = chosen and nb["editing"] and active
+            cell_h = heights[index]
+            self.fill(CODE_ROW if chosen else CODE_BG, x + 6, row, w - 12, cell_h - 3, 3)
+            if chosen:
+                self.fill(CODE_FOCUS if active else CODE_BORDER, x + 6, row + 1, 3, cell_h - 5)
+            if editing:
+                self.fill(CODE_FOCUS, x + 6, row, w - 12, 1)
+                self.fill(CODE_FOCUS, x + w - 7, row, 1, cell_h - 3)
+                self.fill(CODE_FOCUS, x + 6, row + cell_h - 4, w - 12, 1)
+            code = cell["kind"] == "code"
+            if code:
+                self.label("[" + str(cell["runs"] or " ") + "]", x + 12, row + 4, 11, CODE_MUTED, width=35, mono=True)
+            src = cell["source"]
+            lines = src.split("\n")
+            origin = min(max(0, src.encode("utf-16-le")[:nb["caret"]*2].decode("utf-16-le","ignore").count("\n")-2),
+                         len(lines) - 1) if editing else 0
+            offset = sum(self.units(l) + 1 for l in lines[:origin])
+            for n, line in enumerate(lines[origin:origin + 3]):
+                ly = row + 3 + n * 19
+                if not code and not editing:
+                    self.label(line.lstrip("# "), x + 16, ly, 15, CODE_FG, width=w - 30, bold=True)
+                else:
+                    caret = nb["caret"] if editing else 0
+                    self.field(line, {"cursor": caret, "anchor": nb["anchor"] if editing else caret},
+                               x + 51, ly, w - 67, 14, CODE_FG, offset=offset, focused=editing,
+                               line_break=int(n + origin + 1 < len(lines)), syntax=cell["syntax"],
+                               caret_color=CODE_FOCUS, selection_color=CODE_SELECTION)
+                offset += self.units(line) + 1
+            if cell["output"]:
+                tone = "#ff7b72" if cell["failed"] else "#7ee787"
+                self.label(("Предыдущий вывод   " if cell.get("stale") else "Вывод   ") + cell["output"], x + 51, row + cell_h - 27, 13, tone, width=w - 64, mono=True)
+            row += cell_h
+        self.snapshot.pop()
+
     def code(self, window, x, y, w, h):
         # Only an immersive, comfortably wide editor gets the desktop-style
         # title bar. The editor embedded in lessons keeps its compact chrome.
@@ -1144,6 +1229,30 @@ class DesktopView(Gtk.Widget):
             project = window.get("projectName", "")
             self.label(("⌄  " + project.upper()) if view == "explorer" and project else "",
                        x + rail + 9, y + 35, 10, CODE_FG, bold=True, width=sidebar - 14)
+            if window.get("focus") in ("explorer", "file-name") and view == "explorer":
+                entries = window.get("entries", [])
+                selected = window.get("item", -1)
+                visible = max(1, int((h-92)/22))
+                first = max(0, selected-visible+1)
+                expanded = set(window.get("expandedFolders", ()))
+                for idx, entry in enumerate(entries[first:first+visible], first):
+                    row_y = y + 55 + 22*(idx-first)
+                    if idx == selected:
+                        self.fill(CODE_LIST_SELECTION, x+rail+1, row_y, sidebar-3, 22)
+                    depth = entry.get("path","").count("/") - window.get("projectRootDepth", 3) - 1
+                    left = x+rail+8+13*max(0,depth)
+                    folder = entry.get("kind") == "folder"
+                    self.label(("⌄" if entry["path"] in expanded else "›") if folder else "▤",
+                               left, row_y+2, 12, CODE_MUTED)
+                    left += 15
+                    width = max(2, x+rail+sidebar-left-4)
+                    if idx == selected and window.get("focus") == "file-name":
+                        self.fill(CODE_BG, left-2, row_y+1, width, 20, 2)
+                        self.field(window.get("input",""), window, left, row_y+2, width-3, 12,
+                                   CODE_FG, mono=False, caret_color=CODE_FG)
+                    else:
+                        self.label(entry.get("title",""), left, row_y+2, 12, CODE_FG, width=width)
+                shown = []
             for i, name in enumerate(shown):
                 if y + 80 + 22 * i >= y + h - 18:
                     break
@@ -1194,8 +1303,12 @@ class DesktopView(Gtk.Widget):
         current = editor_x + (pane if split and window.get("group") == 1 else 0)
         body_top = tab_h + 29
         lines_visible = max(1, int(((h * .54 if window.get("panel") else h - 20) - body_top + 1) / line_h))
-        def document(path, body, left, active, syntax):
+        def document(path, body, left, active, syntax, notebook):
             self.label("  ›  ".join(path.split("/")), left + 12, y + tab_h + 5, 11, CODE_MUTED, width=pane - 22)
+            if notebook:
+                self.notebook_page(notebook, left, y + body_top - 3, pane, (h * .54 if window.get("panel") else h - 20) - body_top,
+                                   active and window.get("focus") == "body")
+                return
             cursor = window.get("bodyCursor", 0) if active else 0
             line_num = body.encode("utf-16-le")[:cursor * 2].decode("utf-16-le", "ignore").count("\n")
             first = max(0, line_num - lines_visible + 1)
@@ -1220,10 +1333,10 @@ class DesktopView(Gtk.Widget):
                                line_break=line_break, syntax=syntax, selection_color=CODE_SELECTION, caret_color=CODE_FOCUS,
                                focused=active and (window.get("focus") == "body" or field["cursor"] != field["anchor"]))
                 offset += self.units(line) + line_break
-        document(window.get("projectRelative") or name, window.get("body", ""), current, True, window.get("syntax", ()))
+        document(window.get("projectRelative") or name, window.get("body", ""), current, True, window.get("syntax", ()), window.get("notebook"))
         if split:
             other = window.get("otherTab") or {}
-            document(other.get("title", ""), other.get("body", ""), editor_x if current != editor_x else editor_x + pane, False, other.get("syntax", ()))
+            document(other.get("title", ""), other.get("body", ""), editor_x if current != editor_x else editor_x + pane, False, other.get("syntax", ()), other.get("notebook"))
             self.fill(CODE_BORDER, editor_x + pane, y + tab_h + 1, 1, max(1, (h * .54 if window.get("panel") else h - 19) - tab_h - 1))
         if window.get("panel"):
             self.fill(CODE_INSET, editor_x, y + h * .54, editor_w, h * .46 - 19)
@@ -1307,6 +1420,8 @@ class DesktopView(Gtk.Widget):
         line, col = before.count("\n") + 1, self.units(before.rsplit("\n", 1)[-1]) + 1
         support = "Python" if name.lower().endswith(".py") else "Текст"
         status = f"Стр {line}, стлб {col}    UTF-8    {support}    {self.scene.get('layout', 'EN')}"
+        if window.get("notebook"):
+            status = f"Ячейка {window['notebook']['selected'] + 1}    Jupyter Notebook"
         self.label(status, x + max(105, w - 265), y + h - 16, 9, CODE_MUTED, width=min(w - 110, 260))
 
     def terminal(self, window, x, y, w, h, embedded=False):

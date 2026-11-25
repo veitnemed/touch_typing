@@ -144,7 +144,13 @@ namespace TouchTypingStudio
                 else if (!windows && (i - first) % 2 == 1) Rectangle(side + 1, y, width - side - 1, row - 1, "#FAF9F8");
                 FilesGlyph(directory ? "folder" : name.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "picture" : "file",
                     side + 15, y + (row - 14) / 2, windows);
-                Text(name, side + 37, y + (row - 16) / 2, 13, ink, kindX - side - 46);
+                if (i == selected && window.S("focus") == "file-name")
+                {
+                    Rounded(side + 34, y + 1, Math.Max(1, kindX - side - 39), row - 3, "#FFFFFF", 2);
+                    Field(window.S("input"), window, side + 37, y + (row - 16)/2,
+                        kindX - side - 46, 13, ink, 0, true, face: regular);
+                }
+                else Text(name, side + 37, y + (row - 16) / 2, 13, ink, kindX - side - 46);
                 Text(FilesType(name, directory, windows), kindX + 8, y + (row - 15) / 2, 12, muted, width - kindX - 14);
             }
             if (entries.Length == 0 && available >= 26)
@@ -152,7 +158,7 @@ namespace TouchTypingStudio
 
             Rectangle(0, height - bottom, width, bottom, windows ? "#F8F8F8" : "#F7F5F3");
             Rectangle(0, height - bottom, width, 1, edge);
-            Text("Объектов: " + entries.Length + (selected >= 0 && selected < entries.Length ? "   |   Выбран: " + entries[selected].S("title") : ""),
+            Text(window.S("focus") == "file-name" ? window.S("status") : "Объектов: " + entries.Length + (selected >= 0 && selected < entries.Length ? "   |   Выбран: " + entries[selected].S("title") : ""),
                 12, height - bottom + 4, 11, muted, width - 24);
         }
 

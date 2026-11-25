@@ -106,6 +106,7 @@ namespace TouchTypingStudio
                     focus == "project-results" ? "Поиск «" + editor.S("projectSearchQuery") + "»: " +
                     string.Join("; ", editor.Items("entries").Select(item => item.S("title"))) :
                     focus == "symbol-rename" ? "Переименовать символ: " + editor.S("input") :
+                    focus == "body" && editor.D("notebook").Exists ? editor.S("notebookDescription") :
                     editor.Items("tabs").Skip(Math.Max(0, editor.I("activeTab"))).Select(item => item.S("title")).FirstOrDefault();
                 System.Windows.Automation.AutomationProperties.SetHelpText(this, description ?? "");
             }
@@ -496,6 +497,27 @@ namespace TouchTypingStudio
             }
             int visible = Math.Max(1, (int)((bottom - y) / pitch));
             int selected = window.I("item", -1);
+            if (url == "chrome://downloads" && entries.Any(e => e.S("kind") == "reveal"))
+            {
+                int[] files = Enumerable.Range(0, entries.Length).Where(i => entries[i].S("kind") == "file").ToArray();
+                int current = Array.FindIndex(files, i => selected == i || selected == i + 1);
+                int first = Math.Max(0, current - visible + 1);
+                foreach (int i in files.Skip(first).Take(visible))
+                {
+                    double bw = Math.Min(148, panelWidth * .43), bx = panelLeft + panelWidth - bw - 8;
+                    Rounded(panelLeft, y, panelWidth, pitch-3, "#FFFFFF", 8);
+                    if (selected == i) Rounded(panelLeft+5, y+3, bx-panelLeft-10, pitch-9, "#DBE9FC", 5);
+                    Text("↓", panelLeft+12, y+10, 17, "#365E98");
+                    Text(entries[i].S("title"), panelLeft+36, y+4, 14, "#1A427E", bx-panelLeft-45);
+                    Text("Загрузки", panelLeft+36, y+22, 11, "#5F6368", bx-panelLeft-45);
+                    bool focused = selected == i + 1;
+                    Rounded(bx, y+6, bw, pitch-16, focused ? "#1A5EA9" : "#E6EDF8", 12);
+                    if (focused) Rounded(bx+2, y+8, bw-4, pitch-20, "#DBE9FC", 10);
+                    Text(bw>113 ? "Показать в папке" : "В папку", bx+12, y+11, 12, "#174682", bw-20);
+                    y += pitch;
+                }
+                return;
+            }
             int start = Math.Max(0, selected - visible + 1);
             Rounded(panelLeft, y, panelWidth, Math.Min(entries.Length, visible) * pitch, "#FFFFFF", 9);
             for (int i = start; i < entries.Length && i < start + visible; i++)
@@ -675,7 +697,8 @@ namespace TouchTypingStudio
             double gutter = Math.Max(49, 21 + lines.Length.ToString(CultureInfo.InvariantCulture).Length * 8);
             int offset = 0;
             var syntax = window.Items("syntax").ToArray();
-            for (int i = 0; i < Math.Min(lines.Length, first + visible); i++)
+            if (window.D("notebook").Exists) DrawNotebookPage(window.D("notebook"), primary, firstRowY - 4, editorWidth, bottom - firstRowY, bodyFocused);
+            else for (int i = 0; i < Math.Min(lines.Length, first + visible); i++)
             {
                 if (i >= first)
                 {
@@ -718,7 +741,8 @@ namespace TouchTypingStudio
                 Rectangle(x + editorWidth, 60, 1, Math.Max(1, (window.B("panel") ? h * .55 : h - 21) - 60), "#414854");
                 Data other = window.D("otherTab");
                 Text(other.S("title"), secondary + 14, 73, 11, "#BFD0DF", editorWidth - 28);
-                Text(other.S("body"), secondary + 18, 94, 12, "#C7D9E7", editorWidth - 32, visible, true);
+                if (other.D("notebook").Exists) DrawNotebookPage(other.D("notebook"), secondary, 94, editorWidth, bottom - 94, false);
+                else Text(other.S("body"), secondary + 18, 94, 12, "#C7D9E7", editorWidth - 32, visible, true);
             }
             DrawCodeStatus(window, w, h, caretLine + 1, caretColumn, file);
             string focus = window.S("focus");

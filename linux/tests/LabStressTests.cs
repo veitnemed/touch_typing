@@ -80,6 +80,8 @@ internal static class LabStressTests
             int before = Run.Solved;
             if (task.Keys.Length > 0)
             {
+                if (Run.Scene.NotebookCourse && task.Text.Length > 0 && task.Id is "quick-choose" or "save")
+                    Type(task.Text);
                 for (int i = 0; i < 32 && Run.Solved == before; i++)
                     Chord(task.Keys, reverseModifiers: Random.Next(2) == 0, repeats: 3);
             }
@@ -92,9 +94,10 @@ internal static class LabStressTests
                     for (int index = 0; index < length; index++) Chord("Backspace");
                 }
                 else if (task.Action == "command") Chord("Ctrl+U");
-                else if ((task.Action == "type-code" && window?.Body.Length > 0) || window?.Input.Length > 0) Chord("Ctrl+A");
+                else if (task.Action != "file-name-commit" && ((task.Action == "type-code" && window?.Body.Length > 0) ||
+                    window?.Input.Length > 0)) Chord("Ctrl+A");
                 Type(task.Text);
-                if (task.Action != "type-code") Chord("Enter");
+                if (task.Action is not ("type-code" or "notebook-type")) Chord("Enter");
             }
             Check(Run.Solved == before + 1, "Displayed instruction must remain solvable after recovery: " + Run.Status);
         }

@@ -92,11 +92,13 @@ internal sealed class LabRun
         ActionLimit > 0 && Solved >= ActionLimit ? "actions" : null);
     private bool ReachedLimit => LimitReached != null;
     private static bool IsEssentials(string missionId) => missionId?.StartsWith("terminal-essentials-", StringComparison.Ordinal) == true;
-    private static bool IsBrowserRotation(string missionId) => missionId?.StartsWith("chrome-", StringComparison.Ordinal) == true ||
-        missionId == "workday-download-handoff";
+    private static bool JoinsTimedRotation(string missionId) => missionId?.StartsWith("chrome-", StringComparison.Ordinal) == true ||
+        missionId is "workday-download-handoff" or "workday-project-file-inbox" ||
+        missionId?.StartsWith("code-notebook-", StringComparison.Ordinal) == true ||
+        missionId?.StartsWith("code-project-file-", StringComparison.Ordinal) == true;
     private bool CompletedRoute => !restoring && mission != null && pending.Count == 0 &&
         (FinishingMission || softFinish && ReachedLimit ||
-            (finishSingleRoute || mission.Curated && (EnvironmentProfile != "windows" && !IsEssentials(mission.Id) && !IsBrowserRotation(mission.Id) || TimeLimit == 0 && ActionLimit == 0))
+            (finishSingleRoute || mission.Curated && (EnvironmentProfile != "windows" && !IsEssentials(mission.Id) && !JoinsTimedRotation(mission.Id) || TimeLimit == 0 && ActionLimit == 0))
                 && mission.FinishAfterRoute);
     private bool PendingLimitChoice => softFinish && !restoring && ReachedLimit &&
         !limitAccepted && !FinishingMission && !CompletedRoute;
@@ -365,9 +367,11 @@ internal sealed class LabRun
         }
         // Lock toggles affect the physical keyboard, not progress in a lesson.
         if (key is "NumLock" or "CapsLock" or "ScrollLock") return null;
-        var pythonEdit = LiveCourse.ResolvePythonEdit(key, held, Scene);
+        if (Scene.OnNotebook && LiveCourse.ResolveNotebook(key, held, Scene) is LabTask notebook) return Perform(notebook, key);
+        var pythonEdit = Scene.OnNotebook ? null : LiveCourse.ResolvePythonEdit(key, held, Scene);
         if (pythonEdit != null) return Perform(pythonEdit, key);
         var actual = Scene.Overview && !commandModifiers && key != "Esc" ? null : LabCatalog.Resolve(key, held, Scene);
+        if (Scene.OnNotebook && actual != null && !LabScene.NotebookGlobalAction(actual.Action)) actual = null;
         string before = Scene.Overview ? Scene.Search : Scene.Active?.App == "terminal" || Scene.Active?.Focus is "terminal" or "reverse-search" ? Scene.TerminalInput : Scene.Active?.Input ?? "";
         bool submitting = Task.Action == "command" && key == "Enter" && !commandModifiers;
         bool matches = submitting && Scene.Terminal.MatchesCommand(before, Task.Text);
@@ -388,11 +392,11 @@ internal sealed class LabRun
             return Miss(key, WrongKeyMessage(key));
         }
         bool changed = Scene.Text(key, useNativeEnglish ? text : VirtualText(key, text), shift, word);
-        bool typedEdit = changed && Task.Action == "python-edit-write" &&
+        bool typedEdit = changed && Task.Action is ("python-edit-write" or "notebook-type") &&
             key is not ("Left" or "Right" or "Up" or "Down" or "Home" or "End" or "Enter" or "Backspace" or "Delete") &&
             !string.IsNullOrEmpty(text) && !text.Any(char.IsControl);
         var passed = Observe(key, matches && Scene.Terminal.LastSuccess ? Task.Text : null, actualTaskId:
-            matches && Scene.Terminal.LastSuccess || typedEdit || changed && Task.Action != "python-edit-write" && Task.Keys.Length == 0 && key == "Enter" && !submitting ? Task.Id : null);
+            matches && Scene.Terminal.LastSuccess || typedEdit || changed && Task.Action is not ("python-edit-write" or "notebook-type") && Task.Keys.Length == 0 && key == "Enter" && !submitting ? Task.Id : null);
         if (passed != null) return passed;
         if (submitting && !Scene.Terminal.LastSuccess) return Miss(key, Scene.Active.Status);
         if (matches && watching?.Any(item => item.Goal.Task == Task && item.Goal.VerifyReport) == true)
@@ -419,15 +423,17 @@ internal sealed class LabRun
         {
             "command" => window.App == "terminal" || window.Focus is "terminal" or "reverse-search",
             "navigate-pasted" => Scene.BrowserPracticeActive && Task.Text.Length > 0 && window.Focus == "url",
+            "file-name-commit" => window.Focus == "file-name",
             "code-clone-command" => Scene.BrowserPracticeActive && window.Focus == "palette",
+            "notebook-type" => Scene.OnNotebook && window.Tab.Notebook.Editing,
             "python-edit-write" or "gnome-write" or "debug-rewrite" => window.App == "code" && window.Focus == "body",
             "debug-doc-submit" => window.App == "chrome" && window.Focus == "find",
             "project-search-submit" => window.Focus == "project-search",
             "project-search-repair" => window.App == "code" && window.Focus == "body",
             "code-rename-confirm" => window.Focus == "symbol-rename",
             "exact-find-submit" or "research-find" => window.Focus == "find",
-            "quick-choose" => Scene.ExactEdit && window.Focus == "quick-open" && Task.Text.Length > 0,
-            "save" => Scene.ExactEdit && window.App == "code" && window.Focus == "body" && Task.Text.Length > 0,
+            "quick-choose" => (Scene.NotebookCourse || Scene.ExactEdit) && window.Focus == "quick-open" && Task.Text.Length > 0,
+            "save" => (Scene.NotebookCourse || Scene.ExactEdit) && window.App == "code" && window.Focus == "body" && Task.Text.Length > 0,
             _ => false
         };
     }
@@ -479,6 +485,8 @@ internal sealed class LabRun
             if (passed != null) return passed;
         }
         if (changed) { Status = ""; LastKey = ""; Feedback = "ready"; return null; }
+        if (actual.Action is "file-name-commit" or "file-paste" && Scene.FileProblem is string reason)
+            return Miss(key, reason);
         return Miss(key, "Действие сейчас недоступно. " + Task.Title + ".");
     }
 
@@ -500,7 +508,7 @@ internal sealed class LabRun
             string target = goal.VerifyReport && replayLegacyReport ? goal.LegacyTarget : goal.Target;
             bool recheckingArtifact = goal.ArtifactPath != null && goal.Task == Task && equivalentCommand != null;
             if (goal.ArtifactPath != null && !recheckingArtifact) continue;
-            if (before == target && !recheckingArtifact && !(acceptExistingUrlSelection && goal.Task.Id == "url")) continue;
+            if (before == target && !(Scene.NotebookCourse && actualTaskId == goal.Task.Id && goal.Task.Action is "notebook-run" or "save") && !recheckingArtifact && !(acceptExistingUrlSelection && goal.Task.Id == "url")) continue;
             string command = goal.Task == Task ? equivalentCommand : null;
             if (LiveCourse.Evidence(goal.Task, Scene, command, strictReport, goal.ArtifactPath) != target) continue;
             // Published drafts retain earned progress, but a report receipt is only issued
@@ -581,7 +589,7 @@ internal sealed class LabRun
             bool essentials = IsEssentials(last);
             var rotation = courses.Where(m => essentials
                 ? IsEssentials(m.Id)
-                : !m.FinishAfterRoute || (EnvironmentProfile == "windows" || IsBrowserRotation(m.Id)) && m.Curated).ToArray();
+                : !m.FinishAfterRoute || (EnvironmentProfile == "windows" || JoinsTimedRotation(m.Id)) && m.Curated).ToArray();
             var available = rotation.Where(m => !used.Contains(m.Id)).ToArray();
             if (available.Length == 0) { used.Clear(); available = rotation.Where(m => m.Id != last || rotation.Length == 1).ToArray(); }
             var recent = past.Concat(Attempts).Where(a => a.Mission != null).Select(a => a.Mission).Reverse().Distinct().Take(2).ToHashSet();
@@ -675,7 +683,7 @@ internal sealed class LabRun
             accuracy = Solved + Errors == 0 ? 0 : Math.Round(100.0 * Solved / (Solved + Errors), 1),
             record = Math.Max(previousRecord, complete ? Solved : 0), previousRecord, previousRecordErrors = previousBest?.Errors ?? 0, newRecord = better,
             series = points, weak = points.Where(point => !point.Correct).GroupBy(point => point.Task).Select(group =>
-            { var task = LabCatalog.AllTasks.FirstOrDefault(item => item.Id == group.Key); return new { id = group.Key, title = task?.Title ?? "Ввод команды", keys = task?.Keys ?? "", errors = group.Count() }; }),
+            { var task = LabCatalog.AllTasks.Concat(LiveCourse.NotebookActions).FirstOrDefault(item => item.Id == group.Key); return new { id = group.Key, title = task?.Title ?? (group.Key == "notebook-type" ? "Редактирование ячейки" : "Ввод команды"), keys = task?.Keys ?? "", errors = group.Count() }; }),
             history = matching.OrderByDescending(item => item.Date).Take(15).Select(item => new
             { item.Session, item.App, item.Mode, item.Level, item.Date, item.Seconds, item.Solved, item.Errors, item.Completed }) };
     }

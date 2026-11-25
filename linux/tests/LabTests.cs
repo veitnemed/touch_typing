@@ -341,14 +341,15 @@ internal static class LabTests
             new Random(17), () => 10000, missionId: "chrome-docs-reference", neutralProject: true);
         rotation.Resume();
         var seen = new HashSet<string>();
-        for (int i = 0; i < 220 && seen.Count < 7; i++)
+        var expected = NeutralProject.MissionCatalog.Where(m => m.App == "chrome" && m.Level == 0).Select(m => m.Id).ToHashSet();
+        for (int i = 0; i < 50 * expected.Count && !seen.SetEquals(expected); i++)
         {
             seen.Add(rotation.MissionId);
             Complete(rotation);
             Check(!rotation.Finished, "A completed research route must not end a timed Chrome practice block");
         }
         Check(seen.Contains("chrome-search-clone") && seen.Contains("chrome-reader") &&
-            seen.Contains("chrome-download-verify") && seen.Count == 7, "Research routes and original browser work mix in one rotation");
+            seen.Contains("chrome-download-verify") && seen.Contains("chrome-project-file-inbox") && seen.SetEquals(expected), "Research routes and original browser work mix in one rotation");
     }
 
     private static void TestHeldBackspaceInLiveFields()
