@@ -3,6 +3,8 @@ import json
 import os
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
+from pathlib import Path
 from unittest.mock import patch
 
 from platform_linux import Engine
@@ -90,6 +92,101 @@ class NotebookCourse(unittest.TestCase):
                     with self.subTest(platform=p,level=level,seed=seed), tempfile.TemporaryDirectory() as root, patch.dict(os.environ,{"TOUCH_TYPING_QA_DATA_ROOT":root}):
                         variants.add(self.run_route(p,level,seed))
         self.assertEqual(variants,{"weekly.ipynb","delivery.ipynb","checks.ipynb"})
+
+    def test_word_deletion_preserves_cell_and_undo_positions(self):
+        for platform in ("linux", "windows"):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as root, patch.dict(
+                    os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": root}):
+                e = Engine(verify=True)
+                try:
+                    e.call("configure", platform=platform, layout="EN")
+                    s = e.call("lab-start", **options(1, 0))
+                    e.call("lab-resume")
+                    for _ in range(2):
+                        s = advance(e, s)
+                    for key in ("Down", "Enter", "Ctrl+A"):
+                        s = gesture(e, key)
+                    s = text(e, "unit_price total_fee final")
+                    initial = editor(s)["notebook"]
+                    solved = s["solved"]
+
+                    def check(state, source, caret, anchor=None):
+                        n = editor(state)["notebook"]
+                        self.assertEqual((n["selected"], n["editing"]), (1, True))
+                        self.assertEqual((n["cells"][1]["source"], n["caret"], n["anchor"]),
+                                         (source, caret, caret if anchor is None else anchor))
+                        for i in (0, 2):
+                            self.assertEqual(n["cells"][i], initial["cells"][i])
+
+                    s = gesture(e, "Ctrl+Backspace")
+                    check(s, "unit_price total_fee ", 21)
+                    s = gesture(e, "Ctrl+Z")
+                    check(s, "unit_price total_fee final", 26)
+                    gesture(e, "Home")
+                    s = gesture(e, "Ctrl+Delete", right=True)
+                    check(s, " total_fee final", 0)
+                    s = gesture(e, "Ctrl+Z")
+                    check(s, "unit_price total_fee final", 0)
+                    gesture(e, "Shift+Right")
+                    s = gesture(e, "Ctrl+Delete")
+                    check(s, "nit_price total_fee final", 0)
+                    s = gesture(e, "Ctrl+Z")
+                    check(s, "unit_price total_fee final", 1, 0)
+                    gesture(e, "End")
+                    for key in ("LCtrl", "Backspace", "Backspace"):
+                        s = e.call("lab-key", key=key, pressed=True, text="")
+                    check(s, "unit_price ", 11)
+                    self.assertEqual(s["solved"], solved)
+                finally:
+                    e.close()
+
+    def test_old_draft_replays_rejected_gesture_then_enables_word_deletion(self):
+        with tempfile.TemporaryDirectory() as root, patch.dict(
+                os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": root}):
+            op = options(1, 0)
+            e = Engine(verify=True)
+            try:
+                e.call("configure", platform="linux", layout="EN")
+                s = e.call("lab-start", **op)
+                e.call("lab-resume")
+                for _ in range(2):
+                    s = advance(e, s)
+                for key in ("Down", "Enter", "Ctrl+A"):
+                    s = gesture(e, key)
+                before = editor(text(e, "unit_price total_fee"))["notebook"]
+                gesture(e, "Ctrl+Backspace")
+                self.assertTrue(e.call("lab-stop")["saved"])
+            finally:
+                e.close()
+
+            file = Path(root) / "TouchTypingStudio-QA" / "progress.xml"
+            profile = ET.parse(file)
+            trace = profile.find("./LiveDrafts/LiveDraft/Trace")
+            marker = "@notebook-word-erase"
+            events = json.loads(trace.text)
+            old_events = [event for event in events if event["Key"] != marker]
+            self.assertEqual(len(events) - len(old_events), 1)
+            trace.text = json.dumps(old_events)
+            profile.write(file, encoding="utf-8", xml_declaration=True)
+
+            op.pop("seed")
+            e = Engine(verify=True)
+            try:
+                s = e.call("lab-start", **op, **{"continue": True})
+                self.assertEqual(editor(s)["notebook"], before)
+                e.call("lab-resume")
+                after = editor(gesture(e, "Ctrl+Backspace"))["notebook"]
+                self.assertEqual(after["cells"][1]["source"], "unit_price ")
+                self.assertTrue(e.call("lab-stop")["saved"])
+            finally:
+                e.close()
+
+            e = Engine(verify=True)
+            try:
+                s = e.call("lab-start", **op, **{"continue": True})
+                self.assertEqual(editor(s)["notebook"], after)
+            finally:
+                e.close()
 
     def test_kernel_scope_edit_and_restore(self):
         with tempfile.TemporaryDirectory() as root, patch.dict(os.environ,{"TOUCH_TYPING_QA_DATA_ROOT":root}):

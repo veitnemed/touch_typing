@@ -24,6 +24,8 @@ internal sealed class LabRun
     private const string ClusterNavigationEvent = "@cluster-navigation";
     private const string LineEditingEvent = "@line-editing";
     private const string PythonEditingEvent = "@python-editing";
+    private const string NotebookWordEraseEvent = "@notebook-word-erase";
+    private bool replayLegacyNotebookWordErase;
     private const string StrictTriggersEvent = "@strict-triggers";
     private bool replayLegacyTriggers;
     private bool replayLegacyLineEditing, replayLegacyPythonEditing;
@@ -33,7 +35,7 @@ internal sealed class LabRun
     private bool initialVirtual;
     internal bool HasDraft => !CompletedRoute && !limitAccepted && (!ReachedLimit || softFinish || FinishingMission) &&
         (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 ||
-        trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or StrictTriggersEvent)));
+        trace.Any(item => item.Key is not (ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or StrictTriggersEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask, inputAtActiveMilliseconds;
@@ -146,7 +148,8 @@ internal sealed class LabRun
         // New traces begin with format markers. Old ones acquire the line
         // marker only after the historic keystrokes have been replayed.
         var initialFormat = savedEvents.TakeWhile(e => e.Key is
-            ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent or StrictTriggersEvent);
+            ExactUrlEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or StrictTriggersEvent);
+        replayLegacyNotebookWordErase = draft != null && !initialFormat.Any(e => e.Key == NotebookWordEraseEvent);
         replayLegacyTriggers = draft != null;
         replayLegacyLineEditing = draft != null && !initialFormat.Any(e => e.Key == LineEditingEvent);
         replayLegacyPythonEditing = draft != null && !initialFormat.Any(e => e.Key == PythonEditingEvent);
@@ -168,6 +171,7 @@ internal sealed class LabRun
                 else if (e.Key == ClusterNavigationEvent) EndLegacyNavigation(e);
                 else if (e.Key == LineEditingEvent) EndLegacyLineEditing(e);
                 else if (e.Key == PythonEditingEvent) EndLegacyPythonEditing(e);
+                else if (e.Key == NotebookWordEraseEvent) { replayLegacyNotebookWordErase = false; trace.Add(e); }
                 else if (e.Key == StrictTriggersEvent) { replayLegacyTriggers = false; trace.Add(e); }
                 else Input(e.Key, e.Down, e.Text, e.NativeEnglish ? "EN" : "");
             }
@@ -177,6 +181,10 @@ internal sealed class LabRun
             if (replayLegacyLineEditing) EndLegacyLineEditing(new(LineEditingEvent));
             if (replayLegacyPythonEditing) EndLegacyPythonEditing(new(PythonEditingEvent));
             if (replayLegacyTriggers) { replayLegacyTriggers = false; trace.Add(new(StrictTriggersEvent)); }
+            // Earlier notebook drafts recorded rejected Ctrl+Delete/Backspace
+            // as key events. Do not turn them into edits while replaying.
+            if (replayLegacyNotebookWordErase && Scene.NotebookCourse) trace.Add(new(NotebookWordEraseEvent));
+            replayLegacyNotebookWordErase = false;
             replayLegacyUrl = replayLegacyReport = false;
             Pause();
             // Trace describes the current mission, not the whole attempt. Its
@@ -306,7 +314,8 @@ internal sealed class LabRun
         if (pressed && held.Contains(key))
         {
             if (!replayLegacyUrl && Scene.CanRepeatEditing(key) && !held.Any(item => KeyChord.Family(item) is "Alt" or "Super")
-                && (!held.Any(item => KeyChord.Family(item) == "Ctrl") || key is "Left" or "Right" or "Home" or "End"))
+                && (!held.Any(item => KeyChord.Family(item) == "Ctrl") || key is "Left" or "Right" or "Home" or "End" ||
+                    CanEraseNotebookWord(key, held.Any(item => KeyChord.Family(item) == "Shift"))))
             {
                 trace.Add(new(key, true, ""));
                 Scene.Text(key, "", held.Any(item => KeyChord.Family(item) == "Shift"),
@@ -385,7 +394,8 @@ internal sealed class LabRun
         bool shift = held.Any(item => KeyChord.Family(item) == "Shift");
         bool word = held.Any(item => KeyChord.Family(item) == "Ctrl") && !held.Any(item => KeyChord.Family(item) is "Alt" or "Super");
         bool navigation = key is "Left" or "Right" or "Home" or "End";
-        if (commandModifiers && !(word && navigation))
+        bool notebookWordDelete = CanEraseNotebookWord(key, shift);
+        if (commandModifiers && !(word && (navigation || notebookWordDelete)))
         {
             // Cutting an empty selection in an ordinary field is a valid no-op.
             if (word && key == "X" && Scene.Active?.Focus == "url") return null;
@@ -406,6 +416,10 @@ internal sealed class LabRun
         if (!changed) return Miss(key, "Здесь эта клавиша не выполняет действие.");
         Feedback = "ready"; LastKey = ""; Status = ""; return null;
     }
+
+    private bool CanEraseNotebookWord(string key, bool shift) =>
+        !replayLegacyNotebookWordErase && Scene.OnNotebook && Scene.Active.Tab.Notebook.Editing &&
+        !shift && (key is "Backspace" or "Delete");
 
     // The virtual keyboard/switching mission and the actual input source are
     // different things. Require EN for known English text goals only; ordinary
@@ -648,6 +662,7 @@ internal sealed class LabRun
                 trace.Add(new(LineEditingEvent));
                 trace.Add(new(PythonEditingEvent));
                 trace.Add(new(StrictTriggersEvent));
+                if (Scene.NotebookCourse) trace.Add(new(NotebookWordEraseEvent));
             }
             foreach (string key in held) trace.Add(new("@held/" + key, superUsed));
             missionLength = pending.Count;

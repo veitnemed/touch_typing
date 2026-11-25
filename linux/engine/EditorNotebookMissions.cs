@@ -136,6 +136,14 @@ internal sealed partial class LabScene
                 else { if (end == src.Length) return false; next = Math.Min(LineEnd(src, end + 1), end + 1 + column); }
                 break;
             case "Backspace": case "Delete":
+                if (word)
+                {
+                    int edge = caret != anchor ? anchor : key == "Backspace"
+                        ? EditorWordEdge(src, caret, true) : EditorDeleteRightEdge(src, caret);
+                    if (edge == caret) return true;
+                    n.ReplaceRange(Math.Min(caret, edge), Math.Max(caret, edge), "");
+                    return Mark();
+                }
                 if (anchor == caret) n.Anchor = key == "Backspace" ? PreviousBoundary(src, caret) : NextBoundary(src, caret);
                 if (n.Anchor == caret) return false;
                 n.Replace(""); return Mark();

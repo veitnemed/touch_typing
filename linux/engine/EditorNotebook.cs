@@ -88,10 +88,11 @@ internal sealed class EditorNotebook
         Caret = Anchor = Math.Min(Caret, Source(Selected).Length); return true;
     }
     internal void SelectAll() { Anchor = 0; Caret = Source(Selected).Length; }
-    internal void Replace(string text)
+    internal void Replace(string text) => ReplaceRange(Math.Min(Anchor, Caret), Math.Max(Anchor, Caret), text);
+
+    internal void ReplaceRange(int lo, int hi, string text)
     {
         string src = Source(Selected);
-        int lo = Math.Min(Anchor, Caret), hi = Math.Max(Anchor, Caret);
         if (src.Length - hi + lo + text.Length > 4096) return;
         undo.Push((Selected, new EditRevision(src, Caret, Anchor))); redo.Clear();
         Cell(Selected)["source"] = new JsonArray((JsonNode)(src[..lo] + text + src[hi..]));

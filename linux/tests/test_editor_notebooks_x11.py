@@ -37,6 +37,18 @@ class NotebookWindow(QA):
             changed=[]; types=set()
             for _ in range(28):
                 t=lab.state["task"]; old=lab.state["solved"]; task=t["id"]
+                if task == "notebook-type":
+                    before = active()["notebook"]
+                    index = before["selected"]
+                    source = before["cells"][index]["source"]
+                    yield from self.chord("Ctrl+Delete")
+                    empty = active()["notebook"]
+                    assert empty["cells"][index]["source"] == "" and empty["caret"] == empty["anchor"] == 0
+                    assert lab.state["solved"] == old
+                    yield from self.chord("Ctrl+Z")
+                    restored = active()["notebook"]
+                    assert restored["cells"][index]["source"] == source
+                    assert (restored["caret"], restored["anchor"]) == (before["caret"], before["anchor"])
                 if t["text"] and task in {"notebook-type","quick-choose","save"}:
                     # A notebook cell never inserts a newline just to submit its text.
                     yield from self.typed({"id":"type-code","text":t["text"]})
