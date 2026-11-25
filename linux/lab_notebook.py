@@ -135,7 +135,7 @@ class NotebookSurface:
     def _on_nb_pointer_move(self, _controller, x, y):
         self._notebook_pointer_pos = (x, y)
         hit = next((part for part in reversed(self._notebook_hits) if contains(part[0], x, y)), None)
-        self.set_cursor_from_name(("text" if hit[1] == "edit" else "pointer") if hit else "default")
+        self.set_cursor_from_name(("text" if hit[1] in ("edit", "browser-history:search") else "pointer") if hit else "default")
         tip = hit[2] if hit else None
         if self.get_tooltip_text() != tip:
             self.set_tooltip_text(tip)
@@ -150,7 +150,7 @@ class NotebookSurface:
             if count < clicks or not contains(box, x, y):
                 continue
             self.grab_focus()
-            if self.explorer_hotspot(action,path):
+            if self.explorer_hotspot(action,path) or self.browser_history_hotspot(action,path):
                 gesture.set_state(Gtk.EventSequenceState.CLAIMED)
                 return
             self._explorer_menu = False

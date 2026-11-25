@@ -2944,6 +2944,7 @@ class LabPage(Gtk.Box):
         self.desktop = DesktopView()
         self.desktop.notebook_command = self.apply_notebook_command
         self.desktop.explorer_command = self.apply_explorer_command
+        self.desktop.browser_history_command = self.apply_browser_history_command
         self.desktop.reference_chrome = True
         self.stage = Gtk.Overlay()
         self.stage.add_css_class("reference-workspace")
@@ -3519,6 +3520,14 @@ class LabPage(Gtk.Box):
                 or self.state.get("limitDecisionPending") or self.settings_menu.get_popover().get_mapped()):
             return
         response = self.host.call("lab-explorer-action", action=action, path=path)
+        if response:
+            self.render(response)
+
+    def apply_browser_history_command(self, action, path):
+        if (not self.active or self.state["paused"] or self.limit_resume_wait or self.save_pending
+                or self.state.get("limitDecisionPending") or self.settings_menu.get_popover().get_mapped()):
+            return
+        response = self.host.call("lab-browser-history-focus", action=action, path=path)
         if response:
             self.render(response)
 

@@ -91,6 +91,7 @@ jobs:
           /usr/bin/python3 linux/tests/test_live_capture_generation.py
           /usr/bin/python3 linux/tests/test_live_missions.py
           /usr/bin/python3 linux/tests/test_terminal_history_theory.py
+          /usr/bin/python3 linux/tests/test_chrome_history_filter.py
           /usr/bin/python3 linux/tests/test_live_catalog_contract.py
           /usr/bin/python3 linux/tests/test_live_route_policy.py
           /usr/bin/python3 linux/tests/test_live_coach.py
@@ -165,7 +166,7 @@ jobs:
             /usr/bin/python3 linux/tests/test_preview2_native.py
           ' | tee "$TOUCH_TYPING_QA_OUTPUT/gtk-test.log"
           native_failures=()
-          for scenario in test_editor_notebooks_x11.py test_project_files_x11.py test_editor_course_x11.py test_typing_cycles_native.py test_typing_records_gtk.py test_typing_mixed_native.py test_typing_mixed_native.py:base test_live_guide_layout_native.py test_live_course_cards_x11.py test_notebook_workbench_native.py test_source_handoff_x11.py test_source_handoff_x11.py:course test_live_coach_x11.py test_notebook_file_handoff_x11.py test_live_pause_focus_x11.py test_ubuntu_window_switch_x11.py test_terminal_history_theory_x11.py test_typing_normal_launch_x11.py test_typing_review_native.py; do
+          for scenario in test_editor_notebooks_x11.py test_project_files_x11.py test_editor_course_x11.py test_typing_cycles_native.py test_typing_records_gtk.py test_typing_mixed_native.py test_typing_mixed_native.py:base test_live_guide_layout_native.py test_live_course_cards_x11.py test_notebook_workbench_native.py test_source_handoff_x11.py test_source_handoff_x11.py:course test_live_coach_x11.py test_notebook_file_handoff_x11.py test_live_pause_focus_x11.py test_ubuntu_window_switch_x11.py test_terminal_history_theory_x11.py test_chrome_history_native.py test_chrome_history_pointer_x11.py test_typing_normal_launch_x11.py test_typing_review_native.py; do
             script="${scenario%%:*}"
             proof_name="${script%.py}"
             unset TOUCH_TYPING_QA_SOURCE_MODE TOUCH_TYPING_QA_MIXED_BASE
@@ -284,6 +285,8 @@ jobs:
           & "./windows/Test-Notebook-Workbench.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/notebook-workbench"
           & "./windows/Test-Notebook-File-Handoff.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/notebook-file-handoff"
           & "./windows/Test-OrdinaryWpfLaunch.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/ordinary-launch"
+          & "./windows/Test-ChromeHistory.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/chrome-history"
+          & "./windows/Test-Chrome-History-View.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/chrome-history-frame"
       - name: Verify visible adaptive guidance in two ordinary Chrome routes
         if: always()
         shell: powershell

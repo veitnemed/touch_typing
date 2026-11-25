@@ -184,6 +184,10 @@ internal sealed partial class PracticeService
                     else SaveLabCheckpoint();
                 }
                 return LabState();
+            case "lab-browser-history-focus":
+                CheckLabLimit();
+                if (lab?.BrowserHistoryPointer(Text(message, "action"), Text(message, "path")) == true) SaveLabCheckpoint();
+                return LabState();
             case "lab-explorer-action":
                 CheckLabLimit();
                 if (lab?.ExplorerPointer(Text(message, "action"), Text(message, "path")) == true) SaveLabCheckpoint();

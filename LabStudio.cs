@@ -402,6 +402,13 @@ namespace TouchTypingStudio
             if (next.Exists) RenderLab(next);
         }
 
+        private void ApplyLabBrowserHistoryCommand(string action, string path)
+        {
+            if (!labActive || paused || !IsActive || referenceHelpOpen || state.B("limitDecisionPending")) return;
+            var next = Request("lab-browser-history-focus", "action", action, "path", path);
+            if (next.Exists) RenderLab(next);
+        }
+
         private static bool LabEditingRepeat(string key)
         {
             switch (key)

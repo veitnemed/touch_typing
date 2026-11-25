@@ -115,6 +115,7 @@ namespace TouchTypingStudio
             AutomationProperties.SetAutomationId(labDesktop, "LabDesktop");
             labDesktop.NotebookCommand += ApplyLabNotebookCommand;
             labDesktop.ExplorerCommand += ApplyLabExplorerCommand;
+            labDesktop.BrowserHistoryCommand += ApplyLabBrowserHistoryCommand;
             var sceneFrame = ReferenceLessonPanel(labDesktop, new Thickness(4), 13);
             sceneFrame.Margin = new Thickness(16, 8, 16, 0);
             Grid.SetRow(sceneFrame, 2);

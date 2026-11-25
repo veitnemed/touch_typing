@@ -284,8 +284,12 @@ internal static class LabCatalog
             "symbol-next" or "symbol-open" => window?.Focus == "symbols",
             "file-open" or "file-copy" or "file-cut" => fileList && window.Item >= 0,
             "trash" => window?.App == "files" && window.Focus == "body" && window.Item >= 0,
-            "link-open" => window?.App == "chrome" && window.Focus == "body" && window.Item >= 0,
-            "link-next" or "link-prev" => window?.App == "chrome" && window.Focus == "body",
+            "link-open" => window?.App == "chrome" && (window.Focus == "body" || LabScene.OnChromeHistory(window) && window.Focus == "history")
+                && window.Item >= 0 && window.Item < scene.Entries(window).Length,
+            "link-next" => window?.App == "chrome" && (window.Focus == "body" || LabScene.OnChromeHistory(window) && window.Focus == "history")
+                && (!LabScene.OnChromeHistory(window) || scene.Entries(window).Length > 0),
+            "link-prev" => window?.App == "chrome" && (window.Focus == "body" || LabScene.OnChromeHistory(window) &&
+                window.Focus == "history" && window.Item > 0),
             "switch-next" or "switch-prev" => scene.Windows.Count(item => item.Workspace == scene.Workspace)
                 >= (scene.GnomeWindows && window == null ? 1 : 2),
             "switch-group-next" or "switch-group-prev" => scene.GnomePractice == "same-app" && scene.GnomeGroupSize >= 2,

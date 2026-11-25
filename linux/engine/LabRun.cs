@@ -21,6 +21,7 @@ internal sealed class LabRun
     private const string NativeLayoutEvent = "@native-layout";
     private const string SimulatedWindowSwitchEvent = "@simulated-window-switch", TerminalHistoryEvent = "@terminal-reverse-search";
     private const string ExactUrlEvent = "@exact-url", ExactQuickOpenEvent = "@exact-quick-open";
+    private const string ChromeHistoryEvent = "@chrome-history-filter", ChromeHistoryPointerEvent = "@chrome-history-pointer";
     private const string StrictReportEvent = "@strict-report";
     private const string ClusterNavigationEvent = "@cluster-navigation";
     private const string LineEditingEvent = "@line-editing";
@@ -40,7 +41,7 @@ internal sealed class LabRun
     private bool initialVirtual;
     internal bool HasDraft => !CompletedRoute && !limitAccepted && (!ReachedLimit || softFinish || FinishingMission) &&
         (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 ||
-        trace.Any(item => item.Key is not (TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent)));
+        trace.Any(item => item.Key is not (ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask, inputAtActiveMilliseconds;
@@ -175,7 +176,7 @@ internal sealed class LabRun
         // New traces begin with format markers. Old ones acquire the line
         // marker only after the historic keystrokes have been replayed.
         var initialFormat = savedEvents.TakeWhile(e => e.Key is
-            TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent);
+            ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent);
         replayLegacyNotebookWordErase = draft != null && !initialFormat.Any(e => e.Key == NotebookWordEraseEvent);
         replayLegacyTriggers = replayLegacyCsvExplorer = draft != null;
         replayLegacyLineEditing = draft != null && !initialFormat.Any(e => e.Key == LineEditingEvent);
@@ -189,6 +190,7 @@ internal sealed class LabRun
         Scene.ReplayLegacyNotebookActions = legacyNotebookActions;
         Scene.ReplayLegacyQuickOpen = draft != null && !initialFormat.Any(e => e.Key == ExactQuickOpenEvent);
         Scene.ReplayLegacyTerminalSearch = draft != null && !initialFormat.Any(e => e.Key == TerminalHistoryEvent);
+        Scene.ReplayLegacyChromeHistory = draft != null && !initialFormat.Any(e => e.Key == ChromeHistoryEvent);
         if (draft != null)
         {
             Resume();
@@ -215,6 +217,12 @@ internal sealed class LabRun
                 else if (e.Key == ExactUrlEvent) { replayLegacyUrl = false; trace.Add(e); }
                 else if (e.Key == ExactQuickOpenEvent) { Scene.ReplayLegacyQuickOpen = false; trace.Add(e); }
                 else if (e.Key == TerminalHistoryEvent) EndLegacyTerminalSearch(e);
+                else if (e.Key == ChromeHistoryEvent) EndLegacyChromeHistory(e);
+                else if (e.Key == ChromeHistoryPointerEvent)
+                {
+                    int cut = e.Text.IndexOf(':');
+                    if (cut > 0) BrowserHistoryPointer(e.Text[..cut], e.Text[(cut + 1)..]);
+                }
                 else if (e.Key == StrictReportEvent) { replayLegacyReport = false; trace.Add(e); }
                 else if (e.Key == ClusterNavigationEvent) EndLegacyNavigation(e);
                 else if (e.Key == LineEditingEvent) EndLegacyLineEditing(e);
@@ -227,6 +235,7 @@ internal sealed class LabRun
             }
             if (replayLegacyUrl) trace.Add(new(ExactUrlEvent));
             if (Scene.ReplayLegacyTerminalSearch) EndLegacyTerminalSearch(new(TerminalHistoryEvent));
+            if (Scene.ReplayLegacyChromeHistory) EndLegacyChromeHistory(new(ChromeHistoryEvent));
             if (Scene.ReplayLegacyQuickOpen)
             { Scene.ReplayLegacyQuickOpen = false; trace.Add(new(ExactQuickOpenEvent)); }
             if (replayLegacyReport) trace.Add(new(StrictReportEvent));
@@ -265,6 +274,12 @@ internal sealed class LabRun
                 coach = new(draft.CoachStage, draft.CoachReason ?? "");
             restoring = false;
         }
+    }
+
+    private void EndLegacyChromeHistory(LiveEvent marker)
+    {
+        Scene.FinishLegacyChromeHistory();
+        trace.Add(marker);
     }
 
     private void EndLegacyTerminalSearch(LiveEvent marker)
@@ -408,6 +423,13 @@ internal sealed class LabRun
         LastKey = "";
         Feedback = "simulation";
         Status = "Учебное окно переключено. " + noCredit;
+        return true;
+    }
+
+    internal bool BrowserHistoryPointer(string action, string path)
+    {
+        if (Finished || AwaitingLimitChoice || Paused || !Scene.BrowserHistoryPointer(action, path)) return false;
+        trace.Add(new(ChromeHistoryPointerEvent, Text: action + ":" + path));
         return true;
     }
 
@@ -840,6 +862,7 @@ internal sealed class LabRun
                 trace.Add(new(ExactUrlEvent));
                 trace.Add(new(ExactQuickOpenEvent));
                 trace.Add(new(TerminalHistoryEvent));
+                trace.Add(new(ChromeHistoryEvent));
                 trace.Add(new(StrictReportEvent));
                 trace.Add(new(ClusterNavigationEvent));
                 trace.Add(new(LineEditingEvent));

@@ -122,7 +122,14 @@ namespace TouchTypingStudio
             context.PushClip(new RectangleGeometry(new Rect(0, 0, bounds.Width, bounds.Height)));
             Rectangle(0, 0, bounds.Width, bounds.Height, "#20252B");
             if (app == "code" || app == "vscode") DrawCode(window, bounds.Width, bounds.Height);
-            else if (app == "chrome") DrawChrome(window, bounds.Width, bounds.Height);
+            else if (app == "chrome")
+            {
+                DrawChrome(window, bounds.Width, bounds.Height);
+                context.DrawRectangle(null, new Pen(Ui.Brush(window.B("active") ? "#42A5E2" : "#798B9F"), 1),
+                    new Rect(.5, .5, bounds.Width-1, bounds.Height-1));
+                context.Pop(); context.Pop();
+                return;
+            }
             else if (app == "terminal") DrawTerminal(window, bounds.Width, bounds.Height);
             else DrawFiles(window, bounds.Width, bounds.Height);
             Rectangle(0, 0, bounds.Width, 29, window.B("active") ? "#F4F8FC" : "#DCE4EE");
