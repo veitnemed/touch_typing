@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Publish exactly the archives from the build job, never a rebuilt package.
 set -euo pipefail
+trap 'echo "Preview publication failed at line $LINENO" >&2' ERR
 
 pkg=${1:?archive directory required}
 subject=$(git show -s --format=%s "$PRODUCT_SHA")
