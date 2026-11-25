@@ -10,14 +10,14 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 8
     env:
-      CANDIDATE_SHA: 43052e12cb3350a960b788d678299ae34065ffa7
+      CANDIDATE_SHA: cf2b0c0208c8f7dd6c5ed77f9da6594d1b48e687
     steps:
       - uses: actions/checkout@v4
         with: {persist-credentials: false}
       - uses: actions/download-artifact@v4
         with:
           name: live-verified-archives
-          run-id: 45591873575
+          run-id: 45592901335
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/note-archive
       - shell: powershell
