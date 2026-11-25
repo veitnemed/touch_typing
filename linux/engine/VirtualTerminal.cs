@@ -9,7 +9,7 @@ namespace TouchTypingStudio;
 internal sealed record TerminalCommandResult(bool Success, string[] Output);
 
 /// <summary>An entirely in-memory Linux workspace used by terminal lessons.</summary>
-internal sealed class VirtualTerminal
+internal sealed partial class VirtualTerminal
 {
     private const string Home = "/home/student";
     private readonly Dictionary<string, string> files = new(StringComparer.Ordinal);
@@ -32,6 +32,12 @@ internal sealed class VirtualTerminal
     private bool packagesUpdated;
     private int reboots, shutdowns;
     private bool elevated;
+    private string liveLogPath, followedLogPath;
+    private string[] liveLogFeed = [];
+    private int liveLogNext, liveLogIncidentIndex;
+    internal bool FollowingLog => followedLogPath != null;
+    internal bool LogIncidentArrived => liveLogPath != null && liveLogNext > liveLogIncidentIndex;
+    internal bool LogInterrupted { get; private set; }
     private readonly Dictionary<string, List<int>> branchLogs = new(StringComparer.Ordinal);
 
     internal string Cwd { get; private set; } = Home;
@@ -73,6 +79,48 @@ internal sealed class VirtualTerminal
     internal void InstallUnitTest(string selector, Func<VirtualTerminal, string> run) => lessonUnitTests.Add(selector, run);
     internal bool HasUnitTest(string selector) => lessonUnitTests.ContainsKey(selector);
     internal bool DirectoryExists(string path) => directories.Contains(Resolve(path));
+    internal void InstallLogFeed(string path, string[] lines, int incidentIndex)
+    {
+        liveLogPath = Resolve(path);
+        liveLogFeed = [.. lines];
+        liveLogIncidentIndex = incidentIndex;
+        liveLogNext = 0;
+    }
+
+    internal bool AppendLogFeedLine()
+    {
+        if (!FollowingLog || liveLogNext == liveLogFeed.Length) return false;
+        string line = liveLogFeed[liveLogNext++];
+        Write(liveLogPath, ReadFile(liveLogPath) + line + "\n");
+        history.Add(line);
+        return true;
+    }
+
+    internal bool InterruptLog()
+    {
+        if (!FollowingLog) return false;
+        followedLogPath = null;
+        LogInterrupted = true;
+        history.Add("^C");
+        Version++;
+        return true;
+    }
+
+    private void StartFollowingLog(string path, string command)
+    {
+        if (path != liveLogPath) throw Error(command, "живой поток доступен только для журнала текущего задания");
+        followedLogPath = path;
+        LogInterrupted = false;
+        Version++;
+    }
+
+    private string FollowLog(string path)
+    {
+        string before = Slice([path], "", true);
+        StartFollowingLog(Resolve(path), "tail");
+        return before;
+    }
+
     internal object Snapshot() => new
     {
         cwd = Cwd, output = History,
@@ -80,11 +128,13 @@ internal sealed class VirtualTerminal
             mode = modes.GetValueOrDefault(pair.Key, "644"), owner = owners.GetValueOrDefault(pair.Key, "student") }).ToArray(),
         directories = directories.Order().ToArray(), packages = packages.Order().ToArray(),
         processes = processes.Select(pair => new { pid = pair.Key, command = pair.Value }).ToArray(),
-        reboots, shutdowns, branch, version = Version, lastCommand = LastCommand, lastSuccess = LastSuccess
+        reboots, shutdowns, branch, version = Version, lastCommand = LastCommand, lastSuccess = LastSuccess, followingLog = FollowingLog,
+        followPath = followedLogPath, logIncidentArrived = LogIncidentArrived, logInterrupted = LogInterrupted, shell = IsPowerShell ? "powershell" : "bash", prompt = Prompt
     };
 
     internal string[] Complete(string prefix)
     {
+        if (IsPowerShell) return CompletePowerShell(prefix);
         if (prefix == "~") return ["~/"];
         int slash = prefix.LastIndexOf('/');
         string directoryText = slash < 0 ? "" : prefix[..(slash + 1)];
@@ -102,6 +152,7 @@ internal sealed class VirtualTerminal
 
     internal string[] SuggestedCommands(int level)
     {
+        if (IsPowerShell) return ["Select-String ERROR sync.log", "Get-Content sync.log -Wait"];
         var commands = new List<string> { "pwd", "ls", "ls -la", "whoami", "echo training" };
         if (Cwd != Home + "/project" && directories.Contains(Home + "/project")) commands.Add("cd ~/project");
         if (Cwd != Home) commands.Add("cd ~");
@@ -160,6 +211,7 @@ internal sealed class VirtualTerminal
     {
         try
         {
+            if (IsPowerShell) return PowerShellMatches(submitted, expected);
             var actualTokens = Tokenize(submitted);
             var targetTokens = Tokenize(expected);
             if (actualTokens.Select(TokenMeaning).SequenceEqual(targetTokens.Select(TokenMeaning))) return CopyWorkspace().Execute(expected).Success;
@@ -197,7 +249,9 @@ internal sealed class VirtualTerminal
         var copy = new VirtualTerminal
         {
             Cwd = Cwd, repository = repository, branch = branch, packagesUpdated = packagesUpdated,
-            reboots = reboots, shutdowns = shutdowns, Version = Version, LastSuccess = LastSuccess, LastCommand = LastCommand, LastOutput = LastOutput
+            reboots = reboots, shutdowns = shutdowns, Version = Version, LastSuccess = LastSuccess, LastCommand = LastCommand, LastOutput = LastOutput,
+            liveLogPath = liveLogPath, followedLogPath = followedLogPath, liveLogFeed = liveLogFeed,
+            liveLogNext = liveLogNext, liveLogIncidentIndex = liveLogIncidentIndex, LogInterrupted = LogInterrupted, IsPowerShell = IsPowerShell
         };
         Replace(copy.files, files); Replace(copy.modes, modes); Replace(copy.owners, owners);
         copy.directories.Clear(); copy.directories.UnionWith(directories);
@@ -215,7 +269,8 @@ internal sealed class VirtualTerminal
 
     private bool SameWorkspace(VirtualTerminal other) =>
         Cwd == other.Cwd && repository == other.repository && branch == other.branch && packagesUpdated == other.packagesUpdated &&
-        reboots == other.reboots && shutdowns == other.shutdowns && directories.SetEquals(other.directories) && packages.SetEquals(other.packages) &&
+        reboots == other.reboots && shutdowns == other.shutdowns && followedLogPath == other.followedLogPath &&
+        LogInterrupted == other.LogInterrupted && directories.SetEquals(other.directories) && packages.SetEquals(other.packages) &&
         Same(files, other.files) && Same(modes, other.modes) && Same(owners, other.owners) && Same(committed, other.committed) && Same(index, other.index) &&
         processes.Count == other.processes.Count && processes.All(pair => other.processes.GetValueOrDefault(pair.Key) == pair.Value) &&
         commits.SequenceEqual(other.commits) && branches.Count == other.branches.Count && branches.All(pair => other.branches.TryGetValue(pair.Key, out var value) && Same(pair.Value, value)) &&
@@ -223,9 +278,11 @@ internal sealed class VirtualTerminal
 
     internal TerminalCommandResult Execute(string command)
     {
+        if (FollowingLog)
+            return new(false, ["Текущий процесс читает журнал. Ctrl+C остановит просмотр."]);
         LastCommand = command;
         LastOutput = [];
-        history.Add($"student@ubuntu:{Abbreviate(Cwd)}$ {command}");
+        history.Add(Prompt + command);
         if (string.IsNullOrWhiteSpace(command))
         {
             LastSuccess = true;
@@ -239,12 +296,7 @@ internal sealed class VirtualTerminal
         try
         {
             if (command.Length > 32768 || command.Contains('\0')) throw Error("input", "слишком длинная строка или недопустимый нулевой символ");
-            var stages = SplitPipeline(Tokenize(command));
-            if (stages.Count > 32) throw Error("input", "учебный конвейер ограничен 32 командами");
-            string input = "";
-            foreach (var stage in stages)
-                input = ExecuteStage(stage, input);
-            var output = Lines(input);
+            var output = Lines(IsPowerShell ? RunPowerShell(command) : RunBashPipeline(command));
             LastSuccess = true;
             history.AddRange(output); LastOutput = output;
             return new(true, output);
@@ -255,6 +307,19 @@ internal sealed class VirtualTerminal
             history.Add(error.Message);
             return new(false, [error.Message]);
         }
+    }
+
+    private string RunBashPipeline(string command)
+    {
+        var stages = SplitPipeline(Tokenize(command));
+        if (stages.Count > 32) throw Error("input", "учебный конвейер ограничен 32 командами");
+        if (stages.Count == 1 && stages[0] is [var commandToken, var follow, var path] &&
+            !commandToken.Operator && commandToken.Value == "tail" && !follow.Operator &&
+            follow.Value is "-f" or "--follow" && !path.Operator)
+            return FollowLog(path.Value);
+        string input = "";
+        foreach (var stage in stages) input = ExecuteStage(stage, input);
+        return input;
     }
 
     private string ExecuteStage(List<Token> tokens, string input)

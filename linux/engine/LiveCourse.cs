@@ -43,7 +43,7 @@ internal static partial class LiveCourse
             foreach (string token in RouteTokens(mission.Phases[phase]))
             {
                 if (!nativeEnglishInput && (IsCommandToken(token) || token is "source-log-command" or "source-config-test" || IsProjectSearchQuery(token) || token is "browser-search" or "code-clone-command" or "research-find" or "file-name-commit" ||
-                    NotebookEnglishToken(token) || token is "code-rename-confirm" or "debug-unit" or "debug-report-check"
+                    NotebookEnglishToken(token) || token is "terminal-incident-filter" or "code-rename-confirm" or "debug-unit" or "debug-report-check"
                     or "debug-project-query" or "debug-doc-submit" or "debug-rewrite" or "exact-find-submit" or "python-edit-write" or "notebook-file" or "notebook-report" or "notebook-type" or "notebook-report-save" or "moved-report-save" ||
                     trial.ExactEdit && token is "quick-choose" or "save") && trial.Layout == "RU")
                 {
@@ -108,6 +108,11 @@ internal static partial class LiveCourse
     private static readonly Dictionary<string, LabTask> Actions = LabCatalog.AllTasks.ToDictionary(task => task.Id);
     private static LabTask MakeTask(string token, LabScene scene)
     {
+        if (token == "terminal-incident-filter")
+            return new(scene.Terminal.IsPowerShell ? "command/powershell-incident" : "command/filter-incident",
+                "Покажите строки новой попытки из журнала", "",
+                "Возьмите ID из новой строки ERROR, подставьте его в показанную команду и нажмите Enter.",
+                scene.TerminalIncidentFilter, "command");
         if (NotebookTask(token, scene) is LabTask notebook) return notebook;
         if (PythonEditTask(token) is LabTask edit) return edit;
         if (token == "moved-report-save") return Actions["save"] with {
@@ -170,9 +175,15 @@ internal static partial class LiveCourse
                 "history" => "Посмотрите, какие команды уже выполнялись",
                 "clear" => "Очистите экран, не удаляя файлы и историю",
                 "reboot" => "Перезапустите только учебную систему",
+                "grep ERROR app.log" when scene.PracticalTerminal => "Выведите только строки ERROR из app.log",
+                "tail -f app.log" when scene.PracticalTerminal => "Следите за новыми строками app.log",
+                "Select-String ERROR sync.log" when scene.PracticalTerminal => "Покажите ошибки синхронизации с номерами строк",
+                "Get-Content sync.log -Wait" when scene.PracticalTerminal => "Следите за новыми строками sync.log",
                 _ => "Выполните «" + value + "»"
             };
-            return new(CommandId(value), objective, "", value.Length > 12 ? "Введите команду и нажмите Enter. Если она уже в истории: Ctrl+R, фрагмент, сверка строки, затем Enter." : "Введите команду и нажмите Enter.", value, "command");
+            return new(CommandId(value), objective, "", !scene.PracticalTerminal && value.Length > 12 ?
+                "Введите команду и нажмите Enter. Если она уже в истории: Ctrl+R, фрагмент, сверка строки, затем Enter." :
+                "Наберите команду целиком и нажмите Enter.", value, "command");
         }
         if (token == "gnome-write")
             return new(token, "Дописать комментарий: «" + LabScene.GnomeNoteText + "»", "",
@@ -259,6 +270,8 @@ internal static partial class LiveCourse
             return trial.Text("Enter", "");
         }
         if (task.Action == "code-rename-confirm") trial.Active.Input = LabScene.RenameTarget;
+        if (task.Action == "terminal-interrupt")
+            while (!trial.Terminal.LogIncidentArrived && trial.Terminal.AppendLogFeedLine()) { }
         if (trial.CsvNotebook && task.Action == "file-paste" && task.Text == "!conflict")
             return !trial.Apply(task.Action) && trial.NotebookConflictExpected();
         if (!LabCatalog.Available(task, trial) || !trial.Apply(task.Action)) return false;
@@ -310,13 +323,14 @@ internal static partial class LiveCourse
             "command" or "terminal-submit" => new { command = equivalentCommand ?? scene.Terminal.LastCommand, scene.Terminal.LastSuccess, scene.Terminal.Cwd, scene.Terminal.LastOutput, input = scene.TerminalInput, report = verifyReport ? scene.ReadReportArtifact() : null },
             "terminal-history-up" or "terminal-history-down" or "terminal-erase" or "terminal-kill" or "terminal-yank" or "word-left" or "word-right" or "terminal-home" or "terminal-end" or "terminal-cancel" => new { scene.TerminalInput, w?.Cursor },
             "terminal-clear" => scene.Terminal.History.Count(),
+            "terminal-interrupt" => scene.TerminalInterruptEvidence(),
             "overview" => scene.Overview, "desktop" => scene.ShowDesktop, "layout" => scene.Layout,
             "screenshot" => scene.Screenshot, "screenshot-confirm" => scene.Screenshots,
             "open-chrome" or "open-code" or "open-terminal" or "open-files" or "launch" or "switch-next" or "switch-prev" => app,
             "close-window" or "minimize" => scene.Windows.Select(v => new { v.App, v.State, v.Workspace }).ToArray(),
             "maximize" or "restore" or "tile-left" or "tile-right" or "fullscreen" => new { app, w?.State },
             "workspace-next" or "workspace-prev" or "move-next" or "move-prev" => new { scene.Workspace, windows = scene.Windows.Select(v => new { v.App, v.Workspace }).ToArray() },
-            "item-next" or "item-prev" => w == null ? null : new { app, w.Folder, w.Url, item = scene.Entries(w).ElementAtOrDefault(w.Item)?.Path },
+            "item-next" or "item-prev" => w == null ? null : new { app, w.Folder, Url = scene.BrowserGoalAddress(w.Url), item = scene.Entries(w).ElementAtOrDefault(w.Item)?.Path },
             "file-parent" or "file-home" or "file-back" or "file-forward" => new { app, w?.Folder },
             "file-cut" or "file-copy" => scene.Clipboard,
             "file-paste" or "trash" or "restore-trash" => w == null ? null : new { w.Folder, items = scene.Entries(w).Select(e => e.Path).ToArray() },
@@ -334,6 +348,7 @@ internal static partial class LiveCourse
             "new-tab" or "close-tab" or "restore-tab" => new { app, w?.ActiveTab, tabs = w?.Tabs.Select(tab => tab.Url).ToArray() },
             "next-tab" or "prev-tab" or "first-tab" or "last-tab" => new { app, w?.Url, w?.ActiveTab },
             "back" or "forward" or "navigate-pasted" => new { w?.Focus, w?.Url, w?.ActiveTab },
+            "history" when LabScene.OnChromeHistory(w) => new { focus = w.Focus is "body" or "history" ? "history" : w.Focus, w.Url },
             "history" or "downloads" or "bookmark-manager" => new { w?.Focus, w?.Url },
             "panel" or "terminal-toggle" => new { w?.Panel, w?.Focus }, "sidebar" => w?.Sidebar, "split" or "focus-editor" or "focus-second" => new { w?.Split, w?.Group, w?.Url, w?.Focus },
             "save" => new { w?.Url, w?.Tab?.SavedBody },

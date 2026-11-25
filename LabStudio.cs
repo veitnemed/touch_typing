@@ -35,7 +35,7 @@ namespace TouchTypingStudio
         private Button labDesktopUbuntuChoice, labDesktopWindowsChoice;
 
         private string LessonDesktopProfile
-        { get { return labApp == "windows" || labApp == "workday" ? labDesktopProfile : "ubuntu"; } }
+        { get { return labApp == "windows" || labApp == "workday" || labApp == "terminal" ? labDesktopProfile : "ubuntu"; } }
 
         private void HydrateDesktopProfile(Data settings)
         {
@@ -142,7 +142,7 @@ namespace TouchTypingStudio
 
         private Data PreferredLiveDraft(Data catalog, string app)
         {
-            string environment = app == "windows" || app == "workday" ? labDesktopProfile : "ubuntu";
+            string environment = app == "windows" || app == "workday" || app == "terminal" ? labDesktopProfile : "ubuntu";
             var drafts = catalog.Items("drafts").Where(draft => draft.S("app") == app &&
                 draft.S("desktopProfile", "ubuntu") == environment);
             // The profile keeps checkpoint insertion order. Do not hide a
@@ -399,6 +399,13 @@ namespace TouchTypingStudio
         {
             if (!labActive || paused || !IsActive || referenceHelpOpen || state.B("limitDecisionPending")) return;
             var next = Request("lab-explorer-action", "action", command, "path", path);
+            if (next.Exists) RenderLab(next);
+        }
+
+        private void ApplyLabBrowserHistoryCommand(string action, string path)
+        {
+            if (!labActive || paused || !IsActive || referenceHelpOpen || state.B("limitDecisionPending")) return;
+            var next = Request("lab-browser-history-focus", "action", action, "path", path);
             if (next.Exists) RenderLab(next);
         }
 

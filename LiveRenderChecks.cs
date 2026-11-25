@@ -43,6 +43,7 @@ namespace TouchTypingStudio
             for (int i = 0; i < pixels.Length; i += 4)
                 if ((pixels[i] == 155 && pixels[i + 1] == 98 && pixels[i + 2] == 53) ||
                     (pixels[i] == 240 && pixels[i + 1] == 200 && pixels[i + 2] == 173) ||
+                    NearPixel(pixels, i, 65, 92, 132) ||
                     CodeSelectionPixel(pixels, i)) count++;
             return count;
         }

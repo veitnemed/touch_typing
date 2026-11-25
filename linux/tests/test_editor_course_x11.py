@@ -1,16 +1,51 @@
 """Exercise the same Live → VS Code card and Continue entry as the learner."""
 import json
+import time
 from unittest.mock import patch
 
 from platform_linux import Engine
 from test_editor_course import checkpoint, first_difference
 from test_project_file_practice import active, disk
 from test_editor_guide_note import NOTE, source_fragments
-from test_preview2_native import QA, CaptureConsent, out
+from test_preview2_native import QA, CaptureConsent, alias, codes, out
 from touch_typing import LabPage
 
 
 class CourseWindowQA(QA):
+    def chord(self, label):
+        keys = [codes[alias.get(key, key)] for key in label.split("+")]
+        expected = {(code, pressed) for code in keys for pressed in (True, False)}
+        before = {event: self.received.get(event, 0) for event in expected}
+        yield from super().chord(label)
+        # XFlush queues events at the server, it doesn't wait for GTK to
+        # dispatch them. Never send a second chord to compensate for slow
+        # delivery: e.g. a second Ctrl+Shift+Tab opens another file.
+        deadline = time.monotonic() + 5.0
+        while True:
+            seen = {event: self.received.get(event, 0) - before[event] for event in expected}
+            assert all(count <= 1 for count in seen.values()), ("duplicate delivery", label, seen)
+            if all(count == 1 for count in seen.values()):
+                return
+            assert time.monotonic() < deadline, ("missing GTK key event", label, seen)
+            yield
+
+    def advance_goal(self, lab):
+        task, old = lab.state["task"], lab.state["solved"]
+        keys = task["keys"]
+        if not keys:
+            yield from self.typed(task)
+        else:
+            # These steps can require moving across multiple plausible items.
+            # Each movement is a new, acknowledged press; all other goals
+            # must react correctly to a single gesture.
+            for _ in range(24 if keys in ("Down", "Tab") else 1):
+                yield from self.chord(keys)
+                if lab.state["solved"] != old:
+                    break
+        window = active(lab.state)
+        assert lab.state["solved"] == old + 1, (task, lab.state["status"], old, lab.state["solved"],
+                                                 window["url"], window["focus"])
+
     def exercise(self):
         def acquired(page):
             # X11 cannot offer Wayland shortcut-inhibition consent. Real
@@ -42,6 +77,15 @@ class CourseWindowQA(QA):
             expected_note = "".join(source_fragments(lab.state))
             while lab.state["mission"] == "code-guide":
                 yield from self.advance_goal(lab)
+                if lab.state["solved"] == 22:
+                    window = active(lab.state)
+                    assert (window["url"].split("/")[-1], window["focus"],
+                            window["bodyAnchor"], window["bodyCursor"]) == ("app.py", "body", 0, 0)
+                if lab.state["solved"] == 23:
+                    window = active(lab.state)
+                    expected_import = source_fragments(lab.state)[2]
+                    assert (window["url"].split("/")[-1], window["bodyAnchor"], window["bodyCursor"],
+                            window["body"][:window["bodyCursor"]]) == ("app.py", 0, len(expected_import), expected_import)
                 if lab.state["solved"] == 27:
                     assert disk(lab.state)[NOTE] == active(lab.state)["body"] == expected_note
                     self.capture_widget_png(out/"course-01b-three-source-note.png")

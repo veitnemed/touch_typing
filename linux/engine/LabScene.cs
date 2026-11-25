@@ -62,6 +62,14 @@ internal sealed class LabWindow(string app, int number, int workspace)
     private readonly Dictionary<string, FieldPosition> positions = [];
     private readonly Dictionary<string, string> fields = [];
     internal string Input { get => fields.GetValueOrDefault(Focus, ""); set => fields[Focus] = value; }
+    internal string HistorySearch => fields.GetValueOrDefault("history", "");
+    // Feedback to pressing Enter in History's search field is not a window-wide
+    // notification: it must never follow a selected visit into the source page.
+    internal bool PromptHistorySelection;
+    private string StatusFor(LabEntry[] entries) =>
+        PromptHistorySelection && App == "chrome" && Url == LabScene.ChromeHistory && Focus == "history" && Item < 0
+            ? entries.Length == 0 ? "В истории нет совпадений." : "Tab выбирает запись, Enter открывает её."
+            : Status;
     private FieldPosition Position
     {
         get
@@ -111,7 +119,7 @@ internal sealed class LabWindow(string app, int number, int workspace)
     internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults, string projectName, string projectRelative, string windowsPath = null, bool browserPractice = false, int projectRootDepth = 3,
         LabEntry[] explorerEntries = null, bool canUndoExplorer = false, bool explorerCanPaste = false, bool canPasteCell = false) => new { windowsPath, browserPractice, projectRootDepth, renamePath = RenamePath,
         explorerActions = App == "code", explorerEntries, canUndoExplorer, explorerCanPaste, expandedFolders = ExpandedProjectFolders, notebook = Tab?.Notebook?.Snapshot(canPasteCell), notebookDescription = Tab?.Notebook?.Describe(), syntax = App == "code" ? PythonHighlight.For(Body, Url) : [], projectFiles, changedFiles, searchResults, projectName, projectRelative, ProjectSearchQuery, Id, App, Title, Workspace, State, NormalSlot, restoreState = MinimizedFrom, active, Folder, folderCanBack = FolderBack.Count != 0, folderCanForward = FolderForward.Count != 0, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(App == "code"), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
-        tabs = Tabs.Select(tab => tab.Snapshot()), ActiveTab, Url, Body, Focus, Input, Find, Sidebar, Split, Status, Zoom, Selected, Cursor, Anchor, Panel, bodyCursor = Tab?.Position.Caret ?? 0, bodyAnchor = Tab?.Position.Anchor ?? 0, OptionIndex, Bookmarks, savedBookmarks = SavedBookmarks.ToArray() };
+        tabs = Tabs.Select(tab => tab.Snapshot()), ActiveTab, Url, Body, Focus, Input, HistorySearch, Find, Sidebar, Split, Status = StatusFor(entries), Zoom, Selected, Cursor, Anchor, Panel, bodyCursor = Tab?.Position.Caret ?? 0, bodyAnchor = Tab?.Position.Anchor ?? 0, OptionIndex, Bookmarks, savedBookmarks = SavedBookmarks.ToArray() };
     internal LabWindow Clone()
     {
         var copy = new LabWindow(App, int.Parse(Id[7..]), Workspace)
@@ -120,7 +128,7 @@ internal sealed class LabWindow(string app, int number, int workspace)
             Sidebar = Sidebar, Split = Split, Panel = Panel, Bookmarks = Bookmarks,
             SearchDraft = SearchDraft, SearchFrom = SearchFrom, SearchAnchor = SearchAnchor, SearchCaret = SearchCaret,
             MinimizedFrom = MinimizedFrom, UntileTo = UntileTo,
-            ActiveTab = ActiveTab, Zoom = Zoom, OptionIndex = OptionIndex
+            ActiveTab = ActiveTab, Zoom = Zoom, OptionIndex = OptionIndex, PromptHistorySelection = PromptHistorySelection
         };
         foreach (var jump in SymbolBack.Reverse()) copy.SymbolBack.Push(jump);
         copy.SymbolReferences = [.. SymbolReferences];
@@ -203,6 +211,7 @@ internal sealed partial class LabScene
     {
         NeutralWorkspace = source.NeutralWorkspace;
         guideExpected = source.guideExpected;
+        journalCase = source.journalCase;
         BrowserPracticeActive = source.BrowserPracticeActive; RepoCloned = source.RepoCloned; BrowserPracticeQuery = source.BrowserPracticeQuery;
         notebookCase = source.notebookCase; notebookLevel = source.notebookLevel;
         notebookFamily = source.notebookFamily; csvNotebook = source.csvNotebook; verifiedNotebookBody = source.verifiedNotebookBody;
@@ -341,6 +350,8 @@ internal sealed partial class LabScene
             case "copy-shot": if (!ScreenshotReady) return false; ScreenshotCopied = true; Clipboard = "Снимок-" + Screenshots + ".png"; break;
             case "escape":
                 if (window?.Focus == "reverse-search") return Text("Esc", "");
+                if (!ReplayLegacyChromeHistory && OnChromeHistory(window) && window.Focus == "history")
+                    return FocusChromeHistory(window, clear: true);
                 Overview = Switcher = Screenshot = ScreenshotReady = false;
                 if (window != null)
                 {
@@ -441,6 +452,7 @@ internal sealed partial class LabScene
             case "last-tab": window.ActiveTab = Math.Max(0, window.Tabs.Count - 1); window.Focus = "body"; break;
             case "url": if (!browser) return false; window.Focus = "url"; window.Input = window.Url; window.Selected = true; break;
             case "find":
+                if (!ReplayLegacyChromeHistory && OnChromeHistory(window)) return FocusChromeHistory(window, selectAll: true);
                 string needle = window.Focus == "body" && window.Selected ? Slice(window, window.Body).TrimEnd('\n') : window.Find;
                 window.Focus = "find"; window.Input = window.Find = needle; window.Select(0, needle.Length);
                 if (needle.Length > 0) FindMatch(window, false); break;
@@ -547,6 +559,10 @@ internal sealed partial class LabScene
                 window.Body = window.Body.Remove(begin, lineEnd - begin); window.Cursor = begin; break;
             case "terminal-clear": if (!terminal) return false; Terminal.Execute("clear"); break;
             case "terminal-cancel": if (!terminal) return false; TerminalInput = ""; window.Cursor = 0; window.Status = "Ввод команды отменён"; break;
+            case "terminal-interrupt":
+                if (!terminal || !Terminal.InterruptLog()) return false;
+                window.Status = "Просмотр остановлен. Приглашение снова доступно.";
+                break;
             case "terminal-home": if (!terminal) return false; window.Cursor = 0; break;
             case "terminal-end": if (!terminal) return false; window.Cursor = TerminalInput.Length; break;
             case "terminal-kill": if (!terminal) return false; killedText = TerminalInput[window.Cursor..]; TerminalInput = TerminalInput[..window.Cursor]; break;
@@ -643,7 +659,11 @@ internal sealed partial class LabScene
         int start = Math.Clamp(w.Start, 0, source.Length), end = Math.Clamp(w.End, start, source.Length);
         string updated = source[..start] + value + source[end..];
         if (IsTerminal(w)) TerminalInput = updated;
-        else if (w.Focus != "body") w.Input = updated;
+        else if (w.Focus != "body")
+        {
+            w.Input = updated;
+            if (w.Focus == "history" && OnChromeHistory(w)) { w.Item = -1; w.PromptHistorySelection = false; }
+        }
         else if (w.App == "code")
         {
             Remember(w);
@@ -677,7 +697,7 @@ internal sealed partial class LabScene
         // text repeat. In an actual field use the same caret, selection and
         // grapheme deletion as the first press, without another goal attempt.
         return (key is "Backspace" or "Delete") && window.Focus is
-            "url" or "find" or "palette" or "clone-url" or "quick-open" or "goto-line" or "symbols"
+            "url" or "find" or "history" or "palette" or "clone-url" or "quick-open" or "goto-line" or "symbols"
             or "symbol-rename" or "file-name" or "project-search" or "replace-find" or "replace-with";
     }
 
@@ -700,6 +720,17 @@ internal sealed partial class LabScene
         var window = Active;
         if (window == null) return false;
         if (OnNotebook) return NotebookText(key, text, extend, word);
+        if (!ReplayLegacyChromeHistory && OnChromeHistory(window) && key == "Tab")
+        {
+            if (extend || window.Focus != "history") return FocusChromeHistory(window);
+            if (Entries(window).Length > 0) return Apply("item-next");
+            return true;
+        }
+        if (!ReplayLegacyChromeHistory && OnChromeHistory(window) && window.Focus == "history" && key == "Enter" && window.Item < 0)
+        {
+            window.PromptHistorySelection = true; Version++;
+            return true;
+        }
         bool terminal = window.App == "terminal" || window.Focus == "terminal";
         if (window.Focus == "reverse-search")
         {
@@ -715,6 +746,7 @@ internal sealed partial class LabScene
             window.SearchIndex = commands.Count;
             return ReverseSearch(window); // historic trace behavior
         }
+        if (terminal && Terminal.FollowingLog) return false;
         if (key == "Enter")
         {
             if (terminal)
@@ -723,7 +755,8 @@ internal sealed partial class LabScene
                 var result = Terminal.Execute(command);
                 if (command.Length > 0) commands.Add(command);
                 commandIndex = commands.Count; TerminalInput = ""; window.Cursor = 0;
-                window.Status = result.Success ? "Команда выполнена" : "Проверьте команду";
+                window.Status = !result.Success ? "Проверьте команду" : Terminal.FollowingLog ?
+                    "Журнал открыт и принимает новые строки" : "Команда выполнена";
             }
             else if (window.Focus == "url")
             {
@@ -954,7 +987,7 @@ internal sealed partial class LabScene
     }
 
     internal object Snapshot() => new { Workspace, WorkspaceCount, Overview, Switcher, SwitchTarget, switchChoices = GnomePractice == "same-app" || WindowsDesktop ? SwitchChoices : [],
-        desktopStyle = WindowsDesktop ? "win10" : "ubuntu", DesktopOverlay, DesktopOverlaySelection, DesktopOverlayWindows,
+        desktopStyle = WindowsDesktop || Terminal.IsPowerShell ? "win10" : "ubuntu", DesktopOverlay, DesktopOverlaySelection, DesktopOverlayWindows,
         desktopStartApps = WindowsDesktop ? WindowsStartApps : [], Dock, Layout, ActiveWindow, GnomeWindows, GnomePractice, DebugDay,
         windows = Windows.Select(WindowSnapshot), terminal = Terminal.Snapshot(), terminalInput = TerminalInput,
         Clipboard, clipboardMime = ClipboardImage == null ? "text/plain" : "image/png", Screenshot, ScreenshotReady, ScreenshotCopied, Screenshots, ShowDesktop, Search, LayoutIsVirtual, Version, DiagnosticWorkspace, DiagnosticProblemCount };

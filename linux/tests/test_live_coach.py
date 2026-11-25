@@ -96,32 +96,35 @@ class LiveCoachTests(unittest.TestCase):
             finally:
                 e.close()
 
-    def test_terminal_connection_requires_a_new_working_directory_for_transfer(self):
+    def test_terminal_practical_rehearsal_recalls_and_transfers_to_different_log(self):
         with TemporaryDirectory() as root, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": root}):
             e = Engine(verify=True)
             try:
                 e.call("configure", platform="linux", layout="EN")
-                s = begin(e, "terminal", adaptiveGuide=True, actionLimit=100)
-                s = seek(e, s, lambda state: state["task"]["id"] == "command/pwd")
-                enter(e, "pwf")
+                def finish(state):
+                    while not state["finished"]:
+                        state = advance(e, state)
+                    return state
+                def journal(state):
+                    return next(item["content"] for item in state["scene"]["terminal"]["files"]
+                                if item["path"] == "/home/student/project/app.log")
+                s = begin(e, "terminal", adaptiveGuide=True)
+                first = journal(s)
+                enter(e, "gerp ERROR app.log")
                 s = chord(e, "Enter")
                 self.assertEqual((s["coachStage"], s["showGuide"]), ("practice", True))
-                s = advance(e, s)
-                s = seek(e, s, lambda state: state["coachStage"] == "recall")
-                self.assertEqual((s["task"]["id"], s["coachPrompt"], s["showGuide"]),
-                                 ("command/pwd", "Узнайте, в какой папке вы находитесь", False))
-                prior = s["scene"]["terminal"]["cwd"]
-                s = advance(e, s)
-                s = seek(e, s, lambda state: state["mission"] == "terminal-essentials-locate")
-                same_folder = seek(e, s, lambda state: state["task"]["id"] == "command/pwd")
-                self.assertEqual(same_folder["scene"]["terminal"]["cwd"], prior)
-                self.assertNotEqual(same_folder["coachStage"], "transfer")
-                s = seek(e, advance(e, same_folder), lambda state: state["coachStage"] == "transfer")
-                self.assertEqual((s["mission"], s["task"]["id"], s["showGuide"]),
-                                 ("terminal-essentials-locate", "command/pwd", False))
-                self.assertNotEqual(s["scene"]["terminal"]["cwd"], prior)
-                s = advance(e, s)
-                self.assertTrue(s["scene"]["terminal"]["output"][-1].strip() == "/home/student")
+                self.assertEqual(finish(s)["solved"], 4)
+                s = begin(e, "terminal", adaptiveGuide=True)
+                recall = journal(s)
+                self.assertNotEqual(recall, first)
+                self.assertEqual((s["coachStage"], s["showGuide"], s["task"]["id"]),
+                                 ("recall", False, "command/grep ERROR app.log"))
+                self.assertEqual(finish(s)["solved"], 4)
+                s = begin(e, "terminal", adaptiveGuide=True)
+                self.assertNotEqual(journal(s), recall)
+                self.assertEqual((s["coachStage"], s["showGuide"], s["task"]["id"]),
+                                 ("transfer", False, "command/grep ERROR app.log"))
+                self.assertEqual(finish(s)["solved"], 4)
             finally:
                 e.close()
 

@@ -1,4 +1,4 @@
-"""Replay the reported scenario inside the native ordinary GTK lesson."""
+"""Keep Bash history as separately selected native GTK practice, not the default course."""
 import os
 from test_live_course_cards_x11 import CourseCards
 from test_preview2_native import out
@@ -15,7 +15,22 @@ class TerminalHistoryWindow(CourseCards):
         self.navigate("home")
         for _ in range(25): yield
         self.focus_window()
-        lesson = yield from self.ordinary_card("terminal")
+        if BASELINE:
+            lesson = yield from self.ordinary_card("terminal")
+        else:
+            settings, chooser, level, mode, actions, timer, start = self.home_configure["terminal"]
+            settings.grab_focus()
+            yield from self.chord("Space")
+            titles = chooser.get_model()
+            chooser.set_selected(next(i for i in range(titles.get_n_items())
+                                     if titles.get_string(i) == "Разобраться в незнакомом проекте"))
+            start.grab_focus()
+            yield from self.chord("Enter")
+            for _ in range(90):
+                if self.lab and self.lab.active and not self.lab.state["paused"]:
+                    break
+                yield
+            lesson = self.lab
         assert lesson and lesson.active and lesson.state["mission"] == "terminal-explore"
         self.focus_window()
         lesson.desktop.grab_focus()
@@ -65,7 +80,7 @@ class TerminalHistoryWindow(CourseCards):
             assert lesson.state["solved"] == before + 1 and lesson.state["scene"]["terminalInput"] == "pwd"
             assert lesson.state["scene"]["terminal"]["lastCommand"] == last
             self.capture_widget_png(out / "07-arrow-not-executed.png")
-        print(f"PASS real GTK {('released .7' if BASELINE else 'fixed')} ordinary Terminal:"
+        print(f"PASS real GTK {('released .7' if BASELINE else 'fixed')} Terminal history:"
               f" empty Ctrl+R+Enter candidate={candidate!r}, executed={actual!r};"
               " fragment accepted with real cwd; arrows display/behavior separately verified in fixed build.", flush=True)
 

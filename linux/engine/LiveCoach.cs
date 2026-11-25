@@ -69,7 +69,8 @@ internal static class LiveCoach
         if (spacing < InterveningActions) return LiveCoaching.None;
         if (recalled == null)
             return new(Recall, "Вы уже сделали это с подсказкой. Вспомните действие по рабочей цели.");
-        if (recalled.Mission != mission && !string.IsNullOrEmpty(recalled.CoachContext) && recalled.CoachContext != context)
+        bool practicalJournal = app == "terminal" && LiveCourse.PracticalTerminalMission(mission) && recalled.TerminalCase > 0;
+        if ((recalled.Mission != mission || practicalJournal) && !string.IsNullOrEmpty(recalled.CoachContext) && recalled.CoachContext != context)
             return new(Transfer, "Проверьте знакомый навык в другом поручении и рабочем состоянии.");
         return LiveCoaching.None;
     }

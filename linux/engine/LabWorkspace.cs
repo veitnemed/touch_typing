@@ -36,7 +36,7 @@ internal sealed partial class LabScene
                 .Select(path => new LabEntry(NameOf(path), path, Terminal.DirectoryExists(path) ? "folder" : "file")).ToArray();
         if (w.App == "chrome") return w.Url switch
         {
-            "chrome://history" => recentUrls.Where(url => !url.StartsWith("chrome:")).Select(PageEntry).ToArray(),
+            ChromeHistory => HistoryEntries(w),
             "chrome://downloads" => DownloadEntries(),
             "chrome://bookmarks" => w.SavedBookmarks.Order().Select(PageEntry).ToArray(),
             _ when BrowserPracticeActive && IsSearchResult(w.Url) => PracticeSearchEntries(w.Url),
@@ -305,6 +305,7 @@ internal sealed partial class LabScene
                 int existing = w.Tabs.FindIndex(tab => tab.Url == internalUrl);
                 if (existing >= 0) { w.ActiveTab = existing; w.Focus = "body"; w.Item = -1; }
                 else { ApplyWindow("new-tab", w); Navigate(w, internalUrl); }
+                if (!ReplayLegacyChromeHistory && action == "history") FocusChromeHistory(w, clear: true);
                 return true;
             case "item-next": case "item-prev":
                 int length = Entries(w).Length;

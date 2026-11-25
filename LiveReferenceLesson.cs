@@ -115,6 +115,7 @@ namespace TouchTypingStudio
             AutomationProperties.SetAutomationId(labDesktop, "LabDesktop");
             labDesktop.NotebookCommand += ApplyLabNotebookCommand;
             labDesktop.ExplorerCommand += ApplyLabExplorerCommand;
+            labDesktop.BrowserHistoryCommand += ApplyLabBrowserHistoryCommand;
             var sceneFrame = ReferenceLessonPanel(labDesktop, new Thickness(4), 13);
             sceneFrame.Margin = new Thickness(16, 8, 16, 0);
             Grid.SetRow(sceneFrame, 2);
@@ -299,7 +300,10 @@ namespace TouchTypingStudio
             string shown = !guided ? "" : raw.Length > 0 ? string.Join(" → ", steps.Select(chord =>
                 string.Join(" + ", chord.Split('+').Select(LessonCap)))) :
                 task.S("id").StartsWith("open-") ? "⊞  →  " + text + "  →  Enter" :
-                task.S("id").StartsWith("command/") && text.Length > 12 ? "Ctrl + R  →  фрагмент  →  Enter" : text;
+                task.S("id") == "command/filter-incident" ? "grep [ID] app.log" :
+                task.S("id") == "command/powershell-incident" ? "Select-String [ID] sync.log" :
+                !state.B("terminalPractical") && task.S("id").StartsWith("command/") && text.Length > 12 ?
+                    "Ctrl + R  →  фрагмент  →  Enter" : text;
             string signature = (guided ? "guided:" : "independent:") + shown + "|" + raw + "|" + step + "/" + count;
             if (signature == referenceKeySignature) return; // Input and timer ticks should not rebuild visual children.
             referenceKeySignature = signature;
@@ -362,7 +366,10 @@ namespace TouchTypingStudio
 
         private void DrawReferenceTerminalTheory()
         {
-            referenceHelpText.Text = state.B("showGuide", true)
+            referenceHelpText.Text = state.B("terminalPractical")
+                ? "Для одного короткого файла удобен поиск в редакторе. Здесь вы отделяете ошибки, следите за " +
+                  "новыми записями и проверяете запрос по его ID. Остановка просмотра не выключает сервис."
+                : state.B("showGuide", true)
                 ? "↑ возвращает прошлую команду, но не запускает её. Ctrl+R ищет по истории: наберите фрагмент, сверьте найденную строку и нажмите Enter. " +
                   "←/→ переносят её в командную строку для правки, Esc возвращает ваш черновик."
                 : "История хранит уже выполненные команды. Можно вернуть прошлую строку для правки или найти нужную по фрагменту. " +

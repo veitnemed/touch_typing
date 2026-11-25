@@ -91,12 +91,15 @@ namespace TouchTypingStudio
                         scene.Items("windows").FirstOrDefault(w => w.S("id") == item.Value())).Where(w => w != null)
                         .Select(w => w.S("url").Split('/').Last())) : ""));
             System.Windows.Automation.AutomationProperties.SetHelpText(this, scene.S("terminalInput"));
+            var shell = scene.D("terminal");
             var terminal = scene.Items("windows").FirstOrDefault(w => w.B("active") &&
                 (w.S("app") == "terminal" || w.S("focus") == "terminal" || w.S("focus") == "reverse-search"));
             var editor = scene.Items("windows").FirstOrDefault(w => w.B("active") && w.S("app") == "code");
-            System.Windows.Automation.AutomationProperties.SetItemStatus(this, terminal != null ?
-                "cursor:" + terminal.I("cursor", -1).ToString(CultureInfo.InvariantCulture) : editor == null ? "" :
-                "editor:" + editor.S("focus") + ":" + editor.I("bodyCursor", -1).ToString(CultureInfo.InvariantCulture));
+            string fieldStatus = terminal != null ? "cursor:" + terminal.I("cursor", -1).ToString(CultureInfo.InvariantCulture) :
+                editor == null ? "" : "editor:" + editor.S("focus") + ":" + editor.I("bodyCursor", -1).ToString(CultureInfo.InvariantCulture);
+            if (terminal != null && shell.B("followingLog"))
+                fieldStatus += shell.B("logIncidentArrived") ? " · Журнал обновляется, новая ошибка получена" : " · Журнал обновляется";
+            System.Windows.Automation.AutomationProperties.SetItemStatus(this, fieldStatus);
             if (terminal == null && editor != null)
             {
                 string focus = editor.S("focus");
@@ -113,6 +116,9 @@ namespace TouchTypingStudio
                     editor.Items("tabs").Skip(Math.Max(0, editor.I("activeTab"))).Select(item => item.S("title")).FirstOrDefault();
                 System.Windows.Automation.AutomationProperties.SetHelpText(this, description ?? "");
             }
+            var history = scene.Items("windows").FirstOrDefault(w => w.B("active") && w.S("url") == "chrome://history");
+            if (history != null)
+                System.Windows.Automation.AutomationProperties.SetHelpText(this, ChromeHistoryAccessible(history));
             if (WitnessPythonEditor)
                 System.Windows.Automation.AutomationProperties.SetItemType(this, PythonEditorWitness(scene, editor));
             else if (Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_BROWSER_CLONE") == "1")
@@ -131,9 +137,9 @@ namespace TouchTypingStudio
             NotebookStartFrame(1, 0, 0);
             bool immersive = (classApp == "chrome" || classApp == "code") && NotebookInteractionClear() &&
                 scene.Items("windows").Any(item => item.B("active") && item.S("app") == classApp && item.S("state") != "minimized");
-            bool windowsNotebook = immersive && classApp == "code" && scene.Items("windows").Any(
-                item => item.B("active") && item.S("app") == "code" && item.D("notebook").Exists);
-            if (scene.S("desktopStyle") == "win10" && !windowsNotebook)
+            bool windowsImmersive = immersive && (classApp == "chrome" || classApp == "code" && scene.Items("windows").Any(
+                item => item.B("active") && item.S("app") == "code" && item.D("notebook").Exists));
+            if (scene.S("desktopStyle") == "win10" && !windowsImmersive)
             {
                 DrawSimulatedWindows10(dc);
                 context = null;
@@ -188,13 +194,13 @@ namespace TouchTypingStudio
 
         private void DrawImmersive(DrawingContext dc)
         {
-            double width = classApp == "chrome" ? Math.Min(900, Math.Max(610, ActualWidth)) : Math.Max(420, ActualWidth);
+            double width = Math.Max(classApp == "chrome" ? 350 : 420, ActualWidth);
             double scale = ActualWidth / width;
             double height = ActualHeight / scale;
             NotebookStartFrame(scale, 0, 0);
             dc.PushTransform(new ScaleTransform(scale, scale));
             dc.PushClip(new RectangleGeometry(new Rect(0, 0, width, height), 10, 10));
-            Rectangle(0, 0, width, height, classApp == "chrome" ? "#F7F6FD" : CodeCanvas);
+            Rectangle(0, 0, width, height, classApp == "chrome" ? ChromeTray : CodeCanvas);
             var candidates = scene.Items("windows").Where(w =>
                 (w.S("app") == classApp || classApp == "code" && w.S("app") == "vscode") &&
                 w.S("state") != "closed" && w.S("state") != "minimized").ToArray();
@@ -206,12 +212,12 @@ namespace TouchTypingStudio
             else
             {
                 Text(classApp == "chrome" ? "Chrome закрыт" : "VS Code закрыт", 75, height * .35, 30,
-                    classApp == "chrome" ? "#2F4055" : "#E2E2E2", 1050);
+                    classApp == "chrome" ? ChromeText : "#E2E2E2", 1050);
                 Text("Откройте приложение сочетанием из задания.", 75, height * .35 + 48, 16,
-                    classApp == "chrome" ? "#5F6C7C" : "#A8B0BB", 1050);
+                    classApp == "chrome" ? ChromeIcon : "#A8B0BB", 1050);
             }
             if (scene.B("switcher")) DrawSwitcher();
-            if (scene.B("screenshot")) DrawScreenshot(height);
+            if (scene.B("screenshot")) DrawScreenshot(height, width);
             dc.Pop();
             dc.Pop();
         }
@@ -289,47 +295,27 @@ namespace TouchTypingStudio
                 context.Pop(); context.Pop();
                 return;
             }
-            Rectangle(0, 0, bounds.Width, 29, app == "chrome" ? "#24213B" : window.B("active") ? "#303034" : "#28282C");
-            if (app == "chrome") Icon("chrome", 13, 5, 19);
-            Text(window.S("title", AppTitle(app)), app == "chrome" ? 38 : 14, 7, app == "chrome" ? 14 : 11, "#F6F1FF");
+            if (app == "chrome")
+            {
+                DrawChrome(window, bounds.Width, bounds.Height);
+                context.Pop(); context.Pop();
+                return;
+            }
+            Rectangle(0, 0, bounds.Width, 29, window.B("active") ? "#303034" : "#28282C");
+            Text(window.S("title", AppTitle(app)), 14, 7, 11, "#F6F1FF");
             Text("—       □", bounds.Width - 89, 5, 12, "#C6C6CE");
             Rounded(bounds.Width - 26, 5, 18, 18, "#D75636", 9);
             Text("×", bounds.Width - 22, 3, 15, "#FFFFFF");
-            double w = bounds.Width, h = bounds.Height;
-            if (app == "chrome") DrawChrome(window, w, h);
-            else if (app == "terminal") DrawTerminal(window, w, h);
-            else DrawFiles(window, w, h);
+            if (app == "terminal") DrawTerminal(window, bounds.Width, bounds.Height);
+            else DrawFiles(window, bounds.Width, bounds.Height);
             context.Pop(); context.Pop();
         }
 
         private void DrawChrome(Data window, double w, double h)
         {
-            Rectangle(0, 29, w, h - 29, "#F7F6FD");
-            Rectangle(0, 29, w, 35, "#1D1A35");
             var tabs = window.Items("tabs").ToArray();
-            double tabWidth = Math.Min(200, (w - 65) / Math.Max(1, tabs.Length));
-            for (int i = 0; i < tabs.Length; i++)
-            {
-                Rounded(7 + i * tabWidth, 35, tabWidth - 4, 29,
-                    i == window.I("activeTab") ? "#3A345C" : "#26223E", 7);
-                Text("◉", 16 + i * tabWidth, 42, 10, "#80BCDF");
-                Text(tabs[i].S("title", "Новая вкладка"), 33 + i * tabWidth, 42, 11, "#E7EAF1", tabWidth - 53);
-                Text("×", tabWidth - 15 + i * tabWidth, 40, 12, "#A4ACBC");
-            }
-            Text("+", 17 + tabs.Length * tabWidth, 38, 20, "#C2C9D6");
-            Rectangle(0, 64, w, 38, "#3A345C");
-            Text("‹   ›   ⟳", 13, 71, 17, "#CDD5E2");
-            Rounded(95, 70, w - 142, 26, window.S("focus") == "url" ? "#D8E9FD" : "#242039", 13);
-            Field(window.S("focus") == "url" ? window.S("input") : window.S("url"), window, 109, 76, w - 180, 12,
-                window.S("focus") == "url" ? "#1F3E5F" : "#D4DCEB", 0, window.S("focus") == "url",
-                scrollKey: "address:" + window.S("id"), face: regular);
-            if (window.B("browserPractice"))
-            {
-                bool saved = window.Items("savedBookmarks").Any(item => item.Value() == window.S("url"));
-                Text(saved ? "★" : "☆", w - 41, 74, 14, saved ? "#BDA8FF" : "#D6DDE9");
-            }
-            Text("⋮", w - 24, 68, 21, "#D6DDE9");
-            double pageTop = window.B("bookmarks") ? 126 : 102;
+            double pageTop = DrawChromeTop(window, w, tabs);
+            Rectangle(0, pageTop, w, h - pageTop, "#F8F9FB");
             double pageScale = window.N("zoom", 100) / 100;
             var active = tabs.ElementAtOrDefault(window.I("activeTab"));
             string url = window.S("url");
@@ -337,40 +323,34 @@ namespace TouchTypingStudio
             if (body.Length == 0 && active != null) body = active.S("body");
             string title = active == null ? "Рабочие материалы" : active.S("title", "Рабочие материалы");
             var entries = window.Items("entries").ToArray();
-            bool manager = url == "chrome://history" || url == "chrome://downloads" || url == "chrome://bookmarks";
+            bool manager = url == "chrome://downloads" || url == "chrome://bookmarks";
             bool searchHome = url == "https://www.google.com/";
             bool searchResults = url.StartsWith("https://www.google.com/search?q=", StringComparison.Ordinal);
             string status = window.S("status");
             bool showStatus = status.Length > 0 && status != "Готово";
-            double bottom = h - (showStatus ? 24 : 8);
-            if (searchHome || searchResults)
+            double bottom = h - (showStatus ? 24 : url == "chrome://history" ? 0 : 8);
+            if (url == "chrome://history")
+                DrawChromeHistory(window, w, pageTop, bottom, entries);
+            else if (searchHome || searchResults)
                 DrawSearchPage(window, w, pageTop, bottom, searchHome, body, entries, pageScale);
             else if (manager)
                 DrawBrowserManager(window, w, pageTop, bottom, url, entries, pageScale);
             else
                 DrawBrowserDocument(window, w, pageTop, bottom, url, title, body, entries, pageScale);
-            if (window.B("bookmarks"))
-            {
-                Rectangle(0, 101, w, 25, "#E5EAF0");
-                var bookmarks = window.Items("savedBookmarks").Select(item => item.Value())
-                    .Where(bookmark => !string.IsNullOrWhiteSpace(bookmark)).OrderBy(bookmark => bookmark, StringComparer.Ordinal)
-                    .Select(bookmark => BrowserBookmarkTitle(bookmark, tabs, window.Items("entries"))).ToArray();
-                Text(bookmarks.Length == 0 ? "Нет сохранённых закладок" : string.Join("    ", bookmarks.Select(label => "☆  " + label)),
-                    15, 107, 10, "#43566D", w - 30);
-            }
             if (window.S("find").Length > 0 || window.S("focus") == "find")
             {
-                Rounded(w - 337, 104, 323, 41, "#343A45", 5);
+                double boxWidth = Math.Min(323, w - 24), left = w-boxWidth-12, findTop = pageTop+3;
+                Rounded(left, findTop, boxWidth, 38, "#303134", 6);
                 bool editingFind = window.S("focus") == "find";
-                Text("⌕", w - 321, 115, 14, "#CFD7E8", 23);
-                Field(editingFind ? window.S("input") : window.S("find"), window, w - 297, 116, 211,
-                    12, "#FFFFFF", 0, editingFind && window.B("active"), scrollKey: "find:" + window.S("id"), face: regular);
-                Text("↑  ↓  ×", w - 79, 115, 13, "#CFD7E8");
+                DrawChromeMark("search",left+8,findTop+11,14,ChromeIcon,"#303134");
+                Field(editingFind ? window.S("input") : window.S("find"), window, left+29, findTop+10, boxWidth-86,
+                    13, "#FFFFFF", 0, editingFind && window.B("active"), scrollKey: "find:" + window.S("id"), face: regular);
+                Text("↑  ↓  ×", left+boxWidth-57, findTop+9, 13, ChromeIcon);
             }
             if (showStatus)
             {
-                Rectangle(0, h - 23, w, 23, "#ECF0F6");
-                Text(status, 12, h - 18, 10, "#4B607B", w - 30);
+                Rectangle(0, h - 24, w, 24, ChromePill);
+                Text(status, 10, h - 19, 11, ChromeText, w - 20);
             }
         }
 
@@ -496,8 +476,7 @@ namespace TouchTypingStudio
         private void DrawBrowserManager(Data window, double width, double top, double bottom, string url,
             Data[] entries, double scale)
         {
-            string heading = url == "chrome://bookmarks" ? "Закладки" :
-                url == "chrome://downloads" ? "Загрузки" : "История";
+            string heading = url == "chrome://bookmarks" ? "Закладки" : "Загрузки";
             Rectangle(0, top, width, bottom - top, "#F3F6FC");
             Rectangle(0, top, width, 46, "#DCE7FC");
             Text("☰", 18, top + 13, 16, "#29466B", 23);
@@ -539,7 +518,7 @@ namespace TouchTypingStudio
                 Data entry = entries[i];
                 double rowY = y + (i - start) * pitch;
                 if (i == selected) Rounded(panelLeft + 4, rowY + 2, panelWidth - 8, pitch - 4, "#DEEAFD", 6);
-                Text(url == "chrome://bookmarks" ? "☆" : url == "chrome://downloads" ? "↓" : "◷",
+                Text(url == "chrome://bookmarks" ? "☆" : "↓",
                     panelLeft + 13, rowY + 11, 16, "#4B6586");
                 Text(entry.S("title"), panelLeft + 42, rowY + 5, 14, "#202124", panelWidth - 58);
                 Text(BrowserShortAddress(entry.S("path")), panelLeft + 42, rowY + 23, 11, "#526274", panelWidth - 58);
@@ -852,14 +831,17 @@ namespace TouchTypingStudio
 
         private void DrawTerminal(Data window, double w, double h)
         {
-            Rectangle(0, 29, w, h - 29, "#2B1028");
-            string output = string.Join("\n", scene.D("terminal").Items("output").Select(line => line.Value()).Reverse().Take(13).Reverse());
-            Text(output, 16, 45, 13, "#E4DCE6", w - 35, 14, true);
-            string input = scene.S("terminalInput");
-            string cwd = scene.D("terminal").S("cwd", "~");
+            var terminal = scene.D("terminal");
+            bool powershell = terminal.S("shell") == "powershell";
+            Rectangle(0, 29, w, h - 29, powershell ? "#012456" : "#2B1028");
+            string output = string.Join("\n", terminal.Items("output").Select(line => line.Value()).Reverse().Take(13).Reverse());
+            Text(output, 16, 45, 13, powershell ? "#E7EFFB" : "#E4DCE6", w - 35, 14, true);
             double y = Math.Min(h - 45, 72 + Math.Min(11, output.Split('\n').Length) * 20);
-            TerminalField(window, 16, y, w - 32);
-            if (window.S("status").Length > 0) Text(window.S("status"), 16, h - 25, 11, "#C9B3C5", w - 35);
+            if (terminal.B("followingLog"))
+                Text(terminal.B("logIncidentArrived") ? "Новая ошибка получена · просмотр продолжается" :
+                    "Просмотр открыт · ожидаются новые записи", 16, y, 12, "#F1C77C", w - 32);
+            else TerminalField(window, 16, y, w - 32);
+            if (window.S("status").Length > 0) Text(window.S("status"), 16, h - 25, 11, powershell ? "#BCD0EE" : "#C9B3C5", w - 35);
         }
 
         internal string CapturePng(bool activeOnly = false)
@@ -926,14 +908,15 @@ namespace TouchTypingStudio
             }
         }
 
-        private void DrawScreenshot(double height = HeightUnits)
+        private void DrawScreenshot(double height = HeightUnits, double width = WidthUnits)
         {
-            Rectangle(0, 0, 1200, height, "#66000000");
+            Rectangle(0, 0, width, height, "#66000000");
             context.DrawRoundedRectangle(null, new Pen(Ui.Brush("#F3F0F6"), 2),
-                new Rect(115, 62, 970, Math.Max(150, height - 160)), 5, 5);
-            Rounded(412, height - 77, 380, 53, "#F4252530", 14);
+                new Rect(width * 115 / 1200, 62, width * 970 / 1200, Math.Max(150, height - 160)), 5, 5);
+            double panelX = Math.Max(8, width / 2 - 188), panelWidth = Math.Min(380, width - 16);
+            Rounded(panelX, height - 77, panelWidth, 53, "#F4252530", 14);
             Text(scene.B("screenshotCopied") ? "✓  Снимок скопирован в учебный буфер" : "▣  Учебный снимок готов   ·   Ctrl+C",
-                436, height - 59, 14, "#FFFFFF", 340);
+                panelX + 24, height - 59, 14, "#FFFFFF", panelWidth - 40);
         }
 
         private void DrawSwitcher()
@@ -985,7 +968,8 @@ namespace TouchTypingStudio
         { context.DrawRoundedRectangle(Ui.Brush(fill), null, new Rect(x, y, Math.Max(0, w), Math.Max(0, h)), radius, radius); }
         private void TerminalField(Data window, double x, double y, double width)
         {
-            string prompt = "student@ubuntu:" + scene.D("terminal").S("cwd", "~").Replace("/home/student", "~") + "$ ";
+            var terminal = scene.D("terminal");
+            string prompt = terminal.S("prompt", "student@ubuntu:" + terminal.S("cwd", "~").Replace("/home/student", "~") + "$ ");
             string value = scene.S("terminalInput");
             bool searching = window.S("focus") == "reverse-search";
             if (searching)
@@ -1001,12 +985,13 @@ namespace TouchTypingStudio
         }
 
         private void Field(string value, Data window, double x, double y, double width, double size, string ink,
-            int offset, bool focused, bool document = false, string scrollKey = null, Typeface face = null, bool hasLineBreak = false)
+            int offset, bool focused, bool document = false, string scrollKey = null, Typeface face = null,
+            bool hasLineBreak = false, string selectionFill = null)
         {
             if (width <= 0) return;
             if (face != null)
             {
-                ProportionalField(value, window, x, y, width, size, ink, offset, focused, document, scrollKey, face);
+                ProportionalField(value, window, x, y, width, size, ink, offset, focused, document, scrollKey, face, selectionFill);
                 return;
             }
             var typeface = mono;
@@ -1067,7 +1052,7 @@ namespace TouchTypingStudio
         }
 
         private void ProportionalField(string value, Data window, double x, double y, double width, double size, string ink,
-            int offset, bool focused, bool document, string scrollKey, Typeface face)
+            int offset, bool focused, bool document, string scrollKey, Typeface face, string selectionFill)
         {
             int caret = window.I(document ? "bodyCursor" : "cursor") - offset;
             int anchor = window.I(document ? "bodyAnchor" : "anchor") - offset;
@@ -1091,7 +1076,7 @@ namespace TouchTypingStudio
                     // Keep a single foreground run so selecting text never changes the shaping.
                     // Use a light highlight behind dark address/document text and retain the existing
                     // dark highlight behind the white Find text.
-                    var selection = Ui.Brush(ink == "#FFFFFF" ? "#35629B" : "#ADC8F0");
+                    var selection = Ui.Brush(selectionFill ?? (ink == "#FFFFFF" ? "#35629B" : "#ADC8F0"));
                     if (focused && document)
                     {
                         int length = Math.Abs(anchor - caret);

@@ -62,7 +62,7 @@ class CourseCards(QA):
         witness = []
         for environment, apps in (
             ("ubuntu", ("chrome","code","terminal","ubuntu","workday")),
-            ("windows", ("windows","workday")),
+            ("windows", ("windows","terminal","workday")),
         ):
             for app in apps:
                 self.navigate("home")
@@ -73,7 +73,7 @@ class CourseCards(QA):
                 for _ in range(18): yield
                 lab = yield from self.ordinary_card(app)
                 assert (lab and lab.active and not lab.state["paused"] and lab.window_only_keys and lab.surface is None
-                    and lab.state["app"] == app and lab.state["actionLimit"] == 40), (environment,app,lab.state if lab else None)
+                    and lab.state["app"] == app and lab.state["actionLimit"] == (0 if app == "terminal" else 40)), (environment,app,lab.state if lab else None)
                 assert not lab.prep.get_visible(), "a card must not open a new catalog"
                 self.focus_window()
                 lab.desktop.grab_focus()
@@ -81,6 +81,31 @@ class CourseCards(QA):
                 length=lab.state["scenarioLength"]
                 trace=[]
                 self.capture_widget_png(out/f"card-{environment}-{app}-01-start.png")
+                if app == "terminal":
+                    expected = "terminal-powershell-diagnostic" if environment == "windows" else "terminal-practical-incident"
+                    assert first == expected and length == 4
+                    for _ in range(2):
+                        trace.append(lab.state["task"]["text"])
+                        yield from self.advance_card(lab)
+                    assert lab.state["scene"]["terminal"]["followingLog"]
+                    for _ in range(600):
+                        if lab.state["scene"]["terminal"]["logIncidentArrived"]:
+                            break
+                        yield
+                    assert lab.state["scene"]["terminal"]["logIncidentArrived"]
+                    self.capture_widget_png(out/f"card-{environment}-{app}-02-journal.png")
+                    trace.append("Ctrl+C")
+                    yield from self.advance_card(lab)
+                    trace.append(lab.state["task"]["text"])
+                    yield from self.advance_card(lab)
+                    assert lab.state["finished"] and lab.state["solved"] == 4 and not lab.active
+                    witness.append(dict(environment=environment, app=app, initial=first, first_actions=length,
+                                        second=None, successful=lab.state["solved"], trace=trace))
+                    self.return_live_catalog(app)
+                    for _ in range(22):
+                        yield
+                    print("PASS GTK", environment, app, first, "4 meaningful actions", flush=True)
+                    continue
                 while lab.state["solved"] < 20 or lab.state["mission"] == first:
                     s=lab.state
                     assert lab.active and not s.get("limitDecisionPending") and s["solved"] < 100, (app,s["solved"],s["mission"],length)

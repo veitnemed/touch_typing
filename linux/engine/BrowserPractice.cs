@@ -39,6 +39,8 @@ internal sealed partial class LabScene
     internal static bool IsSearchResult(string url) => url.StartsWith(ResultsPrefix, StringComparison.Ordinal);
     internal static string SearchQuery(string url) => Uri.UnescapeDataString(url[ResultsPrefix.Length..]);
     private static string SearchAddress(string query) => ResultsPrefix + Uri.EscapeDataString(query);
+    internal string BrowserGoalAddress(string url) => !BrowserPracticeActive || ReplayLegacyChromeHistory || !IsSearchResult(url) ? url :
+        SearchAddress(string.Join(" ", SearchQuery(url).Split((char[])null, StringSplitOptions.RemoveEmptyEntries)).ToLowerInvariant());
 
     private string PracticeAddress(string input)
     {
@@ -142,7 +144,7 @@ internal sealed partial class LabScene
         // In this lesson the returned query is encoded in the selected history
         // entry. Also verify the generated results, not just the address.
         "back" or "navigate-pasted" when window?.App == "chrome" =>
-            new { window.Url, window.Focus, results = Entries(window).Select(entry => entry.Path).ToArray(), window.Item },
+            new { url = BrowserGoalAddress(window.Url), window.Focus, results = Entries(window).Select(entry => entry.Path).ToArray(), window.Item },
         "research-find" => new { window?.Url, window?.Focus, window?.Find,
             from = window?.Tab?.Position.Anchor, to = window?.Tab?.Position.Caret,
             matched = window?.Status == "Найдено: " + BrowserResearchNeedle },

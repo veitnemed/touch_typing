@@ -15,12 +15,19 @@ TERMINAL_FULL = (
     {"terminal-access", "terminal-catalog", "terminal-triage", "terminal-transfer"},
     {"terminal-revision", "terminal-snapshot", "terminal-incident", "terminal-changes"},
 )
+TERMINAL_PRACTICAL = "terminal-practical-incident"
+TERMINAL_POWERSHELL = "terminal-powershell-diagnostic"
+
+
+def terminal_course(desktop):
+    return TERMINAL_POWERSHELL if desktop == "windows" else TERMINAL_PRACTICAL
+
 BASE_START = {
     "ubuntu": ("ubuntu-start", "ubuntu-research", "ubuntu-briefing"),
     "windows": ("windows-desktop-0", "windows-desktop-1", "windows-desktop-2"),
     "chrome": ("chrome-reader", "chrome-library", "chrome-review"),
     "code": ("code-guide", "code-refactor", "code-handover"),
-    "terminal": ("terminal-explore", "terminal-access", "terminal-revision"),
+    "terminal": (TERMINAL_PRACTICAL,) * 3,
     "workday/ubuntu": ("workday-report", "workday-analysis", "workday-handover"),
     "workday/windows": ("workday-windows-0", "workday-windows-1", "workday-windows-2"),
 }
@@ -40,6 +47,12 @@ def begin(e, app, level=0, desktop="ubuntu", **overrides):
 def advance(e, s):
     if s["app"] == "code":
         return advance_editor(e, s)
+    if s["task"]["id"] == "terminal-interrupt":
+        deadline = monotonic() + 8
+        while not s["scene"]["terminal"]["logIncidentArrived"] and monotonic() < deadline:
+            sleep(.09)
+            s = e.call("lab-state")
+        assert s["scene"]["terminal"]["logIncidentArrived"], s["scene"]["terminal"]
     task = s["task"]
     before = s["solved"]
     key = task["keys"]
@@ -80,14 +93,22 @@ class LiveRoutePolicyTests(unittest.TestCase):
                         def check(e):
                             catalog = e.call("lab-catalog", desktopProfile=desktop)
                             ids = {m["id"] for m in catalog["missions"] if m["app"] == app and m["level"] == level}
-                            first = BASE_START[f"workday/{desktop}" if app == "workday" else app][level]
+                            first = (terminal_course(desktop) if app == "terminal" else
+                                     BASE_START[f"workday/{desktop}" if app == "workday" else app][level])
                             # An explicit 100 allows a full first route even in
                             # advanced Workday instead of overriding the cap.
                             limits = {} if level == 0 else {"actionLimit": 100}
                             s = begin(e, app, level, desktop, **limits)
                             self.assertEqual((s["mission"], s["routeKind"], s["timeLimit"], s["actionLimit"]),
-                                             (first, "course", 0, limits.get("actionLimit", 40)))
+                                             (first, "course", 0, limits.get("actionLimit", 0 if app == "terminal" else 40)))
                             start_length = s["scenarioLength"]
+                            if app == "terminal":
+                                for _ in range(start_length):
+                                    s = advance(e, s)
+                                self.assertEqual((s["solved"], s["finished"]), (4, True))
+                                self.assertTrue(e.call("lab-result")["completed"])
+                                observations.append(f"{desktop}/{app}/{level}: {first}(4), цель выполнена без повторов")
+                                return
                             visited = [first]
                             for _ in range(max(20, start_length + 1)):
                                 if s["limitDecisionPending"]:
@@ -112,35 +133,24 @@ class LiveRoutePolicyTests(unittest.TestCase):
         self.assertEqual(len(observations), 30)
         print("\nCourse checks (" + str(len(observations)) + ")\n" + "\n".join(observations))
 
-    def test_all_twelve_original_terminal_workflows_rotate_at_their_level(self):
+    def test_all_twelve_original_terminal_workflows_remain_directly_selectable(self):
         for desktop in ("ubuntu", "windows"):
             for level, original in enumerate(TERMINAL_FULL):
                 with self.subTest(desktop=desktop, level=level):
                     def check(e):
-                        catalog = e.call("lab-catalog", desktopProfile=desktop)
+                        # Bash remains selectable in its original simulation on either physical host.
+                        catalog = e.call("lab-catalog", desktopProfile="ubuntu")
                         ids = {m["id"] for m in catalog["missions"] if m["app"] == "terminal" and m["level"] == level}
                         self.assertTrue(original <= ids)
                         self.assertFalse(set.union(*[ids for i, ids in enumerate(TERMINAL_FULL) if i != level]) & ids)
-                        s = begin(e, "terminal", level, desktop, actionLimit=0, seconds=0)
-                        seen = set()
-                        meaningful = set()
-                        for _ in range(len(ids)):
-                            mission = s["mission"]
-                            self.assertNotIn(mission, seen)
-                            seen.add(mission)
-                            remaining = s["scenarioLength"]
-                            if mission in original:
-                                self.assertGreaterEqual(remaining, 20)
-                            for _ in range(remaining):
-                                self.assertIn(s["mission"], ids)
-                                task = s["task"]["id"]
-                                if task in ("terminal-history-up", "terminal-home", "terminal-erase", "terminal-yank"):
-                                    meaningful.add(task)
+                        for mission in sorted(original):
+                            s = begin(e, "terminal", level, "ubuntu", routeKind="mission", mission=mission,
+                                      actionLimit=0, seconds=0)
+                            self.assertGreaterEqual(s["scenarioLength"], 20)
+                            for _ in range(s["scenarioLength"]):
+                                self.assertEqual(s["mission"], mission)
                                 s = advance(e, s)
-                                self.assertFalse(s["finished"])
-                        self.assertEqual(seen, ids)
-                        if level < 2:
-                            self.assertTrue({"terminal-history-up", "terminal-home", "terminal-erase"} <= meaningful)
+                            self.assertTrue(s["finished"] and e.call("lab-result")["completed"], mission)
                     self.run_profile(check, desktop)
 
     def test_history_chooses_a_different_established_route_and_preserves_the_old_draft(self):
@@ -148,17 +158,19 @@ class LiveRoutePolicyTests(unittest.TestCase):
             for app in (desktop, "chrome", "code", "terminal", "workday"):
                 with self.subTest(desktop=desktop, app=app):
                     def check(e):
-                        old = BASE_START[f"workday/{desktop}" if app == "workday" else app][0]
-                        e.call("lab-start", **options(app, 0, desktop, mission=old, actionLimit=0, seconds=0))
+                        profile = "ubuntu" if app == "terminal" else desktop
+                        old = "terminal-explore" if app == "terminal" else BASE_START[
+                            f"workday/{desktop}" if app == "workday" else app][0]
+                        e.call("lab-start", **options(app, 0, profile, mission=old, actionLimit=0, seconds=0))
                         used = advance(e, e.call("lab-resume"))
                         self.assertTrue(e.call("lab-stop")["saved"])
-                        fresh = begin(e, app, desktop=desktop)
+                        fresh = begin(e, app, desktop=profile)
                         self.assertNotEqual(fresh["mission"], old)
-                        self.assertEqual((fresh["solved"], fresh["actionLimit"]), (0, 40))
+                        self.assertEqual((fresh["solved"], fresh["actionLimit"]), (0, 0 if app == "terminal" else 40))
                         self.assertFalse(fresh["mission"].startswith(("code-notebook-", "code-project-file-", "terminal-essentials-")))
                         advance(e, fresh)
                         self.assertTrue(e.call("lab-stop")["saved"])
-                        restored = begin(e, app, desktop=desktop, **{"continue": True})
+                        restored = begin(e, app, desktop=profile, **{"continue": True})
                         self.assertEqual((restored["mission"], restored["solved"], restored["task"]),
                                          (old, used["solved"], used["task"]))
                         self.assertEqual((restored["routeKind"], restored["actionLimit"], restored["timeLimit"]), ("", 0, 0))
@@ -219,7 +231,7 @@ class LiveRoutePolicyTests(unittest.TestCase):
                 with self.subTest(desktop=desktop, erase=erase):
                     def check(e):
                         s = begin(e, "terminal", desktop=desktop)
-                        self.assertEqual(s["mission"], "terminal-explore")
+                        self.assertEqual(s["mission"], terminal_course(desktop))
                         enter(e, "abcd")
                         chord(e, "End")
                         chord(e, "Left")

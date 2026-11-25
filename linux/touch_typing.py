@@ -692,7 +692,7 @@ class Studio(Gtk.Application):
         ("ubuntu", "Ubuntu", "Работа в Linux: окна, файлы,\nприложения, система."),
         ("chrome", "Chrome", "Эффективная работа\nв браузере без мыши."),
         ("code", "VS Code", "Навигация, редактирование\nи управление проектом."),
-        ("terminal", "Терминал", "Быстрая работа в консоли:\nкоманды, файлы, процессы."),
+        ("terminal", "Терминал", "Ubuntu Bash: поиск сбоя\nи просмотр живого журнала."),
         ("workday", "Рабочий день", "Реальные сценарии:\nпереключение, поиск, организация."),
     )
 
@@ -783,7 +783,7 @@ class Studio(Gtk.Application):
             self.message("Сохранённое занятие недоступно. Откройте список заново.")
             return
         if launch is None and draft is None:
-            expected = environment if module in ("windows", "workday") else "ubuntu"
+            expected = environment if module in ("windows", "workday", "terminal") else "ubuntu"
             draft = next((item for item in reversed(available)
                           if item["app"] == module and (item.get("desktopProfile") or "ubuntu") == expected), None)
         self.navigate("lab")
@@ -990,7 +990,7 @@ class Studio(Gtk.Application):
         start.set_halign(Gtk.Align.START)
         def populate(*_):
             matching = [m for m in missions if m["app"] == module and m["level"] == level.get_selected()]
-            choices[:] = [{"id": "", "title": "Последовательная практика"}] + matching if matching else []
+            choices[:] = [{"id": "", "title": "Последовательная практика"}] + matching if matching or module == "terminal" else []
             mission.set_model(Gtk.StringList.new([m["title"] for m in choices]))
             mission.set_selected(0 if choices else Gtk.INVALID_LIST_POSITION)
             start.set_sensitive(bool(choices))
@@ -1055,10 +1055,13 @@ class Studio(Gtk.Application):
             if module == "ubuntu" and self.lab_desktop_profile() == "windows":
                 module, title = "windows", "Windows 10"
                 description = "Работа в Windows: Пуск,\nокна, рабочие столы."
+            elif module == "terminal" and environment == "windows":
+                title, description = "PowerShell", "Windows PowerShell: отбор строк\nи просмотр живого журнала."
             tile = button("", lambda dest=module: self.open_reference_module(dest), "reference-card", "module-" + module)
             if index > 2:
                 tile.add_css_class("reference-card-lower")
-            tile.set_tooltip_text(f"Открыть «{title}». Если нет черновика: 40 действий без таймера.")
+            length = "Одно поручение без таймера." if module == "terminal" else "Если нет черновика: 40 действий без таймера."
+            tile.set_tooltip_text(f"Открыть «{title}». {length}")
             inner = box(Gtk.Orientation.VERTICAL, 0, "reference-card-inner")
             picture = ReferenceGlyph(module, 43 if index > 2 else 48)
             picture.add_css_class("reference-app-icon")
@@ -1090,7 +1093,7 @@ class Studio(Gtk.Application):
             drafts = [draft for draft in catalog.get("drafts", ())
                       if draft.get("app") == module and isinstance(draft.get("level"), int)
                       and 0 <= draft["level"] <= 2 and draft.get("guidance") in ("guided", "independent")
-                      and (draft.get("desktopProfile") or "ubuntu") == (environment if module in ("windows", "ubuntu", "workday") else "ubuntu")]
+                      and (draft.get("desktopProfile") or "ubuntu") == (environment if module in ("windows", "ubuntu", "workday", "terminal") else "ubuntu")]
             if drafts:
                 resume = Gtk.MenuButton(label="Продолжить")
                 bind_name(resume, f"Продолжить сохранённое занятие: {title}")
@@ -2944,6 +2947,7 @@ class LabPage(Gtk.Box):
         self.desktop = DesktopView()
         self.desktop.notebook_command = self.apply_notebook_command
         self.desktop.explorer_command = self.apply_explorer_command
+        self.desktop.browser_history_command = self.apply_browser_history_command
         self.desktop.reference_chrome = True
         self.stage = Gtk.Overlay()
         self.stage.add_css_class("reference-workspace")
@@ -3078,8 +3082,8 @@ class LabPage(Gtk.Box):
                 description += "\n" + title + advice["reason"]
             self.summary.set_label(description)
             self.choices = [("", "Подобрать поручение")]
-            # The engine keeps direct app drafts shared between simulations.
-            draft_profile = self.desktop_profile if app in ("workday", "windows") else "ubuntu"
+            # Shell/desktop routes keep distinct drafts between simulations.
+            draft_profile = self.desktop_profile if app in ("workday", "windows", "terminal") else "ubuntu"
             if any(d["app"] == app and d["level"] == level and d["guidance"] == guidance
                    and (d.get("desktopProfile") or "ubuntu") == draft_profile
                    for d in catalog.get("drafts", [])):
@@ -3522,6 +3526,14 @@ class LabPage(Gtk.Box):
         if response:
             self.render(response)
 
+    def apply_browser_history_command(self, action, path):
+        if (not self.active or self.state["paused"] or self.limit_resume_wait or self.save_pending
+                or self.state.get("limitDecisionPending") or self.settings_menu.get_popover().get_mapped()):
+            return
+        response = self.host.call("lab-browser-history-focus", action=action, path=path)
+        if response:
+            self.render(response)
+
     def key_down(self, key, character, modifiers=Gdk.ModifierType(0), keycode=None):
         if self.settings_menu.get_popover().get_mapped():
             return False  # Settings keyboard navigation is not lesson input.
@@ -3655,7 +3667,11 @@ class LabPage(Gtk.Box):
         gesture = raw_keys.replace("+", " + ") or task.get("text", "")
         if guided and not task.get("keys") and task.get("id", "").startswith("open-"):
             gesture = "⊞ → " + task["text"] + " → Enter"
-        elif guided and task.get("id", "").startswith("command/") and len(task.get("text", "")) > 12:
+        elif guided and task.get("id") == "command/filter-incident":
+            gesture = "grep [ID] app.log"
+        elif guided and task.get("id") == "command/powershell-incident":
+            gesture = "Select-String [ID] sync.log"
+        elif guided and not state.get("terminalPractical") and task.get("id", "").startswith("command/") and len(task.get("text", "")) > 12:
             gesture = "Ctrl + R → фрагмент → Enter"
         if not guided:
             gesture = ""
@@ -3668,6 +3684,9 @@ class LabPage(Gtk.Box):
                        "←/→ переносят её в командную строку для правки, Esc возвращает ваш черновик."
                        if guided else "История хранит уже выполненные команды. Можно вернуть прошлую строку "
                        "для правки или найти нужную по фрагменту. Перед запуском сверьте, что нашлось.")
+        if state.get("terminalPractical"):
+            theory_text = ("Для одного короткого файла удобен поиск в редакторе. Здесь вы отделяете ошибки, следите за "
+                           "новыми записями и проверяете запрос по его ID. Остановка просмотра не выключает сервис.")
         show_theory = state["app"] == "terminal"
         self.theory_button.set_visible(show_theory)
         self.theory_button.set_sensitive(not state["paused"])

@@ -39,6 +39,8 @@ install -m 644 -- "$font_assets"/Roboto-{Regular,Medium,Bold}.ttf "$font_assets/
 install -m 755 -- "$source_dir/check.sh" "$target/"
 install -m 644 -- "$source_dir/qa_runner.py" "$target/"
 mkdir -p -- "$target/qa/fixtures"
+install -m 644 -- "$source_dir/tests/test_terminal_practical.py" "$source_dir/tests/test_terminal_powershell.py" "$target/qa/"
+install -m 644 -- "$source_dir/tests/fixtures/preview9-original-terminal-course.xml.gz" "$target/qa/fixtures/"
 install -m 644 -- "$source_dir/tests/fixtures/preview7-original-csv-context.xml.gz" "$target/qa/fixtures/"
 install -m 644 -- "$source_dir/tests/fixtures/preview7-original-quick-open-typo.xml.gz" "$target/qa/fixtures/"
 install -m 644 -- "$source_dir/tests/test_live_missions.py" "$source_dir/tests/test_practice.py" "$source_dir/tests/test_lab_window.py" "$source_dir/tests/test_source_note_window.py" "$source_dir/tests/test_wayland_window.py" "$source_dir/tests/test_ui_controls.py" "$target/qa/"

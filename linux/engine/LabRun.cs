@@ -12,6 +12,8 @@ internal sealed record LabPoint(int Second, bool Correct, string Key, string Tas
 internal sealed class LabRun
 {
     private readonly Func<double> clock;
+    private const string TerminalLogArrivalEvent = "@terminal-log-arrival";
+    private double? nextLogArrival;
     private readonly Random random;
     private readonly HashSet<string> held = [];
     private readonly HashSet<string> layoutBlockedKeys = [];
@@ -21,6 +23,7 @@ internal sealed class LabRun
     private const string NativeLayoutEvent = "@native-layout";
     private const string SimulatedWindowSwitchEvent = "@simulated-window-switch", TerminalHistoryEvent = "@terminal-reverse-search";
     private const string ExactUrlEvent = "@exact-url", ExactQuickOpenEvent = "@exact-quick-open";
+    private const string ChromeHistoryEvent = "@chrome-history-filter", ChromeHistoryPointerEvent = "@chrome-history-pointer";
     private const string StrictReportEvent = "@strict-report";
     private const string ClusterNavigationEvent = "@cluster-navigation";
     private const string LineEditingEvent = "@line-editing";
@@ -40,7 +43,7 @@ internal sealed class LabRun
     private bool initialVirtual;
     internal bool HasDraft => !CompletedRoute && !limitAccepted && (!ReachedLimit || softFinish || FinishingMission) &&
         (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 ||
-        trace.Any(item => item.Key is not (TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent)));
+        trace.Any(item => item.Key is not (ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask, inputAtActiveMilliseconds;
@@ -119,6 +122,7 @@ internal sealed class LabRun
         missionId?.StartsWith("code-project-file-", StringComparison.Ordinal) == true;
     private bool CompletedRoute => !restoring && mission != null && pending.Count == 0 &&
         (FinishingMission || softFinish && ReachedLimit || RouteKind == LiveRoutePolicy.Mission ||
+            IsCourse && LiveCourse.PracticalTerminalMission(mission.Id) ||
             !IsCourse && (finishSingleRoute || mission.Curated && (EnvironmentProfile != "windows" && !IsEssentials(mission.Id) && !JoinsTimedRotation(mission.Id) || TimeLimit == 0 && ActionLimit == 0))
                 && mission.FinishAfterRoute);
     private bool PendingLimitChoice => softFinish && !restoring && ReachedLimit &&
@@ -145,7 +149,7 @@ internal sealed class LabRun
         AdaptiveGuide = RouteKind is LiveRoutePolicy.Course or LiveRoutePolicy.Mission && (draft?.AdaptiveGuide ?? adaptiveGuide);
         this.softFinish = softFinish;
         this.windowsBindings = windowsBindings;
-        EnvironmentProfile = app == "windows" ? "windows" : app == "workday" ? LabScene.DesktopEnvironment(draft?.DesktopEnvironment ?? environment) : "ubuntu";
+        EnvironmentProfile = app == "windows" ? "windows" : app is "workday" or "terminal" ? LabScene.DesktopEnvironment(draft?.DesktopEnvironment ?? environment) : "ubuntu";
         App = app; Mode = progress?.Mode is "drill" or "sandbox" ? progress.Mode : mode; Level = Math.Clamp(level, 0, 2);
         ActionLimit = Math.Max(0, progress?.ActionLimit ?? actionLimit);
         // Old callers preserve action-over-timer precedence. Any saved pair
@@ -175,7 +179,7 @@ internal sealed class LabRun
         // New traces begin with format markers. Old ones acquire the line
         // marker only after the historic keystrokes have been replayed.
         var initialFormat = savedEvents.TakeWhile(e => e.Key is
-            TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent);
+            ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent);
         replayLegacyNotebookWordErase = draft != null && !initialFormat.Any(e => e.Key == NotebookWordEraseEvent);
         replayLegacyTriggers = replayLegacyCsvExplorer = draft != null;
         replayLegacyLineEditing = draft != null && !initialFormat.Any(e => e.Key == LineEditingEvent);
@@ -189,6 +193,7 @@ internal sealed class LabRun
         Scene.ReplayLegacyNotebookActions = legacyNotebookActions;
         Scene.ReplayLegacyQuickOpen = draft != null && !initialFormat.Any(e => e.Key == ExactQuickOpenEvent);
         Scene.ReplayLegacyTerminalSearch = draft != null && !initialFormat.Any(e => e.Key == TerminalHistoryEvent);
+        Scene.ReplayLegacyChromeHistory = draft != null && !initialFormat.Any(e => e.Key == ChromeHistoryEvent);
         if (draft != null)
         {
             Resume();
@@ -205,6 +210,7 @@ internal sealed class LabRun
                         NotebookPointer(parts[0], index, parts.Length == 3 && int.TryParse(parts[2], out int offset) ? offset : -1);
                 }
                 else if (e.Key == NotebookKernelStepEvent) TickNotebook();
+                else if (e.Key == TerminalLogArrivalEvent) AppendTerminalLog();
                 else if (e.Key == SimulatedWindowSwitchEvent) SimulateWindowSwitch();
                 else if (e.Key == ExplorerPointerEvent)
                 {
@@ -215,6 +221,12 @@ internal sealed class LabRun
                 else if (e.Key == ExactUrlEvent) { replayLegacyUrl = false; trace.Add(e); }
                 else if (e.Key == ExactQuickOpenEvent) { Scene.ReplayLegacyQuickOpen = false; trace.Add(e); }
                 else if (e.Key == TerminalHistoryEvent) EndLegacyTerminalSearch(e);
+                else if (e.Key == ChromeHistoryEvent) EndLegacyChromeHistory(e);
+                else if (e.Key == ChromeHistoryPointerEvent)
+                {
+                    int cut = e.Text.IndexOf(':');
+                    if (cut > 0) BrowserHistoryPointer(e.Text[..cut], e.Text[(cut + 1)..]);
+                }
                 else if (e.Key == StrictReportEvent) { replayLegacyReport = false; trace.Add(e); }
                 else if (e.Key == ClusterNavigationEvent) EndLegacyNavigation(e);
                 else if (e.Key == LineEditingEvent) EndLegacyLineEditing(e);
@@ -227,6 +239,7 @@ internal sealed class LabRun
             }
             if (replayLegacyUrl) trace.Add(new(ExactUrlEvent));
             if (Scene.ReplayLegacyTerminalSearch) EndLegacyTerminalSearch(new(TerminalHistoryEvent));
+            if (Scene.ReplayLegacyChromeHistory) EndLegacyChromeHistory(new(ChromeHistoryEvent));
             if (Scene.ReplayLegacyQuickOpen)
             { Scene.ReplayLegacyQuickOpen = false; trace.Add(new(ExactQuickOpenEvent)); }
             if (replayLegacyReport) trace.Add(new(StrictReportEvent));
@@ -265,6 +278,12 @@ internal sealed class LabRun
                 coach = new(draft.CoachStage, draft.CoachReason ?? "");
             restoring = false;
         }
+    }
+
+    private void EndLegacyChromeHistory(LiveEvent marker)
+    {
+        Scene.FinishLegacyChromeHistory();
+        trace.Add(marker);
     }
 
     private void EndLegacyTerminalSearch(LiveEvent marker)
@@ -309,6 +328,7 @@ internal sealed class LabRun
 
     internal void Pause()
     {
+        nextLogArrival = null;
         if (activeSince is double since) activeMilliseconds += Math.Max(0, clock() - since);
         if (!Paused && held.Count > 0) trace.Add(new("@release"));
         Scene.Switcher = false; Scene.SwitchTarget = null; Scene.SwitchChoices = []; switchReleaseKey = switchEvidenceId = null;
@@ -411,6 +431,29 @@ internal sealed class LabRun
         return true;
     }
 
+    internal bool BrowserHistoryPointer(string action, string path)
+    {
+        if (Finished || AwaitingLimitChoice || Paused || !Scene.BrowserHistoryPointer(action, path)) return false;
+        trace.Add(new(ChromeHistoryPointerEvent, Text: action + ":" + path));
+        return true;
+    }
+
+    internal void TickTerminal()
+    {
+        if (Finished || AwaitingLimitChoice || Paused || !Scene.Terminal.FollowingLog)
+        { nextLogArrival = null; return; }
+        double now = clock();
+        nextLogArrival ??= now + Scene.Terminal.LogInterval;
+        if (now < nextLogArrival) return;
+        AppendTerminalLog();
+        nextLogArrival = now + Scene.Terminal.LogInterval;
+    }
+
+    private void AppendTerminalLog()
+    {
+        if (Scene.Terminal.AppendLogFeedLine()) trace.Add(new(TerminalLogArrivalEvent));
+    }
+
     internal void TickNotebook()
     {
         if (!Finished && !AwaitingLimitChoice && !Paused && Scene.TickNotebook())
@@ -504,6 +547,8 @@ internal sealed class LabRun
         var pythonEdit = Scene.OnNotebook ? null : LiveCourse.ResolvePythonEdit(key, held, Scene);
         if (pythonEdit != null) return Perform(pythonEdit, key);
         var actual = Scene.Overview && !commandModifiers && key != "Esc" ? null : LabCatalog.Resolve(key, held, Scene);
+        if (Scene.Terminal.FollowingLog && Scene.Active?.App == "terminal" && actual?.Id != "terminal-interrupt")
+            return Miss(key, "Журнал ещё открыт. Ctrl+C остановит просмотр.");
         if (Scene.OnNotebook && actual != null && (!LabScene.NotebookGlobalAction(actual.Action) ||
             Scene.ReplayLegacyNotebookActions && actual.Action is "palette" or "code-definition" or "code-back" or "restore-tab")) actual = null;
         string before = Scene.Overview ? Scene.Search : Scene.Active?.App == "terminal" || Scene.Active?.Focus is "terminal" or "reverse-search" ? Scene.TerminalInput : Scene.Active?.Input ?? "";
@@ -550,6 +595,10 @@ internal sealed class LabRun
             return Miss(key, "Команда выполнена, но отчёт не совпадает с заданием. Проверьте весь сохранённый файл и папку «Загрузки».");
         if (matches && watching?.Any(item => item.Goal.Task == Task && item.Goal.ArtifactPath != null) == true)
             return Miss(key, "Сохранённая заметка отличается от исходника. Вернитесь в редактор, вставьте скопированный текст целиком и сохраните файл.");
+        if (submitting && Scene.PracticalTerminal)
+            return Miss(key, LiveCourse.TerminalIncidentTask(Task.Id)
+                ? "Сверьте идентификатор именно у новой строки ERROR; результат этого запроса пока не показан."
+                : "Команда выполнена, но вывод не соответствует цели этого шага.");
         if (!changed) return Miss(key, key == "Enter" && Scene.Active?.Focus == "quick-open"
             ? Scene.Active.Status : "Здесь эта клавиша не выполняет действие.");
         Feedback = "ready"; LastKey = ""; Status = ""; return null;
@@ -637,6 +686,9 @@ internal sealed class LabRun
             }
             var passed = Observe(key, acceptExistingUrlSelection: !replayLegacyUrl && actual.Id == "url" && actual.Keys != "Alt+D", actualTaskId: actual.Id);
             if (passed != null) return passed;
+            if (actual.Id == "terminal-interrupt" && Task.Id == "terminal-interrupt" && !Scene.Terminal.LogIncidentArrived)
+                return Miss(key, "Просмотр остановлен до новой ошибки. Снова наберите " +
+                    Scene.TerminalFollowCommand + " и дождитесь строки ERROR.");
         }
         if (!changed && attempted && actual.Action == "file-paste" && Task.Text == "!conflict" && Scene.NotebookConflictExpected())
         {
@@ -747,6 +799,7 @@ internal sealed class LabRun
         var attempt = new ShortcutAttempt { Skill = "lab/" + App + "/" + skill, Session = Session, Verification = "lab-scene",
             Date = DateTime.Now, Correct = correct, Milliseconds = milliseconds, MistakeKey = correct ? null : key, InputMode = "exact", Mission = MissionId, Layout = attemptLayout,
             Assisted = ShowGuide, Independent = Guidance == "independent" || coach.Blind, FirstTry = correct && !hadError,
+            TerminalCase = Scene.PracticalTerminal ? variant + 1 : 0,
             CoachStage = CoachStage.Length == 0 ? null : CoachStage, CoachContext = CoachStage.Length == 0 ? null : attemptCoachContext };
         Attempts.Add(attempt); points.Add(new LabPoint(Seconds, correct, key, skill, milliseconds));
         return attempt;
@@ -755,7 +808,9 @@ internal sealed class LabRun
     private void Next()
     {
         var courses = (neutralProject ? NeutralProject.MissionCatalog : LiveCourse.Missions)
-            .Where(m => m.App == App && m.Level == Level && (LabScene.MissionEnvironment(m) is null || LabScene.MissionEnvironment(m) == EnvironmentProfile)).ToArray();
+            .Where(m => m.App == App && (m.Level == Level || App == "terminal" && (IsCourse || EnvironmentProfile == "windows") &&
+                LiveCourse.PracticalTerminalMission(m.Id)) &&
+                (LabScene.MissionEnvironment(m) is null || LabScene.MissionEnvironment(m) == EnvironmentProfile)).ToArray();
         if (CompletedRoute)
         {
             Stop();
@@ -767,7 +822,9 @@ internal sealed class LabRun
             // Keep standalone projects out of other modes. Chrome research cases are part
             // of the same rotation as the older browser routes.
             bool essentials = IsEssentials(last);
-            var rotation = IsCourse ? courses : courses.Where(m => essentials
+            var rotation = App == "terminal" && (IsCourse || EnvironmentProfile == "windows")
+                ? courses.Where(m => LiveCourse.PracticalTerminalMission(m.Id)).ToArray()
+                : IsCourse ? courses : courses.Where(m => essentials
                 ? IsEssentials(m.Id)
                 : !m.FinishAfterRoute || (EnvironmentProfile == "windows" || JoinsTimedRotation(m.Id)) && m.Curated).ToArray();
             var available = rotation.Where(m => !used.Contains(m.Id)).ToArray();
@@ -786,6 +843,15 @@ internal sealed class LabRun
                     ? LiveCoach.Outstanding(App, initialLayout, history) : null;
                 mission = LiveRoutePolicy.Pick(available, rotation, mission, EnvironmentProfile, history, target);
                 variant = random.Next(3);
+                if (LiveCourse.PracticalTerminalMission(mission.Id))
+                {
+                    var finalSkill = mission.Id == LiveCourse.PracticalPowerShellId ?
+                        "lab/terminal/command/powershell-incident" : "lab/terminal/command/filter-incident";
+                    int previousCase = history.Where(attempt => attempt.Correct && attempt.TerminalCase > 0 &&
+                        attempt.Mission == mission.Id && attempt.Skill == finalSkill)
+                        .OrderByDescending(attempt => attempt.Date).FirstOrDefault()?.TerminalCase ?? 0;
+                    if (variant == previousCase - 1) variant = (variant + 1) % 3;
+                }
                 Scene = PrepareMissionScene();
                 mission.Prepare?.Invoke(Scene);
                 pending = LiveCourse.Compile(mission, Scene, prepared: true, nativeEnglishInput: nativeEnglishInput);
@@ -840,6 +906,7 @@ internal sealed class LabRun
                 trace.Add(new(ExactUrlEvent));
                 trace.Add(new(ExactQuickOpenEvent));
                 trace.Add(new(TerminalHistoryEvent));
+                trace.Add(new(ChromeHistoryEvent));
                 trace.Add(new(StrictReportEvent));
                 trace.Add(new(ClusterNavigationEvent));
                 trace.Add(new(LineEditingEvent));
@@ -851,7 +918,8 @@ internal sealed class LabRun
             }
             foreach (string key in held) trace.Add(new("@held/" + key, superUsed));
             missionLength = pending.Count;
-            Scene.PrepareHistory(pending.Where(goal => goal.Task.Action == "command" && goal.Task.Text.Length > 12).Select(goal => goal.Task.Text));
+            if (!Scene.PracticalTerminal)
+                Scene.PrepareHistory(pending.Where(goal => goal.Task.Action == "command" && goal.Task.Text.Length > 12).Select(goal => goal.Task.Text));
         }
         Task = pending[0].Task;
         sinceTask = clock(); HintVisible = hadError = false;
@@ -859,7 +927,8 @@ internal sealed class LabRun
     }
 
     private string CoachContext() =>
-        string.Join("|", Scene.Active?.App ?? "", Scene.Active?.Focus ?? "", Scene.Active?.Url ?? "", Scene.Terminal.Cwd);
+        string.Join("|", Scene.Active?.App ?? "", Scene.Active?.Focus ?? "", Scene.Active?.Url ?? "", Scene.Terminal.Cwd) +
+        (Scene.PracticalTerminal ? "|" + EnvironmentProfile + "-journal-" + variant : "");
 
     private void UpdateCoaching()
     {

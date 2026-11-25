@@ -155,6 +155,8 @@ internal static class LabCatalog
         T("delete-line", "Удалите строку", "Ctrl+Shift+K", "delete-line", 2),
         T("terminal-clear", "Очистите экран терминала", "Ctrl+L", "terminal-clear"),
         T("terminal-cancel", "Отмените ввод команды", "Ctrl+C", "terminal-cancel"),
+        T("terminal-interrupt", "Остановите живой просмотр после новой ошибки", "Ctrl+C", "terminal-interrupt", hint:
+            "Найдите новую строку ERROR. Затем Ctrl+C остановит чтение, не сам учебный сервис."),
         T("terminal-erase", "Очистите строку ввода", "Ctrl+U", "terminal-erase", 1),
         T("terminal-kill", "Удалите текст после курсора", "Ctrl+K", "terminal-kill", 2),
         T("terminal-home", "Перейдите в начало команды", "Ctrl+A", "terminal-home", 1),
@@ -221,7 +223,7 @@ internal static class LabCatalog
     internal static object Catalog(IEnumerable<LiveDraft> drafts, IEnumerable<ShortcutAttempt> history, string layout,
         bool neutralProject = false, string environment = "ubuntu")
     {
-        var draftRows = (drafts ?? []).Select(d => d.App is "ubuntu" or "windows" or "workday"
+        var draftRows = (drafts ?? []).Select(d => d.App is "ubuntu" or "windows" or "workday" or "terminal"
             ? (object)new { d.App, d.Level, d.Mission, d.Guidance, d.AdaptiveGuide, desktopProfile = LabScene.DesktopEnvironment(d.DesktopEnvironment) }
             : new { d.App, d.Level, d.Mission, d.Guidance, d.AdaptiveGuide });
         var profiles = new[] { new { id = "ubuntu", title = "Ubuntu" }, new { id = "windows", title = "Windows 10" } };
@@ -229,13 +231,14 @@ internal static class LabCatalog
             desktopProfile = environment, desktopProfiles = profiles,
             recommendations = LiveStartingLevel.Recommend(history, layout, environment), drafts = draftRows,
             classes = VisibleApps(environment).Select(app => new {
-                id = app, title = Title(app), description = app switch {
+                id = app, title = app == "terminal" && environment == "windows" ? "PowerShell" : Title(app), description = app switch {
                     "workday" => "Общее рабочее место, файлы и окна приложений",
                     "ubuntu" => "Окна, рабочие столы и системные сочетания",
                     "windows" => "Пуск, Проводник, окна и виртуальные рабочие столы Windows 10",
                     "chrome" => "Вкладки, навигация, поиск и адресная строка",
                     "code" => "Файлы, код, блокноты, панели и встроенный терминал",
-                    _ => "Сочетания, команды и учебная файловая система"
+                    _ => environment == "windows" ? "Windows PowerShell: сбои синхронизации и журнал" :
+                        "Ubuntu Bash: поиск сбоя и живой журнал"
                 },
                 desktopProfile = app is "windows" or "ubuntu" ? app : null,
                 shortcuts = app == "windows" || app == "workday" && environment == "windows"
@@ -257,6 +260,7 @@ internal static class LabCatalog
         if (task.Id.StartsWith("win-", StringComparison.Ordinal)) return scene.WindowsActionAvailable(task.Action);
         var window = scene.Active;
         bool terminal = window != null && (window.App == "terminal" || window.Focus == "terminal");
+        if (terminal && scene.Terminal.FollowingLog) return task.Id == "terminal-interrupt";
         bool fileList = window?.App == "files" && window.Focus == "body" || window?.App == "code" && window.Focus == "explorer";
         return task.Id switch
         {
@@ -284,8 +288,12 @@ internal static class LabCatalog
             "symbol-next" or "symbol-open" => window?.Focus == "symbols",
             "file-open" or "file-copy" or "file-cut" => fileList && window.Item >= 0,
             "trash" => window?.App == "files" && window.Focus == "body" && window.Item >= 0,
-            "link-open" => window?.App == "chrome" && window.Focus == "body" && window.Item >= 0,
-            "link-next" or "link-prev" => window?.App == "chrome" && window.Focus == "body",
+            "link-open" => window?.App == "chrome" && (window.Focus == "body" || LabScene.OnChromeHistory(window) && window.Focus == "history")
+                && window.Item >= 0 && window.Item < scene.Entries(window).Length,
+            "link-next" => window?.App == "chrome" && (window.Focus == "body" || LabScene.OnChromeHistory(window) && window.Focus == "history")
+                && (!LabScene.OnChromeHistory(window) || scene.Entries(window).Length > 0),
+            "link-prev" => window?.App == "chrome" && (window.Focus == "body" || LabScene.OnChromeHistory(window) &&
+                window.Focus == "history" && window.Item > 0),
             "switch-next" or "switch-prev" => scene.Windows.Count(item => item.Workspace == scene.Workspace)
                 >= (scene.GnomeWindows && window == null ? 1 : 2),
             "switch-group-next" or "switch-group-prev" => scene.GnomePractice == "same-app" && scene.GnomeGroupSize >= 2,
@@ -339,6 +347,7 @@ internal static class LabCatalog
             "cut" => window != null && (window.Focus == "body" ? window.App == "code" && window.Body.Length > 0 : window.Selected),
             "paste" => window != null && scene.Clipboard.Length > 0 && (window.App == "code" || window.App == "chrome" && window.Focus != "body"),
             "terminal-copy" => terminal && window.Selected,
+            "terminal-interrupt" => false, // only an active foreground log reader can be interrupted
             "terminal-clear" or "terminal-yank" => terminal,
             "terminal-paste" => terminal && scene.Clipboard.Length > 0,
             "terminal-cancel" or "terminal-erase" or "terminal-kill" or "terminal-home" or "terminal-end" => terminal && scene.TerminalInput.Length > 0,

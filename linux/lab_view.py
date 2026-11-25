@@ -41,6 +41,7 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         self.field_scroll = {}
         self.presentation_app = "ubuntu"
         self.reference_chrome = False
+        self.browser_history_command = None
         self.set_overflow(Gtk.Overflow.HIDDEN)
         self.set_size_request(400, 200)
         self.set_hexpand(True)
@@ -59,6 +60,13 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
                        if active.get("focus") in ("code-problems", "code-quick-fix") else "")
             detail = (self.explorer_description(active) if active.get("explorerActions") and
                       active.get("focus") in ("explorer","file-name") else active.get("notebookDescription") or active.get("body","")[:300])
+            if active.get("url") == "chrome://history":
+                query = active.get("historySearch") or ""
+                rows = active.get("entries", ())
+                item = active.get("item", -1)
+                selected = rows[item].get("title", "") if 0 <= item < len(rows) else ""
+                detail = f"История Chrome. Поиск в истории: {query or 'пусто'}. Записей: {len(rows)}. "
+                detail += (f"Выбрано: {selected}. Enter — открыть." if selected else "Введите запрос или нажмите Tab, чтобы выбрать запись.")
             self.update_property([Gtk.AccessibleProperty.LABEL], [
                 ("Учебный рабочий стол Windows 10. " if scene.get("desktopStyle") == "win10" else "Учебная сцена. ")
                 + {"start": "Пуск. ", "task-view": "Представление задач. ", "snap": "Выберите второе окно. "}
@@ -84,11 +92,8 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
 
     @property
     def chrome_font(self):
-        # Only the reference browser shares the lesson shell's bundled font.
-        # Keep the older desktop presentation and all monospace surfaces intact.
-        if self.reference_chrome and self.presentation_app == "chrome":
-            return "Roboto,Noto Sans,sans-serif"
-        return "Noto Sans"
+        # Chrome uses a consistent proportional UI font at all simulation sizes.
+        return "Roboto,Noto Sans,sans-serif"
 
     def text_layout(self, value, size, *, mono=False, bold=False, family="Noto Sans"):
         layout = self.create_pango_layout(str(value))
@@ -634,7 +639,10 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         self.fill("#569ace" if win10 and window.get("active") else "#303036", x, y, w, h, radius)
         self.snapshot.push_clip(self.rect(x + 1, y + 1, w - 2, h - 2))
         app = window.get("app", "terminal")
-        purple = self.reference_chrome and self.presentation_app == app == "chrome"
+        if app == "chrome":
+            self.chrome(window, x, y, w, h)
+            self.snapshot.pop()
+            return
         if win10:
             self.fill("#f4f7fa", x + 1, y + 1, w - 2, 26)
             self.win10_app_icon(app, x + 8, y + 7, 13)
@@ -654,18 +662,12 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
             self.fill("#e3e0dd", x + w - 25, y + 5, 17, 17, 9)
             self.label("×", x + w - 21, y + 3, 15, "#454441")
         else:
-            self.fill("#282541" if purple else "#303036", x, y, w, 27)
-            if purple:
-                self.app_icon("chrome", x + 10, y + 5, 17)
-            self.label(window.get("title", app), x + (34 if purple else 10), y + 6,
-                       12 if purple else 11, width=w - 105, bold=True,
-                       family=self.chrome_font if purple else "Noto Sans")
+            self.fill("#303036", x, y, w, 27)
+            self.label(window.get("title", app), x + 10, y + 6, 11, width=w - 105, bold=True)
             self.label("−    □", x + w - 79, y + 5, 12)
             self.fill("#e95420" if window.get("active") else "#66616c", x + w - 25, y + 5, 17, 17, 9)
             self.label("×", x + w - 21, y + 3, 15)
-        if app == "chrome":
-            self.chrome(window, x, y + 27, w, h - 27)
-        elif app == "files":
+        if app == "files":
             self.files(window, x, y + 27, w, h - 27, win10=win10)
         elif app == "code":
             self.code(window, x, y + 27, w, h - 27)
@@ -824,45 +826,202 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
             self.label({"home": "⌂", "download": "↓", "desktop": "▣", "star": "★",
                         "clock": "◷", "bin": "▤"}[kind], x, y - 3, 13, icon)
 
-    def chrome(self, window, x, y, w, h):
-        purple = self.reference_chrome and self.presentation_app == "chrome"
+    def chrome_mark(self, kind, x, y, size, color, background="#3d3d3d"):
+        """Small vector browser marks; no missing-glyph squares on either theme."""
+        s, pen = size / 16, size * 1.5 / 16
+        paths = {
+            "back": (((8, 3), (3, 8), (8, 13)), ((3, 8), (13, 8))),
+            "forward": (((8, 3), (13, 8), (8, 13)), ((13, 8), (3, 8))),
+            "down": (((4, 6), (8, 10), (12, 6)),),
+            "home": (((2, 8), (8, 3), (14, 8)), ((4, 7), (4, 14), (12, 14), (12, 7)),
+                     ((7, 14), (7, 10), (9, 10), (9, 14))),
+            "min": (((3, 12), (13, 12)),),
+            "max": (((3, 3), (13, 3), (13, 13), (3, 13), (3, 3)),),
+            "close": (((4, 4), (12, 12)), ((12, 4), (4, 12))),
+            "plus": (((3, 8), (13, 8)), ((8, 3), (8, 13))),
+            "download": (((8, 2), (8, 10)), ((4, 7), (8, 11), (12, 7)), ((3, 13), (13, 13))),
+            "search": (((10.5, 10.5), (14, 14)),),
+            "refresh": (((11, 2), (14, 5), (10, 5)),),
+            "history": (((8, 4.5), (8, 8), (11, 9.5)), ((1, 3), (1, 7), (5, 7))),
+            "sliders": (((2, 5), (14, 5)), ((2, 11), (14, 11))),
+            "folder": (((2, 5), (2, 13), (14, 13), (14, 5), (8, 5), (6, 3), (2, 3), (2, 5)),),
+            "star": (((8, 1.5), (10, 6), (15, 6), (11, 9), (12.5, 14), (8, 11.3),
+                      (3.5, 14), (5, 9), (1, 6), (6, 6), (8, 1.5)),),
+        }
+        def disk(cx, cy, radius, ink_color):
+            r = radius * s
+            self.fill(ink_color, x+cx*s-r, y+cy*s-r, 2*r, 2*r, r)
+        def ring(cx, cy, radius):
+            disk(cx, cy, radius, color)
+            disk(cx, cy, radius-1.5, background)
+        if kind == "search":
+            ring(6.5, 6.5, 5)
+        elif kind in ("globe", "history", "refresh", "chrome"):
+            ring(8, 8, 6.3)
+            if kind == "refresh":
+                self.fill(background, x+10.6*s, y+s, 5.4*s, 4.7*s)
+            elif kind == "history":
+                self.fill(background, x, y+s, 5*s, 6*s)
+            elif kind == "chrome":
+                ring(8, 8, 3.7)
+                paths[kind] = (((4.5, 4.5), (10, 4.5)), ((10.5, 7.5), (8.4, 12)), ((6.5, 10.1), (3.5, 5.6)))
+            else:
+                paths["globe"] = (((2.5, 8), (13.5, 8)), ((8, 2), (6, 6), (6, 10), (8, 14)),
+                                  ((8, 2), (10, 6), (10, 10), (8, 14)))
+        elif kind == "more":
+            for cy in (3.8, 8, 12.2):
+                disk(8, cy, 1.15, color)
+        elif kind == "apps":
+            for ox in (2, 9):
+                for oy in (2, 9):
+                    self.fill(color, x+ox*s, y+oy*s, 5*s, 5*s, s)
+                    self.fill(background, x+(ox+1.3)*s, y+(oy+1.3)*s, 2.4*s, 2.4*s, .35*s)
+        for path in paths.get(kind, ()):
+            for (x1, y1), (x2, y2) in zip(path, path[1:]):
+                point = Graphene.Point().init(x+x1*s, y+y1*s)
+                self.snapshot.save()
+                self.snapshot.translate(point)
+                self.snapshot.rotate(degrees(atan2(y2-y1, x2-x1)))
+                self.fill(color, -pen/2, -pen/2, hypot(x2-x1, y2-y1)*s+pen, pen, pen/2)
+                self.snapshot.restore()
+        if kind == "sliders":
+            for cx, cy in ((6, 5), (11, 11)):
+                disk(cx, cy, 2.3, color)
+                disk(cx, cy, 1, background)
+
+    def chrome_site_mark(self, url, x, y, size, color, background):
+        icon = {"chrome://history": "history", "chrome://bookmarks": "star",
+                "chrome://downloads": "download"}.get(url, "globe")
+        self.chrome_mark(icon, x, y, size, color, background)
+
+    def chrome_density(self, width):
+        # Match the larger Chrome reference without zooming compact lessons or
+        # stacking another 25% on top of an already scaled host monitor.
+        native = self.get_native()
+        surface = native.get_surface() if native else None
+        get_scale = getattr(surface, "get_scale", None)
+        device = max(1, get_scale() if get_scale else self.get_scale_factor())
+        reference = 1+.25*max(0,min(1,(width-1100)/740))
+        return min(reference,max(1,1.25/device))
+
+    def chrome_top(self, window, x, y, w):
         label = partial(self.label, family=self.chrome_font)
         field = partial(self.field, family=self.chrome_font, mono=False)
-        self.fill("#201d36" if purple else "#202124", x, y, w, h)
+        unit = .81 if w < 710 else self.chrome_density(w)
+        tabs_h, nav_h, books_h = 40*unit, 42*unit, 38*unit
+        strap = "#3d3d3d"
+        self.fill("#272727", x, y, w, tabs_h)
+        if w >= 240:
+            self.fill("#646464", x+6*unit, y+7*unit, 28*unit, 28*unit, 10*unit)
+            self.chrome_mark("down", x+12*unit, y+13*unit, 16*unit, "#e2e2e2", "#646464")
         tabs = window.get("tabs", [])
-        tab_w = min(169 if purple else 150, max(48, (w - 48) / max(1, len(tabs))))
-        for i, tab in enumerate(tabs):
-            active_tab = i == window.get("activeTab", 0)
-            self.fill(("#41375f" if active_tab else "#25213d") if purple else
-                      ("#3c4043" if active_tab else "#292a2d"),
-                      x + 6 + tab_w * i, y + 2, tab_w - 3, 26, 7)
-            label(tab["title"], x + 15 + tab_w * i, y + 8, 10, width=tab_w - 33)
-            label("×", x + tab_w * (i + 1) - 12, y + 7, 12)
-        label("+", x + min(w - 22, 12 + tab_w * len(tabs)), y + 6, 16)
-        self.fill("#222039" if purple else "#303134", x, y + 29, w, 33)
-        label("‹   ›   ↻", x + 9, y + 35, 15)
-        if purple:
-            self.fill("#67558d", x + 89, y + 32, w - 149, 27, 14)
-            self.fill("#201c36", x + 90, y + 33, w - 151, 25, 13)
-            label("◈", x + 99, y + 36, 12, "#cfc0f6")
-            label("☆", x + w - 49, y + 34, 16)
+        left, controls = (40*unit if w >= 240 else 4), 100*unit
+        avail = max(42, w-left-controls-25*unit)
+        count = min(len(tabs), max(1, int(avail/(52*unit))))
+        active = max(0, min(len(tabs)-1, window.get("activeTab", 0)))
+        start = min(max(0, active-count+1), max(0, len(tabs)-count))
+        tw = min(235*unit, avail/max(1, count))
+        for i in range(start, start+count):
+            tab, current = tabs[i], i == active
+            position = x+left+(i-start)*tw
+            tone = strap if current else "#282828"
+            if current:
+                self.fill(tone, position, y+6*unit, tw, tabs_h-6*unit, 11*unit)
+                self.fill(tone, position, y+tabs_h-10*unit, tw, 10*unit)
+            else:
+                self.fill(tone, position, y+7*unit, tw-1, tabs_h-9*unit, 7*unit)
+                if i+1 != active:
+                    self.fill("#202020", position+tw-2, y+12*unit, 1, 15*unit)
+            if tw >= 68*unit:
+                self.chrome_site_mark(tab.get("url",""), position+9*unit, y+13*unit, 16*unit,
+                                      "#b7babc", tone)
+                label(tab.get("title","Новая вкладка"), position+31*unit, y+12*unit,
+                      14*unit, "#f2f2f2" if current else "#bcbcbc", width=tw-55*unit)
+            else:
+                self.chrome_site_mark(tab.get("url",""), position+6*unit, y+13*unit, 15*unit,
+                                      "#b7babc", tone)
+            self.chrome_mark("close", position+tw-19*unit, y+14*unit, 12*unit,
+                             "#e7e7e7" if current else "#bcbcbe", tone)
+        plus = x+left+tw*count+4*unit
+        if plus+28*unit <= x+w-controls+8*unit:
+            self.fill("#646464", plus, y+7*unit, 28*unit, 28*unit, 14*unit)
+            self.chrome_mark("plus", plus+6*unit, y+13*unit, 16*unit, "#e2e2e2", "#646464")
+        for i, icon in enumerate(("min","max","close")):
+            self.chrome_mark(icon, x+w-(90-32*i)*unit, y+13*unit, 16*unit, "#e1e1e1", "#272727")
+        nav_y = y+tabs_h
+        self.fill(strap, x, nav_y, w, nav_h)
+        steps = ("back", "forward", "refresh", "home") if w>=460 else ("back","refresh")
+        for i, icon in enumerate(steps):
+            self.chrome_mark(icon, x+(16+i*35)*unit, nav_y+13*unit, 16*unit, "#c4c7c5", strap)
+        roomy = w >= 840
+        ox, right = x+(19+35*len(steps))*unit, (145 if roomy else 52)*unit
+        ow = max(26, x+w-right-ox)
+        editing = window.get("focus") == "url" and window.get("active", True)
+        address = window.get("input","") if editing else window.get("url","")
+        dark = "#292b28" if editing else "#32332f"
+        if editing:
+            self.fill("#a7c6fa", ox, nav_y+5*unit, ow, 35*unit, 18*unit)
+        self.fill(dark, ox+(1.5*unit if editing else 0), nav_y+(6.5 if editing else 5)*unit,
+                  ow-(3*unit if editing else 0), (32 if editing else 35)*unit, 17*unit)
+        internal = window.get("url","").startswith("chrome://") and not editing and ow >= 230*unit
+        if internal:
+            self.fill("#20211f", ox+4*unit, nav_y+10*unit, 86*unit, 25*unit, 13*unit)
+            self.chrome_mark("chrome", ox+9*unit, nav_y+13*unit, 18*unit, "#f5f5f5","#20211f")
+            label("Chrome", ox+29*unit, nav_y+11*unit, 14*unit, "#f5f5f5", width=58*unit)
+        elif ow>=90*unit:
+            self.fill("#20211f", ox+5*unit, nav_y+10*unit, 25*unit, 25*unit, 13*unit)
+            self.chrome_mark("sliders", ox+10*unit, nav_y+14*unit, 15*unit, "#dededc","#20211f")
+        text_indent = (99 if internal else 38 if ow>=90*unit else 7)*unit
+        address_width = max(1, ow-text_indent-(32 if ow>=90*unit else 6)*unit)
+        visible = address[8:] if not editing and address.startswith("https://") else address
+        if editing:
+            field(visible, window, ox+text_indent, nav_y+13*unit, address_width, 14*unit, "#f3f3f3",
+                  focused=True, scroll_key=("address",window.get("id")), selection_color="#415c84", caret_color="#e4e4e4")
         else:
-            self.fill("#202124", x + 79, y + 32, w - 112, 27, 14)
-        editing = window["focus"] == "url"
-        address = window["input"] if editing else window["url"]
-        field(address, window, x + (118 if purple else 94), y + 36,
-                   w - (181 if purple else 144), 13, "#f6f0ff" if purple else "#e6e8ec", focused=editing)
-        if window.get("browserPractice"):
-            saved = window.get("url") in window.get("savedBookmarks", [])
-            self.fill("#222039" if purple else "#303134", x + w - 53, y + 33, 23, 22, 4)
-            label("★" if saved else "☆", x + w - 49, y + 35, 15, "#bda8ff" if saved else "#d6dde9")
-        label("⋮", x + w - 21, y + 35, 16)
-        body_top = 62
+            label(visible, ox+text_indent,nav_y+12*unit,14*unit,"#f3f3f3",width=address_width)
+        if ow>=90*unit:
+            saved = window.get("url") in window.get("savedBookmarks",[])
+            if saved:
+                label("★", ox+ow-24*unit, nav_y+9*unit, 17*unit, "#a7c6fa", width=19*unit)
+            else:
+                self.chrome_mark("star", ox+ow-24*unit, nav_y+14*unit, 16*unit, "#c4c7c5", dark)
+        self.chrome_mark("download", x+w-(131 if roomy else 42)*unit, nav_y+12*unit, 18*unit,"#c4c7c5",strap)
+        if roomy:
+            self.fill("#32332f", x+w-104*unit, nav_y+5*unit, 70*unit, 34*unit, 17*unit)
+            label("Учебный", x+w-96*unit, nav_y+13*unit, 12*unit, "#e2e2e2", width=58*unit)
+        self.chrome_mark("more", x+w-24*unit, nav_y+12*unit, 16*unit, "#c4c7c5",strap)
+        top = nav_y+nav_h
         if window.get("bookmarks"):
-            self.fill("#303134", x, y + 62, w, 23)
-            label("    ".join(window.get("savedBookmarks", [])), x + 15, y + 65, 10, width=w - 30)
-            body_top += 23
+            self.fill(strap, x, top, w, books_h)
+            self.chrome_mark("apps", x+12*unit, top+11*unit, 15*unit, "#b8babc",strap)
+            self.fill("#686868", x+42*unit, top+10*unit, 1, 16*unit)
+            entry_titles = {item["path"]:item["title"] for item in window.get("entries",[]) if item.get("path")}
+            titles = {tab.get("url"):tab.get("title") for tab in tabs}
+            titles.update(entry_titles)
+            px = x+58*unit
+            for bookmark in window.get("savedBookmarks",[]):
+                if px>=x+w-152*unit:
+                    break
+                caption = titles.get(bookmark) or self.browser_short_address(bookmark)
+                bw = min(212*unit, self.text_layout(caption, 13*unit, family=self.chrome_font).get_pixel_size()[0]+28*unit,
+                         x+w-148*unit-px)
+                self.chrome_site_mark(bookmark,px,top+11*unit,15*unit,"#c4c7c5",strap)
+                label(caption,px+21*unit,top+10*unit,13*unit,"#eeeeee",width=max(1,bw-21*unit))
+                px += bw+8*unit
+            if w>=345:
+                self.fill("#686868",x+w-151*unit,top+10*unit,1,16*unit)
+                self.chrome_mark("folder",x+w-135*unit,top+10*unit,17*unit,"#c4c7c5",strap)
+                label("Все закладки",x+w-112*unit,top+9*unit,13*unit,"#eeeeee",width=108*unit)
+            top += books_h
+        self.fill("#222326",x,top-1,w,1)
+        return top-y
+
+    def chrome(self, window, x, y, w, h):
+        label = partial(self.label, family=self.chrome_font)
+        field = partial(self.field, family=self.chrome_font, mono=False)
+        body_top = self.chrome_top(window, x, y, w)
         self.fill("#f8f9fb", x, y + body_top, w, max(1, h - body_top))
+        tabs = window.get("tabs", [])
         tab = tabs[window["activeTab"]] if tabs else {}
         body = window.get("body", "") or tab.get("body", "")
         scale = window.get("zoom", 100) / 100
@@ -870,12 +1029,14 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         top = y + body_top
         status = window.get("status", "")
         show_status = bool(status) and status != "Готово"
-        bottom = y + h - (24 if show_status else 8)
+        bottom = y + h - (24 if show_status else 0 if url == "chrome://history" else 8)
         entries = window.get("entries", [])
         search_home = url == "https://www.google.com/"
         if search_home or url.startswith("https://www.google.com/search?q="):
             self.browser_search_page(window, x, top, w, bottom, search_home, body, entries, scale)
-        elif url in ("chrome://bookmarks", "chrome://history", "chrome://downloads"):
+        elif url == "chrome://history":
+            self.chrome_history(window, x, top, w, bottom, entries)
+        elif url in ("chrome://bookmarks", "chrome://downloads"):
             self.browser_manager(window, x, top, w, bottom, url, entries, scale)
         else:
             self.browser_document(window, x, top, w, bottom, url,
@@ -886,17 +1047,18 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         if window.get("focus") == "find":
             left = x + max(10, w - 300)
             box_width = min(290, w - 20)
-            self.fill("#303134", left, y + 64, box_width, 38, 5)
-            label("⌕", left + 9, y + 73, 14)
-            field(window.get("input", ""), window, left + 29, y + 74, box_width - 42,
-                       13, "#ffffff", scroll_key=("find", window.get("id")))
+            find_y = top + 3
+            self.fill("#303134", left, find_y, box_width, 38, 6)
+            self.chrome_mark("search", left+8, find_y+11, 14, "#c4c7c5", "#303134")
+            field(window.get("input", ""), window, left+29, find_y+10, box_width-42,
+                  13, "#ffffff", scroll_key=("find", window.get("id")))
         elif url not in ("chrome://bookmarks", "chrome://history", "chrome://downloads") and window.get("focus") in ("downloads", "history", "bookmarks"):
             self.fill("#303134", x + max(10, w - 300), y + 64, min(290, w - 20), 38, 5)
             label({"find": "Поиск", "downloads": "Загрузки", "history": "История", "bookmarks": "Закладки"}.get(window["focus"], "")
                        + "  " + window.get("input", ""), x + max(20, w - 290), y + 74, 11, width=min(270, w - 40))
         if show_status:
-            self.fill("#e5edf8", x, y + h - 24, w, 24)
-            label(status, x + 9, y + h - 19, 11, "#284571", width=w - 18)
+            self.fill("#32332f", x, y + h - 24, w, 24)
+            label(status, x + 9, y + h - 19, 11, "#e2e2e2", width=w - 18)
 
     @staticmethod
     def browser_address_parts(value):
@@ -1005,11 +1167,120 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
             if pitch >= 64 and detail:
                 label(detail, left, row_y + 49, 12, "#4d5156", width=bar_w)
 
+    def browser_history_hotspot(self, action, path):
+        prefix = "browser-history:"
+        if not action.startswith(prefix) or self.browser_history_command is None:
+            return False
+        self.browser_history_command(action[len(prefix):], path)
+        return True
+
+    def chrome_history(self, window, x, top, width, bottom, entries):
+        """Paint in Chrome logical units and bind clicks to the same scaled controls."""
+        density = self.chrome_density(width)
+        def hit(rx, ry, rw, rh, action, title, path=""):
+            self._nb_hit((x+rx*density,top+ry*density,rw*density,rh*density),
+                         "browser-history:"+action,title,path=path)
+        self.snapshot.save()
+        self.snapshot.translate(Graphene.Point().init(x, top))
+        self.snapshot.scale(density, density)
+        try:
+            self._draw_chrome_history(window, 0, 0, width/density, (bottom-top)/density, entries, hit)
+        finally:
+            self.snapshot.restore()
+
+    def _draw_chrome_history(self, window, x, top, width, bottom, entries, hit):
+        """Only the local lesson's visit ledger is rendered, never host history."""
+        label = partial(self.label, family=self.chrome_font)
+        field = partial(self.field, family=self.chrome_font, mono=False)
+        bg, card, fg, muted, blue = "#252629", "#2d2e31", "#e2e2e2", "#bdc1c6", "#a7c6fa"
+        self.fill(bg, x, top, width, bottom-top)
+        roomy = width >= 725 and bottom-top >= 140
+        rail = min(254, width*.24) if roomy else 0
+        if roomy:
+            self.chrome_mark("chrome",x+18,top+13,27,"#ffffff",bg)
+            label("История",x+65,top+13,22,fg,bold=True,width=rail-70)
+            self.fill("#89b3f8",x,top+64,rail,40,22)
+            self.fill("#89b3f8",x,top+64,rail/2,40)
+            self.chrome_mark("history",x+24,top+74,18,"#161c22","#89b3f8")
+            label("История Chrome",x+64,top+74,14,"#17212a",bold=True,width=rail-72)
+            label("Посещения в тренажёре",x+64,top+118,12,muted,width=rail-72)
+        else:
+            self.chrome_mark("chrome",x+16,top+6,20,"#ffffff",bg)
+            label("История",x+43,top+6,16,fg,bold=True,width=width-60)
+        left = x+rail+max(14,(width-rail-960)/2)
+        pane = min(960,x+width-left-14)
+        if pane <= 85:
+            return
+        shallow = bottom-top < 290
+        sy, sh = top+(8 if roomy else 31), 35 if shallow else 42
+        sw = min(698,pane-2)
+        query = window.get("historySearch") or ""
+        selected = window.get("item", -1)
+        focused = (window.get("active", True) and window.get("focus") == "history" and selected < 0)
+        interactive = window.get("active", True) and self.browser_history_command and "historySearch" in window
+        stroke = 1.6 if focused else 1
+        self.fill(blue if focused else "#515357",left+3,sy,sw,sh,sh/2)
+        self.fill("#292929",left+3+stroke,sy+stroke,sw-2*stroke,sh-2*stroke,sh/2-stroke)
+        self.chrome_mark("search",left+17,sy+(sh-16)/2,16,muted,"#292929")
+        search_y = sy+(sh-17)/2
+        if not query:
+            label("Поиск в истории",left+40,search_y,13,muted,width=sw-48)
+        if query or focused:
+            field(query,window,left+40,search_y,sw-48,13,fg,focused=focused,
+                  scroll_key=("history-search",window.get("id")),selection_color="#415c84",caret_color=fg)
+        if interactive:
+            hit(left+3,sy,sw,sh,"search","Поиск в истории · Ctrl+F")
+        nav_y = sy+sh+(4 if shallow else 10)
+        label("Недавние",left+19,nav_y+8,14,blue,bold=True,width=pane-36)
+        line_y = nav_y+(26 if shallow else 42)
+        self.fill("#3c3d41",left+4,line_y,pane-4,1)
+        self.fill(blue,left+19,line_y-2,72,3,1.5)
+        panel_y = line_y+(9 if shallow else 24)
+        if bottom-panel_y < 28:
+            return
+        head_h, pitch = (32,31) if shallow else (58,44)
+        visible = min(len(entries), max(0,int((bottom-panel_y-head_h-8)/pitch)))
+        first = max(0,min(len(entries)-visible,selected-visible+1)) if visible else 0
+        panel_h = min(bottom-panel_y-3, head_h+visible*pitch+9)
+        self.fill("#212225",left-1,panel_y-1,pane+2,panel_h+2,10)
+        self.fill(card,left,panel_y,pane,panel_h,10)
+        heading = ("Найдено: "+str(len(entries))) if query else "Посещения в этом занятии"
+        if not entries:
+            heading = "Ничего не найдено" if query else "История пока пуста"
+        label(heading,left+24,panel_y+(8 if shallow else 25),16,fg,bold=True,width=pane-48)
+        if visible == 0:
+            return
+        for idx, entry in enumerate(entries[first:first+visible],first):
+            row_y = panel_y+head_h+(idx-first)*pitch
+            chosen = idx == selected
+            path, title = entry.get("path",""), entry.get("title","")
+            row_bg = "#384962" if chosen else card
+            if chosen:
+                self.fill(row_bg,left+8,row_y+2,pane-16,pitch-4,6)
+                self.fill(blue,left+8,row_y+6,2,pitch-12,1)
+            self.chrome_site_mark(path,left+22,row_y+(pitch-16)/2,16,blue if chosen else muted,row_bg)
+            ty = row_y+(pitch-16)/2
+            host,_ = self.browser_address_parts(path)
+            title_w = min(self.text_layout(title,13,family=self.chrome_font).get_pixel_size()[0]+6,
+                          pane*(.66 if pane>=330 else .74),pane-72)
+            label(title,left+48,ty,13,fg,bold=True,width=title_w)
+            if host and pane-title_w >= 168:
+                label(host,left+58+title_w,ty+1,12,muted,width=pane-84-title_w)
+            if chosen and pane >= 260:
+                label("Enter",left+pane-57,ty+1,11,blue,width=44)
+            if interactive and path:
+                hit(left+8,row_y+2,pane-16,pitch-4,"entry","Выбрать: "+title+" · Enter — открыть",path=path)
+        if len(entries)>visible:
+            track = max(6,panel_h-head_h-10)
+            thumb = max(19,track*visible/len(entries))
+            read = (track-thumb)*first/(len(entries)-visible)
+            self.fill("#3b3c40",left+pane-5,panel_y+head_h,3,track,1.5)
+            self.fill("#9aa0a6",left+pane-5,panel_y+head_h+read,3,thumb,1.5)
+
     def browser_manager(self, window, x, top, width, bottom, url, entries, scale):
         label = partial(self.label, family=self.chrome_font)
         title, icon = {"chrome://bookmarks": ("Закладки", "☆"),
-                       "chrome://downloads": ("Загрузки", "↓"),
-                       "chrome://history": ("История", "◷")}[url]
+                       "chrome://downloads": ("Загрузки", "↓")}[url]
         self.fill("#f3f6fc", x, top, width, bottom - top)
         self.fill("#dce7fc", x, top, width, 46)
         label("☰", x + 18, top + 13, 16, "#29466b", width=23)
@@ -1435,15 +1706,21 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         self.label(status, x + max(105, w - 265), y + h - 16, 9, CODE_MUTED, width=min(w - 110, 260))
 
     def terminal(self, window, x, y, w, h, embedded=False):
-        self.fill("#181818" if embedded else "#291726", x, y, w, h)
         terminal = self.scene.get("terminal", {})
+        powershell = terminal.get("shell") == "powershell"
+        self.fill("#181818" if embedded else "#012456" if powershell else "#291726", x, y, w, h)
         visible = max(0, int((h - 38) / 21))
         output = "\n".join(terminal.get("output", [])).splitlines()
         recent = output[-visible:] if visible else []
         for i, line in enumerate(recent):
-            self.label(line, x + 16, y + 9 + i * 21, 13, "#dccfdc", width=w - 32, mono=True)
+            self.label(line, x + 16, y + 9 + i * 21, 13, "#E7EFFB" if powershell else "#dccfdc", width=w - 32, mono=True)
+        if terminal.get("followingLog"):
+            status = ("Новая ошибка получена · просмотр продолжается" if terminal.get("logIncidentArrived")
+                      else "Просмотр открыт · ожидаются новые записи")
+            self.label(status, x + 16, y + 10 + len(recent) * 21, 12, "#F1C77C", width=w - 32)
+            return
         value = self.scene.get("terminalInput", "")
-        prefix = "student@ubuntu:" + terminal.get("cwd", "~").replace("/home/student", "~", 1) + "$ "
+        prefix = terminal.get("prompt") or ("student@ubuntu:" + terminal.get("cwd", "~").replace("/home/student", "~", 1) + "$ ")
         searching = window.get("focus") == "reverse-search"
         if searching:
             prefix = "Поиск «"

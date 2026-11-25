@@ -7,7 +7,7 @@ Each line represents completed scenarios, not mere catalog entries.
 import argparse
 import json
 
-from test_live_route_policy import LiveRoutePolicyTests, advance, begin
+from test_live_route_policy import LiveRoutePolicyTests, advance, begin, terminal_course
 
 
 def main():
@@ -33,8 +33,26 @@ def main():
                     expected = {m["id"] for m in missions}
                     curated = {m["id"] for m in missions if m.get("curated")}
                     old = baseline.get((desktop, app, level), set())
-                    assert old <= expected, (desktop, app, level, sorted(old - expected))
+                    legacy_in_ubuntu = set()
+                    if app == "terminal" and desktop == "windows":
+                        ubuntu = engine.call("lab-catalog", desktopProfile="ubuntu")
+                        legacy_in_ubuntu = old & {m["id"] for m in ubuntu["missions"]
+                                                  if m["app"] == "terminal" and m["level"] == level}
+                    assert old <= expected | legacy_in_ubuntu, (desktop, app, level, sorted(old - expected - legacy_in_ubuntu))
                     s = begin(engine, app, level, desktop, actionLimit=0, seconds=0, adaptiveGuide=True)
+                    if app == "terminal":
+                        journal = terminal_course(desktop)
+                        assert s["mission"] == journal and s["scenarioLength"] == 4
+                        for i in range(4):
+                            assert s["scenarioCompletedGoals"] == i
+                            s = advance(engine, s)
+                        assert s["finished"] and s["solved"] == 4
+                        print(json.dumps({"desktop": desktop, "app": app, "level": level,
+                            "available": 1, "completed": 1, "curated": 1, "credits": s["solved"],
+                            "sections": [(journal, 4)],
+                            "oldCatalogRetained": len(old), "legacyInUbuntu": sorted(legacy_in_ubuntu),
+                            "manualCatalog": sorted(expected - {journal})}, ensure_ascii=False), flush=True)
+                        return
                     completed = []
                     for _ in range(2 * len(expected) + 2):
                         if expected <= {name for name, _ in completed}:

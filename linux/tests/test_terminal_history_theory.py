@@ -21,7 +21,7 @@ class TerminalHistoryTheory(unittest.TestCase):
 
     def test_empty_wrong_then_correct_search_and_arrow_feedback(self):
         def check(e):
-            s = begin(e, "terminal", adaptiveGuide=True)
+            s = begin(e, "terminal", routeKind="mission", mission="terminal-explore", adaptiveGuide=True)
             self.assertEqual((s["mission"], s["task"]["text"]),
                              ("terminal-explore", "cd /home/student/project"))
             self.assertIn("фрагмент", s["task"]["hint"])
@@ -62,7 +62,7 @@ class TerminalHistoryTheory(unittest.TestCase):
 
     def test_query_miss_never_executes_stale_match_and_esc_restores_selection(self):
         def check(e):
-            s = begin(e, "terminal")
+            s = begin(e, "terminal", routeKind="mission", mission="terminal-explore")
             s = advance(e, s)  # cd /home/student/project
             s = advance(e, s)  # pwd genuinely executes before the search
             self.assertEqual(s["scene"]["terminal"]["lastCommand"], "pwd")

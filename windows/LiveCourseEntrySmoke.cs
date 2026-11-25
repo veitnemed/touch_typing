@@ -26,7 +26,7 @@ internal static partial class LiveUiSmoke
             SetNativeLessonLayout(thread,"00000409",0x0409);
             string[][] groups = {
                 new[] {"ubuntu","chrome","code","terminal","ubuntu","workday"},
-                new[] {"windows","windows","workday"}
+                new[] {"windows","windows","terminal","workday"}
             };
             foreach (var group in groups)
             {
@@ -44,7 +44,8 @@ internal static partial class LiveUiSmoke
                     string initial=CourseScenario();
                     Check(initial.Length>0,"The lesson reports the actual current objective");
                     CaptureReferenceFrame("course-"+environment+"-"+mode+"-start");
-                    for(int cap=0;cap<100 && (ReadSolved()<20||CourseScenario()==initial);cap++)
+                    bool shortTerminal = mode=="terminal";
+                    for(int cap=0;cap<100 && !Visible("LabResult") && (ReadSolved()<20||CourseScenario()==initial);cap++)
                     {
                         int before=ReadSolved();
                         string prompt=Find("LabTask").Current.ItemStatus;
@@ -57,6 +58,9 @@ internal static partial class LiveUiSmoke
                         {
                             Check(prompt.StartsWith("keys:",StringComparison.Ordinal),"A credited step expects a real typed action: "+prompt);
                             string keys=prompt.Substring(5);
+                            if (shortTerminal && keys=="Ctrl+C")
+                                Until(delegate {return Find("LabDesktop").Current.ItemStatus.Contains("новая ошибка");},
+                                      "actual virtual log event before interrupting its viewer");
                             string prefix=Exists("LabKeys") ? Find("LabKeys").Current.ItemStatus : "";
                             if(!String.IsNullOrEmpty(prefix)) EnterCharacters(prefix);
                             for(int attempt=0;attempt<(keys=="Tab"||keys=="Down"||keys=="Up"||keys=="Shift+Tab"?25:1);attempt++)
@@ -67,7 +71,17 @@ internal static partial class LiveUiSmoke
                         }
                         Until(delegate {return Visible("LabResult") || ReadSolved()==before+1;},
                               environment+"/"+mode+" "+before+" "+prompt);
-                        Check(!Visible("LabResult"),"Ordinary practice didn't terminate at the end of its first activity");
+                        if (!shortTerminal) Check(!Visible("LabResult"),"Ordinary practice didn't terminate at the end of its first activity");
+                    }
+                    if (shortTerminal)
+                    {
+                        Check(Visible("LabResult") && Find("LabResult").Current.HelpText.Contains("Выполнено 4."),
+                              "The bounded journal incident completes four actions without unrelated additions");
+                        CaptureReferenceFrame("course-"+environment+"-"+mode+"-completed");
+                        Console.WriteLine("COURSE " + environment + "/" + mode + ": " + initial + " | single practical journal completed.");
+                        Invoke("LabChooseClass");
+                        Until(delegate {return Visible("HomeClass-"+mode);},"terminal card restores after finite result");
+                        continue;
                     }
                     int earned=ReadSolved();
                     string next=CourseScenario();
@@ -85,7 +99,7 @@ internal static partial class LiveUiSmoke
                     Until(delegate {return Visible("HomeClass-"+mode);},"saved again to the same card");
                 }
             }
-            Console.WriteLine("PASS real WPF course cards, seven environments/app entries and natural boundaries.");
+            Console.WriteLine("PASS real WPF course cards, both shell profiles and ordinary mission boundaries.");
             return 0;
         }
         catch(Exception e)
