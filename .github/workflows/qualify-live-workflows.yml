@@ -264,8 +264,26 @@ jobs:
           & "./windows/Test-LiveSourceHandoffs.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/source-handoffs"
           & "./windows/Test-Notebook-Workbench.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/notebook-workbench"
           & "./windows/Test-Notebook-File-Handoff.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/notebook-file-handoff"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -LiveCoach -Seed 0 -OutputDirectory "$proof/live-coach"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -LiveCoachHint -Seed 0 -OutputDirectory "$proof/live-coach-hint"
+      - name: Verify visible adaptive guidance in two ordinary Chrome routes
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = "$env:RUNNER_TEMP/TouchTyping Live Candidate"
+          $proof = "$env:RUNNER_TEMP/windows-proof"
+          $problems = @()
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -LiveCoach -Seed 0 -OutputDirectory "$proof/live-coach" }
+          catch { $problems += "Blind: $_" }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -LiveCoachHint -Seed 0 -OutputDirectory "$proof/live-coach-hint" }
+          catch { $problems += "Hint: $_" }
+          if ($problems.Count) { throw ($problems -join '; ') }
+      - name: Render editor at 96, 120 and 144 DPI and verify rasterized selection
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = "$env:RUNNER_TEMP/TouchTyping Live Candidate"
+          $proof = "$env:RUNNER_TEMP/windows-proof"
           $render = "$proof/editor-dpi"
           $previousRoot = $env:TOUCH_TYPING_QA_DATA_ROOT
           $env:TOUCH_TYPING_QA_DATA_ROOT = "$proof/editor-dpi-profile"
