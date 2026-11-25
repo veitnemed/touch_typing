@@ -1,7 +1,7 @@
 """Native snapshots of simulated Ubuntu and Windows desktops and application windows."""
 import base64
 from functools import partial
-from math import ceil
+from math import atan2, ceil, degrees, hypot
 from urllib.parse import urlsplit
 
 import gi
@@ -1129,6 +1129,28 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
                 label("↓" if entry.get("kind") == "download" else "↗", left + 4, row_y + 2, 13, "#365d88")
                 label(entry["title"], left + 23, row_y + 2, 13 * scale, "#205496", width=pane - 25)
 
+    def workbench_mark(self, name, x, y, size, color):
+        """Draw common editor icons without relying on optional font glyphs."""
+        paths = (((2, 11), (2, 2), (10, 2), (10, 4)),
+                 ((2, 11), (4, 11)), ((5, 5), (14, 5), (14, 14), (5, 14), (5, 5))) if name == "copy" else (
+                 ((4, 5.5), (4, 10.5)), ((11.5, 6), (11.5, 7.5), (9.5, 9.5), (4, 9.5)))
+        scale, stroke = size / 16, size * 1.35 / 16
+        for path in paths:
+            for (x1, y1), (x2, y2) in zip(path, path[1:]):
+                offset = Graphene.Point()
+                offset.init(x + x1 * scale, y + y1 * scale)
+                self.snapshot.save()
+                self.snapshot.translate(offset)
+                self.snapshot.rotate(degrees(atan2(y2 - y1, x2 - x1)))
+                self.fill(color, -stroke / 2, -stroke / 2, hypot(x2 - x1, y2 - y1) * scale + stroke, stroke, stroke / 2)
+                self.snapshot.restore()
+        if name == "branch":
+            for cx, cy in ((4, 3.5), (4, 12.5), (11.5, 4)):
+                mx, my = x + cx * scale, y + cy * scale
+                outer, inner = 2.65 * scale, 1.3 * scale
+                self.fill(color, mx - outer, my - outer, 2 * outer, 2 * outer, outer)
+                self.fill(CODE_BG, mx - inner, my - inner, 2 * inner, 2 * inner, inner)
+
     def code_file_icon(self, name, x, y):
         if name.lower().endswith(".ipynb"):
             # A compact, high contrast notebook badge that remains readable at small sizes.
@@ -1166,14 +1188,18 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         self.fill(CODE_BG, x, y, rail, max(1, h - 19))
         self.fill(CODE_BORDER, x + rail - 1, y, 1, h - 19)
         step = 44 if wide else 33
-        for i, icon in enumerate(("▤", "⌕", "⑂", "▷", "▦")):
+        for i, icon in enumerate(("▤", "⌕", "", "▷", "▦")):
             if y + 28 + i * step >= y + h - 19:
                 break
             active_icon = {"explorer": 0, "project-search": 1, "changes": 2, "extensions": 4}.get(window.get("view"), 0)
             if i == active_icon and window.get("sidebar", True):
                 self.fill(CODE_FG if wide else "#f78166", x, y + i * step, 2, step - 1)
-            self.label(icon, x + (12 if wide else 8), y + 9 + i * step, 21 if wide else 18,
-                       CODE_FG if i == active_icon else CODE_MUTED)
+            color = CODE_FG if i == active_icon else CODE_MUTED
+            if i == 2:
+                size = 20 if wide else 17
+                self.workbench_mark("branch", x + (rail - size) / 2, y + i * step + (step - size) / 2, size, color)
+            else:
+                self.label(icon, x + (12 if wide else 8), y + 9 + i * step, 21 if wide else 18, color)
         show_tree = window.get("explorerActions") and window.get("focus") in ("explorer","file-name")
         sidebar = (min(225,int(w*.24)) if wide else min(155,int(w*.36))) if window.get("sidebar",True) and (w>450 or show_tree and w>275) else 0
         if sidebar:
@@ -1383,6 +1409,8 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
             self.fill("#141519", px - 1, y + 6, pw + 2, 52 + visible * 25, 7)
             self.fill(CODE_ROW, px, y + 5, pw, 51 + visible * 25, 7)
             title = titles[focus]
+            if focus == "quick-open" and not choices:
+                title += " · Совпадений нет"
             if focus == "find" and window.get("status", "").startswith("Совпадение "):
                 title += " · " + window["status"]
             self.label(title, px + 12, y + 10, 10, "#b4bfcd")
@@ -1394,7 +1422,8 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
                 self.label(choices[index], px + 14, iy, 13, width=pw - 28)
         self.fill(CODE_BG, x, y + h - 19, w, 19)
         self.fill(CODE_BORDER, x, y + h - 19, w, 1)
-        self.label("⑂ main    ✓ 0   ⚠ " + str(self.scene.get("diagnosticProblemCount", 0)), x + 9, y + h - 16, 9, CODE_MUTED)
+        self.workbench_mark("branch", x + 9, y + h - 15, 11, CODE_MUTED)
+        self.label("main    ✓ 0   ⚠ " + str(self.scene.get("diagnosticProblemCount", 0)), x + 23, y + h - 16, 9, CODE_MUTED)
         before = window.get("body", "").encode("utf-16-le")[:window.get("bodyCursor", 0) * 2].decode("utf-16-le", "ignore")
         line, col = before.count("\n") + 1, self.units(before.rsplit("\n", 1)[-1]) + 1
         support = "Python" if name.lower().endswith(".py") else "Текст"

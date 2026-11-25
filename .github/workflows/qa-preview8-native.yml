@@ -1,4 +1,4 @@
-name: QA only - Preview 8 Windows typing and correction
+name: QA only - Preview 9 ordinary Windows and Workday
 on:
   push:
     branches: [qa/touchtyping-preview8-native-check]
@@ -46,9 +46,10 @@ jobs:
           $app = "$env:RUNNER_TEMP/TouchTyping Preview8 QA"
           Expand-Archive -LiteralPath "$p/touchtyping-preview8-qa.zip" -DestinationPath $app
           $proof = "$env:RUNNER_TEMP/preview8-typing-proof"
-          & './windows/Test-TypingReview.ps1' -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/review"
-          & './windows/Test-Typing-Mixed.ps1' -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/mixed"
-          & './windows/Test-TypingCardRecords.ps1' -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/history"
+          & './windows/Test-Typing-Session.ps1' -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing"
+          & './windows/Test-OrdinaryWpfLaunch.ps1' -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/ordinary-live"
+          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -EditorCourse -Seed 0 -OutputDirectory "$proof/editor"
+          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock off -Seed 0 -OutputDirectory "$proof/number-pad"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

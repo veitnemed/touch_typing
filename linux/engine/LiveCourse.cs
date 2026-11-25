@@ -7,7 +7,7 @@ namespace TouchTypingStudio;
 
 internal sealed record LivePhase(string Title, string Route);
 internal sealed record LiveMission(string App, int Level, string Id, string Title, LivePhase[] Phases, bool FinishAfterRoute = false, bool Curated = false, Action<LabScene> Prepare = null);
-internal sealed record LiveGoal(int Phase, LabTask Task, string Target, string Layout, bool VerifyReport = false, string LegacyTarget = null, string ArtifactPath = null);
+internal sealed record LiveGoal(int Phase, LabTask Task, string Target, string Layout, bool VerifyReport = false, string LegacyTarget = null, string ArtifactPath = null, string CsvExplorerTarget = null);
 
 internal static partial class LiveCourse
 {
@@ -74,7 +74,8 @@ internal static partial class LiveCourse
                 else if (!Demonstrate(task, trial)) throw new InvalidOperationException(mission.Id + ": недоступно " + token);
                 string proof = Evidence(task, trial, verifyReport: verifyReport, artifactPath: artifactPath);
                 if (original == proof) { trial = before; continue; }
-                goals.Add(new(phase, task, proof, before.Layout, verifyReport, verifyReport ? Evidence(task, trial) : null, artifactPath));
+                goals.Add(new(phase, task, proof, before.Layout, verifyReport, verifyReport ? Evidence(task, trial) : null,
+                    artifactPath, CsvExplorerProof(task, trial)));
             }
         }
         if (goals.Count < (mission.Curated ? 1 : 20)) throw new InvalidOperationException(mission.Id + ": меньше 20 результатов");
@@ -268,10 +269,14 @@ internal static partial class LiveCourse
         return true;
     }
 
+    internal static string CsvExplorerProof(LabTask task, LabScene scene) =>
+        scene.ScopedCsvExplorerEvidence(task) is object evidence ? JsonSerializer.Serialize(evidence) : null;
+
     internal static string Evidence(LabTask task, LabScene scene, string equivalentCommand = null, bool verifyReport = false, string artifactPath = null)
     {
         var w = scene.Active;
         string app = w?.App ?? "", action = task.Action;
+        if (scene.GuideNoteEvidence(task) is object note) return JsonSerializer.Serialize(note);
         if (scene.SourceHandoffEvidence(task, equivalentCommand) is object source) return JsonSerializer.Serialize(source);
         if (scene.ProjectFileEvidence(task) is object files) return JsonSerializer.Serialize(files);
         if (scene.NotebookCourse) return JsonSerializer.Serialize(scene.NotebookEvidence(task));

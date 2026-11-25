@@ -41,12 +41,12 @@ class Surface:
         assert name == "shortcuts-inhibited"
         return self.inhibited
 
-def lab_for(path):
+def lab_for(path, backend="GdkWaylandDisplay"):
     scheduler = Scheduler()
     namespace = dict(GLib=scheduler, Gdk=S(Toplevel=Surface,
                      ModifierType=S(CONTROL_MASK=1, SHIFT_MASK=2, ALT_MASK=4, SUPER_MASK=8)))
     methods = {"acquire", "resolve_capture", "check_denied", "capture_expired",
-               "release_capture", "clear_capture_timers", "schedule_capture_denial", "focus"}
+               "release_capture", "clear_capture_timers", "schedule_capture_denial", "focus", "resume_with_capture"}
     lab_ast = next(c for c in ast.parse(path.read_text()).body if isinstance(c, ast.ClassDef) and c.name == "LabPage")
     lab_ast.body = [f for f in lab_ast.body if isinstance(f,ast.FunctionDef) and f.name in methods]
     lab_ast.bases = []
@@ -56,13 +56,15 @@ def lab_for(path):
     surface=Surface()
     result={"paused": False}
     lab.host=S(window=S(is_active=lambda:True,get_surface=lambda:surface,
-        get_display=lambda:S(get_default_seat=lambda:S(get_keyboard=lambda:S(get_modifier_state=lambda:0)))),call=lambda operation:result)
+        get_display=lambda:S(__gtype__=S(name=backend),
+            get_default_seat=lambda:S(get_keyboard=lambda:S(get_modifier_state=lambda:0)))),call=lambda operation:result)
     lab.active=True
     lab.waiting_capture=False
     lab.save_pending=lab.limit_resume_wait=False
     lab.state={"paused": True}
     lab.status=S(set_label=lambda value:setattr(lab,"notice",value),set_visible=lambda value:None)
     lab.surface=lab.handler=None
+    lab.window_only_keys=False
     lab.pressed=set()
     lab.physical_down=set()
     lab.capture_timeout=lab.capture_denied_timer=lab.capture_generation=0
@@ -122,8 +124,24 @@ def regain_focus(path):
     assert next_denial not in sch.callbacks
     print("OK focus regain queues only one current denial, real grant cancels it")
 
+def focus_local_x11(path):
+    lab, s, sch = lab_for(path, "GdkX11Display")
+    def forbidden(_):
+        raise AssertionError("X11 cannot request Wayland keyboard inhibition")
+    s.inhibit_system_shortcuts = forbidden
+    lab.host.window.is_active = lambda: False
+    lab.acquire()
+    assert lab.state["paused"] and not lab.window_only_keys and not sch.callbacks
+    lab.host.window.is_active = lambda: True
+    lab.acquire()
+    assert not lab.state["paused"] and lab.window_only_keys and lab.surface is None and not sch.callbacks
+    lab.release_capture()
+    assert not lab.window_only_keys
+    print("OK focused X11 resumes without a global grab; background X11 cannot resume")
+
 
 if __name__ == "__main__":
     path=Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parents[1] / "touch_typing.py"
     repro(path)
     regain_focus(path)
+    focus_local_x11(path)

@@ -460,7 +460,9 @@ namespace TouchTypingStudio
             int cell, bool enabled, Rect? clip = null)
         {
             if (w < 17) return;
-            Text(caption, x + 6, y + 3, 12, enabled ? CodeForeground : NotebookMuted, w - 8);
+            string tint = enabled ? CodeForeground : NotebookMuted;
+            if (action == "copy-cell") DrawWorkbenchMark("copy", x + (w - 14) / 2, y + 5, 14, tint);
+            else Text(caption, x + 6, y + 3, 12, tint, w - 8);
             if (enabled)
             {
                 var box = new Rect(x, y, w, 24);
@@ -477,7 +479,7 @@ namespace TouchTypingStudio
             Rounded(x, top, tool * 5 + 3, 23, CodeInset, 4);
             DrawNotebookTool(x, top, tool, "↑", "move-up", "Переместить ячейку выше", cell, cell > 0, clip); x += tool;
             DrawNotebookTool(x, top, tool, "↓", "move-down", "Переместить ячейку ниже", cell, cell + 1 < count, clip); x += tool;
-            DrawNotebookTool(x, top, tool, "⧉", "copy-cell", "Скопировать ячейку", cell, true, clip); x += tool;
+            DrawNotebookTool(x, top, tool, "", "copy-cell", "Скопировать ячейку", cell, true, clip); x += tool;
             DrawNotebookTool(x, top, tool, code ? "M" : "<>", code ? "markdown" : "code",
                 code ? "Преобразовать ячейку в Markdown" : "Преобразовать ячейку в код", cell, true, clip); x += tool;
             DrawNotebookTool(x, top, tool, "×", "delete-cell", "Удалить выбранную ячейку", cell, true, clip);

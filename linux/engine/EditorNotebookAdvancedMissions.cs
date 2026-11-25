@@ -169,6 +169,37 @@ internal sealed partial class LabScene
         (NotebookRead(NotebookFile) == verifiedNotebookBody ||
          CsvNotebook && NotebookRead(NotebookFile) == null && NotebookRead(VerifiedNotebookPath) == verifiedNotebookBody);
 
+    private object CsvEvidenceFiles() => CsvNotebook ? new {
+        incoming = NotebookRead("incoming/" + csvNotebook.Input), archive = NotebookRead("data/" + csvNotebook.Input),
+        renamed = NotebookRead("incoming/" + csvNotebook.Approved + ".csv"), moved = NotebookRead(CsvApprovedPath),
+        original = NotebookRead(NotebookFile) != null, verified = NotebookRead(VerifiedNotebookPath) != null
+    } : null;
+
+    internal object ScopedCsvExplorerEvidence(LabTask task)
+    {
+        if (!CsvNotebook || Active is not LabWindow w) return null;
+        var path = w.Focus is "explorer" or "file-name" ? Entries(w).ElementAtOrDefault(w.Item)?.Path : null;
+        // A destination selection only counts with the file being transferred.
+        // Merely inspecting data before cutting the CSV is not that action.
+        bool destination = task.Text is "data" or "verified";
+        return task.Action switch
+        {
+            "quick-open" => new { w.App, w.Focus, w.Input },
+            "explorer" => new { w.App, w.Focus, w.View, w.Sidebar },
+            "item-next" => new { w.App, w.Focus, path,
+                transfer = destination && fileCut && Clipboard == fileTransfer ? fileTransfer : null },
+            "item-open" => new { w.App, w.Focus, path, expanded = path != null && w.ExpandedProjectFolders.Contains(path) },
+            "file-cut" or "file-copy" => new { w.App, w.Focus, path, fileTransfer, fileCut },
+            "file-name-start" => new { w.App, w.Focus, w.RenamePath, w.Input, w.Cursor, w.Anchor },
+            "file-name-commit" => new { w.App, w.Focus, path, files = CsvEvidenceFiles() },
+            "file-paste" when task.Text == "!conflict" =>
+                new { w.App, w.Focus, conflict = NotebookConflictExpected(), files = CsvEvidenceFiles() },
+            "file-paste" => new { w.App, w.Focus, path, files = CsvEvidenceFiles() },
+            _ => null
+        };
+    }
+
+    // Keep the original full scene proof solely for replaying older input traces.
     private object AdvancedNotebookEvidence(LabTask task)
     {
         var w = Active;
@@ -176,11 +207,6 @@ internal sealed partial class LabScene
         var n = w.Tab?.Notebook;
         n?.SynchronizeWorkspace(NotebookRead);
         string action = task.Action;
-        object DataFiles() => CsvNotebook ? new {
-            incoming = NotebookRead("incoming/" + csvNotebook.Input), archive = NotebookRead("data/" + csvNotebook.Input),
-            renamed = NotebookRead("incoming/" + csvNotebook.Approved + ".csv"), moved = NotebookRead(CsvApprovedPath),
-            original = NotebookRead(NotebookFile) != null, verified = NotebookRead(VerifiedNotebookPath) != null
-        } : null;
         if (action == "palette-choose")
         {
             if (task.Text == "New Folder") return new { w.Focus, w.RenamePath };
@@ -209,12 +235,12 @@ internal sealed partial class LabScene
         if (action == "close-tab" && CsvNotebook)
             return new { closed = !w.Tabs.Any(t => EditorPath(t) == NotebookAbs(VerifiedNotebookPath)), w.Focus };
         if (action == "file-paste" && task.Text == "!conflict")
-            return new { path = w.Url, w.Focus, conflict = NotebookConflictExpected(), files = DataFiles() };
+            return new { path = w.Url, w.Focus, conflict = NotebookConflictExpected(), files = CsvEvidenceFiles() };
         if (action is "file-cut" or "file-copy")
             return new { path = w.Url, w.Focus, current = Entries(w).ElementAtOrDefault(w.Item)?.Path, fileTransfer, fileCut };
         if (action == "file-name-start" || action == "file-name-commit" || action == "file-paste" || action == "item-open" || action == "item-next")
             return new { path = w.Url, w.Focus, w.RenamePath, current = Entries(w).ElementAtOrDefault(w.Item)?.Path,
-                expanded = w.ExpandedProjectFolders.Order().ToArray(), files = DataFiles() };
+                expanded = w.ExpandedProjectFolders.Order().ToArray(), files = CsvEvidenceFiles() };
         if (action is "notebook-move-up" or "notebook-move-down" or "notebook-delete-cell" or "notebook-markdown" or "notebook-code" or
             "notebook-add-above" or "notebook-add-below" or "notebook-paste-cell")
             return n == null ? new { path = w.Url, missing = true } : new { path = w.Url, n.Selected, n.Editing, cells = Enumerable.Range(0,n.Count).Select(i => new { code = n.IsCode(i), source = n.Source(i) }).ToArray() };

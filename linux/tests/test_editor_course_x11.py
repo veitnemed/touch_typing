@@ -4,7 +4,8 @@ from unittest.mock import patch
 
 from platform_linux import Engine
 from test_editor_course import checkpoint, first_difference
-from test_project_file_practice import active
+from test_project_file_practice import active, disk
+from test_editor_guide_note import NOTE, source_fragments
 from test_preview2_native import QA, CaptureConsent, out
 from touch_typing import LabPage
 
@@ -38,8 +39,13 @@ class CourseWindowQA(QA):
             count = lab.state["scenarioLength"]
             self.capture_widget_png(out/"course-01-original.png")
             yield from self.video_hold("VS Code: прежний курс при обычном входе")
+            expected_note = "".join(source_fragments(lab.state))
             while lab.state["mission"] == "code-guide":
                 yield from self.advance_goal(lab)
+                if lab.state["solved"] == 27:
+                    assert disk(lab.state)[NOTE] == active(lab.state)["body"] == expected_note
+                    self.capture_widget_png(out/"course-01b-three-source-note.png")
+                    yield from self.video_hold("Одна сохранённая заметка использует все три исходных фрагмента")
             assert lab.active and lab.state["mission"] == "code-notebook-read" and lab.state["solved"] == count == 33
             assert abs(lab.lesson_meter.get_fraction() - 33 / 40) < .001
             yield from self.advance_goal(lab)  # Ctrl+P from the ordinary editor.

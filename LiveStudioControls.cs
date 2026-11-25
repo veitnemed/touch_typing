@@ -112,6 +112,7 @@ namespace TouchTypingStudio
         private string layout = "EN", incorrect = "", keyboardProfile = "", fnMode = "";
         private bool keys = true, hands = true, functionRow;
         internal bool ReferenceAidRail { get; set; }
+        internal string ReferenceAidDescription { get; private set; }
 
         private double ReferenceHandScale
         {
@@ -168,6 +169,7 @@ namespace TouchTypingStudio
                 });
                 string description = keys ? "Раскладка: " + layout + ". Подсвечены: " + string.Join(" + ", shown) :
                     "Экранная клавиатура скрыта.";
+                ReferenceAidDescription = description;
                 System.Windows.Automation.AutomationProperties.SetHelpText(this, description);
             }
             if (reflow) InvalidateMeasure();

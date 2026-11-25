@@ -146,7 +146,7 @@ internal sealed partial class LabScene
     private string clipboard = "build: 17 tests passed";
     internal string Clipboard { get => clipboard; set { clipboard = value; notebookClipboard = ""; } }
     internal bool Overview, Switcher, Screenshot, ScreenshotReady, ScreenshotCopied, ShowDesktop, LayoutIsVirtual;
-    internal bool ReplayLegacyNavigation, ReplayLegacyLineEditing, UseWindowsBindings;
+    internal bool ReplayLegacyNavigation, ReplayLegacyLineEditing, ReplayLegacyQuickOpen, UseWindowsBindings;
     internal bool GnomeWindows;
     internal const string GnomeNoteText = "gnome";
     private string GnomeCodeBody => NeutralWorkspace ? "# \nfrom tasks import add_task\n" : "# \nfrom src.spectrum import fft\n";
@@ -200,6 +200,7 @@ internal sealed partial class LabScene
     private LabScene(LabScene source)
     {
         NeutralWorkspace = source.NeutralWorkspace;
+        guideExpected = source.guideExpected;
         BrowserPracticeActive = source.BrowserPracticeActive; RepoCloned = source.RepoCloned; BrowserPracticeQuery = source.BrowserPracticeQuery;
         notebookCase = source.notebookCase; notebookLevel = source.notebookLevel;
         notebookFamily = source.notebookFamily; csvNotebook = source.csvNotebook; verifiedNotebookBody = source.verifiedNotebookBody;
@@ -412,7 +413,9 @@ internal sealed partial class LabScene
             case "new-tab":
                 if (!browser && !code) return false;
                 string origin = window.Tab?.Id;
-                string name = code ? "notes-" + (++window.UntitledCount) + ".py" : "";
+                string name = code
+                    ? (CanCreateGuideNote(window) ? GuideNoteName : "notes-" + (++window.UntitledCount) + ".py")
+                    : "";
                 window.Tabs.Add(browser ? new LabTab("Новая вкладка", "about:blank", "") : new LabTab(name, name, "") { Origin = origin });
                 window.ActiveTab = window.Tabs.Count - 1; window.Focus = browser ? "url" : "body"; window.Input = ""; window.Cursor = 0; break;
             case "close-tab":
@@ -483,7 +486,12 @@ internal sealed partial class LabScene
                 else { Remember(window); window.Body = string.Join("\n", window.Body.Split('\n').Select(line => line.TrimEnd())); }
                 window.Focus = "body"; window.Input = ""; break;
             case "goto-line": if (!code) return false; window.Focus = "goto-line"; window.Input = ""; window.Cursor = 0; break;
-            case "explorer": if (!code) return false; window.View = "explorer"; window.Sidebar = true; window.Focus = "explorer"; break;
+            case "explorer":
+                if (!code) return false;
+                window.View = "explorer"; window.Sidebar = true; window.Focus = "explorer";
+                if (GuideNoteActive && window.Tab?.Title == GuideNoteName && Terminal.Exists(GuideNotePath))
+                    SelectPath(window, GuideNotePath);
+                break;
             case "project-search": if (!code) return false; window.View = "project-search"; window.Sidebar = true; window.Focus = "project-search"; window.Input = ""; window.Cursor = 0; window.OptionIndex = 0; break;
             case "panel":
                 window.Panel = !window.Panel;
@@ -729,6 +737,13 @@ internal sealed partial class LabScene
             }
             else if (window.Focus == "quick-open")
             {
+                // Only old saved traces may replay the historical fallback
+                // that chose an existing tab or created a scratch document.
+                if (!ReplayLegacyQuickOpen)
+                {
+                    window.Status = "Совпадений нет. Уточните имя или путь.";
+                    return false;
+                }
                 string name = window.Input.Trim();
                 int found = window.Tabs.FindIndex(tab => tab.Title.Equals(name, StringComparison.OrdinalIgnoreCase));
                 if (found >= 0) window.ActiveTab = found;

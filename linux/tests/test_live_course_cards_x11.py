@@ -94,6 +94,10 @@ class CourseCards(QA):
                 self.return_live_catalog(app)
                 for _ in range(22): yield
                 assert app in self.home_resume, (environment,app,"missing practice draft")
+                assert self.window.get_focus() is self.home_cards[app], (environment,app,"wrong actual focus")
+                assert not any(card.has_css_class("reference-selected") for card in self.home_cards.values())
+                if app == "code":
+                    self.capture_widget_png(out/f"card-{environment}-{app}-03-returned-focus.png")
                 restored = yield from self.ordinary_card(app)
                 assert restored and not restored.state["paused"], (environment, app, "resume is paused")
                 assert (restored.state["solved"], restored.state["mission"], restored.state["task"]) == (

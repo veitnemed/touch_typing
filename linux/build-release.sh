@@ -39,11 +39,13 @@ install -m 644 -- "$font_assets"/Roboto-{Regular,Medium,Bold}.ttf "$font_assets/
 install -m 755 -- "$source_dir/check.sh" "$target/"
 install -m 644 -- "$source_dir/qa_runner.py" "$target/"
 mkdir -p -- "$target/qa/fixtures"
+install -m 644 -- "$source_dir/tests/fixtures/preview7-original-csv-context.xml.gz" "$target/qa/fixtures/"
+install -m 644 -- "$source_dir/tests/fixtures/preview7-original-quick-open-typo.xml.gz" "$target/qa/fixtures/"
 install -m 644 -- "$source_dir/tests/test_live_missions.py" "$source_dir/tests/test_practice.py" "$source_dir/tests/test_lab_window.py" "$source_dir/tests/test_source_note_window.py" "$source_dir/tests/test_wayland_window.py" "$source_dir/tests/test_ui_controls.py" "$target/qa/"
-install -m 644 -- "$source_dir/tests/test_editor_course.py" "$source_dir/tests/test_editor_notebooks.py" \
+install -m 644 -- "$source_dir/tests/test_editor_course.py" "$source_dir/tests/test_editor_notebooks.py" "$source_dir/tests/test_editor_guide_note.py" \
     "$source_dir/tests/test_notebook_advanced_routes.py" "$source_dir/tests/test_python_editor.py" "$source_dir/tests/test_project_file_practice.py" "$source_dir/tests/test_source_handoff.py" "$target/qa/"
 install -m 644 -- "$source_dir/tests/capture_home_reference.py" "$target/qa/"
 install -m 644 -- "$source_dir/tests/record_terminal_window.py" "$target/qa/"
 install -m 644 -- "$source_dir/tests/test_native_selection_render.py" "$target/qa/"
 install -m 644 -- "$source_dir/tests/test_debug_day.py" "$source_dir/tests/test_live_entry_preferences.py" "$source_dir/tests/test_live_capture_generation.py" "$target/qa/"
-install -m 644 -- "$source_dir/tests/fixtures/v1.7.0-workday-report.xml.gz" "$target/qa/fixtures/"
+install -m 644 -- "$source_dir/tests/fixtures/v1.7.0-workday-report.xml.gz" "$source_dir/tests/fixtures/preview7-original-guide.xml.gz" "$target/qa/fixtures/"

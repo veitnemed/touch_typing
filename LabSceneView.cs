@@ -829,6 +829,7 @@ namespace TouchTypingStudio
                 if (focus == "find" && window.S("status").StartsWith("Совпадение ", StringComparison.Ordinal))
                     title += " · " + window.S("status");
                 var entries = window.Items("entries").ToArray();
+                if (focus == "quick-open" && entries.Length == 0) title += " · Совпадений нет";
                 bool notebookPalette = focus == "palette" && (window.D("notebook").Exists || window.S("input").Trim().Length > 0 &&
                     entries.Any(item => item.S("kind") == "notebook-command" || item.S("kind") == "explorer-command"));
                 string[] options = focus == "palette" && !notebookPalette && window.B("browserPractice") ? new[] { "Git: Clone" } :

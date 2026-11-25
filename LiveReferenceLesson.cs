@@ -41,6 +41,11 @@ namespace TouchTypingStudio
                 var guide = ((LiveAidRail)Owner).Child as LiveKeyboard;
                 return guide == null ? base.GetHelpTextCore() : guide.ReferenceAidExtent;
             }
+            protected override string GetItemStatusCore()
+            {
+                var guide = ((LiveAidRail)Owner).Child as LiveKeyboard;
+                return guide == null ? base.GetItemStatusCore() : (guide.ReferenceAidDescription ?? "");
+            }
         }
 
         private FrameworkElement MakeReferenceLesson()

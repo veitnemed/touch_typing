@@ -39,7 +39,7 @@ internal sealed partial class TypingRun
     private static readonly (string Id, string Title)[] PrimaryModes =
     [
         ("Russian", "Русские фразы"), ("English", "Английские фразы"),
-        ("WordsRU", "Русский словарь"), ("WordsEN", "Английский словарь"),
+        ("WordsRU", "Русские слова"), ("WordsEN", "Английские слова"),
         .. MixedTypingRun.Modes.Select(item => (item.Key, item.Value)),
         ("Project", "Python · task-list"), ("Symbols", "Спецсимволы"),
         ("WeakRU", "Работа над промахами · RU"), ("WeakEN", "Работа над промахами · EN"),
@@ -85,7 +85,7 @@ internal sealed partial class TypingRun
             case "WordsRU":
             case "WordsEN":
                 bool russian = mode == "WordsRU";
-                title = russian ? "Русский словарь" : "Английский словарь";
+                title = russian ? "Русские слова" : "Английские слова";
                 var words = Enumerable.Range(0, level + 1).SelectMany(index =>
                         PracticeCorpus.Prose(russian ? ContinuousKind.Russian : ContinuousKind.English, index))
                     .SelectMany(block => block(random).ToLowerInvariant().Split(' '))

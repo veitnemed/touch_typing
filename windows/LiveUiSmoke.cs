@@ -63,7 +63,7 @@ internal static partial class LiveUiSmoke
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_NAV_TRACE", gnomeProfile ? "workspace" : numLockMode.Length > 0 ? "workday-keypad" :
                 referenceEvidence && !nativeLayout && !referenceBrowser && !dailyUse && !debugDay && !codeTheme && !pythonEditor && !browserClone && !notebookMission && !projectFileMission && !editorProjectFileMission && !editorCourse && !coach ? "terminal" : null);
             Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_BROWSER_CLONE", browserClone || projectFileMission || editorProjectFileMission || coach ? "1" : null);
-            Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_PYTHON_EDITOR", pythonEditor ? "1" : null);
+            Environment.SetEnvironmentVariable("TOUCH_TYPING_QA_PYTHON_EDITOR", pythonEditor || editorCourse ? "1" : null);
             app = Process.Start(new ProcessStartInfo(path, "--qa --live") { WorkingDirectory = Path.GetDirectoryName(path) });
             Until(delegate {
                 app.Refresh();
@@ -858,7 +858,18 @@ internal static partial class LiveUiSmoke
             Until(delegate { return ReadSolved() == solved + 1; }, "one exact key credit for " + keys + " at " + solved);
         };
 
-        for (int solved = 0; solved < 33; solved++) next(solved);
+        for (int solved = 0; solved < 33; solved++)
+        {
+            next(solved);
+            if (solved != 26) continue;
+            const string fullNote = "def save_tasks(tasks, path):\n    text = json.dumps(tasks, indent=2)\n" +
+                "def add_task(tasks, title):\nfrom tasks import add_task, find_task, mark_done\n";
+            string expected = NativeFixtureHash(fullNote);
+            var note = EditorWitness();
+            Check(note[1] == "review-notes.txt" && ExactEditorTab(note, "review-notes.txt", expected, expected),
+                "All three real source fragments reached the same saved review note");
+            CaptureReferenceFrame("course-01b-three-source-note");
+        }
         Check(!Visible("LabResult") && Find("LabTask").Current.ItemType.StartsWith("Проверить расчёт из блокнота") &&
             Name("LabScenarioProgress") == "Прогресс занятия: 33 из 40", "The original route rolls into notebook without ending or resetting progress");
         next(33); next(34);
@@ -1227,9 +1238,8 @@ internal static partial class LiveUiSmoke
                     Key("F4");
                     Until(delegate
                     {
-                        var aid = Find("LiveKeyboard");
-                        return Visible("LiveAidPanel") && aid != null &&
-                            aid.Current.HelpText.Contains("7 / Home (NumPad7)");
+                        return Visible("LiveAidPanel") &&
+                            Find("LiveAidPanel").Current.ItemStatus.Contains("7 / Home (NumPad7)");
                     }, "Visible MateBook key points to 7/Home on the number pad");
                     CaptureReferenceFrame("workday-pad7-home");
                     Chord("Alt+7");

@@ -399,6 +399,8 @@ internal static class LabCatalog
             if (task.Id == "escape" && (scene.BrowserResearchActive || scene.ContextHandoffActive) && context.Contains(task.Id))
                 return true; // Esc closes the app's find bar when no Windows overlay has focus.
             if (UbuntuIds.Contains(task.Id) || task.Id is "switch-group-next" or "switch-group-prev") return !scene.WindowsDesktop;
+            if (app == "code" && !terminal && task.Id == "restore-tab" && scene.GuideNoteActive && scene.Active.Focus == "body")
+                return true;
             return context.Contains(task.Id) || terminal && app == "code" && task.Id is "terminal-toggle" or "panel" or "escape";
         });
     }

@@ -1055,8 +1055,6 @@ class Studio(Gtk.Application):
                 module, title = "windows", "Windows 10"
                 description = "Работа в Windows: Пуск,\nокна, рабочие столы."
             tile = button("", lambda dest=module: self.open_reference_module(dest), "reference-card", "module-" + module)
-            if index == 0:
-                tile.add_css_class("reference-selected")
             if index > 2:
                 tile.add_css_class("reference-card-lower")
             tile.set_tooltip_text(f"Открыть «{title}». Если нет черновика: 40 действий без таймера.")
@@ -2766,6 +2764,7 @@ class LabPage(Gtk.Box):
         self.limit_modal_signature = None
         self.limit_resume_wait = False
         self.limit_actions = ()
+        self.pause_actions = ()
         self.result = False
         self.show_diagnostic = False
         self.last_physical = ("", None)
@@ -3158,6 +3157,12 @@ class LabPage(Gtk.Box):
         panel.append(legend)
 
     def show_pause_modal(self):
+        if self.pause_actions and self.modal_layer.get_visible():
+            if self.host.window.get_focus() not in self.pause_actions:
+                self.pause_actions[0].grab_focus()
+            return  # A normal state refresh must not reset the selected modal action.
+        self.settings_menu.popdown()
+        self.content.set_can_focus(False)
         clear(self.modal_layer)
         result = self.host.call("lab-result") or self.state or {}
         panel = self.reference_lesson_panel("Пауза", "Пробел — продолжить занятие", result)
@@ -3165,12 +3170,26 @@ class LabPage(Gtk.Box):
         controls.set_halign(Gtk.Align.CENTER)
         resume = button("Продолжить", self.acquire, "reference-primary")
         resume.set_tooltip_text("Продолжить · Пробел")
-        add(controls, resume, button("Начать сначала", self.replay),
-            button("Завершить", self.stop))
+        self.pause_actions = (resume, button("Начать сначала", self.replay), button("Завершить", self.stop))
+        add(controls, *self.pause_actions)
         panel.append(controls)
         self.add_reference_modal(panel)
-        if not self.host.window.get_focus() or self.host.window.get_focus() == self.desktop:
-            resume.grab_focus()
+        resume.grab_focus()
+
+    def leave_pause_modal(self):
+        if self.pause_actions:
+            self.pause_actions = ()
+            self.content.set_can_focus(True)
+
+    def step_pause_focus(self, backwards):
+        focus = self.host.window.get_focus()
+        actions = self.pause_actions
+        if focus in actions:
+            index = (actions.index(focus) + (-1 if backwards else 1)) % len(actions)
+        else:
+            index = 0
+        self.host.window.set_focus_visible(True)
+        actions[index].grab_focus()
 
     def show_limit_choice(self, error=""):
         reason = (self.state or {}).get("limitReached")
@@ -3180,6 +3199,7 @@ class LabPage(Gtk.Box):
         self.limit_modal_signature = signature
         self.waiting_capture = False
         self.release_capture()
+        self.leave_pause_modal()
         self.content.set_sensitive(False)
         clear(self.modal_layer)
         explanation = "Можно остановиться здесь или закончить текущую миссию без дополнительного лимита."
@@ -3387,7 +3407,6 @@ class LabPage(Gtk.Box):
             if self.state.get("limitDecisionPending") or not self.active:
                 return
         self.status.set_label(message)
-        self.pause.grab_focus()
 
     def focus(self, active):
         if not active:
@@ -3489,14 +3508,18 @@ class LabPage(Gtk.Box):
             self.stop()
             return True
         if self.state["paused"]:
+            if self.pause_actions and self.modal_layer.get_visible() and key == "Tab":
+                if not modifiers & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SUPER_MASK):
+                    self.step_pause_focus(bool(modifiers & Gdk.ModifierType.SHIFT_MASK))
+                return True
             if key == "Space" and not has_modifiers:
                 if inside_widget(self.host.window.get_focus(), self.modal_layer):
                     return False
                 self.acquire()
             if key == "Enter":
-                focused = self.host.window.get_focus()
-                return not (inside_widget(focused, self.modal_layer) and isinstance(focused, Gtk.Button) and
-                            not focused.get_label().startswith("Продолжить"))
+                # Enter is common in exercises. Only explicit secondary actions
+                # use it on pause; Resume intentionally uses Space or the pause key.
+                return self.host.window.get_focus() not in self.pause_actions[1:]
             return key in ("Space", pause_key, finish_key)
         if not self.window_only_keys and (not self.surface or not self.surface.get_property("shortcuts-inhibited")):
             self.pause_run("Захват клавиш прерван. Разрешите его, чтобы продолжить.")
@@ -3635,6 +3658,8 @@ class LabPage(Gtk.Box):
         elif state["paused"] and not self.waiting_capture:
             self.show_pause_modal()
         elif self.active:
+            if not state["paused"]:
+                self.leave_pause_modal()
             self.modal_layer.set_visible(False)
 
     def tick(self):
@@ -3655,6 +3680,7 @@ class LabPage(Gtk.Box):
                                             finish_limit=finish_limit)
         self.status.set_label("Не удалось сохранить занятие. Повторите сохранение.")
         self.status.set_visible(True)
+        self.leave_pause_modal()
         clear(self.modal_layer)
         details = "Занятие осталось на паузе. Закройте другое окно тренажёра или проверьте доступ к папке профиля."
         panel = self.reference_lesson_panel("Прогресс не сохранён", details)
@@ -3686,6 +3712,7 @@ class LabPage(Gtk.Box):
         self.state = state
         self.limit_modal_signature = None
         self.limit_actions = ()
+        self.leave_pause_modal()
         self.content.set_sensitive(True)
         self.save_pending = False
         self.retry_save = None
