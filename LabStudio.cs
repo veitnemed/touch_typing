@@ -459,7 +459,7 @@ namespace TouchTypingStudio
             else if (down ? !pressed.Add(key) : !pressed.Remove(key)) return;
             if (down && !repeat && !pressed.Any(IsModifier))
             {
-                if (key == "F2" && labApp == "terminal" && !state.D("task").S("keys").Split('+').Contains("F2"))
+                if (key == "F2" && state.D("commandTheory").Exists && !state.D("task").S("keys").Split('+').Contains("F2"))
                 { ToggleReferenceTerminalTheory(); return; }
                 if (key == "F1" && !state.D("task").S("keys").Split('+').Contains("F1"))
                 { OpenReferenceLessonHelp(); return; }

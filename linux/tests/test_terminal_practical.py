@@ -139,6 +139,20 @@ class TerminalPracticalTests(unittest.TestCase):
         second = self.play(1, "windows")
         self.assertIn("missing source file", second[1])
 
+    def test_independent_command_theory_gives_context_not_the_solution(self):
+        for desktop in ("ubuntu", "windows"):
+            with self.subTest(desktop=desktop):
+                e = self.open()
+                e.call("lab-start", **options(desktop, guidance="independent"))
+                s = e.call("lab-resume")
+                self.assertFalse(s["showGuide"])
+                card = s["commandTheory"]
+                self.assertEqual(card["shell"], "PowerShell" if desktop=="windows" else "Bash")
+                copy = " ".join((card["title"], card["why"], card["observe"]))
+                for solution in ("grep", "Select-String", "sync.log", "app.log", "Ctrl+R"):
+                    self.assertNotIn(solution, copy)
+                e.call("lab-stop")
+
     def test_old_ordinary_draft_preserves_command_pointer_and_buffer(self):
         fixture = Path(__file__).with_name("fixtures") / "preview9-original-terminal-course.xml.gz"
         target = self.profile / "TouchTypingStudio-QA" / "progress.xml"

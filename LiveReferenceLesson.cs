@@ -20,7 +20,12 @@ namespace TouchTypingStudio
         private ProgressBar referenceScenarioProgress;
         private Border referenceHintPanel, referenceKeysFrame;
         private Expander referenceErrorReview;
-        private bool referenceHelpOpen, referenceTheoryOpen;
+        private bool referenceHelpOpen;
+        private bool? commandTheoryChoice;
+        private Border commandTheoryRail;
+        private ScrollViewer commandTheoryScroll;
+        private TextBlock commandTheoryShell, commandTheoryTitle, commandTheoryWhy, commandTheoryObserve, commandTheoryToggleText;
+        private string commandTheorySignature;
         private Button referenceTheory;
         private static string ArrowName(string token)
         {
@@ -73,7 +78,7 @@ namespace TouchTypingStudio
             SetReferenceLessonCaption(true);
             MinWidth = 600;
             MinHeight = 415;
-            referenceHelpOpen = referenceTheoryOpen = false;
+            referenceHelpOpen = false;
             referenceErrorReview = null;
             referenceKeySignature = null;
 
@@ -119,9 +124,33 @@ namespace TouchTypingStudio
             labDesktop.BrowserHistoryCommand += ApplyLabBrowserHistoryCommand;
             labDesktop.BrowserTabCommand += ApplyLabBrowserTabCommand;
             var sceneFrame = ReferenceLessonPanel(labDesktop, new Thickness(4), 13);
-            sceneFrame.Margin = new Thickness(16, 8, 16, 0);
-            Grid.SetRow(sceneFrame, 2);
-            root.Children.Add(sceneFrame);
+            var sceneRow = new Grid { Margin = new Thickness(16, 8, 16, 0) };
+            sceneRow.ColumnDefinitions.Add(new ColumnDefinition());
+            sceneRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            sceneRow.Children.Add(sceneFrame);
+            var card = Stack();
+            commandTheoryShell = ReferenceLabel("", 11, ReferenceMuted, true);
+            commandTheoryTitle = ReferenceLabel("", 18, ReferenceText, true);
+            commandTheoryTitle.Margin = new Thickness(0, 9, 0, 7);
+            commandTheoryWhy = ReferenceLabel("", 14, ReferenceText, false);
+            var readout = ReferenceLabel("Что проверить", 13, ReferenceMuted, true);
+            readout.Margin = new Thickness(0, 16, 0, 5);
+            commandTheoryObserve = ReferenceLabel("", 14, ReferenceText, false);
+            AutomationProperties.SetAutomationId(commandTheoryTitle, "LabTheoryTitle");
+            AutomationProperties.SetAutomationId(commandTheoryWhy, "LabTheoryWhy");
+            AutomationProperties.SetAutomationId(commandTheoryObserve, "LabTheoryObserve");
+            foreach (var line in new[] {commandTheoryShell, commandTheoryTitle, commandTheoryWhy, readout, commandTheoryObserve})
+                card.Children.Add(line);
+            commandTheoryScroll = new ScrollViewer { Content = card, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false };
+            commandTheoryRail = ReferenceLessonPanel(commandTheoryScroll, new Thickness(14), 12);
+            commandTheoryRail.Margin = new Thickness(8, 0, 0, 0);
+            commandTheoryRail.Visibility = Visibility.Collapsed;
+            commandTheorySignature = null;
+            Grid.SetColumn(commandTheoryRail, 1);
+            sceneRow.Children.Add(commandTheoryRail);
+            Grid.SetRow(sceneRow, 2);
+            root.Children.Add(sceneRow);
 
             var footer = new DockPanel();
             var actionCluster = Stack(true);
@@ -161,9 +190,9 @@ namespace TouchTypingStudio
             KeyboardNavigation.SetTabIndex(back, 0);
             aids.Children.Add(back);
             referenceTheory = ReferenceLessonButton("Теория", "Теория терминала · " + DisplayLabGesture("F2"),
-                ToggleReferenceTerminalTheory, "LabTerminalTheory", 70);
-            referenceTheory.Content = ReferenceLabel("Теория", 13, ReferenceText, true);
-            referenceTheory.Visibility = labApp == "terminal" ? Visibility.Visible : Visibility.Collapsed;
+                ToggleReferenceTerminalTheory, "LabTerminalTheory", 110);
+            referenceTheory.Content = commandTheoryToggleText = ReferenceLabel("Теория", 13, ReferenceText, true);
+            referenceTheory.Visibility = Visibility.Collapsed;
             labHint = ReferenceLessonButton("?", "Подсказка · F1", OpenReferenceLessonHelp, "LabHint", 26);
             labKeyAid = ReferenceLessonButton("⌨", "Показать или скрыть клавиатуру", delegate { ToggleLabAid(true); }, "LabKeyboardAid", 28);
             labHandAid = ReferenceLessonButton("👐", "Показать или скрыть руки", delegate { ToggleLabAid(false); }, "LabHandAid", 28);
@@ -196,6 +225,7 @@ namespace TouchTypingStudio
             root.Children.Add(labGuide);
             root.SizeChanged += delegate
             {
+                commandTheoryRail.Width = Math.Max(180, Math.Min(268, root.ActualWidth / 4));
                 hintScroll.MaxHeight = root.ActualHeight < 500 ? 37 : 67;
                 if (ReferenceEquals(center.Content, root)) UpdateReferenceGuideVisibility();
             };
@@ -290,8 +320,8 @@ namespace TouchTypingStudio
             AutomationProperties.SetName(referenceScenarioProgress,
                 (boundedCourse ? "Прогресс занятия: " : "Прогресс задания: ") + completed + " из " + total);
             UpdateReferenceKeycaps(task, count, step);
-            if (referenceTheoryOpen) DrawReferenceTerminalTheory();
-            else if (referenceHelpOpen) DrawReferenceLessonHelp(task);
+            DrawReferenceTerminalTheory();
+            if (referenceHelpOpen) DrawReferenceLessonHelp(task);
         }
 
         private void UpdateReferenceKeycaps(Data task, int count, int step)
@@ -304,8 +334,7 @@ namespace TouchTypingStudio
                 task.S("id").StartsWith("open-") ? "⊞  →  " + text + "  →  Enter" :
                 task.S("id") == "command/filter-incident" ? "grep [ID] app.log" :
                 task.S("id") == "command/powershell-incident" ? "Select-String [ID] sync.log" :
-                !state.B("terminalPractical") && task.S("id").StartsWith("command/") && text.Length > 12 ?
-                    "Ctrl + R  →  фрагмент  →  Enter" : text;
+                text;
             string signature = (guided ? "guided:" : "independent:") + shown + "|" + raw + "|" + step + "/" + count;
             if (signature == referenceKeySignature) return; // Input and timer ticks should not rebuild visual children.
             referenceKeySignature = signature;
@@ -358,32 +387,35 @@ namespace TouchTypingStudio
 
         private void ToggleReferenceTerminalTheory()
         {
-            if (labApp != "terminal" || !labActive || paused || labSavePending || state.B("limitDecisionPending")) return;
-            if (referenceTheoryOpen) { CloseReferenceLessonHelp(); return; }
-            referenceTheoryOpen = true; referenceHelpOpen = false;
+            if (!state.D("commandTheory").Exists || !labActive || paused || labSavePending || state.B("limitDecisionPending")) return;
+            commandTheoryChoice = commandTheoryRail.Visibility != Visibility.Visible;
             DrawReferenceTerminalTheory();
-            UpdateReferenceGuideVisibility();
             labDesktop.Focus();
         }
 
         private void DrawReferenceTerminalTheory()
         {
-            referenceHelpText.Text = state.B("terminalPractical")
-                ? "Для одного короткого файла удобен поиск в редакторе. Здесь вы отделяете ошибки, следите за " +
-                  "новыми записями и проверяете запрос по его ID. Остановка просмотра не выключает сервис."
-                : state.B("showGuide", true)
-                ? "↑ возвращает прошлую команду, но не запускает её. Ctrl+R ищет по истории: наберите фрагмент, сверьте найденную строку и нажмите Enter. " +
-                  "←/→ переносят её в командную строку для правки, Esc возвращает ваш черновик."
-                : "История хранит уже выполненные команды. Можно вернуть прошлую строку для правки или найти нужную по фрагменту. " +
-                  "Перед запуском сверьте, что нашлось.";
-            referenceHintPanel.Visibility = Visibility.Visible;
+            var card = state.D("commandTheory");
+            bool expanded = commandTheoryChoice ?? state.B("showGuide", true);
+            referenceTheory.Visibility = card.Exists ? Visibility.Visible : Visibility.Collapsed;
+            commandTheoryRail.Visibility = card.Exists && expanded ? Visibility.Visible : Visibility.Collapsed;
+            if (!card.Exists) { commandTheorySignature = null; return; }
+            var signature = card.S("shell") + "|" + card.S("title") + "|" + card.S("why") + "|" + card.S("observe") + "|" + expanded;
+            if (signature == commandTheorySignature) return;
+            commandTheorySignature = signature;
+            commandTheoryShell.Text = "ТЕОРИЯ   /   " + card.S("shell");
+            commandTheoryTitle.Text = card.S("title");
+            commandTheoryWhy.Text = card.S("why");
+            commandTheoryObserve.Text = card.S("observe");
+            commandTheoryToggleText.Text = expanded ? "Скрыть теорию" : "Теория";
+            SetReferenceLessonAction(referenceTheory, commandTheoryToggleText.Text + " · " + DisplayLabGesture("F2"));
+            commandTheoryScroll.ScrollToTop();
         }
 
         private void OpenReferenceLessonHelp()
         {
             if (!labActive || paused || labSavePending) return;
             if (referenceHelpOpen) { CloseReferenceLessonHelp(); return; }
-            referenceTheoryOpen = false;
             referenceHelpOpen = true;
             if (!state.B("showGuide", true))
             {
@@ -406,7 +438,7 @@ namespace TouchTypingStudio
 
         private void CloseReferenceLessonHelp()
         {
-            referenceHelpOpen = referenceTheoryOpen = false;
+            referenceHelpOpen = false;
             referenceHintPanel.Visibility = Visibility.Collapsed;
             UpdateReferenceKeycaps(state.D("task"), state.I("scenarioLength"), state.I("scenarioStep"));
             UpdateReferenceGuideVisibility();

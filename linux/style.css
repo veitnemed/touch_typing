@@ -550,3 +550,11 @@ window.reference-light button.reference-card:hover { background: #e7dcea; }
 .typing-record-red .typing-record-value { color: #eaa2ad; }
 .typing-record-orange .typing-record-value { color: #ecc38f; }
 .typing-record-green .typing-record-value { color: #a7d4b4; }
+
+/* Command theory is a sibling of the terminal, not a banner above the lesson. */
+.command-theory-rail { background: @graph_panel; border: 1px solid @graph_edge; border-radius: 12px; }
+.command-theory-inner { padding: 14px; }
+.command-theory-kicker { color: @graph_muted; font-size: 11px; font-weight: 700; }
+.command-theory-title { color: @graph_ink; font-size: 18px; font-weight: 700; margin: 2px 0; }
+.command-theory-caption { color: @graph_muted; font-size: 13px; font-weight: 700; margin-top: 8px; }
+.command-theory-body { color: @graph_ink; font-size: 14px; }

@@ -58,11 +58,14 @@ class PowerShellWindow(CourseCards):
         assert (lab.state["scene"]["desktopStyle"], terminal(lab.state)["prompt"]) == ("win10", PS_PROMPT)
         if not self.resuming:
             assert lab.gesture_tokens == ("Select-String ERROR sync.log",), lab.gesture_tokens
+            assert lab.theory_rail.get_mapped() and lab.theory_shell.get_label().endswith("PowerShell")
+            assert "Select-String" in lab.theory_why.get_label()
             before = sync_log(lab.state)
             yield from self.frame("powershell-02-start.png")
             yield from self.video_hold("Windows 10 → PowerShell: своё окно, приглашение и журнал")
             yield from self.run_command("Select-String ERROR sync.log")
             assert lab.state["solved"] == 1 and sync_log(lab.state) == before
+            assert "-Wait" in lab.theory_why.get_label()
             first_error = terminal(lab.state)["output"][-1]
             assert first_error == "sync.log:2:" + before.splitlines()[1]
             yield from self.run_command("Get-Content sync.log")
@@ -95,6 +98,7 @@ class PowerShellWindow(CourseCards):
         baseline = json.loads(saved.read_text(encoding="utf-8"))
         initial, old_id = baseline["initial"], baseline["old_id"]
         assert lab.state["solved"] == 2 and terminal(lab.state)["followingLog"]
+        assert not lab.theory_rail.get_mapped() and not lab.theory_button.get_mapped()
         assert sync_log(lab.state).startswith(baseline["checkpoint"])
         yield from self.wait_state(lambda: terminal(lab.state)["logIncidentArrived"])
         new_line = next(line for line in sync_log(lab.state).splitlines()[len(initial.splitlines()):]

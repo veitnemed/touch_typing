@@ -207,6 +207,12 @@ class LiveRoutePolicyTests(unittest.TestCase):
                             self.assertGreaterEqual(s["scenarioLength"], 20)
                             for _ in range(s["scenarioLength"]):
                                 self.assertEqual(s["mission"], mission)
+                                card = s.get("commandTheory")
+                                if s["task"]["id"].startswith("command/"):
+                                    self.assertTrue(card and card["shell"] == "Bash" and
+                                                    all(card.get(part) for part in ("title","why","observe")), s["task"])
+                                else:
+                                    self.assertIsNone(card, s["task"])
                                 s = advance(e, s)
                             self.assertTrue(s["finished"] and e.call("lab-result")["completed"], mission)
                     self.run_profile(check, desktop)

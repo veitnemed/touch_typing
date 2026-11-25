@@ -43,12 +43,32 @@ internal static partial class LiveUiSmoke
                     Check(ReadSolved()==0,"Ordinary card starts clean for "+environment+"/"+mode);
                     string initial=CourseScenario();
                     Check(initial.Length>0,"The lesson reports the actual current objective");
+                    if (mode=="terminal")
+                    {
+                        Until(delegate {return Visible("LabTheoryTitle") && Visible("LabTerminalTheory");},"discoverable command theory");
+                        var console=Find("LabDesktop").Current.BoundingRectangle;
+                        var copy=Find("LabTheoryTitle").Current.BoundingRectangle;
+                        Check(console.Right<=copy.Left && console.Width>350,"Sidebar to the right does not overlap input");
+                        Check(Name("LabTheoryWhy").Contains(environment=="windows"?"Select-String":"grep"),"First shell command explained");
+                        Key("F2");
+                        Until(delegate {return !Visible("LabTheoryTitle");},"hide explanation");
+                        Check(ReadSolved()==0,"Closing theory does not submit the exercise");
+                        Key("F2");
+                        Until(delegate {return Visible("LabTheoryTitle");},"reopen explanation");
+                    }
+                    else if(mode=="chrome") Check(!Visible("LabTerminalTheory") && !Visible("LabTheoryTitle"),"No command sidebar in browser");
                     CaptureReferenceFrame("course-"+environment+"-"+mode+"-start");
                     bool shortTerminal = mode=="terminal";
                     for(int cap=0;cap<100 && !Visible("LabResult") && (ReadSolved()<20||CourseScenario()==initial);cap++)
                     {
                         int before=ReadSolved();
                         string prompt=Find("LabTask").Current.ItemStatus;
+                        if (shortTerminal && before==1)
+                            Check(Name("LabTheoryWhy").Contains(environment=="windows"?"-Wait":"-f"),"Theory changes with current command");
+                        if (shortTerminal && before==2)
+                            Check(!Visible("LabTerminalTheory") && !Visible("LabTheoryTitle"),"No command sidebar on interrupt shortcut");
+                        if (shortTerminal && before==3)
+                            Check(Name("LabTheoryTitle").Contains("одной попытки"),"Returned prompt has lookup theory");
                         if (prompt.StartsWith("text:",StringComparison.Ordinal))
                         {
                             EnterCharacters(prompt.Substring(5));

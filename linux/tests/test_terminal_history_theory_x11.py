@@ -36,17 +36,19 @@ class TerminalHistoryWindow(CourseCards):
         lesson.desktop.grab_focus()
         assert lesson.state["task"]["text"] == "cd /home/student/project"
         hint = tuple(lesson.gesture_tokens)
-        assert ("фрагмент" in hint) is not BASELINE, hint
+        assert ("фрагмент" not in hint) and "cd /home/student/project" in hint, hint
         self.capture_widget_png(out / "01-start.png")
         if not BASELINE:
-            assert lesson.theory_button.get_mapped() and not lesson.details.get_reveal_child()
+            assert lesson.theory_button.get_mapped() and lesson.theory_rail.get_mapped()
+            assert "Перейти к рабочим файлам" in lesson.theory_title.get_label()
+            assert "Ctrl+R" in lesson.state["task"]["hint"]
             yield from self.chord("F2")
-            assert lesson.details.get_reveal_child() and "↑ возвращает" in lesson.details_text.get_label()
+            assert not lesson.theory_rail.get_mapped()
             assert self.window.get_focus() is lesson.desktop
             self.capture_widget_png(out / "02-theory.png")
-            yield from self.video_hold("Теория: стрелка только возвращает команду; Enter запускает")
+            yield from self.video_hold("Скрытие справки не меняет содержимое команды")
             yield from self.chord("F2")
-            assert not lesson.details.get_reveal_child() and self.window.get_focus() is lesson.desktop
+            assert lesson.theory_rail.get_mapped() and self.window.get_focus() is lesson.desktop
         yield from self.chord("Ctrl+R")
         assert active(lesson)["focus"] == "reverse-search"
         candidate = lesson.state["scene"]["terminalInput"]
@@ -70,6 +72,7 @@ class TerminalHistoryWindow(CourseCards):
         if not BASELINE:
             while lesson.state["task"]["id"] != "terminal-history-up":
                 yield from self.advance_card(lesson)
+            assert not lesson.theory_button.get_mapped() and not lesson.theory_rail.get_mapped()
             label = lesson.gesture.get_first_child()
             assert label.get_label() == "↑" and label.has_css_class("reference-keycap")
             self.capture_widget_png(out / "06-physical-arrow.png")

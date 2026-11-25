@@ -27,11 +27,23 @@ class PracticalJournal(CourseCards):
         assert lesson.gesture_tokens == ("grep ERROR app.log",), lesson.gesture_tokens
         initial = log(lesson.state)
         yield from self.rendered_frame("terminal-practical-01-start.png")
-        yield from self.run_command("grep ERROR app.log")
+        assert lesson.theory_rail.get_mapped() and lesson.theory_button.get_mapped()
+        assert lesson.stage.get_allocation().x + lesson.stage.get_width() <= lesson.theory_rail.get_allocation().x
+        assert lesson.theory_shell.get_label().endswith("Bash") and "grep" in lesson.theory_why.get_label()
+        yield from self.typed({"id": "type-code", "text": "grep"})
+        yield from self.chord("F2")
+        assert not lesson.theory_rail.get_mapped() and self.window.get_focus() is lesson.desktop
+        assert lesson.state["scene"]["terminalInput"] == "grep" and lesson.state["solved"] == 0
+        yield from self.run_command(" ERROR app.log")
         assert lesson.state["solved"] == 1 and log(lesson.state) == initial
+        assert not lesson.theory_rail.get_mapped()  # explicit collapse survives the next command
+        yield from self.chord("F2")
+        assert lesson.theory_rail.get_mapped() and "-f" in lesson.theory_why.get_label()
+        yield from self.rendered_frame("terminal-practical-follow-theory.png")
         old_id = terminal(lesson.state)["output"][-1].split()[1]
         yield from self.run_command("tail -f app.log")
         assert lesson.state["solved"] == 2 and terminal(lesson.state)["followingLog"]
+        assert not lesson.theory_rail.get_mapped() and not lesson.theory_button.get_mapped()
         for _ in range(300):
             if log(lesson.state) != initial:
                 break
@@ -67,6 +79,7 @@ class PracticalJournal(CourseCards):
         yield from self.run_command(f"grep {old_id} app.log")
         assert lesson.state["solved"] == 3 and "новой строки ERROR" in lesson.state["status"]
         new_id = fresh.split()[1]
+        assert lesson.theory_rail.get_mapped() and new_id not in lesson.theory_why.get_label() + lesson.theory_observe.get_label()
         yield from self.run_command(f"grep {new_id} app.log")
         assert lesson.state["solved"] == 4 and lesson.state["finished"]
         assert terminal(lesson.state)["output"][-2:] == [f"INFO {new_id} started", fresh]

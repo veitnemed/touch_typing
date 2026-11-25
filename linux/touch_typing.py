@@ -2892,7 +2892,8 @@ class LabPage(Gtk.Box):
             aids_menu.append(control)
         self.hint_button = button("Подсказка · F1", lambda: self.render(self.host.call("lab-hint")), "reference-hint")
         self.diagnostic_button = button("Показать коды клавиш", self.toggle_diagnostic)
-        self.details_mode = "goal"
+        self.theory_choice = None
+        self.theory_signature = None
         self.theory_button = button("Теория", self.toggle_terminal_theory, "reference-footer-settings")
         self.theory_button.set_tooltip_text("Теория терминала · " + physical_key_hint("F2", host.library))
         bind_name(self.theory_button, "Теория терминала")
@@ -2961,7 +2962,23 @@ class LabPage(Gtk.Box):
         self.diagnostic.set_valign(Gtk.Align.START)
         self.stage.add_overlay(self.diagnostic)
         self.diagnostic.set_visible(False)
-        self.content.append(self.stage)
+        # A sibling, never an overlay: the explanation must not cover the prompt.
+        self.theory_shell = text("", "command-theory-kicker")
+        self.theory_title = text("", "command-theory-title", wrap=True)
+        self.theory_why = text("", "command-theory-body", wrap=True)
+        self.theory_observe = text("", "command-theory-body", wrap=True)
+        card = box(gap=7)
+        card.add_css_class("command-theory-inner")
+        for widget in (self.theory_shell, self.theory_title, self.theory_why,
+                       text("Что проверить", "command-theory-caption"), self.theory_observe):
+            card.append(widget)
+        self.theory_rail = scroll(card)
+        self.theory_rail.set_overlay_scrolling(False)
+        self.theory_rail.add_css_class("command-theory-rail")
+        self.theory_rail.set_visible(False)
+        self.scene_row = add(row(8), self.stage, self.theory_rail)
+        self.scene_row.set_vexpand(True)
+        self.content.append(self.scene_row)
         self.lesson_meter = Gtk.ProgressBar()
         self.lesson_meter.add_css_class("reference-meter")
         self.lesson_meter.set_valign(Gtk.Align.CENTER)
@@ -2993,7 +3010,7 @@ class LabPage(Gtk.Box):
         self.content.append(self.guide_scroll)
         self.guide.paint(self.live_guide_profile(), "RU" if host.layout == "RU" else "EN")
         self.set_desktop_classes()
-        for widget in (self.toolbar, self.stage, self.footer, self.guide_scroll, self.details):
+        for widget in (self.toolbar, self.scene_row, self.footer, self.guide_scroll, self.details):
             widget.set_visible(False)
         self.os_selector.grab_focus()
 
@@ -3038,16 +3055,42 @@ class LabPage(Gtk.Box):
 
     def toggle_goal_details(self, options):
         options.popdown()
-        self.toggle_details("goal")
+        self.toggle_details()
 
     def toggle_terminal_theory(self):
-        if (self.active and self.state and self.state["app"] == "terminal" and not self.state["paused"]
+        if (self.active and self.state and self.state.get("commandTheory") and not self.state["paused"]
                 and not self.save_pending and not self.state.get("limitDecisionPending")):
-            self.toggle_details("theory")
+            self.theory_choice = not self.theory_rail.get_visible()
+            self.update_terminal_theory(self.state)
+            self.desktop.grab_focus()
 
-    def toggle_details(self, mode):
-        opened = not (self.details.get_reveal_child() and self.details_mode == mode)
-        self.details_mode = mode
+    def update_terminal_theory(self, state):
+        card = state.get("commandTheory")
+        self.theory_button.set_visible(bool(card))
+        self.theory_button.set_sensitive(not state["paused"])
+        expanded = self.theory_choice if self.theory_choice is not None else state.get("showGuide", True)
+        self.theory_rail.set_visible(bool(card and expanded))
+        if not card:
+            self.theory_signature = None
+            return
+        width = max(180, min(268, self.host.window.get_width() // 4))
+        if self.theory_rail.get_size_request()[0] != width:
+            self.theory_rail.set_size_request(width, -1)
+        signature = (card["shell"], card["title"], card["why"], card["observe"], expanded)
+        if self.theory_signature == signature:
+            return
+        self.theory_signature = signature
+        self.theory_shell.set_label("ТЕОРИЯ   /   " + card["shell"])
+        self.theory_title.set_label(card["title"])
+        self.theory_why.set_label(card["why"])
+        self.theory_observe.set_label(card["observe"])
+        self.theory_button.set_label("Скрыть теорию" if expanded else "Теория")
+        self.theory_button.set_tooltip_text(self.theory_button.get_label() + " · " +
+                                           physical_key_hint("F2", self.host.library))
+        self.theory_rail.get_vadjustment().set_value(0)
+
+    def toggle_details(self):
+        opened = not self.details.get_reveal_child()
         self.details.set_reveal_child(opened)
         self.details.set_visible(opened)
         if opened and self.state:
@@ -3331,7 +3374,7 @@ class LabPage(Gtk.Box):
         self.action_icon.cached_key = None
         self.action_icon.queue_draw()
         self.prep.set_visible(False)
-        for widget in (self.toolbar, self.stage, self.footer):
+        for widget in (self.toolbar, self.scene_row, self.footer):
             widget.set_visible(True)
         self.desktop.set_size_request(380, 180)
         self.desktop.grab_focus()
@@ -3592,7 +3635,7 @@ class LabPage(Gtk.Box):
             focused = self.host.window.get_focus()
             return not (key in ("Space", "Enter") and not has_modifiers
                         and self.physical_down <= {key} and focused in self.limit_actions)
-        if (key == "F2" and not has_modifiers and not self.state["paused"] and self.state["app"] == "terminal"
+        if (key == "F2" and not has_modifiers and not self.state["paused"] and self.state.get("commandTheory")
                 and "F2" not in self.state.get("task", {}).get("keys", "").split("+")):
             self.toggle_terminal_theory()
             return True
@@ -3689,30 +3732,14 @@ class LabPage(Gtk.Box):
             gesture = "grep [ID] app.log"
         elif guided and task.get("id") == "command/powershell-incident":
             gesture = "Select-String [ID] sync.log"
-        elif guided and not state.get("terminalPractical") and task.get("id", "").startswith("command/") and len(task.get("text", "")) > 12:
-            gesture = "Ctrl + R → фрагмент → Enter"
         if not guided:
             gesture = ""
         coach_reason = state.get("coachReason") or ""
         notes = [coach_reason] if coach_prompt else [*state.get("objectives", []), *hints, coach_reason]
         details = "\n".join(filter(None, [state.get("scenario", ""), *notes]))
         self.task.set_tooltip_text(details)
-        theory_text = ("↑ возвращает прошлую команду, но не запускает её. Ctrl+R ищет по истории: "
-                       "наберите фрагмент, сверьте найденную строку и нажмите Enter. "
-                       "←/→ переносят её в командную строку для правки, Esc возвращает ваш черновик."
-                       if guided else "История хранит уже выполненные команды. Можно вернуть прошлую строку "
-                       "для правки или найти нужную по фрагменту. Перед запуском сверьте, что нашлось.")
-        if state.get("terminalPractical"):
-            theory_text = ("Для одного короткого файла удобен поиск в редакторе. Здесь вы отделяете ошибки, следите за "
-                           "новыми записями и проверяете запрос по его ID. Остановка просмотра не выключает сервис.")
-        show_theory = state["app"] == "terminal"
-        self.theory_button.set_visible(show_theory)
-        self.theory_button.set_sensitive(not state["paused"])
-        if not show_theory and self.details_mode == "theory":
-            self.details.set_reveal_child(False)
-            self.details.set_visible(False)
-            self.details_mode = "goal"
-        self.details_text.set_label(theory_text if self.details_mode == "theory" else details)
+        self.update_terminal_theory(state)
+        self.details_text.set_label(details)
         self.hint_button.set_visible(not guided)
         tokens = self.gesture_pieces(gesture)
         if tokens != getattr(self, "gesture_signature", ()):
@@ -3852,7 +3879,7 @@ class LabPage(Gtk.Box):
         self.theory_button.set_visible(False)
         self.details.set_reveal_child(False)
         self.details.set_visible(False)
-        self.details_mode = "goal"
+        self.theory_rail.set_visible(False)
         self.host.message()
         if on_saved:
             on_saved()
