@@ -32,6 +32,11 @@ namespace TouchTypingStudio
         private void AutomationPropertiesText()
         { System.Windows.Automation.AutomationProperties.SetName(this, Current + " " + Right); }
 
+        // This ribbon is rendered directly; without a peer Narrator and native
+        // keyboard QA see an empty window where the current target is painted.
+        protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer()
+        { return new System.Windows.Automation.Peers.FrameworkElementAutomationPeer(this); }
+
         protected override Size MeasureOverride(Size availableSize)
         { return new Size(double.IsInfinity(availableSize.Width) ? 300 : availableSize.Width, 90); }
 

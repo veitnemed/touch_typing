@@ -35,6 +35,8 @@ namespace TouchTypingStudio
         public List<LiveDraft> LiveDrafts = new List<LiveDraft>();
         public List<LabSessionRecord> LabSessions = new List<LabSessionRecord>();
         public List<LabSessionRecord> LabRecords = new List<LabSessionRecord>();
+        // Versioned payload owned by the packaged practice engine; older XML profiles simply lack it.
+        public string ClassicTypingDraft;
         public int TypingCourse;
         public double CardX = double.NaN;
         public double CardY = double.NaN;
@@ -316,11 +318,12 @@ namespace TouchTypingStudio
         public int FirstMs { get; private set; }
         public bool HintsUsed { get; private set; }
 
-        public TypingAttempt(string target, TypingDraft draft)
+        public TypingAttempt(string target, TypingDraft draft, bool allowCompletedDraft = false)
         {
             Target = target;
             if (target.IndexOf(CodeText.Erase) >= 0) editedText = new StringBuilder();
-            if (draft == null || draft.Target != target || draft.Position < 0 || draft.Position >= target.Length) return;
+            if (draft == null || draft.Target != target || draft.Position < 0 || draft.Position > target.Length ||
+                (!allowCompletedDraft && draft.Position == target.Length)) return;
             Position = draft.Position;
             Errors = draft.Errors;
             previousSeconds = draft.Seconds;

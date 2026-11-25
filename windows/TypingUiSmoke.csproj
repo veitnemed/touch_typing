@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <LangVersion>5</LangVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>TouchTyping.TypingUiSmoke</AssemblyName>
+    <StartupObject>TypingMain</StartupObject>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="LiveUiSmoke.cs" />
+    <Compile Include="TypingUiSmoke.cs" />
+    <Compile Include="TypingProofClient.cs" />
+    <Reference Include="UIAutomationClient;UIAutomationTypes;WindowsBase;System.Drawing;System.Windows.Forms" />
+  </ItemGroup>
+</Project>

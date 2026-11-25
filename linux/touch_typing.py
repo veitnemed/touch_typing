@@ -1561,6 +1561,11 @@ class Studio(Gtk.Application):
                     self.window.close()
                 if self.lab and self.lab.active:
                     self.lab.stop(show=False, on_saved=close_saved)
+                elif self.workout == "typing":
+                    saved = self.call("typing-suspend", layout=self.layout)
+                    if saved is not None and not self.engine.storage_error:
+                        self.workout = None
+                        close_saved()
                 else:
                     close_saved()
         dialog.connect("response", answer)
@@ -1629,7 +1634,7 @@ class Studio(Gtk.Application):
         elif previous == "typing":
             self.call("typing-stop", layout=self.layout)
             result = self.call("typing-result", layout=self.layout)
-            settings = (self.typing_level.get_selected(), self.typing_time.get_selected())
+            settings = (self.typing_level.get_selected(), self.typing_time.get_selected(), self.typing_cycles.get_selected())
             if show_result and result:
                 self.build_result(previous, result, settings, completed)
             else:
@@ -1888,15 +1893,51 @@ class Studio(Gtk.Application):
         self.typing_pick.set_selected(current)
         self.typing_level = bind_name(dropdown(["Базовый", "Средний", "Сложный"]), "Сложность")
         self.typing_time = bind_name(dropdown(["Без таймера", "1 минута", "3 минуты", "5 минут", "10 минут"]), "Длительность")
+        self.typing_cycles = bind_name(dropdown(["1 цикл", "2 цикла", "3 цикла", "4 цикла", "5 циклов",
+                                                      "Без конца"]), "Объём занятия")
         self.typing_start = button("Начать · F5", self.start_typing, "primary")
-        self.typing_prep = add(box(gap=7), text("Печать", "lesson-title"),
-                              add(row(8), expand(self.typing_pick), self.typing_level, self.typing_time, self.typing_start))
+        self.typing_settings = Gtk.Expander(label="Параметры занятия")
+        settings_row = row(12)
+        for name, field in (("Объём", self.typing_cycles), ("Сложность", self.typing_level), ("Таймер", self.typing_time)):
+            settings_row.append(expand(add(box(gap=3), text(name, "muted"), field)))
+        self.typing_settings.set_child(settings_row)
+        self.typing_summary = text("", "muted", wrap=True)
+        def summarize(*_):
+            index = self.typing_cycles.get_selected()
+            caption = ["1 цикл", "2 цикла", "3 цикла", "4 цикла", "5 циклов", "Бесконечная печать"][index]
+            timer = ["без таймера", "1 мин", "3 мин", "5 мин", "10 мин"][self.typing_time.get_selected()]
+            self.typing_summary.set_label(f"{caption}  ·  {timer}" +
+                                          ("  ·  350–550 знаков в цикле" if index < 5 else ""))
+        self.typing_cycles.connect("notify::selected", summarize)
+        self.typing_time.connect("notify::selected", summarize)
+        summarize()
+        self.typing_prep = add(box(gap=8), text("Печать", "lesson-title"),
+                              add(row(8), expand(self.typing_pick), self.typing_start),
+                              self.typing_summary, self.typing_settings)
+        draft = catalog.get("draft")
+        if draft:
+            def continue_draft():
+                state = self.call("typing-continue", id=draft["id"], layout=self.layout)
+                if state is None:
+                    return
+                self.typing_choice = draft["mode"]
+                self.typing_level.set_selected(draft.get("level", 0))
+                self.typing_cycles.set_selected(max(0, min(4, draft["cycles"] - 1)))
+                self.typing_time.set_selected([0, 60, 180, 300, 600].index(draft.get("timeLimit", 0)))
+                self.accept_typing_run(state)
+            self.typing_continue = button(f'Продолжить · {draft["title"]} · {draft["done"]}/{draft["total"]}',
+                                          continue_draft)
+            self.typing_prep.append(self.typing_continue)
         self.page.append(self.typing_prep)
         self.typing_hero = box(gap=3)
         self.typing_hero.set_focusable(True)
         self.typing_tag = text("Уроки  ›  Печать", "crumb")
         self.typing_tag.set_ellipsize(Pango.EllipsizeMode.END)
         self.typing_timer = text("00:00", "lesson-timer")
+        self.typing_counter = text("", "typing-counter")
+        self.typing_counter.set_visible(False)
+        clock_row = add(row(10), self.typing_timer, self.typing_counter)
+        clock_row.set_halign(Gtk.Align.CENTER)
         self.typing_text = PracticeLine()
         self.start_on_click(self.typing_text, self.start_typing)
         self.typing_detail = text("", "muted", wrap=True)
@@ -1908,7 +1949,8 @@ class Studio(Gtk.Application):
         self.typing_controls = self.lesson_controls(self.toggle_typing_pause, self.stop, self.typing_tag)
         self.typing_progress = self.lesson_progress()
         tape_frame = add(box(Gtk.Orientation.VERTICAL, 0, "tape-frame"), self.typing_text)
-        add(self.typing_hero, self.typing_timer, self.typing_controls, tape_frame, self.typing_progress, self.typing_detail)
+        self.typing_progress.set_visible(False)
+        add(self.typing_hero, clock_row, self.typing_controls, tape_frame, self.typing_progress, self.typing_detail)
         self.guide = LessonGuide(self.library["keyboard"], function_row=False)
         self.guide.reflow(self.window.get_width() or self.window_size[0])
         self.pause_button.set_visible(False)
@@ -1921,10 +1963,14 @@ class Studio(Gtk.Application):
             self.stop()
             return
         self.typing_choice = self.typing_options[self.typing_pick.get_selected()][0]
+        choice = self.typing_cycles.get_selected()
         state = self.call("typing-start", mode=self.typing_choice, level=self.typing_level.get_selected(),
+                          cycles=choice + 1 if choice < 5 else 0, infinite=choice == 5,
                           seconds=[0, 60, 180, 300, 600][self.typing_time.get_selected()], layout=self.layout)
-        if state is None:
-            return
+        if state is not None:
+            self.accept_typing_run(state)
+
+    def accept_typing_run(self, state):
         self.message()
         self.workout = "typing"
         self.paused = False
@@ -1948,7 +1994,13 @@ class Studio(Gtk.Application):
         self.typing_tag.set_label("Уроки  ›  " + language + "  ›  " + heading)
         self.typing_tag.set_tooltip_text(heading)
         self.typing_tag.set_max_width_chars(76)
-        self.typing_progress.set_fraction(state["fragmentProgress"])
+        finite = state["progressVisible"]
+        self.typing_progress.set_visible(finite)
+        done = state["progressDone"]
+        if finite:
+            self.typing_progress.set_fraction(state["progressFraction"])
+        self.typing_counter.set_label(f'{done}/{state["progressTotal"]}' if finite else f"Набрано: {done}")
+        self.typing_counter.set_visible(True)
         self.typing_text.update(state["before"], state["after"], state["correct"])
         timer = self.clock_text(state["seconds"])
         if state["timeLimit"]:
@@ -2325,7 +2377,7 @@ class Studio(Gtk.Application):
                 widget.set_selected(value)
             self.toggle_shortcut()
         else:
-            for widget, value in zip((self.typing_level, self.typing_time), settings):
+            for widget, value in zip((self.typing_level, self.typing_time, self.typing_cycles), settings):
                 widget.set_selected(value)
             self.start_typing()
 
@@ -2467,7 +2519,7 @@ class Studio(Gtk.Application):
         if self.lab:
             self.lab.stop(show=False)
         if self.workout == "typing":
-            self.call("typing-stop", layout=self.layout)
+            self.call("typing-suspend", layout=self.layout)
         if self.engine:
             self.engine.close()
         Gtk.Application.do_shutdown(self)

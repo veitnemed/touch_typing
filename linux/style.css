@@ -531,3 +531,5 @@ window.reference-light button.reference-card:hover { background: #e7dcea; border
 .reference-environment-choices button.selected {
   background: @graph_cta; color: @graph_ink; border-color: #9c86aa;
 }
+
+.typing-counter { color: #d4cbdc; font-family: Roboto, sans-serif; font-size: 15px; font-weight: 500; }

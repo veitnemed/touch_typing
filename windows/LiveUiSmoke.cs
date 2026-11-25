@@ -14,7 +14,7 @@ using System.Windows.Automation;
 using System.Xml;
 
 // Compile separately. This process drives only the new --qa trainer process it owns.
-internal static class LiveUiSmoke
+internal static partial class LiveUiSmoke
 {
     private static Process app;
     private static IntPtr trainer, focusProbe;

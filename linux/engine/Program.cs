@@ -28,12 +28,12 @@ internal static class Program
                 Console.WriteLine(JsonSerializer.Serialize(new { ok = false, error = exception.Message }, Json));
             }
         }
-        service.FinishTyping();
+        service.SuspendTyping();
         service.FinishLab();
     }
 }
 
-internal sealed class PracticeService
+internal sealed partial class PracticeService
 {
     private const string DefaultLayoutBinding = "Super+Space";
     private readonly ProfileStore store;
@@ -50,12 +50,13 @@ internal sealed class PracticeService
     private bool labFinishAttempted;
     private string labSaveError;
     private string[] dock, desktopProfile;
-    internal string StorageError => store.Error;
+    internal string StorageError => typingConflictNotice ?? store.Error;
 
-    private readonly bool neutralProject;
+    private readonly bool neutralProject, verifyInputs;
 
     internal PracticeService(bool verify)
     {
+        verifyInputs = verify;
         neutralProject = !verify || Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_LEGACY_PROJECT") != "1";
         string data = null;
         if (!windows)
@@ -72,6 +73,7 @@ internal sealed class PracticeService
 
     internal object Handle(JsonElement message)
     {
+        typingConflictNotice = null;
         bool verifyProfile = false;
         switch (Text(message, "command"))
         {
@@ -222,15 +224,33 @@ internal sealed class PracticeService
             case "shortcut-resume": run?.Resume(); return ShortcutState();
             case "typing-start":
                 FinishTyping();
-                typing = new TypingRun(Text(message, "mode"), Number(message, "level"), Number(message, "round", -1),
-                    Number(message, "seconds"), profile, Random.Shared);
+                if (typing?.CanSave == true && store.Error != null) throw new InvalidOperationException(store.Error);
+                profile = store.Read();
+                if (store.Error != null) throw new InvalidOperationException(store.Error);
+                TrainingProgress.Migrate(profile, DateTime.Now);
+                string typingMode = Text(message, "mode");
+                typing = new TypingRun(typingMode.Length == 0 ? "Russian" : typingMode, Number(message, "level"), Number(message, "round", -1),
+                    Number(message, "seconds"), profile,
+                    verifyInputs && message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared,
+                    Number(message, "cycles", 1), Flag(message, "infinite"));
+                BeginTypingOwnership(profile.ClassicTypingDraft, false);
+                return TypingState(message);
+            case "typing-continue":
+                // Do not stop/save an attempt that is merely being continued after
+                // a pause in this process. Re-read the atomic persisted checkpoint.
+                profile = store.Read();
+                if (store.Error != null) throw new InvalidOperationException(store.Error);
+                RequireRequestedTypingDraft(message, profile.ClassicTypingDraft);
+                typing = TypingRun.Continue(profile.ClassicTypingDraft);
+                BeginTypingOwnership(profile.ClassicTypingDraft, true);
                 return TypingState(message);
             case "typing-key":
                 typing?.Enter(Text(message, "text"));
                 verifyProfile = typing?.Finished == true;
                 break;
             case "typing-state": verifyProfile = typing?.Finished == true; break;
-            case "typing-pause": typing?.Pause(); break;
+            case "typing-pause": SuspendTyping(close: false); break;
+            case "typing-suspend": SuspendTyping(); break;
             case "typing-resume": typing?.Resume(); break;
             case "typing-stop": FinishTyping(); break;
             case "typing-result": return typing?.Result(Text(message, "layout"));
@@ -567,8 +587,18 @@ internal sealed class PracticeService
     {
         typing?.Pause();
         if (typing?.CanSave != true) return;
-        Save(typing.Save);
-        if (store.Error == null) typing.Saved();
+        if (SaveTypingOutcome(typing.AttemptId, typing.Save)) typing.Saved();
+    }
+
+    internal void SuspendTyping(bool close = true)
+    {
+        typing?.Pause();
+        if (typing == null || typing.IsSaved) return;
+        if (typing.HasFiniteDraft)
+        {
+            SaveTypingCheckpoint(typing.Checkpoint());
+        }
+        else if (typing.Finished || close && typing.CycleCount == 0) FinishTyping();
     }
 
     private object TypingState(JsonElement message) => typing?.State(Text(message, "layout") == "RU" ? "RU" : "EN");

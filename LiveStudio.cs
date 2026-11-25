@@ -49,9 +49,9 @@ namespace TouchTypingStudio
         private string page = LivePage;
         private bool active, paused;
         private bool closeAccepted;
-        private string selectedSkill = "terminal-paste", selectedTyping = "Project";
+        private string selectedSkill = "terminal-paste", selectedTyping = "Russian";
         private string selectedGroup = "";
-        private int selectedLiveKind, selectedLiveLevel, selectedMeasure, selectedTypingLevel, selectedTime;
+        private int selectedLiveKind, selectedLiveLevel, selectedMeasure, selectedTypingLevel, selectedTime, selectedCycleChoice;
 
         private FocusTape tape;
         private ProgressBar lessonProgress;
@@ -60,7 +60,8 @@ namespace TouchTypingStudio
         private Button keyboardControl, handsControl, mistakeControl, pauseControl, stopControl;
         private string lastTypedKey = "";
         private ComboBox groupSelect, taskSelect, kindSelect, levelSelect, measureSelect;
-        private ComboBox typingSelect, typingLevel, typingTime;
+        private ComboBox typingSelect, typingLevel, typingTime, typingCycles;
+        private TextBlock typingCounter;
         private Button beginControl;
         private Data[] groupSkills = new Data[0];
 
@@ -107,7 +108,7 @@ namespace TouchTypingStudio
                         if (!TrySaveLab()) { e.Cancel = true; return; }
                     }
                     var saved = wasLab ? null : page == TypingPage ?
-                        Request("typing-stop", "layout", CurrentLayout()) : Request("shortcut-result");
+                        Request("typing-suspend", "layout", CurrentLayout()) : Request("shortcut-result");
                     if (!wasLab && (!saved.Exists || !string.IsNullOrWhiteSpace(engine.Notice)))
                     {
                         e.Cancel = true;
@@ -163,6 +164,7 @@ namespace TouchTypingStudio
             panel.Children.Add(Label("Сохранить прогресс и закрыть тренажёр?", 16, Ink, true));
             var detail = Label(labActive && (state.B("limitDecisionPending") || state.B("finishingMission")) ?
                 "Миссию можно будет продолжить с сохранённого места." :
+                page == TypingPage && !state.B("infinite") ? "Позиция и пройденные знаки сохранятся. Продолжите из раздела «Печать»." :
                 "Текущее занятие остановится; результаты сохранятся.", 12, Dim);
             detail.Margin = new Thickness(0, 7, 0, 16);
             panel.Children.Add(detail);
@@ -360,7 +362,7 @@ namespace TouchTypingStudio
             var root = PagePanel("Печать", "Слова, фразы, упражнения и код учебного проекта");
             var items = new List<Option>
             {
-                new Option("Project", "Python · task-list"), new Option("Russian", "Русские фразы"),
+                new Option("Russian", "Русские фразы"), new Option("Project", "Python · task-list"),
                 new Option("English", "Английские фразы"), new Option("WordsRU", "Русские слова"),
                 new Option("WordsEN", "Английские слова"), new Option("Symbols", "Спецсимволы"),
                 new Option("WeakRU", "Промахи · русский"), new Option("WeakEN", "Промахи · английский")
@@ -369,16 +371,56 @@ namespace TouchTypingStudio
             items.AddRange(catalog.Items("projects").Select(item => new Option(item.S("id"), "Python · " + item.S("title"))));
             items.AddRange(catalog.Items("sets").Select(item => new Option(item.S("id"), "Свой текст · " + item.S("title"))));
             items.AddRange(catalog.Items("lessons").Select(item => new Option(item.S("id"), "Урок · " + item.S("title"))));
+            typingSelect = Select("Урок", items.ToArray(), selectedTyping, 305);
+            typingLevel = Select("Сложность", new[] { "Базовый", "Средний", "Продвинутый" }, selectedTypingLevel, 145);
+            typingTime = Select("Таймер", new[] { "Без таймера", "1 минута", "3 минуты", "5 минут", "10 минут" }, selectedTime, 135);
+            string[] cycleOptions = { "1 цикл", "2 цикла", "3 цикла", "4 цикла", "5 циклов", "Без конца" };
+            typingCycles = Select("Объём занятия", cycleOptions, selectedCycleChoice, 140);
+            AutomationProperties.SetAutomationId(typingSelect, "TypingMode");
+            AutomationProperties.SetAutomationId(typingLevel, "TypingLevel");
+            AutomationProperties.SetAutomationId(typingTime, "TypingTime");
+            AutomationProperties.SetAutomationId(typingCycles, "TypingCycles");
             var choices = Stack(true);
-            typingSelect = Select("Урок", items.ToArray(), selectedTyping, 300);
-            typingLevel = Select("Сложность", new[] { "Базовый", "Средний", "Продвинутый" }, selectedTypingLevel, 146);
-            typingTime = Select("Время", new[] { "Без таймера", "1 минута", "3 минуты", "5 минут" }, selectedTime, 136);
             choices.Children.Add(typingSelect);
-            choices.Children.Add(typingLevel);
-            choices.Children.Add(typingTime);
             beginControl = ActionButton("Начать · F5", delegate { StartTyping(); }, true);
+            AutomationProperties.SetAutomationId(beginControl, "TypingStart");
             choices.Children.Add(beginControl);
             root.Children.Add(choices);
+            var draft = catalog.D("draft");
+            if (draft.Exists)
+            {
+                var continuation = ActionButton("Продолжить · " + draft.S("title") + " · " +
+                    draft.I("done") + "/" + draft.I("total"), delegate {
+                        var restored = Request("typing-continue", "id", draft.S("id"), "layout", CurrentLayout());
+                        if (!restored.Exists) return;
+                        selectedTyping = draft.S("mode", "Russian");
+                        selectedTypingLevel = Math.Max(0, Math.Min(2, draft.I("level")));
+                        selectedCycleChoice = Math.Max(0, Math.Min(4, draft.I("cycles", 1) - 1));
+                        selectedTime = Math.Max(0, Array.IndexOf(new[] { 0, 60, 180, 300, 600 }, draft.I("timeLimit")));
+                        StartSession(restored);
+                    });
+                AutomationProperties.SetAutomationId(continuation, "TypingContinue");
+                root.Children.Add(continuation);
+            }
+            var summary = Label("", 13, ReferenceMuted);
+            summary.Margin = new Thickness(0, 7, 0, 4);
+            Action describe = delegate {
+                int index = Math.Max(0, typingCycles.SelectedIndex);
+                summary.Text = (index == 5 ? "Бесконечная печать" : cycleOptions[index]) + "  ·  " +
+                    new[] { "без таймера", "1 мин", "3 мин", "5 мин", "10 мин" }[Math.Max(0, typingTime.SelectedIndex)] +
+                    (index == 5 ? "" : "  ·  350–550 знаков в цикле");
+            };
+            typingCycles.SelectionChanged += delegate { describe(); };
+            typingTime.SelectionChanged += delegate { describe(); };
+            describe();
+            root.Children.Add(summary);
+            var settings = Stack(true);
+            var volume = Stack(); ConfigureField(volume, "Объём", typingCycles); settings.Children.Add(volume);
+            var difficulty = Stack(); ConfigureField(difficulty, "Сложность", typingLevel); settings.Children.Add(difficulty);
+            var duration = Stack(); ConfigureField(duration, "Таймер", typingTime); settings.Children.Add(duration);
+            var expander = new Expander { Header = Label("Параметры занятия", 14, ReferenceText, true), Content = settings, Foreground = ReferenceText };
+            AutomationProperties.SetAutomationId(expander, "TypingParameters");
+            root.Children.Add(expander);
             return Scroll(root);
         }
 
@@ -403,8 +445,10 @@ namespace TouchTypingStudio
             selectedTyping = Get(typingSelect);
             selectedTypingLevel = Math.Max(0, typingLevel.SelectedIndex);
             selectedTime = Math.Max(0, typingTime.SelectedIndex);
-            var answer = Request("typing-start", "mode", selectedTyping, "level", selectedTypingLevel,
-                "seconds", new[] { 0, 60, 180, 300 }[selectedTime], "layout", CurrentLayout());
+            selectedCycleChoice = Math.Max(0, typingCycles.SelectedIndex);
+            var answer = Request("typing-start", "cycles", selectedCycleChoice == 5 ? 0 : selectedCycleChoice + 1,
+                "infinite", selectedCycleChoice == 5, "mode", selectedTyping, "level", selectedTypingLevel,
+                "seconds", new[] { 0, 60, 180, 300, 600 }[selectedTime], "layout", CurrentLayout());
             if (answer.Exists) StartSession(answer);
         }
 
@@ -419,7 +463,17 @@ namespace TouchTypingStudio
             root.VerticalAlignment = VerticalAlignment.Top;
             timerLabel = Label("00:00", 17, Ink, true);
             timerLabel.FontFamily = new FontFamily("Courier New");
-            root.Children.Add(new Border { Child = timerLabel, CornerRadius = new CornerRadius(7), BorderBrush = Edge,
+            var clockRow = Stack(true);
+            clockRow.VerticalAlignment = VerticalAlignment.Center;
+            clockRow.Children.Add(timerLabel);
+            if (page == TypingPage)
+            {
+                typingCounter = Label("", 15, ReferenceText, true);
+                typingCounter.Margin = new Thickness(10, 0, 0, 0);
+                AutomationProperties.SetAutomationId(typingCounter, "TypingCount");
+                clockRow.Children.Add(typingCounter);
+            }
+            root.Children.Add(new Border { Child = clockRow, CornerRadius = new CornerRadius(7), BorderBrush = Edge,
                 BorderThickness = new Thickness(2), Background = Card, Padding = new Thickness(10, 4, 10, 4),
                 HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, ActualHeight < 680 ? 10 : 23) });
             var toolbar = new DockPanel { LastChildFill = false };
@@ -451,10 +505,12 @@ namespace TouchTypingStudio
             stopControl.Background = ReferenceField;
             toolbar.Children.Add(stopControl);
             tape = new FocusTape { Margin = new Thickness(0, 4, 0, 0) };
+            if (page == TypingPage) AutomationProperties.SetAutomationId(tape, "TypingTape");
             root.Children.Add(tape);
             lessonProgress = new ProgressBar { Height = 5, Minimum = 0, Maximum = 1, Background = ReferenceField,
                 Foreground = ReferenceAccent, BorderThickness = new Thickness(0),
                 Margin = new Thickness(ActualWidth * .09, 13, ActualWidth * .09, 0) };
+            if (page == TypingPage) AutomationProperties.SetAutomationId(lessonProgress, "TypingSessionBar");
             root.Children.Add(lessonProgress);
             feedback = Label("", 13, Dim);
             feedback.TextWrapping = TextWrapping.NoWrap;
@@ -558,8 +614,21 @@ namespace TouchTypingStudio
             AutomationProperties.SetName(keyboardControl, (string)keyboardControl.ToolTip);
             AutomationProperties.SetName(handsControl, (string)handsControl.ToolTip);
             feedback.Visibility = feedback.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
-            lessonProgress.Value = page == LivePage ? (double)state.I("solved") / Math.Max(1, state.I("limit")) :
-                state.N("fragmentProgress");
+            if (page == LivePage) lessonProgress.Value = (double)state.I("solved") / Math.Max(1, state.I("limit"));
+            else
+            {
+                bool finite = state.B("progressVisible");
+                lessonProgress.Visibility = finite ? Visibility.Visible : Visibility.Collapsed;
+                if (finite) lessonProgress.Value = state.N("progressFraction");
+                typingCounter.Text = finite ? state.I("progressDone") + "/" + state.I("progressTotal") :
+                    "Набрано: " + state.I("progressDone");
+                int cycle = state.I("cycle", 1);
+                var lengths = state.Items("cycleLengths").Select(value => value.Integer()).ToArray();
+                string scope = finite && cycle > 0 && cycle <= lengths.Length ? "Цикл " + cycle + " из " +
+                    lengths.Length + ". " + lengths[cycle - 1] + " действий в цикле." : "Принятые действия без конечной цели.";
+                typingCounter.ToolTip = scope;
+                AutomationProperties.SetHelpText(typingCounter, scope);
+            }
         }
 
         private void PaintTyping()
