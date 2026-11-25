@@ -38,17 +38,17 @@ internal static class LiveRoutePolicy
         _ => !mission.Curated
     };
 
-    internal static LiveMission Pick(LiveMission[] unused, LiveMission[] rotation, LiveMission previous,
+    internal static LiveMission Pick(LiveMission[] unused, LiveMission previous,
         string environment, IEnumerable<ShortcutAttempt> attempts, HashSet<string> targets = null)
     {
         bool needsCore = previous == null || !IsCore(previous, environment);
         var candidates = unused.Where(m => IsCore(m, environment) == needsCore).ToArray();
         if (candidates.Length == 0)
         {
-            // Supplements must not run consecutively if a core still exists,
-            // even in a future level with more supplements than core routes.
-            candidates = needsCore ? rotation.Where(m => IsCore(m, environment)).ToArray() : unused;
-            if (candidates.Length == 0) candidates = unused;
+            // Alternate while both kinds of not-yet-seen work remain. Once
+            // one kind is exhausted, finish the unseen work before repeating
+            // any visited scenario (even with repeated mistakes).
+            candidates = unused;
         }
         if (targets?.Count > 0)
         {

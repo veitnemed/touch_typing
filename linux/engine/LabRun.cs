@@ -877,7 +877,7 @@ internal sealed class LabRun
                 // seen lesson. Keep the established-vs-supplement balance.
                 var target = AdaptiveGuide && used.Count % 2 == 1
                     ? LiveCoach.Outstanding(App, initialLayout, history) : null;
-                mission = LiveRoutePolicy.Pick(available, rotation, mission, EnvironmentProfile, history, target);
+                mission = LiveRoutePolicy.Pick(available, mission, EnvironmentProfile, history, target);
                 variant = random.Next(3);
                 if (LiveCourse.PracticalTerminalMission(mission.Id))
                 {
