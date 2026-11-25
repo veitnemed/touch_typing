@@ -34,6 +34,7 @@ packages=${NUGET_PACKAGES:-"$HOME/.nuget/packages"}
 runtime_package="$packages/microsoft.netcore.app.runtime.win-x64/$runtime_version"
 cp -- "$runtime_package/LICENSE.TXT" "$runtime_package/THIRD-PARTY-NOTICES.TXT" "$target/engine/"
 install -m 644 -- "$root/START-RU.txt" "$root/windows/Start-Live.cmd" "$root/windows/Start-Workday.cmd" "$root/windows/Test-Live-UI.ps1" "$root/windows/LiveUiSmoke.cs" "$target/"
+install -m 644 -- "$root/windows/Test-TypingReview.ps1" "$root/windows/TypingReviewWindowSmoke.cs" "$target/"
 install -m 644 -- "$root/windows/README.md" "$target/README.md"
 mkdir -p -- "$target/code-lesson"
 install -m 644 -- "$root/code-lesson/lesson.js" "$root/code-lesson/package.json" "$target/code-lesson/"

@@ -14,7 +14,7 @@ using System.Windows.Automation;
 using System.Xml;
 
 // Compile separately. This process drives only the new --qa trainer process it owns.
-internal static class LiveUiSmoke
+internal static partial class LiveUiSmoke
 {
     private static Process app;
     private static IntPtr trainer, focusProbe;
@@ -2067,11 +2067,13 @@ internal static class LiveUiSmoke
                 "English-only text receives a non-error native layout instruction");
             CheckTerminalState("", 0);
             Check(ReadSolved() == before, "RU physical input earned no credit");
-            CaptureLiveUxFrame("native-layout-ru-qwerty");
+            Check(Find("LiveAidPanel").Current.HelpText.Contains("RU"), "Keyboard aid follows native RU");
+            CaptureLiveUxFrame("native-layout-ru");
             SetNativeLessonLayout(thread, "00000409", 0x0409);
             Send(PhysicalText("W H O A M I"));
             CheckTerminalState("whoami", 6);
-            CaptureLiveUxFrame("native-layout-en-qwerty");
+            Check(Find("LiveAidPanel").Current.HelpText.Contains("EN"), "Keyboard aid returns to native EN");
+            CaptureLiveUxFrame("native-layout-en");
             Key("Enter");
             Until(delegate { return ReadSolved() == before + 1; }, "switching the real source resumes English entry");
         }

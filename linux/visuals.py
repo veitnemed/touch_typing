@@ -107,13 +107,15 @@ class PracticeLine(Gtk.Widget):
         self.before = ""
         self.after = ""
         self.correct = True
+        self.command = ""
         self.placeholder = "Пробел или Enter — начать набор"
 
-    def update(self, before, after, correct):
-        values = (before[-160:], after[:160], correct)
-        if values != (self.before, self.after, self.correct):
-            self.before, self.after, self.correct = values
+    def update(self, before, after, correct, command=""):
+        values = (before[-160:], after[:160], correct, command)
+        if values != (self.before, self.after, self.correct, self.command):
+            self.before, self.after, self.correct, self.command = values
             self.update_property([Gtk.AccessibleProperty.LABEL], [
+                ("Сочетание: " + command.strip("⟦⟧")) if command else
                 "Следующий символ — " + self.printable(self.after[:1], current=True)])
             self.queue_draw()
 
@@ -161,13 +163,20 @@ class PracticeLine(Gtk.Widget):
             # Shape one layout so the caret, surrounding glyphs and baseline
             # all use the same kerning and fallback font metrics.
             before, after = self.printable(self.before), self.printable(self.after)
+            if self.command:
+                token_width = self.layout(self.command, font).get_pixel_size()[0]
+                room = max(80, width / 2 - 16)
+                if token_width > room:
+                    font.set_absolute_size(font.get_size() * room / token_width)
             layout = self.layout(before + after, font)
             before_end = len(before.encode("utf-8"))
             caret, _ = layout.get_cursor_pos(before_end)
             attrs = Pango.AttrList()
             ranges = [(0, before_end, (0x9696, 0x9191, 0x9e9e))]
-            if not self.correct and after:
-                ranges.append((before_end, before_end + len(after[0].encode("utf-8")), (0xffff, 0x6868, 0x7b7b)))
+            if after and (self.command or not self.correct):
+                count = len((self.command or after[0]).encode("utf-8"))
+                tone = (0xcbcb, 0xbaba, 0xeaea) if self.correct else (0xffff, 0x6868, 0x7b7b)
+                ranges.append((before_end, before_end + count, tone))
             for start_index, end_index, (red, green, blue) in ranges:
                 attr = Pango.attr_foreground_new(red, green, blue)
                 attr.start_index, attr.end_index = start_index, end_index

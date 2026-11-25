@@ -393,6 +393,21 @@ namespace TouchTypingStudio
                 var row = new DockPanel { Margin = new Thickness(0, 9, 0, 0) };
                 var score = Label(string.Format(CultureInfo.CurrentCulture, "{0}  ·  {1} сим/мин  ·  {2:0.#}%  ·  ошибок {3}",
                     formattedDate, item.I("speed"), item.N("accuracy"), item.I("errors")), 12, Dim);
+                string sourceId = item.S("sourceId");
+                if (!string.IsNullOrEmpty(sourceId))
+                {
+                    var open = ActionButton("Результат", delegate {
+                        var result = Request("typing-history-result", "sourceId", sourceId);
+                        if (!result.Exists) return;
+                        ShowPage(TypingPage);
+                        var backdrop = center.Content as FrameworkElement;
+                        center.Content = null;
+                        center.Content = BuildResult(result, backdrop);
+                    });
+                    AutomationProperties.SetAutomationId(open, "TypingHistoryResult_" + sourceId);
+                    DockPanel.SetDock(open, Dock.Right);
+                    row.Children.Add(open);
+                }
                 DockPanel.SetDock(score, Dock.Right);
                 score.Margin = new Thickness(12, 0, 0, 0);
                 row.Children.Add(score);

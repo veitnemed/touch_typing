@@ -30,11 +30,14 @@ namespace TouchTypingStudio
         public int AdaptivePythonLevel;
         public List<PracticeSet> PracticeSets = new List<PracticeSet>();
         public List<PracticeRecord> PracticeRecords = new List<PracticeRecord>();
+        public List<TypingModeBest> TypingModeBests = new List<TypingModeBest>();
         public List<SavedShortcut> Shortcuts = new List<SavedShortcut>();
         public List<ShortcutAttempt> ShortcutHistory = new List<ShortcutAttempt>();
         public List<LiveDraft> LiveDrafts = new List<LiveDraft>();
         public List<LabSessionRecord> LabSessions = new List<LabSessionRecord>();
         public List<LabSessionRecord> LabRecords = new List<LabSessionRecord>();
+        // Versioned payload owned by the packaged practice engine; older XML profiles simply lack it.
+        public string ClassicTypingDraft;
         public int TypingCourse;
         public double CardX = double.NaN;
         public double CardY = double.NaN;
@@ -42,6 +45,7 @@ namespace TouchTypingStudio
         public List<TypingDraft> Drafts = new List<TypingDraft>();
         public List<string> GoodPasses = new List<string>();
         public List<string> CompletedRoutes = new List<string>();
+        public List<TypingReviewTicket> TypingReviews = new List<TypingReviewTicket>();
         public List<TypingResult> Results = new List<TypingResult>();
         public List<KeyMistakes> KeyHistory = new List<KeyMistakes>();
         public List<DayNote> Notes = new List<DayNote>();
@@ -105,9 +109,21 @@ namespace TouchTypingStudio
         public DateTime LastMistake;
     }
 
+    // One small ticket per eligible source session. Runtime-only input objects are
+    // deliberately not serialized by the desktop client (.NET Framework 4.8).
+    public class TypingReviewTicket
+    {
+        public string SourceId, Title;
+        public string Weights, Plan, Mistakes;
+        public int Position, Errors, Revision;
+        public double Seconds;
+        public bool Completed;
+    }
+
     public class TypingResult
     {
         public string Lesson;
+        public string PracticeAttemptId, ReviewOf;
         public string Language;
         public DateTime Date;
         public int Count;
@@ -122,6 +138,7 @@ namespace TouchTypingStudio
         public bool Qualified;
         public int FirstMs;
         public string Context;
+        public TypingRecordConditions TypingConditions;
         [XmlIgnore] public double Accuracy { get { return Count + Errors == 0 ? 0 : (100.0 * Count) / (Count + Errors); } }
         [XmlIgnore] public int Speed { get { return Seconds <= 0 ? 0 : (int)Math.Round(60 * Count / Seconds); } }
     }
@@ -316,11 +333,12 @@ namespace TouchTypingStudio
         public int FirstMs { get; private set; }
         public bool HintsUsed { get; private set; }
 
-        public TypingAttempt(string target, TypingDraft draft)
+        public TypingAttempt(string target, TypingDraft draft, bool allowCompletedDraft = false)
         {
             Target = target;
             if (target.IndexOf(CodeText.Erase) >= 0) editedText = new StringBuilder();
-            if (draft == null || draft.Target != target || draft.Position < 0 || draft.Position >= target.Length) return;
+            if (draft == null || draft.Target != target || draft.Position < 0 || draft.Position > target.Length ||
+                (!allowCompletedDraft && draft.Position == target.Length)) return;
             Position = draft.Position;
             Errors = draft.Errors;
             previousSeconds = draft.Seconds;

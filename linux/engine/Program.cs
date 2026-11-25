@@ -28,12 +28,12 @@ internal static class Program
                 Console.WriteLine(JsonSerializer.Serialize(new { ok = false, error = exception.Message }, Json));
             }
         }
-        service.FinishTyping();
+        service.SuspendTyping();
         service.FinishLab();
     }
 }
 
-internal sealed class PracticeService
+internal sealed partial class PracticeService
 {
     private const string DefaultLayoutBinding = "Super+Space";
     private readonly ProfileStore store;
@@ -50,12 +50,13 @@ internal sealed class PracticeService
     private bool labFinishAttempted;
     private string labSaveError;
     private string[] dock, desktopProfile;
-    internal string StorageError => store.Error;
+    internal string StorageError => typingConflictNotice ?? store.Error;
 
-    private readonly bool neutralProject;
+    private readonly bool neutralProject, verifyInputs;
 
     internal PracticeService(bool verify)
     {
+        verifyInputs = verify;
         neutralProject = !verify || Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_LEGACY_PROJECT") != "1";
         string data = null;
         if (!windows)
@@ -72,6 +73,8 @@ internal sealed class PracticeService
 
     internal object Handle(JsonElement message)
     {
+        typingConflictNotice = null;
+        if (TryReviewCommand(message, out var reviewResponse)) return reviewResponse;
         bool verifyProfile = false;
         switch (Text(message, "command"))
         {
@@ -222,18 +225,45 @@ internal sealed class PracticeService
             case "shortcut-resume": run?.Resume(); return ShortcutState();
             case "typing-start":
                 FinishTyping();
-                typing = new TypingRun(Text(message, "mode"), Number(message, "level"), Number(message, "round", -1),
-                    Number(message, "seconds"), profile, Random.Shared);
+                if ((typing?.CanSave == true || mixedTyping?.CanSave == true) && store.Error != null) throw new InvalidOperationException(store.Error);
+                profile = store.Read();
+                if (store.Error != null) throw new InvalidOperationException(store.Error);
+                TrainingProgress.Migrate(profile, DateTime.Now);
+                mixedTyping = null;
+                if (StartMixedTyping(message)) return TypingState(message);
+                string typingMode = Text(message, "mode");
+                typing = new TypingRun(typingMode.Length == 0 ? "Russian" : typingMode, Number(message, "level"), Number(message, "round", -1),
+                    Number(message, "seconds"), profile,
+                    verifyInputs && message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared,
+                    Number(message, "cycles", 1), Flag(message, "infinite"));
+                BeginTypingOwnership(profile.ClassicTypingDraft, false);
                 return TypingState(message);
+            case "typing-continue":
+                // Do not stop/save an attempt that is merely being continued after
+                // a pause in this process. Re-read the atomic persisted checkpoint.
+                profile = store.Read();
+                if (store.Error != null) throw new InvalidOperationException(store.Error);
+                RequireRequestedTypingDraft(message, profile.ClassicTypingDraft);
+                if (ContinueMixedTyping()) return TypingState(message);
+                mixedTyping = null;
+                typing = TypingRun.Continue(profile.ClassicTypingDraft);
+                BeginTypingOwnership(profile.ClassicTypingDraft, true);
+                return TypingState(message);
+            case "typing-physical": return MixedInputState(message);
             case "typing-key":
-                typing?.Enter(Text(message, "text"));
-                verifyProfile = typing?.Finished == true;
+                if (mixedTyping != null) mixedTyping.Enter(Text(message, "text")); else typing?.Enter(Text(message, "text"));
+                verifyProfile = mixedTyping?.Finished ?? typing?.Finished == true;
                 break;
-            case "typing-state": verifyProfile = typing?.Finished == true; break;
-            case "typing-pause": typing?.Pause(); break;
-            case "typing-resume": typing?.Resume(); break;
+            case "typing-state": verifyProfile = mixedTyping?.Finished ?? typing?.Finished == true; break;
+            case "typing-pause": SuspendTyping(close: false); break;
+            case "typing-suspend": SuspendTyping(); break;
+            case "typing-resume": if (mixedTyping != null) mixedTyping.Resume(); else typing?.Resume(); break;
             case "typing-stop": FinishTyping(); break;
-            case "typing-result": return typing?.Result(Text(message, "layout"));
+            case "typing-records":
+                return TypingModeRecords.ForCards(profile, Number(message, "level"),
+                    Flag(message, "infinite") ? 0 : Number(message, "cycles", 1),
+                    Number(message, "seconds"), Number(message, "round", -1), Text(message, "layout"));
+            case "typing-result": return mixedTyping?.Result(Text(message, "layout")) ?? typing?.Result(Text(message, "layout"));
             case "ping": return "ok";
             default: throw new ArgumentException("Неизвестная команда.");
         }
@@ -354,7 +384,8 @@ internal sealed class PracticeService
             typingHistory = profile.Results.Where(item => item.Activity is "LinuxTyping" or "TypingPractice")
                 .TakeLast(60).Reverse().Select(item => new
             {
-                item.Lesson, item.Date, item.Speed, item.Accuracy, item.Count, item.Errors, item.Seconds
+                item.Lesson, item.Date, item.Speed, item.Accuracy, item.Count, item.Errors, item.Seconds,
+                sourceId = item.PracticeAttemptId
             }),
             profile.ShowKeys, profile.ShowHands, profile.LiveShowKeys, profile.LiveShowHands,
             profile.ShowMistakeKey, profile.RightHandChord,
@@ -565,13 +596,33 @@ internal sealed class PracticeService
 
     internal void FinishTyping()
     {
+        if (mixedTyping != null) { FinishMixedTyping(); return; }
         typing?.Pause();
         if (typing?.CanSave != true) return;
-        Save(typing.Save);
-        if (store.Error == null) typing.Saved();
+        if (SaveTypingOutcome(typing.AttemptId, typing.Save)) typing.Saved();
     }
 
-    private object TypingState(JsonElement message) => typing?.State(Text(message, "layout") == "RU" ? "RU" : "EN");
+    internal void SuspendTyping(bool close = true)
+    {
+        if (review != null)
+        {
+            // Normal window shutdown reaches this path after stdin EOF. A failed
+            // checkpoint has already preserved the previous complete XML on disk.
+            try { PersistReview(pause: true, force: true); }
+            catch (InvalidOperationException) when (close) { }
+            return;
+        }
+        if (mixedTyping != null) { SuspendMixedTyping(); return; }
+        typing?.Pause();
+        if (typing == null || typing.IsSaved) return;
+        if (typing.HasFiniteDraft)
+        {
+            SaveTypingCheckpoint(typing.Checkpoint());
+        }
+        else if (typing.Finished || close && typing.CycleCount == 0) FinishTyping();
+    }
+
+    private object TypingState(JsonElement message) => mixedTyping?.State(Text(message, "layout")) ?? typing?.State(Text(message, "layout") == "RU" ? "RU" : "EN");
 
     private void Save(Action<StudioProfile> change)
     {

@@ -65,6 +65,9 @@ namespace TouchTypingStudio
         public double Accuracy { get { return Inputs == 0 ? 0 : 100.0 * (typed + Attempt.Position) / Inputs; } }
         public string Weakest { get { return Focus ?? NextWeakness(); } }
         public bool HasPendingProgress { get { return pending.Count > 0; } }
+        internal long AcceptedUnits { get { return typed + Attempt.Position; } }
+        internal IReadOnlyDictionary<char, long> MistakeCounts { get { return totalMistakes; } }
+        internal string NextStandardBlock() { return StandardBlock(); }
         public string Name
         {
             get
@@ -98,7 +101,7 @@ namespace TouchTypingStudio
         }
 
         public ContinuousTyping(Random random, ContinuousKind kind, int level, int goal, IEnumerable<string> custom = null,
-            bool autoAdvance = false)
+            bool autoAdvance = false, bool authored = false)
         {
             if (random == null) throw new ArgumentNullException("random");
             this.random = random;
@@ -108,7 +111,7 @@ namespace TouchTypingStudio
             this.goal = goal;
             this.custom = (custom ?? Enumerable.Empty<string>()).Select(CodeText.Normalize)
                 .Where(text => !string.IsNullOrWhiteSpace(text)).Distinct().ToArray();
-            string validation = ValidateSnippets(kind, this.custom);
+            string validation = authored ? null : ValidateSnippets(kind, this.custom);
             if (validation != null) throw new ArgumentException(validation, "custom");
             Prefix = "";
             SelectBlocks();

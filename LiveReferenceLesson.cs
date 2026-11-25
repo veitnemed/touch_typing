@@ -259,12 +259,13 @@ namespace TouchTypingStudio
         {
             bool guided = state.B("showGuide", true) || referenceHelpOpen;
             string raw = task.S("keys"), text = task.S("text");
-            string shown = !guided ? "" : raw.Length > 0 ? DisplayLabGesture(raw) :
+            string shown = !guided ? "" : raw.Length > 0 ? raw.Replace("+", " + ") :
                 task.S("id").StartsWith("open-") ? "⊞  →  " + text + "  →  Enter" :
                 task.S("id").StartsWith("command/") && text.Length > 12 ? "Ctrl + R  →  Enter" : text;
             string signature = (guided ? "guided:" : "independent:") + shown + "|" + raw + "|" + step + "/" + count;
             if (signature == referenceKeySignature) return; // Input and timer ticks should not rebuild visual children.
             referenceKeySignature = signature;
+            labKeys.ToolTip = guided && raw.Length > 0 && DisplayLabGesture(raw) != shown ? DisplayLabGesture(raw) : null;
             AutomationProperties.SetName(labKeys, shown + (count > 0 ? "   ·   шаг " + step + "/" + count : ""));
             referenceKeysFrame.Visibility = guided && shown.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             if (!guided || raw.Length == 0)
