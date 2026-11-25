@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 namespace TouchTypingStudio;
 
 internal sealed record SymbolLocation(string Path, int Offset, int Length, string Kind);
-internal sealed record EditorJump(string Path, int Anchor, int Caret, int NotebookCell = -1, bool NotebookEditing = false);
+internal sealed record EditorJump(string Path, int Anchor, int Caret, int NotebookCell = -1, bool NotebookEditing = false, string NotebookIdentity = null);
 internal sealed record SymbolBinding(string Path, string Name, SymbolLocation Definition, SymbolLocation[] Occurrences);
 
 internal sealed partial class LabScene
@@ -150,9 +150,16 @@ internal sealed partial class LabScene
             case "code-back":
                 if (!w.SymbolBack.TryPop(out var origin)) return false;
                 OpenDocument(origin.Path);
-                if (origin.NotebookCell >= 0 && w.Tab?.Notebook is EditorNotebook notebook && origin.NotebookCell < notebook.Count)
+                if (origin.NotebookCell >= 0)
                 {
-                    notebook.Select(origin.NotebookCell); notebook.SetMode(origin.NotebookEditing);
+                    if (w.Tab?.Notebook is not EditorNotebook notebook) return false;
+                    int index = origin.NotebookIdentity == null ? origin.NotebookCell : notebook.CellIndex(origin.NotebookIdentity);
+                    if (index < 0 || index >= notebook.Count)
+                    {
+                        w.Status = "Исходная ячейка удалена. Открыт сам блокнот.";
+                        return false;
+                    }
+                    notebook.Select(index); notebook.SetMode(origin.NotebookEditing);
                     string source = notebook.Source(notebook.Selected);
                     notebook.Anchor = InsertionBoundary(source, Math.Clamp(origin.Anchor, 0, source.Length));
                     notebook.Caret = InsertionBoundary(source, Math.Clamp(origin.Caret, 0, source.Length));
@@ -209,7 +216,7 @@ internal sealed partial class LabScene
         if (body == null) return false;
         var def = NamedDefinitions(MaskPython(body), name).ToArray();
         if (def.Length != 1) return false;
-        w.SymbolBack.Push(new(EditorPath(w.Tab), n.Anchor, n.Caret, n.Selected, n.Editing));
+        w.SymbolBack.Push(new(EditorPath(w.Tab), n.Anchor, n.Caret, n.Selected, n.Editing, n.CellIdentity(n.Selected)));
         GoToSymbol(new(path, def[0].Index, name.Length, "definition"));
         return true;
     }

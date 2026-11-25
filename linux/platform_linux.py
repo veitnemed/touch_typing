@@ -10,7 +10,8 @@ import subprocess
 APP_ID = "com.veitnemed.TouchTyping"
 ROOT = Path(__file__).resolve().parent
 
-# GDK uses XKB keycodes for both its Wayland and X11 backends. These are physical positions.
+# Wayland/evdev positions. An X11 server may use quite different keycodes for
+# the same hardware (e.g. both XFree86 and evdev use code 104, for different keys).
 ROWS = (
     (9, ["Esc"]),
     (10, list("1234567890-=")),
@@ -58,6 +59,71 @@ class _XkbState(ctypes.Structure):
                 ("modifier_fields", ctypes.c_ubyte * 9), ("ptr_buttons", ctypes.c_ushort)]
 
 
+# Stable XKB key names describe positions in a PC keyboard, not typed symbols.
+# In particular <AB04> is V in EN and М in RU, <KP7> remains independent
+# of NumLock, and <COMP> is the evdev spelling for <MENU>.
+_XKB_POSITIONS = {
+    **{f"{row}{i:02}".encode(): key for row, keys in (
+        ("AE", "1234567890-="), ("AD", "QWERTYUIOP[]"),
+        ("AC", "ASDFGHJKL;'"), ("AB", "ZXCVBNM,./"),
+    ) for i, key in enumerate(keys, 1)},
+    **{f"FK{i:02}".encode(): f"F{i}" for i in range(1, 13)},
+    **{f"KP{i}".encode(): f"NumPad{i}" for i in range(10)},
+    b"TLDE": "`", b"BKSL": "\\", b"SPCE": "Space", b"ESC": "Esc", b"TAB": "Tab",
+    b"BKSP": "Backspace", b"RTRN": "Enter", b"CAPS": "CapsLock", b"SCLK": "ScrollLock",
+    b"NMLK": "NumLock", b"PAUS": "Pause", b"PRSC": "Print", b"MENU": "Menu", b"COMP": "Menu",
+    b"UP": "Up", b"DOWN": "Down", b"LEFT": "Left", b"RGHT": "Right", b"PGUP": "PageUp",
+    b"PGDN": "PageDown", b"HOME": "Home", b"END": "End", b"INS": "Insert", b"DELE": "Delete",
+    b"KPDL": "NumDecimal", b"KPEN": "NumEnter", b"KPDV": "NumDivide", b"KPMU": "NumMultiply",
+    b"KPSU": "NumSubtract", b"KPAD": "NumAdd", b"LCTL": "LCtrl", b"RCTL": "RCtrl",
+    b"LALT": "LAlt", b"RALT": "RAlt", b"LFSH": "LShift", b"RTSH": "RShift",
+    b"LWIN": "LSuper", b"RWIN": "RSuper",
+}
+
+# If a server has no XKB names, only service keys with unambiguous keysyms
+# and the common PC text positions are supported. Never guess an extended
+# key from its evdev number, or turn KP_Home into the separate Home key.
+_X11_SERVICE_KEYS = {
+    **{key: key for key in ("Home", "End", "Left", "Right", "Up", "Down", "Delete", "Insert",
+                            "Pause", "Print", "Menu", "Tab")},
+    **{f"F{i}": f"F{i}" for i in range(1, 13)},
+    **{f"KP_{i}": f"NumPad{i}" for i in range(10)},
+    **{f"KP_{name}": f"NumPad{i}" for i, name in enumerate(
+        ("Insert", "End", "Down", "Page_Down", "Left", "Begin", "Right", "Home", "Up", "Page_Up"))},
+    "KP_Prior": "NumPad9", "KP_Next": "NumPad3", "KP_Delete": "NumDecimal", "KP_Decimal": "NumDecimal",
+    "KP_Separator": "NumDecimal", "KP_Enter": "NumEnter", "KP_Divide": "NumDivide",
+    "KP_Multiply": "NumMultiply", "KP_Subtract": "NumSubtract", "KP_Add": "NumAdd",
+    "BackSpace": "Backspace", "Return": "Enter", "Escape": "Esc", "ISO_Left_Tab": "Tab", "space": "Space",
+    "Page_Up": "PageUp", "Page_Down": "PageDown", "Prior": "PageUp", "Next": "PageDown",
+    "Sys_Req": "Print", "Break": "Pause", "Caps_Lock": "CapsLock", "Scroll_Lock": "ScrollLock",
+    "Num_Lock": "NumLock", "Control_L": "LCtrl", "Control_R": "RCtrl", "Alt_L": "LAlt", "Alt_R": "RAlt",
+    "Shift_L": "LShift", "Shift_R": "RShift", "Super_L": "LSuper", "Super_R": "RSuper",
+}
+_X11_FALLBACK_TEXT = {code: key for code, key in PHYSICAL.items() if len(key) == 1}
+_XKB_CORE_KEYBOARD = 0x0100
+_XKB_KEY_NAMES = 1 << 9
+
+
+# Public libX11 ABI in XKBstr.h. These prefixes end at the members we read;
+# Xlib owns the complete allocations and frees them via XkbFreeKeyboard.
+class _XkbKeyName(ctypes.Structure):
+    _fields_ = [("name", ctypes.c_char * 4)]
+
+
+class _XkbNames(ctypes.Structure):
+    _fields_ = [(field, ctypes.c_ulong) for field in ("keycodes", "geometry", "symbols", "types", "compat")] + [
+        ("vmods", ctypes.c_ulong * 16), ("indicators", ctypes.c_ulong * 32),
+        ("groups", ctypes.c_ulong * 4), ("keys", ctypes.POINTER(_XkbKeyName)),
+    ]
+
+
+class _XkbDescription(ctypes.Structure):
+    _fields_ = [("display", ctypes.c_void_p), ("flags", ctypes.c_ushort), ("device_spec", ctypes.c_ushort),
+                ("min_key_code", ctypes.c_ubyte), ("max_key_code", ctypes.c_ubyte), ("ctrls", ctypes.c_void_p),
+                ("server", ctypes.c_void_p), ("map", ctypes.c_void_p), ("indicators", ctypes.c_void_p),
+                ("names", ctypes.POINTER(_XkbNames))]
+
+
 @lru_cache(maxsize=1)
 def _x11_library():
     try:
@@ -66,6 +132,13 @@ def _x11_library():
         x11.XOpenDisplay.restype = ctypes.c_void_p
         x11.XkbGetState.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.POINTER(_XkbState)]
         x11.XkbGetState.restype = ctypes.c_int
+        description = ctypes.POINTER(_XkbDescription)
+        x11.XkbAllocKeyboard.argtypes = []
+        x11.XkbAllocKeyboard.restype = description
+        x11.XkbGetNames.argtypes = [ctypes.c_void_p, ctypes.c_uint, description]
+        x11.XkbGetNames.restype = ctypes.c_int
+        x11.XkbFreeKeyboard.argtypes = [description, ctypes.c_uint, ctypes.c_int]
+        x11.XkbFreeKeyboard.restype = None
         x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
         x11.XCloseDisplay.restype = ctypes.c_int
         return x11
@@ -84,43 +157,115 @@ def _x11_active_group(display_name):
         return None
     try:
         state = _XkbState()
-        return state.group if x11.XkbGetState(connection, 0x0100, ctypes.byref(state)) == 0 else None
+        return state.group if x11.XkbGetState(connection, _XKB_CORE_KEYBOARD, ctypes.byref(state)) == 0 else None
     finally:
         x11.XCloseDisplay(connection)
+
+
+
+def _x11_physical_codes(display_name):
+    """Read the server's current key names without modifying global input settings."""
+    if not display_name or (x11 := _x11_library()) is None:
+        return None
+    connection = x11.XOpenDisplay(os.fsencode(display_name))
+    if not connection:
+        return None
+    try:
+        descriptor = x11.XkbAllocKeyboard()  # defaults to XkbUseCoreKbd
+        if not descriptor:
+            return None
+        try:
+            if x11.XkbGetNames(connection, _XKB_KEY_NAMES, descriptor) != 0:
+                return None
+            data = descriptor.contents
+            keys = data.names.contents.keys if data.names else None
+            if not keys or not 8 <= data.min_key_code <= data.max_key_code:
+                return None
+            return {code: key for code in range(data.min_key_code, data.max_key_code + 1)
+                    if (key := _XKB_POSITIONS.get(keys[code].name))} or None
+        finally:
+            x11.XkbFreeKeyboard(descriptor, 0, 1)  # free_all ignores the component mask
+    finally:
+        x11.XCloseDisplay(connection)
+
+
+class PhysicalKeyboard:
+    """Resolve native keyboard input before dispatching it to any training mode."""
+    def __init__(self, Gdk, display):
+        self.gdk = Gdk
+        self.display = display
+        self.x11 = display is not None and display.__gtype__.name == "GdkX11Display"
+        self.down = {}
+        self.refresh()
+
+    def refresh(self, *_):
+        self.codes = _x11_physical_codes(self.display.get_name()) if self.x11 else PHYSICAL
+        self.layout_probe = next((code for code, key in (self.codes or {}).items() if key == "A"), _LAYOUT_PROBE)
+
+    def watch_x11(self):
+        if not self.x11:
+            return
+        seat = self.display.get_default_seat()
+        keyboard = seat.get_keyboard() if seat else None
+        if keyboard is not None:
+            keyboard.connect("changed", self.refresh)
+            if keyboard.find_property("layout-names") is not None:  # GTK 4.18+
+                keyboard.connect("notify::layout-names", self.refresh)
+
+    def _resolve(self, keyval, keycode):
+        if self.codes is not None:
+            return self.codes.get(keycode, "")
+        keysym = self.gdk.keyval_name(keyval)
+        if keysym == "ISO_Level3_Shift" and keycode in (108, 113):
+            return "RAlt"  # PC AltGr for evdev and XFree86
+        return _X11_SERVICE_KEYS.get(keysym, _X11_FALLBACK_TEXT.get(keycode, ""))
+
+    def press(self, keyval, keycode):
+        if keycode not in self.down:
+            self.down[keycode] = self._resolve(keyval, keycode)
+        return self.down[keycode]
+
+    def release(self, keyval, keycode):
+        if keycode in self.down:
+            return self.down.pop(keycode)
+        return self._resolve(keyval, keycode)
+
+    def clear(self):
+        self.down.clear()
 
 
 # The same physical ANSI position from which GDK reports an A or Ф event.
 _LAYOUT_PROBE = next(code for code, key in PHYSICAL.items() if key == "A")
 
 
-def layout_for_group(Gdk, display, group):
+def layout_for_group(Gdk, display, group, probe=_LAYOUT_PROBE):
     if group is None or group < 0:
         return None
-    success, keyval, *_ = display.translate_key(_LAYOUT_PROBE, Gdk.ModifierType(0), group)
+    success, keyval, *_ = display.translate_key(probe, Gdk.ModifierType(0), group)
     if success and (symbol := Gdk.keyval_to_unicode(keyval)):
         return {"a": "EN", "ф": "RU"}.get(chr(symbol).lower())
     return None
 
 
-def active_keyboard_layout(Gdk, display):
+def active_keyboard_layout(Gdk, display, probe=_LAYOUT_PROBE):
     """Read the actual layout at a user action, independent of its key or glyph."""
     if display is None:
         return None
     seat = display.get_default_seat()
     keyboard = seat.get_keyboard() if seat else None
     index = getattr(keyboard, "get_active_layout_index", None)
-    if index and (layout := layout_for_group(Gdk, display, index())):
+    if index and (layout := layout_for_group(Gdk, display, index(), probe)):
         return layout
     if display.__gtype__.name == "GdkX11Display":
-        return layout_for_group(Gdk, display, _x11_active_group(display.get_name()))
+        return layout_for_group(Gdk, display, _x11_active_group(display.get_name()), probe)
 
     # Older Wayland may supply a fresh, single-layout keymap for each source.
     # Never select the first of several groups as if it were the active one.
-    success, entries, _ = display.map_keycode(_LAYOUT_PROBE)
+    success, entries, _ = display.map_keycode(probe)
     if success:
         groups = {entry.group for entry in entries}
         if len(groups) == 1:
-            return layout_for_group(Gdk, display, groups.pop())
+            return layout_for_group(Gdk, display, groups.pop(), probe)
     return None
 
 

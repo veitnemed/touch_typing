@@ -158,6 +158,40 @@ class ExpandedNotebookRoutes(unittest.TestCase):
             finally:
                 e.close()
 
+    def test_jump_history_tracks_the_actual_relocated_notebook_path(self):
+        with tempfile.TemporaryDirectory() as profile, patch.dict(os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": profile}):
+            e = Engine(verify=True)
+            try:
+                e.call("configure", platform="windows", layout="EN")
+                e.call("lab-start", app="code", mode="sandbox", mission=ROUTES[2], level=2, seed=1,
+                       seconds=0, actionLimit=0, nativeEnglishInput=True)
+                s = e.call("lab-resume")
+                while s["task"]["id"] != "code-definition":
+                    s = step(e, s)
+                # Leave a nonzero caret in the original import-referenced call.
+                s = gesture(e, "Right")
+                original = editor(s)["url"]
+                previous = editor(s)["notebook"]
+                s = step(e, s)  # F12
+                saved = filemap(s)[original]
+                e.call("lab-explorer-action", action="new-folder")
+                text(e, "other-review")
+                gesture(e, "Enter")
+                folder = original.rsplit("/", 1)[0] + "/other-review"
+                e.call("lab-explorer-action", action="cut", path=original)
+                s = e.call("lab-explorer-action", action="paste", path=folder)
+                target = folder + "/" + original.rsplit("/", 1)[-1]
+                self.assertEqual(filemap(s)[target], saved)
+                self.assertNotIn(original, filemap(s))
+                gesture(e, "Ctrl+1")
+                s = gesture(e, "Alt+Left")
+                self.assertEqual(editor(s)["url"], target)
+                actual = editor(s)["notebook"]
+                self.assertEqual((actual["selected"], actual["caret"], actual["editing"]),
+                                 (previous["selected"], previous["caret"], previous["editing"]))
+            finally:
+                e.close()
+
     def test_three_families_on_two_profiles_with_different_working_data(self):
         for platform in ("linux", "windows"):
             for level in range(3):

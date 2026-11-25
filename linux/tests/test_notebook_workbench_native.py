@@ -143,17 +143,22 @@ class WorkbenchWindow(QA):
             yield from self.pointer("edit", 2)
             assert nb()["editing"] and nb()["selected"] == 2
             yield from self.chord("Ctrl+A")
+            yield from self.typed({"id":"type-code","text":"print('"})
             yield from self.press(["X"]*14)
             for _ in range(12):
                 yield from self.press(["X"]*10)
-            for _ in range(5):
-                yield from self.press(["Enter","1"]*5)
+            yield from self.typed({"id":"type-code","text":"')"})
+            for _ in range(29):
+                yield from self.chord("Enter")
+                yield from self.typed({"id":"type-code","text":"print(1)"})
             assert len(nb()["cells"][2]["source"].splitlines())>=25 and nb()["editing"]
             self.capture_widget_png(out/"workbench-03-caret-on-long-cell.png")
             yield from self.video_hold("Длинная ячейка: каретка видна в конце")
             yield from self.chord("Esc")
             yield from self.chord("Ctrl+Enter")
-            assert len(nb()["cells"][2]["traceback"].splitlines())>=25 and not nb()["editing"]
+            cell = nb()["cells"][2]
+            assert not cell["failed"] and not nb()["editing"]
+            assert cell["output"].splitlines() == ["x"*134] + ["1"]*29, cell["output"]
             view = lab.desktop._notebook_view
             assert view.max_vertical > view.height and view.max_horizontal > 120
             vertical = view.vertical
@@ -164,7 +169,7 @@ class WorkbenchWindow(QA):
             assert lab.desktop._notebook_view.horizontal>horizontal
             for _ in range(6): yield from self.chord("PageDown")
             self.capture_widget_png(out/"workbench-04-long-output-scrolled.png")
-            yield from self.video_hold("Многострочный traceback прокручивается к причине ошибки")
+            yield from self.video_hold("Длинный вывод прокручивается до последних строк")
 
             # The fixed toolbar remains reachable while the long output is scrolled.
             yield from self.pointer("add-markdown")

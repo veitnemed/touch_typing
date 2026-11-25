@@ -51,6 +51,35 @@ internal static class NotebookKernelRegression
         files["bad.py"] = "def result():\n    return 8 / 0\n";
         var error = kernel.Run("from bad import result\nresult()", Reads).Error;
         Need(error?.Name == "ZeroDivisionError" && error.Trace.Contains("bad.py, line 2"), "traceback points to the real saved function");
-        Console.WriteLine("PASS notebook kernel: standard/library imports, physical data dependency, stale imports, reset, bounds and traceback.");
+        DocumentBounds();
+        Console.WriteLine("PASS notebook kernel: standard/library imports, physical data dependency, stale imports, reset, reopenable bounds and traceback.");
     }
+
+    private static void DocumentBounds()
+    {
+        var workbook = EditorNotebook.Open("large.ipynb", EditorNotebook.Empty());
+        // JSON escapes the multiline Cyrillic content. Count bytes that the
+        // notebook actually serializes, not just UTF-16 source positions.
+        string longNote = new string('Ж', 4090);
+        Need(workbook.SetKind("markdown") && workbook.Replace(longNote), "prepare a long ordinary Markdown cell");
+        string clip = workbook.CopyCell();
+        int inserted = 0;
+        while (inserted < 32 && workbook.PasteCell(clip)) inserted++;
+        Need(inserted == 19 && workbook.Count == 20, "oversized paste must stop before an unreadable document");
+        string saved = workbook.Pack();
+        Need(workbook.Problem.Length > 0 && saved.Length < 512_000 &&
+            EditorNotebook.Open("large.ipynb", saved)?.Source(19) == longNote, "large saved notebook must round-trip");
+        Need(workbook.Undo(false) && workbook.Count == 19 && workbook.Undo(true) &&
+            workbook.Pack() == saved, "a rejected paste must not displace the user's real undo history");
+        string lines = "v = '" + new string('Д', 1500) + "'\nprint(v)\nprint(v)\nprint(v)";
+        Need(workbook.InsertCell(false, "code", lines, edit: false), "the new code source fits");
+        string beforeOutput = workbook.Pack();
+        Need(!workbook.Run() && workbook.Output(workbook.Count - 1) == "" && workbook.Pack() == beforeOutput &&
+            workbook.Problem.Length > 0, "oversized output must not corrupt a previously valid notebook");
+        Need(EditorNotebook.Open("large.ipynb", beforeOutput)?.Source(20) == lines,
+            "source from a too-verbose run remains saved and readable");
+        Need(workbook.EraseCell() && workbook.Count == 20 && workbook.Pack() == saved,
+            "recover by removing the unused calculation cell");
+    }
+
 }

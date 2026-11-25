@@ -5,6 +5,6 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="NotebookKernelRegression.cs;../engine/NotebookPythonKernel.cs;../engine/NotebookPythonSyntax.cs" />
+    <Compile Include="NotebookKernelRegression.cs;../engine/NotebookPythonKernel.cs;../engine/NotebookPythonSyntax.cs;../engine/EditorNotebook.cs;../engine/EditorNotebookStructure.cs;../engine/PythonHighlight.cs" />
   </ItemGroup>
 </Project>

@@ -142,6 +142,7 @@ jobs:
           export XDG_DATA_HOME="$temp/data" XDG_RUNTIME_DIR="$temp/runtime" TOUCH_TYPING_QA_DATA_ROOT="$temp/profile"
           mkdir -p -m 700 "$TOUCH_TYPING_QA_OUTPUT" "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR" "$TOUCH_TYPING_QA_DATA_ROOT"
           export PYTHONPATH="$package:$PWD/linux/tests" GDK_BACKEND=x11 GTK_A11Y=none GSK_RENDERER=cairo GSETTINGS_BACKEND=memory
+          /usr/bin/python3 linux/tests/test_x11_physical_keyboard.py
           timeout 150s xvfb-run -a -s "-screen 0 1024x600x24 -nolisten tcp" bash -c '
             set -e
             ffmpeg -y -loglevel warning -f x11grab -framerate 15 -video_size 1024x600 -i "$DISPLAY" -c:v libx264 -preset fast -crf 25 -pix_fmt yuv420p "$TOUCH_TYPING_QA_OUTPUT/gtk-workflow.mp4" &
@@ -149,6 +150,7 @@ jobs:
             trap "kill -INT $video 2>/dev/null || true; wait $video || true" EXIT
             /usr/bin/python3 linux/tests/test_preview2_native.py
           ' | tee "$TOUCH_TYPING_QA_OUTPUT/gtk-test.log"
+          native_failures=()
           for scenario in test_editor_notebooks_x11.py test_project_files_x11.py test_editor_course_x11.py test_typing_cycles_native.py test_typing_records_gtk.py test_typing_mixed_native.py test_live_guide_layout_native.py test_live_course_cards_x11.py test_notebook_workbench_native.py test_source_handoff_x11.py test_source_handoff_x11.py:course test_live_coach_x11.py test_notebook_file_handoff_x11.py; do
             script="${scenario%%:*}"
             proof_name="${script%.py}"
@@ -160,7 +162,7 @@ jobs:
             export TOUCH_TYPING_QA_OUTPUT="$RUNNER_TEMP/gtk-proof/$proof_name" TOUCH_TYPING_QA_DATA_ROOT="$temp/$proof_name"
             mkdir -m 700 "$TOUCH_TYPING_QA_OUTPUT" "$TOUCH_TYPING_QA_DATA_ROOT"
             export SCENARIO="$script" TOUCH_TYPING_QA_VIDEO=1
-            timeout 180s xvfb-run -a -s "-screen 0 1024x600x24 -nolisten tcp" bash -c '
+            if ! timeout 180s xvfb-run -a -s "-screen 0 1024x600x24 -nolisten tcp" bash -c '
               set -e
               printf "VIDEO_BASE %s %s\n" "$SCENARIO" "$(date +%s.%N)"
               ffmpeg -y -loglevel warning -f x11grab -framerate 15 -video_size 1024x600 -i "$DISPLAY" \
@@ -171,7 +173,9 @@ jobs:
                 test_typing_*) dbus-run-session -- /usr/bin/python3 "linux/tests/$SCENARIO";;
                 *) /usr/bin/python3 "linux/tests/$SCENARIO";;
               esac
-            ' | tee "$TOUCH_TYPING_QA_OUTPUT/gtk-test.log"
+            ' | tee "$TOUCH_TYPING_QA_OUTPUT/gtk-test.log"; then
+              native_failures+=("$proof_name")
+            fi
           done
           export TOUCH_TYPING_QA_OUTPUT="$RUNNER_TEMP/gtk-proof"
           unset TOUCH_TYPING_QA_DATA_ROOT
@@ -183,6 +187,22 @@ jobs:
             test -n "$TOUCH_TYPING_QA_XVFB_PID"
             /usr/bin/python3 linux/tests/test_live_backspace_x11.py
           ' | tee "$TOUCH_TYPING_QA_OUTPUT/gtk-backspace.log"
+          for rules in base evdev; do
+            export TOUCH_TYPING_QA_XKB_RULES="$rules" TOUCH_TYPING_QA_OUTPUT="$RUNNER_TEMP/gtk-proof/xkb-$rules"
+            export TOUCH_TYPING_QA_DATA_ROOT="$temp/xkb-profile-$rules" XDG_DATA_HOME="$temp/xkb-data-$rules"
+            mkdir -m 700 "$TOUCH_TYPING_QA_OUTPUT" "$TOUCH_TYPING_QA_DATA_ROOT" "$XDG_DATA_HOME"
+            if ! timeout 60s xvfb-run -a -s "-screen 0 1024x600x24 -nolisten tcp -noreset" bash -c '
+              set -e
+              setxkbmap -rules "$TOUCH_TYPING_QA_XKB_RULES" -model pc105 -layout us,ru
+              dbus-run-session -- /usr/bin/python3 linux/tests/test_x11_physical_keyboard_native.py
+            ' | tee "$TOUCH_TYPING_QA_OUTPUT/gtk-test.log"; then
+              native_failures+=("xkb-$rules")
+            fi
+          done
+          if (( ${#native_failures[@]} )); then
+            printf 'Native GTK failures: %s\n' "${native_failures[*]}" >&2
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -227,14 +247,6 @@ jobs:
           $app = "$env:RUNNER_TEMP/TouchTyping Live Candidate"
           Expand-Archive -LiteralPath $zip -DestinationPath $app
           $proof = "$env:RUNNER_TEMP/windows-proof"
-          $render = "$proof/editor-dpi"
-          $previousRoot = $env:TOUCH_TYPING_QA_DATA_ROOT
-          $env:TOUCH_TYPING_QA_DATA_ROOT = "$proof/editor-dpi-profile"
-          try {
-            $renderCheck = Start-Process -FilePath "$app/TouchTyping.exe" -ArgumentList ('--qa --check-live-render "{0}"' -f $render) -WorkingDirectory $app -Wait -PassThru
-            Get-Content "$render/result.txt"
-            if ($renderCheck.ExitCode -ne 0) { throw "WPF render proof failed ($($renderCheck.ExitCode))" }
-          } finally { $env:TOUCH_TYPING_QA_DATA_ROOT = $previousRoot }
           & "./windows/Test-Typing-Session.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-session"
           & "./windows/Test-TypingCardRecords.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-records"
           & "./windows/Test-Typing-Mixed.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-mixed"
@@ -251,8 +263,17 @@ jobs:
           & "./windows/Test-LiveCourseCards.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/course-cards"
           & "./windows/Test-LiveSourceHandoffs.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/source-handoffs"
           & "./windows/Test-Notebook-Workbench.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/notebook-workbench"
+          & "./windows/Test-Notebook-File-Handoff.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/notebook-file-handoff"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -LiveCoach -Seed 0 -OutputDirectory "$proof/live-coach"
           & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -LiveCoachHint -Seed 0 -OutputDirectory "$proof/live-coach-hint"
+          $render = "$proof/editor-dpi"
+          $previousRoot = $env:TOUCH_TYPING_QA_DATA_ROOT
+          $env:TOUCH_TYPING_QA_DATA_ROOT = "$proof/editor-dpi-profile"
+          try {
+            $renderCheck = Start-Process -FilePath "$app/TouchTyping.exe" -ArgumentList ('--qa --check-live-render "{0}"' -f $render) -WorkingDirectory $app -Wait -PassThru
+            Get-Content "$render/result.txt"
+            if ($renderCheck.ExitCode -ne 0) { throw "WPF render proof failed ($($renderCheck.ExitCode))" }
+          } finally { $env:TOUCH_TYPING_QA_DATA_ROOT = $previousRoot }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

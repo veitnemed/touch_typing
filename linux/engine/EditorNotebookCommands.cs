@@ -40,6 +40,7 @@ internal sealed partial class LabScene
     {
         var n = w.Tab?.Notebook;
         if (n == null) return false;
+        n.ClearProblem();
         bool changed = action switch
         {
             "edit" => n.SetMode(true),
@@ -73,6 +74,7 @@ internal sealed partial class LabScene
             w.Status = action == "interrupt" ? "Выполнение прервано. Уже выполненные ячейки не изменены." : n.Describe();
             Version++;
         }
+        if (!changed && n.Problem.Length > 0) w.Status = n.Problem;
         return changed;
     }
 

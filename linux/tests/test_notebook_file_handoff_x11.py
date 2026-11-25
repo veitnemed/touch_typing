@@ -1,14 +1,11 @@
 """Walk the connected VS Code lesson with native pressed/released keys.
 
-Run against extracted GTK assets. Only the Wayland consent handshake is
-replaced, because X11 has no such API.
+Run against extracted GTK assets with ordinary focused X11 input.
+No consent or notebook/file operation is mocked.
 """
 import re
-from unittest.mock import patch
-
 from test_notebook_advanced_routes import CSV_EXPECTED, filemap
-from test_preview2_native import QA, CaptureConsent, out
-from touch_typing import LabPage
+from test_preview2_native import QA, out
 
 
 def active(lab):
@@ -53,13 +50,6 @@ class NotebookHandoffWindow(QA):
         yield from self.video_hold(caption)
 
     def exercise(self):
-        def accept_without_wayland(page):
-            page.release_capture()
-            page.waiting_capture = False
-            page.surface = CaptureConsent()
-            page.render(page.host.call("lab-resume"))
-            page.desktop.grab_focus()
-
         self.navigate("home")
         for _ in range(26):
             yield
@@ -75,68 +65,67 @@ class NotebookHandoffWindow(QA):
         i = next(i for i in range(titles.get_n_items()) if titles.get_string(i).startswith("Сверить выгрузку,"))
         chooser.set_selected(i)
         yield from self.evidence("01-config", "VS Code: связанное поручение с выгрузкой CSV")
-        with patch.object(LabPage, "acquire", accept_without_wayland):
-            start.grab_focus()
-            yield from self.chord("Enter")
-            for _ in range(35):
-                if self.lab and self.lab.active:
-                    break
-                yield
-            lab = self.lab
-            assert lab and lab.active and lab.state["mission"] == "code-project-file-csv-notebook"
-            assert lab.state["actionLimit"] == lab.state["timeLimit"] == 0
-            self.focus_window()
-            lab.desktop.grab_focus()
-            before_files = filemap(lab.state)
-            incoming = next(path for path in before_files if "/incoming/" in path)
-            stem = incoming.rsplit("/", 1)[-1].removesuffix(".csv")
-            root = incoming.split("/incoming/")[0]
-            archived, moved = (root + "/data/" + stem + suffix for suffix in (".csv", "-updated.csv"))
-            final_notebook = root + "/verified/" + stem + "-verification.ipynb"
-            prior, fresh = None, False
-            for _ in range(50):
-                if not lab.active:
-                    break
-                task = lab.state["task"]
-                yield from self.enter_goal(lab)
-                editor = active(lab)
-                if task["text"] == "!conflict":
-                    assert "Ничего не заменено" in editor["status"] and filemap(lab.state) == before_files
-                    yield from self.evidence("02-conflict", "Две одноимённые выгрузки: ничего не перезаписано")
-                if (task["id"] == "file-paste" and task["text"] != "!conflict"
-                        and moved in filemap(lab.state) and editor["url"] == moved):
-                    assert filemap(lab.state)[moved] == before_files[incoming] and incoming not in filemap(lab.state)
-                    assert filemap(lab.state)[archived] == before_files[archived]
-                    yield from self.evidence("03-input-moved", "Новый CSV перенесён и открыт по фактическому пути")
-                if task["id"] == "notebook-run":
-                    n = editor["notebook"]
-                    if n and n["selected"] == 2 and n["cells"][2]["output"]:
-                        prior = n["cells"][2]["output"]
-                        yield from self.evidence("04-prior-result", "Прежний расчёт не соответствует новой выгрузке")
-                if task["id"] == "code-definition":
-                    assert editor["url"].endswith("_metrics.py") and not editor["url"].endswith("archive_metrics.py")
-                    caret = editor["bodyCursor"]
-                    assert editor["body"][caret - 4:caret] == "def "
-                    yield from self.evidence("05-definition", "F12 привёл к импортированному определению")
-                if task["id"] == "code-back":
-                    n = editor["notebook"]
-                    assert (n["selected"], n["caret"], n["editing"]) == (2, 0, True) and n["cells"][2]["stale"]
-                    yield from self.evidence("06-stale", "Курсор вернулся; прежний вывод явно отмечен")
-                if task["text"] == "Run All Cells":
-                    n = editor["notebook"]
-                    assert n["kernel"]["generation"] == 2 and not n["cells"][2]["stale"]
-                    assert prior != n["cells"][2]["output"] == CSV_EXPECTED[stem]
-                    fresh = True
-                    yield from self.evidence("07-fresh", "Чистое ядро использовало исправленный модуль и свежий CSV")
-            assert not lab.active and lab.state["finished"] and lab.state["solved"] == 39 and fresh
+        start.grab_focus()
+        yield from self.chord("Enter")
+        for _ in range(35):
+            if self.lab and self.lab.active and not self.lab.state["paused"]:
+                break
+            yield
+        lab = self.lab
+        assert lab and lab.active and lab.window_only_keys and lab.state["mission"] == "code-project-file-csv-notebook"
+        assert lab.state["actionLimit"] == lab.state["timeLimit"] == 0
+        self.focus_window()
+        lab.desktop.grab_focus()
+        before_files = filemap(lab.state)
+        incoming = next(path for path in before_files if "/incoming/" in path)
+        stem = incoming.rsplit("/", 1)[-1].removesuffix(".csv")
+        root = incoming.split("/incoming/")[0]
+        archived, moved = (root + "/data/" + stem + suffix for suffix in (".csv", "-updated.csv"))
+        final_notebook = root + "/verified/" + stem + "-verification.ipynb"
+        prior, fresh = None, False
+        for _ in range(50):
+            if not lab.active:
+                break
+            task = lab.state["task"]
+            yield from self.enter_goal(lab)
             editor = active(lab)
-            assert editor["url"] == final_notebook and final_notebook in filemap(lab.state)
-            n = editor["notebook"]
-            assert (n["kernel"]["counter"], n["cells"][2]["output"], n["cells"][2]["outputLabel"]) == (
-                0, CSV_EXPECTED[stem], "Сохранённый вывод")
-            yield from self.evidence("08-result", "Сохранённый блокнот открыт снова из verified")
-            print(f"PASS GTK: конфликт → перенос CSV → F12 и исправление → чистый расчёт {CSV_EXPECTED[stem]} "
-                  "→ сохранить, переместить и открыть блокнот. 39 проверенных действий.", flush=True)
+            if task["text"] == "!conflict":
+                assert "Ничего не заменено" in editor["status"] and filemap(lab.state) == before_files
+                yield from self.evidence("02-conflict", "Две одноимённые выгрузки: ничего не перезаписано")
+            if (task["id"] == "file-paste" and task["text"] != "!conflict"
+                    and moved in filemap(lab.state) and editor["url"] == moved):
+                assert filemap(lab.state)[moved] == before_files[incoming] and incoming not in filemap(lab.state)
+                assert filemap(lab.state)[archived] == before_files[archived]
+                yield from self.evidence("03-input-moved", "Новый CSV перенесён и открыт по фактическому пути")
+            if task["id"] == "notebook-run":
+                n = editor["notebook"]
+                if n and n["selected"] == 2 and n["cells"][2]["output"]:
+                    prior = n["cells"][2]["output"]
+                    yield from self.evidence("04-prior-result", "Прежний расчёт не соответствует новой выгрузке")
+            if task["id"] == "code-definition":
+                assert editor["url"].endswith("_metrics.py") and not editor["url"].endswith("archive_metrics.py")
+                caret = editor["bodyCursor"]
+                assert editor["body"][caret - 4:caret] == "def "
+                yield from self.evidence("05-definition", "F12 привёл к импортированному определению")
+            if task["id"] == "code-back":
+                n = editor["notebook"]
+                assert (n["selected"], n["caret"], n["editing"]) == (2, 0, True) and n["cells"][2]["stale"]
+                yield from self.evidence("06-stale", "Курсор вернулся; прежний вывод явно отмечен")
+            if task["text"] == "Run All Cells":
+                n = editor["notebook"]
+                assert n["kernel"]["generation"] == 2 and not n["cells"][2]["stale"]
+                assert prior != n["cells"][2]["output"] == CSV_EXPECTED[stem]
+                fresh = True
+                yield from self.evidence("07-fresh", "Чистое ядро использовало исправленный модуль и свежий CSV")
+        assert not lab.active and lab.state["finished"] and lab.state["solved"] == 39 and fresh
+        editor = active(lab)
+        assert editor["url"] == final_notebook and final_notebook in filemap(lab.state)
+        n = editor["notebook"]
+        assert (n["kernel"]["counter"], n["cells"][2]["output"], n["cells"][2]["outputLabel"]) == (
+            0, CSV_EXPECTED[stem], "Сохранённый вывод")
+        yield from self.evidence("08-result", "Сохранённый блокнот открыт снова из verified")
+        print(f"PASS GTK: конфликт → перенос CSV → F12 и исправление → чистый расчёт {CSV_EXPECTED[stem]} "
+              "→ сохранить, переместить и открыть блокнот. 39 проверенных действий.", flush=True)
 
 
 if __name__ == "__main__":

@@ -84,15 +84,16 @@ internal static partial class LiveUiSmoke
                 "native left-edge Run opens traceback from the before-state");
             Check(ReadSolved() == previous, "A pointer equivalent did not award the required physical keyboard action.");
             WorkbookFrame("workbench-wpf-02-run-cell");
-            Key("Enter"); Chord("Ctrl+A");
+            Key("Enter"); Chord("Ctrl+A"); EnterCharacters("print('");
             for (int i=0;i<8;i++) Send(Enumerable.Repeat('x',16).SelectMany(Character).ToArray());
-            for (int i=0;i<6;i++) Send(string.Concat(Enumerable.Repeat("\n1",5)).SelectMany(Character).ToArray());
+            EnterCharacters("')");
+            for (int i=0;i<29;i++) { Key("Enter"); EnterCharacters("print(1)"); }
             Until(delegate { return NotebookSummary().Contains("редактирование") && NotebookSummary().Contains(new string('x',100)); },
                 "native keyboard sends long code into an edited cell");
             WorkbookFrame("workbench-wpf-03-edit-long");
             Key("Esc"); Chord("Ctrl+Enter"); Key("PageDown"); Chord("Shift+PageDown");
             for (int i=0;i<7;i++) Key("PageDown");
-            WorkbookFrame("workbench-wpf-04-scrolled-traceback");
+            WorkbookFrame("workbench-wpf-04-scrolled-output");
             string beforeMenu = NotebookSummary();
             Chord("Shift+F10"); Key("Down"); Key("Down"); Key("Esc");
             Check(NotebookSummary() == beforeMenu, "Closing keyboard context menu does not edit text or move the selected cell.");

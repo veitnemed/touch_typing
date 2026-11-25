@@ -11,6 +11,17 @@ namespace TouchTypingStudio;
 internal sealed partial class EditorNotebook
 {
     private readonly JsonObject doc;
+    private const int MaxPackedLength = 512_000;
+    private string packed;
+    internal string Problem { get; private set; } = "";
+    internal void ClearProblem() => Problem = "";
+    private bool FitsDocument()
+    {
+        packed = null;
+        if (Pack().Length <= MaxPackedLength) return true;
+        Problem = "Блокнот достиг предела размера. Уберите лишний вывод или ячейки, чтобы его можно было снова открыть.";
+        return false;
+    }
     private NotebookPythonKernel kernel = new();
     private readonly HashSet<string> staleFiles = new(StringComparer.Ordinal);
     internal int Selected, Caret, Anchor, Counter;
@@ -24,6 +35,8 @@ internal sealed partial class EditorNotebook
     internal string Source(int i) => Lines(Cell(i)["source"]);
     private string Kind(int i) => Str(Cell(i)["cell_type"]);
     internal bool IsCode(int i) => Kind(i) == "code";
+    internal string CellIdentity(int i) => Id(i);
+    internal int CellIndex(string id) => Enumerable.Range(0, Count).FirstOrDefault(i => Id(i) == id, -1);
     internal string Output(int i)
     {
         if (Cell(i)["outputs"] is not JsonArray arr) return "";
@@ -34,11 +47,11 @@ internal sealed partial class EditorNotebook
     }
     internal int Runs(int i) => Number(Cell(i)["execution_count"]);
     internal bool Failed(int i) => Cell(i)["outputs"] is JsonArray arr && arr.OfType<JsonObject>().Any(o => Str(o["output_type"]) == "error");
-    internal string Pack() => doc.ToJsonString();
+    internal string Pack() => packed ??= doc.ToJsonString();
     private EditorNotebook(JsonObject root) { doc = root; EnsureIds(); }
     internal static EditorNotebook Open(string path, string body)
     {
-        if (!path.EndsWith(".ipynb", StringComparison.OrdinalIgnoreCase) || body.Length > 512_000) return null;
+        if (!path.EndsWith(".ipynb", StringComparison.OrdinalIgnoreCase) || body.Length > MaxPackedLength) return null;
         try
         {
             if (JsonNode.Parse(body, documentOptions: new JsonDocumentOptions { MaxDepth = 64 }) is not JsonObject root ||
@@ -47,7 +60,7 @@ internal sealed partial class EditorNotebook
                     row["source"] is not (JsonArray or JsonValue))) return null;
             var n = new EditorNotebook(root);
             // Opening a saved document does NOT restore live kernel variables.
-            return n;
+            return n.Pack().Length <= MaxPackedLength ? n : null;
         }
         catch (JsonException) { return null; }
     }
@@ -55,7 +68,8 @@ internal sealed partial class EditorNotebook
     {
         var n = new EditorNotebook((JsonObject)doc.DeepClone()) {
             Selected = Selected, Caret = Caret, Anchor = Anchor, Editing = Editing, Counter = Counter,
-            nextId = nextId, generation = generation, interrupted = interrupted, DeleteArmed = DeleteArmed };
+            nextId = nextId, generation = generation, interrupted = interrupted, DeleteArmed = DeleteArmed,
+            Problem = Problem };
         n.kernel = kernel.Clone(); n.staleFiles.UnionWith(staleFiles);
         foreach (var pair in executions) n.executions.Add(pair.Key, pair.Value);
         n.undo.AddRange(undo);
@@ -85,29 +99,41 @@ internal sealed partial class EditorNotebook
         Caret = Anchor = Math.Min(Caret, Source(Selected).Length); return true;
     }
     internal void SelectAll() { Anchor = 0; Caret = Source(Selected).Length; }
-    internal void Replace(string text) => ReplaceRange(Math.Min(Anchor, Caret), Math.Max(Anchor, Caret), text);
+    internal bool Replace(string text) => ReplaceRange(Math.Min(Anchor, Caret), Math.Max(Anchor, Caret), text);
 
-    internal void ReplaceRange(int lo, int hi, string text)
+    internal bool ReplaceRange(int lo, int hi, string text)
     {
         string src = Source(Selected);
-        if (Busy || src.Length - hi + lo + text.Length > 4096) return;
-        Remember();
-        Cell(Selected)["source"] = new JsonArray((JsonNode)(src[..lo] + text + src[hi..]));
-        Caret = Anchor = lo + text.Length;
+        if (Busy || lo < 0 || hi < lo || hi > src.Length) return false;
+        if (src.Length - hi + lo + text.Length > 4096)
+        { Problem = "Учебная ячейка вмещает до 4096 знаков."; return false; }
+        var before = Capture(false);
+        var cell = Cell(Selected); var previous = cell["source"];
+        cell["source"] = new JsonArray((JsonNode)(src[..lo] + text + src[hi..]));
+        if (!FitsDocument())
+        {
+            cell["source"] = previous; packed = null;
+            return false;
+        }
+        Remember(before); Caret = Anchor = lo + text.Length; ClearProblem();
+        return true;
     }
+
     internal bool Run(Func<string, string> read = null)
     {
         if (Busy) return false;
         // Ctrl+Enter runs the cell and focuses its container, not the next cell.
         Editing = false; DeleteArmed = false; interrupted = false;
-        Execute(Selected, read);
-        return true;
+        return Execute(Selected, read);
     }
 
-    private void Execute(int index, Func<string, string> read)
+    private bool Execute(int index, Func<string, string> read)
     {
-        if (Kind(index) == "markdown") return;
-        var cell = Cell(index); cell["execution_count"] = ++Counter;
+        ClearProblem();
+        if (Kind(index) == "markdown") return true;
+        var cell = Cell(index);
+        var priorCount = cell["execution_count"]; var priorOutput = cell["outputs"];
+        cell["execution_count"] = ++Counter;
         var outs = new JsonArray(); cell["outputs"] = outs;
         var run = kernel.Run(Source(index), read);
         if (run.Stream.Length > 0)
@@ -123,7 +149,16 @@ internal sealed partial class EditorNotebook
         else if (run.Result is string result)
             outs.Add(new JsonObject { ["output_type"] = "execute_result", ["execution_count"] = Counter,
                 ["data"] = new JsonObject { ["text/plain"] = new JsonArray((JsonNode)result) }, ["metadata"] = new JsonObject() });
+        if (!FitsDocument())
+        {
+            // The kernel did execute, but the persisted output must remain
+            // reopenable. Never label the existing output as reproduced.
+            cell["outputs"] = priorOutput; cell["execution_count"] = priorCount; packed = null;
+            executions.Remove(Id(index)); staleFiles.Remove(Id(index));
+            return false;
+        }
         executions[Id(index)] = run; staleFiles.Remove(Id(index));
+        return true;
     }
     internal void SynchronizeWorkspace(Func<string, string> read)
     {
@@ -152,7 +187,7 @@ internal sealed partial class EditorNotebook
         cells = Enumerable.Range(0, Cells.Count).Select(i => new { id = Id(i), kind = Kind(i), source = Source(i),
             runs = Runs(i), stale = Stale(i), outputLabel = OutputLabel(i), output = Output(i), failed = Failed(i),
             traceback = Traceback(i), syntax = Kind(i) == "code" ? PythonHighlight.For(Source(i), "cell.py") : [] }).ToArray() };
-    internal string Describe() => "Блокнот · ячейка " + (Selected + 1) + " из " + Cells.Count +
+    internal string Describe() => Problem.Length > 0 ? Problem : "Блокнот · ячейка " + (Selected + 1) + " из " + Cells.Count +
         (Editing ? " · редактирование" : " · выбор ячейки") + ". " + Source(Selected) +
         (Output(Selected) != "" ? ". " + OutputLabel(Selected) + ": " + Output(Selected) :
             Runs(Selected) > 0 ? ". " + OutputLabel(Selected) + ": без вывода" : "");

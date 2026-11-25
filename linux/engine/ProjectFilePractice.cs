@@ -86,11 +86,24 @@ internal sealed partial class LabScene
     // Move an entry, not the active editor selection. Copy deliberately does not rebind tabs.
     private void RelinkTabs(string oldPath, string newPath)
     {
+        string MovePath(string path) => path == oldPath || path.StartsWith(oldPath + "/", StringComparison.Ordinal)
+            ? newPath + path[oldPath.Length..] : path;
+        SymbolLocation MoveSymbol(SymbolLocation location) => location with { Path = MovePath(location.Path) };
         foreach (var w in Windows.Where(win => win.App == "code"))
-            foreach (var tab in w.Tabs.Concat(w.ClosedTabs).Where(t => EditorPath(t) == oldPath || EditorPath(t).StartsWith(oldPath + "/", StringComparison.Ordinal)))
+        {
+            foreach (var tab in w.Tabs.Concat(w.ClosedTabs))
             {
-                tab.Url = newPath + EditorPath(tab)[oldPath.Length..]; tab.Title = NameOf(tab.Url);
+                string path = EditorPath(tab), moved = MovePath(path);
+                if (path != moved) { tab.Url = moved; tab.Title = NameOf(moved); }
             }
+            var navigation = w.SymbolBack.Reverse().Select(jump => jump with { Path = MovePath(jump.Path) }).ToArray();
+            w.SymbolBack.Clear();
+            foreach (var jump in navigation) w.SymbolBack.Push(jump);
+            w.SymbolReferences = w.SymbolReferences.Select(MoveSymbol).ToArray();
+            if (w.PendingSymbol is SymbolBinding pending)
+                w.PendingSymbol = pending with { Path = MovePath(pending.Path),
+                    Definition = MoveSymbol(pending.Definition), Occurrences = pending.Occurrences.Select(MoveSymbol).ToArray() };
+        }
     }
 
     private static bool LegalLeaf(string name, bool windows)
@@ -183,7 +196,7 @@ internal sealed partial class LabScene
             switch (revision.Kind)
             {
                 case "move":
-                    if (Occupied(revision.From))
+                    if (Occupied(revision.From, revision.To))
                         return RejectFile(w, "Прежнее имя уже занято. Отмена не заменила другой файл.");
                     Terminal.Transfer(revision.To, revision.From, true);
                     RelinkTabs(revision.To, revision.From);
@@ -192,7 +205,7 @@ internal sealed partial class LabScene
                     break;
                 case "copy":
                     if (Terminal.ReadFile(revision.To) != revision.Content || Windows.Any(win => win.App == "code" &&
-                        win.Tabs.Any(tab => EditorPath(tab) == revision.To && tab.Body != tab.SavedBody)))
+                        win.Tabs.Concat(win.ClosedTabs).Any(tab => EditorPath(tab) == revision.To && tab.Body != tab.SavedBody)))
                         return RejectFile(w, "Копия уже изменена. Отмена не удалит вашу правку.");
                     Terminal.RemoveProjectEntry(revision.To, false);
                     foreach (var win in Windows.Where(win => win.App == "code"))
@@ -200,6 +213,9 @@ internal sealed partial class LabScene
                         int former = win.ActiveTab;
                         var activeTab = win.Tab;
                         win.Tabs.RemoveAll(tab => EditorPath(tab) == revision.To);
+                        var keptClosed = win.ClosedTabs.Reverse().Where(tab => EditorPath(tab) != revision.To).ToArray();
+                        win.ClosedTabs.Clear();
+                        foreach (var tab in keptClosed) win.ClosedTabs.Push(tab);
                         int kept = win.Tabs.IndexOf(activeTab);
                         win.ActiveTab = kept >= 0 ? kept : Math.Clamp(former, 0, Math.Max(0, win.Tabs.Count - 1));
                     }

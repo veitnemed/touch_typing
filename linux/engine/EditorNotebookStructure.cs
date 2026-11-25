@@ -68,10 +68,11 @@ internal sealed partial class EditorNotebook
 
     private Revision Capture(bool structure) => new(Id(Selected), Selected, Caret, Anchor, Editing,
         structure ? null : Source(Selected), structure ? (JsonArray)Cells.DeepClone() : null);
-    private void Remember(bool structure = false)
+    private void Remember(Revision before)
     {
-        Push(undo, Capture(structure)); redo.Clear();
+        Push(undo, before); redo.Clear();
     }
+    private void Remember(bool structure = false) => Remember(Capture(structure));
 
     private sealed record CellClip(string Type, string Source);
     internal string CopyCell() => System.Text.Json.JsonSerializer.Serialize(new CellClip(Kind(Selected), Source(Selected)));
@@ -97,9 +98,16 @@ internal sealed partial class EditorNotebook
     internal bool InsertCell(bool above, string kind = "code", string source = "", bool edit = true)
     {
         if (Busy || Cells.Count >= MaxCells) return false;
-        Remember(structure: true);
-        int pos = above ? Selected : Selected + 1;
+        if (source.Length > 4096) return false;
+        var before = Capture(true);
+        int pos = above ? Selected : Selected + 1, previousId = nextId;
         Cells.Insert(pos, NewCell(NewId(), kind, source));
+        if (!FitsDocument())
+        {
+            Cells.RemoveAt(pos); nextId = previousId; packed = null;
+            return false;
+        }
+        Remember(before); ClearProblem();
         Selected = pos; Caret = Anchor = 0; Editing = edit; DeleteArmed = false;
         return true;
     }
@@ -111,7 +119,7 @@ internal sealed partial class EditorNotebook
         Remember(structure: true);
         var cell = Cells[Selected];
         Cells.RemoveAt(Selected);
-        Cells.Insert(dest, cell);
+        Cells.Insert(dest, cell); packed = null;
         Selected = dest; Editing = false; DeleteArmed = false;
         return true;
     }
@@ -119,9 +127,16 @@ internal sealed partial class EditorNotebook
     internal bool EraseCell()
     {
         if (Busy) return false;
-        Remember(structure: true);
+        var before = Capture(true);
+        int previousId = nextId;
         Cells.RemoveAt(Selected);
         if (Count == 0) Cells.Add(NewCell(NewId(), "code"));
+        if (!FitsDocument())
+        {
+            doc["cells"] = before.Structure.DeepClone(); nextId = previousId; packed = null;
+            return false;
+        }
+        Remember(before); ClearProblem();
         Selected = Math.Min(Selected, Count - 1);
         Caret = Anchor = 0; Editing = false; DeleteArmed = false;
         return true;
@@ -130,13 +145,15 @@ internal sealed partial class EditorNotebook
     internal bool SetKind(string kind)
     {
         if (Busy || Kind(Selected) == kind || kind is not ("code" or "markdown")) return false;
-        Remember(structure: true);
+        var before = Capture(true);
         var cell = Cell(Selected);
         cell["cell_type"] = kind;
         if (kind == "code")
         { cell["outputs"] = new JsonArray(); cell["execution_count"] = null; }
         else
         { cell.Remove("outputs"); cell.Remove("execution_count"); }
+        if (!FitsDocument()) { doc["cells"] = before.Structure.DeepClone(); packed = null; return false; }
+        Remember(before); ClearProblem();
         executions.Remove(Id(Selected));
         DeleteArmed = false;
         return true;
@@ -147,22 +164,24 @@ internal sealed partial class EditorNotebook
         if (Busy) return false;
         var from = forward ? redo : undo; var to = forward ? undo : redo;
         if (from.Count == 0) return false;
-        var last = from[^1];
-        from.RemoveAt(from.Count - 1);
+        var last = from[^1]; Revision inverse;
         if (last.Structure != null)
         {
-            Push(to, Capture(true));
-            doc["cells"] = last.Structure.DeepClone();
+            // The snapshot was accepted under the same document limit.
+            inverse = Capture(true); doc["cells"] = last.Structure.DeepClone(); packed = null;
         }
         else
         {
-            int index = Enumerable.Range(0, Count).FirstOrDefault(i => Id(i) == last.Id, -1);
+            int index = CellIndex(last.Id);
             if (index < 0) return false;
             int length = Source(index).Length;
-            Push(to, new Revision(last.Id, index, Selected == index ? Caret : length, Selected == index ? Anchor : length,
-                Editing, Source(index)));
-            Cell(index)["source"] = new JsonArray((JsonNode)last.Source);
+            inverse = new Revision(last.Id, index, Selected == index ? Caret : length, Selected == index ? Anchor : length,
+                Editing, Source(index));
+            var cell = Cell(index); var previous = cell["source"];
+            cell["source"] = new JsonArray((JsonNode)last.Source);
+            if (!FitsDocument()) { cell["source"] = previous; packed = null; return false; }
         }
+        from.RemoveAt(from.Count - 1); Push(to, inverse); ClearProblem();
         Selected = last.Index;
         Caret = last.Caret; Anchor = last.Anchor; Editing = last.Editing; DeleteArmed = false;
         return true;
@@ -176,13 +195,13 @@ internal sealed partial class EditorNotebook
             if (Kind(i) != "code") continue;
             Cell(i)["execution_count"] = null; Cell(i)["outputs"] = new JsonArray();
         }
-        executions.Clear();
+        executions.Clear(); packed = null; ClearProblem();
         return true;
     }
 
     internal bool Restart()
     {
-        queue.Clear(); kernel.Reset(); executions.Clear(); staleFiles.Clear(); Counter = 0; generation++; interrupted = false;
+        ClearProblem(); queue.Clear(); kernel.Reset(); executions.Clear(); staleFiles.Clear(); Counter = 0; generation++; interrupted = false;
         Editing = false; DeleteArmed = false;
         return true;
     }
@@ -209,8 +228,7 @@ internal sealed partial class EditorNotebook
     internal bool Tick(Func<string, string> read)
     {
         if (!queue.TryDequeue(out int cell)) return false;
-        Execute(cell, read);
-        if (Failed(cell)) queue.Clear();
+        if (!Execute(cell, read) || Failed(cell)) queue.Clear();
         return true;
     }
 

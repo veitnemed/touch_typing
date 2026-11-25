@@ -17,7 +17,10 @@ gi.require_version("Graphene", "1.0")
 gi.require_version("PangoCairo", "1.0")
 from gi.repository import Gdk, Gio, GLib, Graphene, Gtk, Pango, PangoCairo
 
-from platform_linux import APP_ID, Engine, EngineError, FINGERS, InputSources, MODIFIERS, PHYSICAL, ROOT, active_keyboard_layout, chord_label, key_label, layout_for_group
+from platform_linux import (
+    APP_ID, ROOT, Engine, EngineError, FINGERS, InputSources, MODIFIERS, PhysicalKeyboard,
+    active_keyboard_layout, chord_label, key_label, layout_for_group,
+)
 from lab_view import DesktopView
 from visuals import PracticeLine, fingers as paint_fingers, hand_picture, series_chart
 
@@ -611,6 +614,8 @@ class Studio(Gtk.Application):
         self.window.set_size_request(960, 600)
         self.build_header()
         self.window.connect("close-request", self.close_request)
+        self.physical_keyboard = PhysicalKeyboard(Gdk, self.window.get_display())
+        self.physical_keyboard.watch_x11()
         self.window.connect("notify::is-active", self.focus_changed)
         controller = Gtk.EventControllerKey()
         controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
@@ -1599,10 +1604,15 @@ class Studio(Gtk.Application):
         return True
 
     def focus_changed(self, *_):
+        active = self.window.is_active()
+        if active:
+            self.physical_keyboard.refresh()  # old GTK does not notify all X11 keymap changes
+        else:
+            self.physical_keyboard.clear()
         if self.lab:
-            self.lab.focus(self.window.is_active())
+            self.lab.focus(active)
             return
-        if self.window.is_active():
+        if active:
             if self.workout == "shortcuts" and self.state["inputMode"] == "waiting":
                 GLib.idle_add(self.resolve_capture)
                 if self.capture_dialog_seen:
@@ -1740,7 +1750,8 @@ class Studio(Gtk.Application):
         elif controller is not None:
             # GNOME can replace the Wayland keymap when switching sources. Ask GDK
             # how it translates physical A in this event, independent of source-list order.
-            candidate = layout_for_group(Gdk, self.window.get_display(), controller.get_group())
+            candidate = layout_for_group(Gdk, self.window.get_display(), controller.get_group(),
+                                         self.physical_keyboard.layout_probe)
         if candidate and candidate != self.layout:
             self.layout = candidate
             self.show_layout()
@@ -1751,7 +1762,7 @@ class Studio(Gtk.Application):
                 self.refresh_typing_records()
 
     def key_pressed(self, controller, keyval, keycode, modifiers):
-        key = PHYSICAL.get(keycode, "")
+        key = self.physical_keyboard.press(keyval, keycode)
         character = chr(value) if (value := Gdk.keyval_to_unicode(keyval)) else ""
         self.update_layout(controller, character)
         if self.lab:
@@ -1860,8 +1871,8 @@ class Studio(Gtk.Application):
                 return True
         return False
 
-    def key_released(self, _controller, _keyval, keycode, _modifiers):
-        key = PHYSICAL.get(keycode, "")
+    def key_released(self, _controller, keyval, keycode, _modifiers):
+        key = self.physical_keyboard.release(keyval, keycode)
         if self.lab:
             self.lab.key_up(key)
             return
@@ -2078,7 +2089,8 @@ class Studio(Gtk.Application):
         choice = self.typing_cycles.get_selected()
         # A pointer click or Space can start an exercise immediately after the
         # system layout changed. Neither input is evidence for the last letter's layout.
-        active = active_keyboard_layout(Gdk, self.window.get_display()) or self.sources.guess(self.layout)
+        active = (active_keyboard_layout(Gdk, self.window.get_display(), self.physical_keyboard.layout_probe)
+                  or self.sources.guess(self.layout))
         if active != self.layout:
             self.layout = active
             self.show_layout()

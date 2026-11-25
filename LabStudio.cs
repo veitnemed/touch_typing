@@ -507,6 +507,8 @@ namespace TouchTypingStudio
                     keys.Length > 0 ? "keys:" + keys : text.Length > 0 ? "text:" + text : "none:");
             }
             labDesktop.Update(state.D("scene"), labApp);
+            if (HasNotebookHandoffWitness(state))
+                AutomationProperties.SetItemType(labDesktop, NotebookHandoffWitness(state));
             string status = state.S("status").Replace("LSuper", "⊞").Replace("RSuper", "⊞ прав.").Replace("Super", "⊞");
             string held = string.Join(" + ", state.Items("held").Select(key => LiveKeyboard.Title(key.Value())));
             labStatus.Text = paused ? "Пауза · пробел — продолжить" :

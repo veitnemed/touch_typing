@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace TouchTypingStudio;
 
@@ -45,20 +46,25 @@ internal static class LabStressTests
         { foreach (string key in Run.Held.ToArray().Reverse()) Event(key, false); }
         internal void Chord(string keys, bool retainModifiers = false, bool reverseModifiers = false, int repeats = 0)
         {
-            var chord = Gesture.Parse(keys).Chords[0];
-            string[] modifiers = chord.Modifiers.Select(key => key switch
-            { "Ctrl" => Random.Next(2) == 0 ? "LCtrl" : "RCtrl", "Shift" => Random.Next(2) == 0 ? "LShift" : "RShift", "Alt" => "LAlt", "Super" => "LSuper", _ => key }).ToArray();
-            if (reverseModifiers) Array.Reverse(modifiers);
-            foreach (string modifier in modifiers) Event(modifier, true);
-            if (chord.Trigger != null)
+            var gesture = Gesture.Parse(keys);
+            for (int i = 0; i < gesture.Chords.Length; i++)
             {
-                Event(chord.Trigger, true, chord.Modifiers.Count() > 0 ? "М" : "");
-                int accepted = Run.Solved;
-                for (int repeat = 0; repeat < repeats; repeat++)
-                { Event(chord.Trigger, true, "V"); Check(Run.Solved == accepted, "Autorepeat cannot add a second success"); }
-                Event(chord.Trigger, false);
+                var chord = gesture.Chords[i];
+                string[] modifiers = chord.Modifiers.Select(key => key switch
+                { "Ctrl" => Random.Next(2) == 0 ? "LCtrl" : "RCtrl", "Shift" => Random.Next(2) == 0 ? "LShift" : "RShift", "Alt" => "LAlt", "Super" => "LSuper", _ => key }).ToArray();
+                if (reverseModifiers) Array.Reverse(modifiers);
+                foreach (string modifier in modifiers) Event(modifier, true);
+                if (chord.Trigger != null)
+                {
+                    Event(chord.Trigger, true, chord.Modifiers.Length > 0 ? "М" : "");
+                    int accepted = Run.Solved;
+                    for (int repeat = 0; repeat < repeats; repeat++)
+                    { Event(chord.Trigger, true, "V"); Check(Run.Solved == accepted, "Autorepeat cannot add a second success"); }
+                    Event(chord.Trigger, false);
+                }
+                if (!retainModifiers || i < gesture.Chords.Length - 1)
+                    foreach (string modifier in modifiers.Reverse()) Event(modifier, false);
             }
-            if (!retainModifiers) foreach (string modifier in modifiers.Reverse()) Event(modifier, false);
         }
         internal void Type(string text)
         {
@@ -73,6 +79,19 @@ internal static class LabStressTests
                 if (shift.Length > 0) Event(shift, false);
             }
         }
+        private void ReplaceModuleFragment(string pattern, string corrected)
+        {
+            var w = Run.Scene.Active;
+            var before = Regex.Match(w.Body, pattern);
+            var after = Regex.Match(corrected, pattern);
+            Check(before.Success && after.Success && before.Value != after.Value,
+                "Notebook dependency instructions identify a real path/formula change");
+            Chord("Ctrl+F"); Chord("Ctrl+A"); Type(before.Value); Chord("Enter"); Chord("Esc");
+            Check(w.Focus == "body" && w.Body[w.Start..w.End] == before.Value,
+                "Find selects the real module fragment");
+            Type(after.Value);
+        }
+
         internal void Complete()
         {
             Release();
@@ -82,7 +101,12 @@ internal static class LabStressTests
             {
                 if (Run.Scene.CompletingMovedReport && task.Id == "save" && task.Text.Length > 0)
                 { Chord("Ctrl+End"); Type(task.Text); }
-                if (Run.Scene.NotebookCourse && task.Text.Length > 0 && task.Id is "quick-choose" or "save")
+                if (Run.Scene.CsvNotebook && task.Id == "save" && task.Text.StartsWith("from csv import", StringComparison.Ordinal))
+                {
+                    ReplaceModuleFragment(@"data/[a-z-]+\.csv", task.Text);
+                    ReplaceModuleFragment(@"return [a-z]+\(values\)", task.Text);
+                }
+                else if (Run.Scene.NotebookCourse && task.Text.Length > 0 && task.Id is "quick-choose" or "palette-choose" or "save")
                     Type(task.Text);
                 for (int i = 0; i < 32 && Run.Solved == before; i++)
                     Chord(task.Keys, reverseModifiers: Random.Next(2) == 0, repeats: 3);

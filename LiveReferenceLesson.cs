@@ -390,6 +390,8 @@ namespace TouchTypingStudio
             if (!pausedPreview && verifyMode && labDesktop != null &&
                 Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_BROWSER_CLONE") == "1")
                 AutomationProperties.SetItemType(titleLabel, labDesktop.BrowserPracticeWitness(state.D("scene")));
+            if (!pausedPreview && HasNotebookHandoffWitness(state))
+                AutomationProperties.SetItemType(titleLabel, NotebookHandoffWitness(state));
             AutomationProperties.SetHelpText(titleLabel, "Выполнено " + count + ". Ошибки " + errors + ". Рекорд " +
                 result.I("record") + ". " + (pausedPreview ? "Занятие на паузе." : complete ? "Цель занятия выполнена." : "Занятие сохранено."));
             headingText.Children.Add(titleLabel);

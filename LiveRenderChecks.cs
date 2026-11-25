@@ -136,7 +136,8 @@ namespace TouchTypingStudio
                 var pixels = Draw(directory, "code", "code-themed-render-" + dpi + "dpi", state, dpi);
                 int width = 960 * dpi / 96;
                 int x0 = 96 * dpi / 96, x1 = 212 * dpi / 96, y0 = 92 * dpi / 96, y1 = 112 * dpi / 96;
-                int keywords = 0, functions = 0, selection = 0, caret = 0;
+                int keywords = 0, functions = 0, selection = 0;
+                var caretColumns = new int[x1 - x0];
                 for (int y = y0; y < y1; y++)
                     for (int x = x0; x < x1; x++)
                     {
@@ -144,11 +145,18 @@ namespace TouchTypingStudio
                         if (NearPixel(pixels, index, 255, 123, 114)) keywords++;
                         if (NearPixel(pixels, index, 210, 168, 255)) functions++;
                         if (CodeSelectionPixel(pixels, index)) selection++;
-                        if (NearPixel(pixels, index, 47, 129, 247)) caret++;
+                        // The 1.5 DIP caret can straddle two device pixels.
+                        // Require a long, narrow blue stroke at the selected
+                        // word's right edge, not an unblended exact RGB sample.
+                        int r = pixels[index + 2], g = pixels[index + 1], b = pixels[index];
+                        if (x >= 178 * dpi / 96 && x <= 205 * dpi / 96 &&
+                            r <= 85 && g - r >= 38 && b >= 172 && b - g >= 62)
+                            caretColumns[x - x0]++;
                     }
-                if (keywords < 1 || functions < 1 || selection < 45 || caret < 2)
-                    throw new InvalidOperationException(string.Format("WPF themed code pixels at {0} DPI: keyword {1}, function {2}, selection {3}, caret {4}",
-                        dpi, keywords, functions, selection, caret));
+                int caret = caretColumns.Count(column => column >= 12 * dpi / 96);
+                if (keywords < 1 || functions < 1 || selection < 45 || caret < 1 || caret > 4)
+                    throw new InvalidOperationException(string.Format("WPF themed code pixels at {0} DPI: keyword {1}, function {2}, selection {3}, caret columns {4} (strongest {5})",
+                        dpi, keywords, functions, selection, caret, caretColumns.Max()));
             }
         }
 

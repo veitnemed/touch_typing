@@ -110,9 +110,9 @@ internal sealed partial class LabScene
                 int lo = Math.Min(n.Caret, n.Anchor), hi = Math.Max(n.Caret, n.Anchor);
                 if (lo == hi) return false;
                 Clipboard = n.Source(n.Selected)[lo..hi];
-                if (action == "notebook-cut") n.Replace("");
+                if (action == "notebook-cut" && !n.Replace("")) return false;
                 changed = true; break;
-            case "notebook-paste": if (Clipboard.Length == 0) return false; n.Replace(Clipboard); changed = true; break;
+            case "notebook-paste": if (Clipboard.Length == 0) return false; changed = n.Replace(Clipboard); break;
             default: return NotebookGlobalAction(action) || action.StartsWith("win-", StringComparison.Ordinal) ? null : false;
         }
         if (changed) {
@@ -120,11 +120,13 @@ internal sealed partial class LabScene
                 w.Body = n.Pack();
             w.Status = n.Describe(); Version++;
         }
+        if (!changed && n.Problem.Length > 0) w.Status = n.Problem;
         return changed;
     }
     private bool NotebookText(string key, string text, bool extend, bool word)
     {
         var w = Active; var n = w.Tab.Notebook; if (!n.Editing || n.Busy) return false;
+        n.ClearProblem();
         string src = n.Source(n.Selected); int caret = n.Caret, anchor = n.Anchor;
         int next;
         switch (key)
@@ -146,24 +148,27 @@ internal sealed partial class LabScene
                     int edge = caret != anchor ? anchor : key == "Backspace"
                         ? EditorWordEdge(src, caret, true) : EditorDeleteRightEdge(src, caret);
                     if (edge == caret) return true;
-                    n.ReplaceRange(Math.Min(caret, edge), Math.Max(caret, edge), "");
-                    return Mark();
+                    return Mark(n.ReplaceRange(Math.Min(caret, edge), Math.Max(caret, edge), ""));
                 }
                 if (anchor == caret)
                 {
                     int edge = key == "Backspace" ? PreviousBoundary(src, caret) : NextBoundary(src, caret);
                     if (edge == caret) return false;
-                    n.ReplaceRange(Math.Min(caret, edge), Math.Max(caret, edge), "");
+                    return Mark(n.ReplaceRange(Math.Min(caret, edge), Math.Max(caret, edge), ""));
                 }
-                else n.Replace("");
-                return Mark();
-            case "Enter": n.Replace("\n"); return Mark();
+                return Mark(n.Replace(""));
+            case "Enter": return Mark(n.Replace("\n"));
             default:
                 if (string.IsNullOrEmpty(text) || text.Any(char.IsControl)) return false;
-                n.Replace(text); return Mark();
+                return Mark(n.Replace(text));
         }
         n.Caret = InsertionBoundary(src, next); if (!extend) n.Anchor = n.Caret; Version++; return true;
-        bool Mark() { w.Body = n.Pack(); w.Status = n.Describe(); Version++; return true; }
+        bool Mark(bool changed)
+        {
+            if (changed) { w.Body = n.Pack(); Version++; }
+            w.Status = n.Describe();
+            return changed;
+        }
     }
 }
 

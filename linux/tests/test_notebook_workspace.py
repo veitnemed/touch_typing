@@ -184,6 +184,18 @@ class NotebookWorkspace(unittest.TestCase):
         self.assertEqual(by_path(state)[renamed], initial)
         self.assertGreater(len(self.nb(state)["cells"]), 0)
 
+    def test_windows_case_only_rename_can_be_undone(self):
+        state = self.open_existing("windows")
+        origin = editor(state)["url"]
+        self.e.call("lab-explorer-action", action="rename", path=origin)
+        old_bare = origin.rsplit("/", 1)[-1].removesuffix(".ipynb")
+        text(self.e, old_bare.upper())
+        renamed = self.key("Enter")
+        self.assertEqual(editor(renamed)["url"], origin.replace(old_bare, old_bare.upper()))
+        undone = self.key("Ctrl+Z")
+        self.assertEqual(editor(undone)["url"], origin)
+        self.assertIsNotNone(editor(undone)["notebook"])
+
     def test_preview6_rejected_keys_stay_noops_when_replaying_an_old_draft(self):
         self.e.close()
         path = self.profile / "TouchTypingStudio-QA" / "progress.xml"
