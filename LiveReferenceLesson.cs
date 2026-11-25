@@ -525,6 +525,14 @@ namespace TouchTypingStudio
                 card.Children.Add(receipt);
             }
 
+            if (!pausedPreview && result.S("diskCapacityConclusion").Length > 0)
+            {
+                var verdict = ReferenceLabel(result.S("diskCapacityConclusion"), 14, ReferenceText, false);
+                verdict.Margin = new Thickness(0, 0, 0, 11);
+                AutomationProperties.SetAutomationId(verdict, "LabDiskCapacityConclusion");
+                card.Children.Add(verdict);
+            }
+
             if (!pausedPreview)
             {
                 var details = new Expander { Header = ReferenceLabel("Работа над ошибками", 16, ReferenceText, true),

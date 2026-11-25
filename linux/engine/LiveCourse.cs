@@ -45,7 +45,7 @@ internal static partial class LiveCourse
         {
             foreach (string token in RouteTokens(mission.Phases[phase]))
             {
-                if (!nativeEnglishInput && (IsCommandToken(token) || token is "source-log-command" or "source-config-test" || IsProjectSearchQuery(token) || token is "browser-search" or "code-clone-command" or "research-find" or "file-name-commit" ||
+                if (!nativeEnglishInput && (IsCommandToken(token) || token is "disk-capacity-query" or "source-log-command" or "source-config-test" || IsProjectSearchQuery(token) || token is "browser-search" or "code-clone-command" or "research-find" or "file-name-commit" ||
                     NotebookEnglishToken(token) || token is "terminal-incident-filter" or "code-rename-confirm" or "debug-unit" or "debug-report-check"
                     or "debug-project-query" or "debug-doc-submit" or "debug-rewrite" or "exact-find-submit" or "python-edit-write" or "notebook-file" or "notebook-report" or "notebook-type" or "notebook-report-save" or "moved-report-save" ||
                     trial.ExactEdit && token is "quick-choose" or "save") && trial.Layout == "RU")
@@ -113,6 +113,7 @@ internal static partial class LiveCourse
     private static LabTask MakeTask(string token, LabScene scene)
     {
         token = scene.ResolveTabReviewToken(token);
+        if (scene.DiskSpaceLesson && scene.MakeDiskCapacityTask(token) is LabTask diskTask) return diskTask;
         if (token == "terminal-incident-filter")
             return new(scene.Terminal.IsPowerShell ? "command/powershell-incident" : "command/filter-incident",
                 "Покажите строки новой попытки из журнала", "",
@@ -270,6 +271,7 @@ internal static partial class LiveCourse
             trial.Active.Input = task.Text;
             return trial.Text("Enter", "");
         }
+        if (task.Action == "disk-capacity-verdict") return trial.SubmitDiskCapacityVerdict(trial.DiskSpaceExpected);
         if (task.Action == "command")
         {
             trial.TerminalInput = task.Text;
@@ -309,6 +311,7 @@ internal static partial class LiveCourse
     {
         var w = scene.Active;
         string app = w?.App ?? "", action = task.Action;
+        if (scene.DiskCapacityEvidence(task) is object disk) return JsonSerializer.Serialize(disk);
         if (scene.DesktopFileSearchEvidence(task) is object desktopSearch) return JsonSerializer.Serialize(desktopSearch);
         if (scene.GuideNoteEvidence(task) is object note) return JsonSerializer.Serialize(note);
         if (scene.TracebackEvidence(task) is object trace) return JsonSerializer.Serialize(trace);

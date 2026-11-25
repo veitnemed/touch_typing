@@ -14,6 +14,13 @@ internal sealed record ConsoleTheory(string Shell, string Title, string Why, str
         bool ps = scene.Terminal.IsPowerShell;
         ConsoleTheory Card(string title, string why, string observe) =>
             new(ps ? "PowerShell" : "Bash", title, why, observe);
+        if (task.Id == "command/check-destination-space")
+            return Card("Проверить диск, на который шла запись",
+                !guided ? "У компьютера может быть несколько дисков. Даже если на одном места много, другой может быть заполнен." :
+                ps ? "Get-PSDrive показывает объём по букве диска. Возьмите её из пути назначения и введите без двоеточия." :
+                     "df показывает место на диске выбранной папки, а -h выводит понятные единицы M и G.",
+                ps ? "Free (GB) — сколько места осталось на этом диске. Сравните его с размером архива; Used — уже занятое место." :
+                     "Avail — свободное место, Size — полный объём. Сверьте Avail с размером архива. Папка и файлы не изменятся.");
         if (LiveCourse.TerminalIncidentTask(task.Id))
             return Card("Собрать историю одной попытки", guided ?
                 (ps ? "Select-String" : "grep") + " ищет по тексту. На этот раз ищем по номеру операции, а не по слову ERROR: так видны и начало, и сбой." :

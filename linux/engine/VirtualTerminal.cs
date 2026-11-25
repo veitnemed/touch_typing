@@ -253,6 +253,7 @@ internal sealed partial class VirtualTerminal
             liveLogPath = liveLogPath, followedLogPath = followedLogPath, liveLogFeed = liveLogFeed,
             liveLogNext = liveLogNext, liveLogIncidentIndex = liveLogIncidentIndex, LogInterrupted = LogInterrupted, IsPowerShell = IsPowerShell
         };
+        CopyTrainingVolumes(copy);
         Replace(copy.files, files); Replace(copy.modes, modes); Replace(copy.owners, owners);
         copy.directories.Clear(); copy.directories.UnionWith(directories);
         copy.packages.Clear(); copy.packages.UnionWith(packages);
@@ -280,6 +281,7 @@ internal sealed partial class VirtualTerminal
     {
         if (FollowingLog)
             return new(false, ["Текущий процесс читает журнал. Ctrl+C остановит просмотр."]);
+        LastCapacityQuery = null;
         LastCommand = command;
         LastOutput = [];
         history.Add(Prompt + command);
@@ -296,7 +298,9 @@ internal sealed partial class VirtualTerminal
         try
         {
             if (command.Length > 32768 || command.Contains('\0')) throw Error("input", "слишком длинная строка или недопустимый нулевой символ");
-            var output = Lines(IsPowerShell ? RunPowerShell(command) : RunBashPipeline(command));
+            var output = Lines(trainingVolumes.Length != 0
+                ? (IsPowerShell ? RunPowerShellStorage(command) : RunBashStorage(command))
+                : IsPowerShell ? RunPowerShell(command) : RunBashPipeline(command));
             LastSuccess = true;
             history.AddRange(output); LastOutput = output;
             return new(true, output);

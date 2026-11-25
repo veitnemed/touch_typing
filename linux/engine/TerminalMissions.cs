@@ -28,6 +28,7 @@ internal static partial class LiveCourse
     private static void TerminalMissions(List<LiveMission> list)
     {
         AddPracticalTerminal(list);
+        AddTerminalDiskSpace(list);
         void Essentials(int level, string id, string title, params LivePhase[] phases) =>
             list.Add(new("terminal", level, "terminal-essentials-" + id, title, phases,
                 FinishAfterRoute: true, Curated: true, Prepare: scene => scene.Terminal.StartInsideProject()));

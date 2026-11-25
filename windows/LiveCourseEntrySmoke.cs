@@ -119,6 +119,8 @@ internal static partial class LiveUiSmoke
                     Until(delegate {return Visible("HomeClass-"+mode);},"saved again to the same card");
                 }
             }
+            foreach (string desktop in new[] {"ubuntu", "windows"})
+                CheckDiskCapacityMission(desktop);
             Console.WriteLine("PASS real WPF course cards, both shell profiles and ordinary mission boundaries.");
             return 0;
         }
@@ -130,6 +132,40 @@ internal static partial class LiveUiSmoke
             return 1;
         }
         finally { if(app!=null && !app.HasExited){app.Kill();app.WaitForExit(4000);} }
+    }
+
+    private static void CheckDiskCapacityMission(string desktop)
+    {
+        bool ps = desktop == "windows";
+        Invoke("LabDesktopProfile-" + desktop);
+        Until(delegate {return Visible("HomeClass-" + desktop);}, "disk exercise profile "+desktop);
+        OpenLiveConfiguration("terminal");
+        Select("LabMode", 1);
+        Select("LabLevel", 0);
+        Select("LabDuration", 0);
+        Select("LabTimer", 0);
+        SelectMissionByName("Не сохранился архив: проверить место");
+        Key("F5");
+        Until(delegate {return Visible("LabTask") && Visible("LabTheoryObserve") && Name("LabPause").StartsWith("Пауза");},
+            "visible disk capacity explanation");
+        Check(Name("LabTheoryObserve").Contains(ps ? "Free (GB)" : "Avail"), "The real table column is taught for this shell");
+        string expected = Find("LabTask").Current.ItemStatus;
+        Check(expected.StartsWith(ps ? "text:Get-PSDrive " : "text:df -h /"), "Visible working task uses the destination disk");
+        EnterCharacters(ps ? "Get-PSDrive C" : "df -h .");
+        Key("Enter");
+        Check(ReadSolved()==0, "System disk is not disk of storage incident");
+        EnterCharacters(expected.Substring(5));
+        Key("Enter");
+        Until(delegate {return ReadSolved()==1 && Name("LabTask").Contains("Хватит места");}, "actual decision step after volume query");
+        Check(!Visible("LabTerminalTheory"), "Decision is not a shell command");
+        Key("2");
+        Check(ReadSolved()==1 && !Visible("LabResult"), "A wrong answer does not score");
+        Key("1");
+        Until(delegate {return Visible("LabDiskCapacityConclusion");}, "visible verified conclusion");
+        Check(Name("LabDiskCapacityConclusion").Contains("Места не хватает"), "Seed zero disk case needs more space");
+        CaptureReferenceFrame("disk-space-" + desktop);
+        Invoke("LabChooseClass");
+        Until(delegate {return Visible("HomeClass-terminal");}, "return to Live after capacity result");
     }
 
     private static string CourseScenario()

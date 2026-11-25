@@ -563,6 +563,19 @@ internal sealed class LabRun
         if (Task.Id == "gnome-left-super" && key == "Z")
             return Miss(key, "Это клавиша Z (Я). Левый Super ⊞ находится ниже, левее Alt.");
         Watch();
+        if (Task.Action == "disk-capacity-verdict")
+        {
+            // This is the exercise's decision, not another shell input.
+            if (commandModifiers || held.Any(item => KeyChord.Family(item) == "Shift") ||
+                (key is not ("1" or "2") && !(key is "NumPad1" or "NumPad2" && text is "1" or "2")))
+                return null;
+            if (Scene.Active?.App != "terminal" || Scene.Overview)
+                return Miss(key, "Вернитесь к окну задания.");
+            bool enough = key is "2" or "NumPad2";
+            if (!Scene.SubmitDiskCapacityVerdict(enough))
+                return Miss(key, "Сравните свободное место на диске назначения с размером архива.");
+            return Observe(key, actualTaskId: Task.Id);
+        }
         // Keep the physical key in held and trace for release, repeats and
         // saved-draft replay. Interpret its secondary legend only for a
         // navigation goal eligible in the current scene.
@@ -629,6 +642,7 @@ internal sealed class LabRun
             return Miss(key, "Команда выполнена, но отчёт не совпадает с заданием. Проверьте весь сохранённый файл и папку «Загрузки».");
         if (matches && watching?.Any(item => item.Goal.Task == Task && item.Goal.ArtifactPath != null) == true)
             return Miss(key, "Сохранённая заметка отличается от исходника. Вернитесь в редактор, вставьте скопированный текст целиком и сохраните файл.");
+        if (submitting && Scene.DiskSpaceLesson) return Miss(key, "Вы проверили другой диск. Сверьте назначение в заявке.");
         if (submitting && Scene.PracticalTerminal)
             return Miss(key, LiveCourse.TerminalIncidentTask(Task.Id)
                 ? "Сверьте идентификатор именно у новой строки ERROR; результат этого запроса пока не показан."
@@ -956,7 +970,7 @@ internal sealed class LabRun
             }
             foreach (string key in held) trace.Add(new("@held/" + key, superUsed));
             missionLength = pending.Count;
-            if (!Scene.PracticalTerminal)
+            if (!Scene.PracticalTerminal && !Scene.DiskSpaceLesson)
                 Scene.PrepareHistory(pending.Where(goal => goal.Task.Action == "command" && goal.Task.Text.Length > 12).Select(goal => goal.Task.Text));
         }
         Task = pending[0].Task;
@@ -999,7 +1013,7 @@ internal sealed class LabRun
         bool better = complete && (previousBest == null || Solved > previousBest.Solved || Solved == previousBest.Solved && Errors < previousBest.Errors);
         return new { App, Mode, Level, Solved, Errors, Seconds, TimeLimit, ActionLimit, Guidance,
             SimulatedWindowSwitches, completed = complete,
-            sourceReview = Scene.TabReviewReceipt(),
+            sourceReview = Scene.TabReviewReceipt(), diskCapacityConclusion = Scene.DiskCapacityConclusion,
             accuracy = Solved + Errors == 0 ? 0 : Math.Round(100.0 * Solved / (Solved + Errors), 1),
             record = Math.Max(previousRecord, complete ? Solved : 0), previousRecord, previousRecordErrors = previousBest?.Errors ?? 0, newRecord = better,
             series = points, weak = points.Where(point => !point.Correct).GroupBy(point => point.Task).Select(group =>

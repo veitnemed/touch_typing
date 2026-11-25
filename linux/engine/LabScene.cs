@@ -231,6 +231,7 @@ internal sealed partial class LabScene
         lastFileConflict = source.lastFileConflict;
         Terminal = source.Terminal.Clone(); captureImage = source.captureImage;
         CloneDebugDay(source);
+        CloneDiskCapacity(source);
         RestoreSourceFixture(source);
         symbolWorkspace = source.symbolWorkspace;
         SearchProjectRoot = source.SearchProjectRoot; ExactEdit = source.ExactEdit;

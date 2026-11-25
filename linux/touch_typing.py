@@ -3895,6 +3895,8 @@ class LabPage(Gtk.Box):
         if receipt := result.get("sourceReview"):
             panel.append(text("Код сверки: " + receipt["code"] + "\n" + receipt["url"],
                               "reference-modal-subtitle", wrap=True))
+        if disk_verdict := result.get("diskCapacityConclusion"):
+            panel.append(text(disk_verdict, "reference-modal-subtitle", wrap=True))
         note = f'Ошибки: {result["errors"]}    ·    Рекорд: {result.get("record", 0)}'
         if result.get("newRecord"):
             note += "    ·    Новый рекорд"

@@ -45,6 +45,42 @@ internal static class TerminalRegression
         Check(state.GetProperty("packages").EnumerateArray().Any(value => value.GetString() == "bash"), "Core shell retained after " + trace);
         Check(state.GetProperty("reboots").GetInt32() >= 0 && state.GetProperty("shutdowns").GetInt32() >= 0, "Lifecycle counters valid after " + trace);
     }
+    private static void CapacityQueriesAreScopedAndReadOnly()
+    {
+        var bash = new VirtualTerminal();
+        bash.SetTrainingVolumes([new("/dev/test-root", "/", 24576, 8192),
+            new("/dev/test-team", "/mnt/team", 16384, 512)], "Учебная заявка");
+        bash.AddTrainingFolder("/mnt/team/Incoming reports");
+        string untouched = StableState(bash);
+        var linuxVolume = Run(bash, "df -h -- '/mnt/team/Incoming reports'");
+        Check(linuxVolume.Output[0].Contains(" Avail ") &&
+            linuxVolume.Output[1].Split(' ', StringSplitOptions.RemoveEmptyEntries)[3] == "512M" &&
+            bash.LastCapacityQuery is { Mount: "/mnt/team", FreeMiB: 512 },
+            "Bash capacity output reports the mount of its quoted path");
+        Check(StableState(bash) == untouched, "Capacity query must not mutate the workspace");
+        Run(bash, "df -h .");
+        Check(bash.LastCapacityQuery is { Mount: "/", FreeMiB: 8192 },
+            "Current directory resolves to the system mount, not the destination");
+        Reject(bash, "df -h /mnt/team > result.txt");
+        Check(bash.LastCapacityQuery == null, "A failed query cannot reuse a stale capacity observation");
+        Check(bash.Clone().MatchesCommand("df -h /mnt/team", "df -h -- '/mnt/team/Incoming reports'"),
+            "Cloned workspace retains its virtual volume layout and command equivalence");
+
+        var ps = new VirtualTerminal();
+        ps.UsePowerShell();
+        ps.SetTrainingVolumes([new("C", @"C:\", 24576, 8192),
+            new("E", @"E:\", 16384, 3072)], "Учебная заявка");
+        untouched = StableState(ps);
+        var windowsVolume = Run(ps, "get-psdrive -Name 'e'");
+        Check(windowsVolume.Output[0].Contains("Free (GB)") &&
+            windowsVolume.Output[1].Split(' ', StringSplitOptions.RemoveEmptyEntries)[2] == "3.00" &&
+            ps.LastCapacityQuery is { Name: "E", FreeMiB: 3072 },
+            "PowerShell drive name and capacity parse correctly");
+        Check(StableState(ps) == untouched, "PowerShell capacity query must not mutate the workspace");
+        Reject(ps, "Get-PSDrive E:");
+        Check(ps.LastCapacityQuery == null, "Invalid drive syntax must clear the capacity observation");
+    }
+
     private static void Adversarial()
     {
         var shell = new VirtualTerminal();
@@ -301,6 +337,7 @@ internal static class TerminalRegression
             string[] candidates = linked.SuggestedCommands(2);
             Run(linked, candidates[random.Next(candidates.Length)]);
         }
+        CapacityQueriesAreScopedAndReadOnly();
         Adversarial();
         Console.WriteLine("PASS: " + checks + " isolated terminal checks including seeded adversarial sessions");
     }

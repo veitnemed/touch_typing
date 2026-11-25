@@ -271,7 +271,7 @@ internal static class LabCatalog
             missions = (neutralProject ? NeutralProject.MissionCatalog : LiveCourse.Missions)
                 .Where(m => LabScene.MissionEnvironment(m) is null || LabScene.MissionEnvironment(m) == environment)
                 .Select(m => new { m.App, m.Level, m.Id,
-                    Title = environment == "windows" && m.App == "terminal" && m.Id != LiveCourse.PracticalPowerShellId
+                    Title = environment == "windows" && m.App == "terminal" && m.Id is not (LiveCourse.PracticalPowerShellId or LiveCourse.PowerShellDiskId)
                         ? "Bash (учебный Ubuntu) · " + m.Title : m.Title,
                     m.Curated, desktopProfile = LabScene.MissionEnvironment(m) }),
             duration = 0, blockSize = 20

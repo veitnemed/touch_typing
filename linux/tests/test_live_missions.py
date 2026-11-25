@@ -1715,7 +1715,18 @@ class MissionTest(unittest.TestCase):
                     from test_editor_notebooks import chord_for
                     for char in task["text"]:
                         state = chord([sides.get(k, k) for k in chord_for(char).split("+")], char)
-                if task["keys"]:
+                if task["id"] == "command/check-destination-space":
+                    for char in task["text"]:
+                        keys = ["Space"] if char == " " else ["LShift", char] if char.isupper() else [char.upper()]
+                        chord(keys, char)
+                    state = chord(["Enter"])
+                elif task["id"] == "disk-capacity-verdict":
+                    from test_terminal_disk_space import visible_capacity
+                    shell = state["scene"]["terminal"]
+                    needed, free = visible_capacity(shell["output"], shell["shell"]=="powershell")
+                    answer = "2" if free >= needed else "1"
+                    state = chord([answer], answer)
+                elif task["keys"]:
                     expects_text = task["id"] in {"code-rename-confirm", "project-search-submit"} or (
                         mission["id"] == "code-find-exact-edit" and task["id"] in {"quick-choose", "exact-find-submit", "save"})
                     if mission["id"] == "code-project-file-move" and task["id"] == "save" and attempt == 0:
