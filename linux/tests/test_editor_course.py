@@ -1,4 +1,5 @@
 """Regression for the VS Code card, rather than a manually selected exercise."""
+from copy import deepcopy
 import os
 import tempfile
 import unittest
@@ -20,6 +21,41 @@ CATALOG = (
      "code-diagnostic-test", "code-notebook-repair", "code-project-file-copy"},
     {"code-handover", "code-repair", "code-inspection", "code-publish", "code-notebook-recheck"},
 )
+
+
+def checkpoint(state):
+    """Compare learner state, not the process-local identity of a tab widget."""
+    scene = state["scene"]
+    restored = deepcopy({name: state[name] for name in (
+        "solved", "editorCourse", "mission", "task", "phase", "actionLimit", "timeLimit",
+        "scenarioStep", "scenarioLength", "scenarioCompletedGoals", "objectives")})
+    restored.update(windows=deepcopy(scene["windows"]), terminal=deepcopy(scene["terminal"]))
+    for w in restored["windows"]:
+        for tab in w["tabs"]:
+            del tab["id"]
+        if w.get("otherTab"):
+            del w["otherTab"]["id"]
+    return restored
+
+
+def first_difference(before, after, path="state"):
+    if isinstance(before, dict) and isinstance(after, dict):
+        for key in before.keys() | after.keys():
+            if key not in before or key not in after:
+                return f"{path}.{key}: field missing on one side"
+            difference = first_difference(before[key], after[key], f"{path}.{key}")
+            if difference:
+                return difference
+    elif isinstance(before, list) and isinstance(after, list):
+        if len(before) != len(after):
+            return f"{path}: count {len(before)} → {len(after)}"
+        for index, (old, new) in enumerate(zip(before, after)):
+            difference = first_difference(old, new, f"{path}[{index}]")
+            if difference:
+                return difference
+    elif before != after:
+        return f"{path}: {before!r:.320} → {after!r:.320}"
+    return None
 
 
 def supplement(mission):
@@ -83,14 +119,25 @@ class EditorCourseTests(unittest.TestCase):
                     for _ in range(2):
                         state = advance(e, state)
                     self.assertTrue(active(state)["url"].endswith(".ipynb"))
-                    workspace = (disk(state), active(state)["url"], state["solved"], state["task"])
+                    # Preserve a real non-zero caret and selection inside the first cell.
+                    for key in ("Enter", "End", "Shift+Left"):
+                        state = chord(e, key)
+                    notebook = active(state)["notebook"]
+                    self.assertEqual((state["solved"], notebook["selected"], notebook["editing"]), (35, 0, True))
+                    self.assertGreater(notebook["caret"], 0)
+                    self.assertEqual(notebook["anchor"], notebook["caret"] + 1)
+                    workspace = checkpoint(state)
                     self.assertTrue(e.call("lab-stop")["saved"])
                     e.close(); e = Engine(verify=True)
                     e.call("configure", platform=platform, layout="EN")
                     state = begin(e, seconds=180, actionLimit=20, **{"continue": True})
-                    self.assertEqual((disk(state), active(state)["url"], state["solved"], state["task"]), workspace)
+                    resumed = checkpoint(state)
+                    self.assertEqual(resumed, workspace, first_difference(workspace, resumed))
                     self.assertEqual((state["editorCourse"], state["actionLimit"], state["timeLimit"]),
                                      (True, BUDGET, 0))
+                    state = chord(e, "Esc")
+                    self.assertFalse(active(state)["notebook"]["editing"])
+                    self.assertEqual(state["solved"], 35)
                     while not state["limitDecisionPending"]:
                         state = advance(e, state)
                     self.assertEqual((state["solved"], state["finished"], state["limitReached"]),

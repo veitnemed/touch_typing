@@ -5,11 +5,12 @@ trap 'echo "Preview publication failed at line $LINENO" >&2' ERR
 
 pkg=${1:?archive directory required}
 subject=$(git show -s --format=%s "$PRODUCT_SHA")
-if [[ ! $subject =~ ^Release\ (v1\.9\.0-preview\.([4-7]))$ ]]; then
+if [[ ! $subject =~ ^Release\ (v1\.9\.0-preview\.([1-9][0-9]*))$ ]]; then
     echo 'No preview requested by this commit.'; exit 0
 fi
 tag=${BASH_REMATCH[1]}
 number=${BASH_REMATCH[2]}
+((number >= 4))
 test "$GITHUB_REF" = refs/heads/feature/live-ux-acceptance
 test "$(git rev-parse HEAD)" = "$PRODUCT_SHA"
 # A retry is allowed only when no tag was created. Never modify an existing tag or release.

@@ -21,7 +21,8 @@ namespace TouchTypingStudio
         private static readonly int[] LabTimeLimits = { 0, 180, 600 };
         private int lastLabLimit, lastLabTimer;
         private string lastLabMission = "";
-        private bool lastLabEditorCourse;
+        private string lastLabRouteKind = "";
+        private int lastLabRuntimeActions, lastLabRuntimeSeconds;
         private Button labHint;
         private Button labLimitContinue, labLimitFinish, labLimitArmedButton;
         private Key labLimitArmedKey;
@@ -43,7 +44,7 @@ namespace TouchTypingStudio
             if (labApp == "ubuntu" || labApp == "windows") labApp = id;
             labDesktopProfile = id;
             lastLabMission = "";
-            lastLabEditorCourse = false;
+            lastLabRouteKind = "";
         }
 
         private FrameworkElement BuildDesktopProfileChoice(Action redraw)
@@ -138,27 +139,39 @@ namespace TouchTypingStudio
         private readonly Dictionary<string, Button> liveCatalogButtons = new Dictionary<string, Button>();
         private string liveReturnApp;
 
-        private bool HasCompatibleLiveDraft(Data catalog, string app)
+        private Data PreferredLiveDraft(Data catalog, string app)
         {
             string environment = app == "windows" || app == "workday" ? labDesktopProfile : "ubuntu";
-            string guidance = labMode == "drill" ? "independent" : "guided";
-            return catalog.Items("drafts").Any(draft => draft.S("app") == app && draft.I("level") == labLevel &&
-                draft.S("guidance") == guidance && draft.S("desktopProfile", "ubuntu") == environment);
+            var drafts = catalog.Items("drafts").Where(draft => draft.S("app") == app &&
+                draft.S("desktopProfile", "ubuntu") == environment);
+            // The profile keeps checkpoint insertion order. Do not hide a
+            // saved independent/advanced practice just because the app restarted.
+            return drafts.LastOrDefault();
+        }
+
+        private bool HasCompatibleLiveDraft(Data catalog, string app)
+        {
+            return PreferredLiveDraft(catalog, app) != null;
         }
 
         private void LaunchLiveCard(string app, bool resume)
         {
             if (active) return;
+            var catalog = Request("lab-catalog", "desktopProfile", labDesktopProfile);
+            if (!catalog.Exists) return;
             labApp = liveReturnApp = app;
-            bool editorCourse = !resume && app == "code";
-            string mission = "";
-            if (!resume && !editorCourse)
+            var draft = PreferredLiveDraft(catalog, app);
+            if (draft != null)
             {
-                var selection = Request("lab-next-mission", "app", app, "level", labLevel, "desktopProfile", labDesktopProfile);
-                if (!selection.Exists) return;
-                mission = selection.S("mission");
+                labLevel = draft.I("level");
+                labMode = draft.S("guidance") == "independent" ? "drill" : "sandbox";
+                StartLabAttempt("", true);
+                return;
             }
-            StartLabAttempt(mission, resume, editorCourse);
+            if (resume) { SetNotice("Сохранённое занятие больше недоступно."); return; }
+            labLevel = 0;
+            labMode = "sandbox";
+            StartLabAttempt("", false, "course", true);
         }
 
         private void ReturnToLiveCatalog()
@@ -172,7 +185,8 @@ namespace TouchTypingStudio
 
         private bool labSavePending, labSaveClosePending, labSaveBackPending, labExplicitFinishPending;
 
-        private void StartLabAttempt(string mission, bool resume, bool editorCourse = false)
+        private void StartLabAttempt(string mission, bool resume, string routeKind = "",
+            bool defaultBudget = false, int? actionOverride = null, int? timeOverride = null)
         {
             if (active) return;
             if (Keyboard.Modifiers != ModifierKeys.None)
@@ -181,8 +195,8 @@ namespace TouchTypingStudio
                 return;
             }
             page = LivePage;
-            int actions = LabActionLimits[lastLabLimit];
-            int seconds = LabTimeLimits[lastLabTimer];
+            int actions = actionOverride ?? LabActionLimits[lastLabLimit];
+            int seconds = timeOverride ?? LabTimeLimits[lastLabTimer];
             int testSeconds;
             if (verifyMode && seconds > 0 && int.TryParse(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SOFT_FINISH_SECONDS"), out testSeconds))
                 seconds = Math.Max(1, Math.Min(seconds, testSeconds));
@@ -192,8 +206,8 @@ namespace TouchTypingStudio
                 "guidance", guidance, "mission", mission, "continue", resume, "preserveDraft", !resume,
                 "softFinish", true, "combinedLimits", true, "nativeEnglishInput", true
             };
-            if (editorCourse) fields.AddRange(new object[] { "editorCourse", true });
-            else fields.AddRange(new object[] { "seconds", seconds, "actionLimit", actions });
+            if (routeKind.Length > 0) fields.AddRange(new object[] { "routeKind", routeKind });
+            if (!defaultBudget) fields.AddRange(new object[] { "seconds", seconds, "actionLimit", actions });
             int seed;
             if (verifyMode && int.TryParse(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"), out seed))
                 fields.AddRange(new object[] { "seed", seed });
@@ -201,7 +215,9 @@ namespace TouchTypingStudio
             if (!initial.Exists || initial.B("startBlocked")) return;
             labSavePending = labSaveClosePending = labSaveBackPending = labExplicitFinishPending = false;
             lastLabMission = initial.S("mission");
-            lastLabEditorCourse = initial.B("editorCourse");
+            lastLabRouteKind = initial.S("routeKind");
+            lastLabRuntimeActions = initial.I("actionLimit");
+            lastLabRuntimeSeconds = initial.I("timeLimit");
             labActive = active = true;
             paused = true;
             pressed.Clear();
@@ -684,7 +700,8 @@ namespace TouchTypingStudio
         {
             if (labActive) FinishLab();
             if (labActive) return; // Retain the paused lesson until its save succeeds.
-            StartLabAttempt(lastLabEditorCourse ? "" : lastLabMission, false, lastLabEditorCourse);
+            StartLabAttempt(lastLabRouteKind == "course" ? "" : lastLabMission, false, lastLabRouteKind,
+                actionOverride: lastLabRuntimeActions, timeOverride: lastLabRuntimeSeconds);
         }
 
         private FrameworkElement BuildLabResult(Data result, FrameworkElement backdrop, bool preview = false)

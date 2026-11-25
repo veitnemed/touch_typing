@@ -730,15 +730,21 @@ class Studio(Gtk.Application):
     def open_reference_module(self, module, draft=None, launch=None):
         catalog = self.call("lab-catalog") or {}
         environment = self.lab_desktop_profile()
-        if draft and draft not in catalog.get("drafts", ()):
+        available = catalog.get("drafts", ())
+        if draft and draft not in available:
             self.message("Сохранённое занятие недоступно. Откройте список заново.")
             return
+        if launch is None and draft is None:
+            expected = environment if module in ("windows", "workday") else "ubuntu"
+            draft = next((item for item in reversed(available)
+                          if item["app"] == module and (item.get("desktopProfile") or "ubuntu") == expected), None)
         self.navigate("lab")
         if self.lab is None:
             return
         lab = self.lab
         lab.direct_module = module
-        lab.editor_course = module == "code" and launch is None and not draft
+        lab.default_course_budget = launch is None and not draft
+        lab.route_kind = "" if draft else "mission" if (launch or {}).get("mission") else "course"
         index = next((i for i, item in enumerate(lab.classes) if item["id"] == module), None)
         if index is None:
             self.return_live_catalog(module)
@@ -754,11 +760,7 @@ class Studio(Gtk.Application):
             for name, picker in (("level", lab.level), ("guidance", lab.mode),
                                  ("actions", lab.limit), ("time", lab.time_limit)):
                 picker.set_selected(defaults.get(name, 0))
-            level = lab.level.get_selected()
             target = defaults.get("mission", "")
-            if not target and not lab.editor_course:
-                choice = self.call("lab-next-mission", app=module, level=level, desktopProfile=environment) or {}
-                target = choice.get("mission", "")
         selected = next((i for i, (k, _) in enumerate(lab.choices) if k == target), None)
         if selected is None:
             self.return_live_catalog(module)
@@ -938,7 +940,8 @@ class Studio(Gtk.Application):
         start = button("Начать", launch, "reference-primary")
         start.set_halign(Gtk.Align.START)
         def populate(*_):
-            choices[:] = [m for m in missions if m["app"] == module and m["level"] == level.get_selected()]
+            matching = [m for m in missions if m["app"] == module and m["level"] == level.get_selected()]
+            choices[:] = [{"id": "", "title": "Последовательная практика"}] + matching if matching else []
             mission.set_model(Gtk.StringList.new([m["title"] for m in choices]))
             mission.set_selected(0 if choices else Gtk.INVALID_LIST_POSITION)
             start.set_sensitive(bool(choices))
@@ -1008,15 +1011,14 @@ class Studio(Gtk.Application):
                 tile.add_css_class("reference-selected")
             if index > 2:
                 tile.add_css_class("reference-card-lower")
-            tile.set_tooltip_text("Начать маршрут VS Code: 40 действий без таймера." if module == "code" else
-                                  f"Начать первое занятие «{title}». Прогресс подтверждённых сочетаний для текущей раскладки.")
+            tile.set_tooltip_text(f"Открыть «{title}». Если нет черновика: 40 действий без таймера.")
             inner = box(Gtk.Orientation.VERTICAL, 0, "reference-card-inner")
             picture = ReferenceGlyph(module, 43 if index > 2 else 48)
             picture.add_css_class("reference-app-icon")
             picture.set_halign(Gtk.Align.START)
             tally, total = self.module_progress(module, classes, skills)
             fraction = tally / total if total else 0
-            bind_name(tile, f"{title}. Прогресс: {fraction:.0%}. Начать первое занятие.")
+            bind_name(tile, f"{title}. Прогресс: {fraction:.0%}. Открыть практику.")
             label = text(f"Прогресс: {fraction:.0%}", "reference-progress-label")
             status = add(row(12, "reference-progress"), ReferenceGlyph("bars", 19), label)
             meter = Gtk.ProgressBar(fraction=fraction)
@@ -2663,6 +2665,7 @@ class LabPage(Gtk.Box):
         # engine. Capture resets on pause, but a held F-key is not a new press.
         self.physical_down = set()
         self.surface = None
+        self.window_only_keys = False
         self.handler = None
         self.capture_timeout = 0
         self.capture_denied_timer = 0
@@ -2712,7 +2715,8 @@ class LabPage(Gtk.Box):
         self.level = dropdown(self.level_titles)
         self.begin = button("Начать · Пробел", self.start, "primary")
         self.direct_module = None
-        self.editor_course = False
+        self.route_kind = ""
+        self.default_course_budget = False
         self.prep = box(Gtk.Orientation.VERTICAL, 12, "lab-prep")
         self.prep.append(text("Практика без мыши", "h2"))
         self.os_selector = bind_name(dropdown(["Ubuntu", "Windows 10"]), "Учебная операционная система")
@@ -3143,11 +3147,12 @@ class LabPage(Gtk.Box):
         self.host.refresh()
         app = self.classes[self.picker.get_selected()]["id"]
         mission = self.choices[self.mission_picker.get_selected()][0]
-        budget = ({"editorCourse": True} if self.editor_course else
+        budget = ({} if self.default_course_budget else
                   {"seconds": self.time_limits[self.time_limit.get_selected()],
                    "actionLimit": self.action_limits[self.limit.get_selected()]})
         self.state = self.host.call("lab-start", app=app, mode="sandbox", level=self.level.get_selected(), mission="" if mission == "@resume" else mission,
-                                    **{"continue": mission == "@resume"}, softFinish=True, combinedLimits=True, nativeEnglishInput=True,
+                                    **{"continue": mission == "@resume"}, routeKind=self.route_kind,
+                                    softFinish=True, combinedLimits=True, nativeEnglishInput=True,
                                     desktopProfile=self.desktop_profile,
                                     preserveDraft=bool(self.direct_module and mission != "@resume"),
                                     guidance="guided" if self.mode.get_selected() == 0 else "independent", **budget)
@@ -3188,6 +3193,14 @@ class LabPage(Gtk.Box):
             self.status.set_label("Этот оконный сервер не передаёт системные клавиши. Занятие на паузе.")
             self.status.set_visible(True)
             return
+        if self.host.window.get_display().__gtype__.name == "GdkX11Display":
+            # X11 has no shortcuts-inhibit consent. Accept keys delivered to
+            # this focused window; never grab the whole keyboard. The window
+            # manager can still keep its own global bindings.
+            if self.host.window.is_active():
+                self.window_only_keys = True
+                self.resume_with_capture()
+            return
         self.waiting_capture = True
         self.modal_layer.set_visible(False)
         self.surface = surface
@@ -3206,16 +3219,19 @@ class LabPage(Gtk.Box):
                 or (self.state or {}).get("limitDecisionPending")):
             return GLib.SOURCE_REMOVE
         if self.active and self.surface and self.surface.get_property("shortcuts-inhibited") and self.host.window.is_active():
-            self.waiting_capture = False
-            self.clear_capture_timers()
-            state = self.host.call("lab-resume")
-            if state:
-                self.render(state)
-            if self.active and not self.state.get("limitDecisionPending"):
-                self.desktop.grab_focus()
+            self.resume_with_capture()
         elif self.active and self.state and not self.state["paused"] and not self.waiting_capture:
             self.pause_run("Система вернула горячие клавиши. Разрешите их захват, чтобы продолжить.")
         return GLib.SOURCE_REMOVE
+
+    def resume_with_capture(self):
+        self.waiting_capture = False
+        self.clear_capture_timers()
+        state = self.host.call("lab-resume")
+        if state:
+            self.render(state)
+        if self.active and not self.state.get("limitDecisionPending"):
+            self.desktop.grab_focus()
 
     def schedule_capture_denial(self, generation, delay):
         if generation == self.capture_generation and not self.capture_denied_timer:
@@ -3261,6 +3277,7 @@ class LabPage(Gtk.Box):
             self.surface.disconnect(self.handler)
             self.surface.restore_system_shortcuts()
         self.surface = self.handler = None
+        self.window_only_keys = False
         self.pressed.clear()
 
     def pause_run(self, message="Пауза. Нажмите пробел, чтобы продолжить."):
@@ -3370,7 +3387,7 @@ class LabPage(Gtk.Box):
                 return not (inside_widget(focused, self.modal_layer) and isinstance(focused, Gtk.Button) and
                             not focused.get_label().startswith("Продолжить"))
             return key in ("Space", pause_key, finish_key)
-        if not self.surface or not self.surface.get_property("shortcuts-inhibited"):
+        if not self.window_only_keys and (not self.surface or not self.surface.get_property("shortcuts-inhibited")):
             self.pause_run("Захват клавиш прерван. Разрешите его, чтобы продолжить.")
             return True
         self.pressed.add(key)
@@ -3405,11 +3422,11 @@ class LabPage(Gtk.Box):
         self.state = state
         if self.save_pending or self.limit_resume_wait:
             return
-        bounded_editor_course = state.get("editorCourse") and state.get("actionLimit", 0) > 0
-        total = state.get("actionLimit" if bounded_editor_course else "scenarioLength", 0)
-        complete = state.get("solved" if bounded_editor_course else "scenarioCompletedGoals", 0)
+        bounded_course = state.get("routeKind") == "course" and state.get("actionLimit", 0) > 0
+        total = state.get("actionLimit" if bounded_course else "scenarioLength", 0)
+        complete = state.get("solved" if bounded_course else "scenarioCompletedGoals", 0)
         self.lesson_meter.set_fraction(max(0.0, min(1.0, complete / total)) if total else 0.0)
-        bind_name(self.lesson_meter, "Прогресс занятия" if bounded_editor_course else "Прогресс упражнения")
+        bind_name(self.lesson_meter, "Прогресс занятия" if bounded_course else "Прогресс упражнения")
         if state["finished"]:
             self.stop()
             return
@@ -3458,7 +3475,16 @@ class LabPage(Gtk.Box):
         if state["held"]:
             status += "  ·  Нажато " + " + ".join(key_label(k) for k in state["held"])
         self.status.set_label(status.replace("LSuper", "⊞").replace("RSuper", "⊞ прав.").replace("Super", "⊞"))
-        self.status.set_visible(state["paused"] or state.get("feedback") in ("error", "layout"))
+        # Mention potentially reserved keys without revealing the answer in
+        # independent practice. An OS-reserved key that wasn't delivered never
+        # earns credit; the user can choose another mission or adjust their WM.
+        x11_reserved = self.window_only_keys and guided and (
+            "Super" in raw_keys or raw_keys in ("Alt+Tab", "Alt+Shift+Tab", "Alt+F4", "Print", "Alt+Print")
+            or task.get("id", "").startswith("open-"))
+        important = state["paused"] or state.get("feedback") in ("error", "layout")
+        if x11_reserved and not important:
+            self.status.set_label("X11: системные клавиши может перехватить диспетчер окон.")
+        self.status.set_visible(important or x11_reserved)
         self.status.remove_css_class("bad")
         self.status.remove_css_class("good")
         if state.get("feedback") in ("error", "good"):
@@ -3592,9 +3618,7 @@ class LabPage(Gtk.Box):
             return
         direct_module = self.direct_module
         selected_class = self.classes[self.picker.get_selected()]["id"]
-        if (self.state or {}).get("editorCourse"):
-            self.host.open_reference_module(direct_module or selected_class)
-            return
+        route_kind = (self.state or {}).get("routeKind", "")
         desktop_profile = self.desktop_profile
         selected_mode = self.mode.get_selected()
         selected_level = self.level.get_selected()
@@ -3605,6 +3629,7 @@ class LabPage(Gtk.Box):
         time_limit = selection(self.time_limit, self.time_limits, "timeLimit")
         self.host.navigate("lab")
         self.host.lab.direct_module = direct_module
+        self.host.lab.route_kind = route_kind
         self.host.lab.os_selector.set_selected(desktop_profile == "windows")
         class_index = next((i for i, item in enumerate(self.host.lab.classes) if item["id"] == selected_class), None)
         if class_index is None:
@@ -3614,7 +3639,7 @@ class LabPage(Gtk.Box):
         self.host.lab.level.set_selected(selected_level)
         self.host.lab.limit.set_selected(limit)
         self.host.lab.time_limit.set_selected(time_limit)
-        mission = self.state.get("mission")
+        mission = "" if route_kind == "course" else self.state.get("mission")
         for index, (identifier, _) in enumerate(self.host.lab.choices):
             if identifier == mission:
                 self.host.lab.mission_picker.set_selected(index)

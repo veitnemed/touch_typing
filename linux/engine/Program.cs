@@ -109,7 +109,7 @@ internal sealed partial class PracticeService
                         (LabScene.MissionEnvironment(m) is null || LabScene.MissionEnvironment(m) == suggestEnvironment)).ToArray();
                 var preferred = routes.Where(m => m.Id.StartsWith("terminal-essentials-", StringComparison.Ordinal)).ToArray();
                 if (preferred.Length > 0) routes = preferred;
-                if (suggestApp == "code") routes = routes.Where(m => !LabRun.IsEditorSupplement(m.Id)).ToArray();
+                if (suggestApp == "code") routes = routes.Where(m => !LiveRoutePolicy.EditorSupplement(m.Id)).ToArray();
                 var lastUsed = profile.ShortcutHistory.Where(a => a.Correct && a.Mission != null)
                     .GroupBy(a => a.Mission).ToDictionary(g => g.Key, g => g.Max(a => a.Date));
                 return new { mission = routes.OrderBy(m => lastUsed.GetValueOrDefault(m.Id)).FirstOrDefault()?.Id ?? "" };
@@ -136,10 +136,15 @@ internal sealed partial class PracticeService
                     throw new ArgumentException("Для выбранной среды нет сохранённого поручения.");
                 bool combinedLimits = Flag(message, "combinedLimits");
                 string selectedMission = Text(message, "mission");
-                bool editorCourse = chosenApp == "code" && selectedMission.Length == 0 && Flag(message, "editorCourse");
+                string routeKind = Text(message, "routeKind");
+                if (!continuing && (routeKind == LiveRoutePolicy.Course && selectedMission.Length > 0 ||
+                    routeKind == LiveRoutePolicy.Mission && selectedMission.Length == 0))
+                    throw new ArgumentException("Выберите маршрут или конкретное поручение.");
+                bool editorCourse = Flag(message, "editorCourse");
+                bool course = LiveRoutePolicy.Resolve(routeKind, selectedMission, editorCourse, chosenApp, draft) == LiveRoutePolicy.Course;
                 lab = new LabRun(chosenApp, Text(message, "mode"), Number(message, "level"),
-                    Number(message, "seconds", combinedLimits || editorCourse ? 0 : 180), layout, profile.ShortcutHistory,
-                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit", editorCourse ? LabRun.DefaultEditorCourseActions : 0), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: selectedMission, draft: draft, softFinish: Flag(message, "softFinish"), combinedLimits: combinedLimits, windowsBindings: windows, desktopProfile: windows ? null : desktopProfile, neutralProject: neutralProject, environment: chosenEnvironment, nativeEnglishInput: Flag(message, "nativeEnglishInput"), editorCourse: editorCourse);
+                    Number(message, "seconds", combinedLimits || course || routeKind == LiveRoutePolicy.Mission ? 0 : 180), layout, profile.ShortcutHistory,
+                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit", course ? LiveRoutePolicy.DefaultActions : 0), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: selectedMission, draft: draft, softFinish: Flag(message, "softFinish"), combinedLimits: combinedLimits, windowsBindings: windows, desktopProfile: windows ? null : desktopProfile, neutralProject: neutralProject, environment: chosenEnvironment, nativeEnglishInput: Flag(message, "nativeEnglishInput"), editorCourse: editorCourse, routeKind: routeKind);
                 persistedLabAttempts = 0;
                 labCheckpoint = draft;
                 preservePreviousLabDraft = !continuing && Flag(message, "preserveDraft");
@@ -279,8 +284,10 @@ internal sealed partial class PracticeService
         return new { lab.App, lab.Mode, lab.Level, desktopProfile = lab.EnvironmentProfile, task = lab.Task.Snapshot(), scene = lab.Scene.Snapshot(), held = lab.Held,
             lab.LastKey, lab.Status, lab.Feedback, lab.Errors, lab.Solved, lab.Block, index = lab.Solved % 20 + 1,
             lab.Seconds, lab.Remaining, lab.TimeLimit, lab.ActionLimit, lab.Guidance, lab.ShowGuide, lab.Finished, lab.Paused, lab.Saved, startBlocked, saveError = labSaveError, needsCapture = true,
-            limitDecisionPending = lab.AwaitingLimitChoice, finishingMission = lab.FinishingMission, limitReached = lab.LimitReached,
-            reportArtifact = lab.ReportArtifact, lab.EditorCourse,
+            // A time cap may be crossed between polling and serialization.
+            // Never show its decision until capture actually paused.
+            limitDecisionPending = lab.Paused && lab.AwaitingLimitChoice, finishingMission = lab.FinishingMission, limitReached = lab.LimitReached,
+            reportArtifact = lab.ReportArtifact, lab.EditorCourse, lab.RouteKind,
             mission = lab.MissionId, phase = lab.PhaseTitle, objectives = lab.Objectives, scenario = lab.ScenarioTitle, scenarioStep = lab.ScenarioStep, scenarioLength = lab.ScenarioLength, scenarioCompletedGoals = lab.ScenarioCompletedGoals,
             guide = !lab.ShowGuide || lab.Task.Keys.Length == 0 ? null : Describe(Gesture.Parse(lab.Task.Keys), "") };
     }

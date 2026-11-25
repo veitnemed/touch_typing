@@ -246,14 +246,14 @@ namespace TouchTypingStudio
         private void UpdateReferenceLesson(Data task)
         {
             int count = state.I("scenarioLength"), step = state.I("scenarioStep");
-            bool boundedEditorCourse = state.B("editorCourse") && state.I("actionLimit") > 0;
-            int total = boundedEditorCourse ? state.I("actionLimit") : count;
-            int completed = Math.Max(0, Math.Min(total, state.I(boundedEditorCourse ? "solved" : "scenarioCompletedGoals")));
+            bool boundedCourse = state.S("routeKind") == "course" && state.I("actionLimit") > 0;
+            int total = boundedCourse ? state.I("actionLimit") : count;
+            int completed = Math.Max(0, Math.Min(total, state.I(boundedCourse ? "solved" : "scenarioCompletedGoals")));
             referenceScenarioProgress.Maximum = Math.Max(1, total);
             referenceScenarioProgress.Value = completed;
             referenceScenarioProgress.Visibility = total > 0 ? Visibility.Visible : Visibility.Collapsed;
             AutomationProperties.SetName(referenceScenarioProgress,
-                (boundedEditorCourse ? "Прогресс занятия: " : "Прогресс задания: ") + completed + " из " + total);
+                (boundedCourse ? "Прогресс занятия: " : "Прогресс задания: ") + completed + " из " + total);
             UpdateReferenceKeycaps(task, count, step);
             if (referenceHelpOpen) DrawReferenceLessonHelp(task);
         }

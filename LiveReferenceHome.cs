@@ -486,7 +486,7 @@ namespace TouchTypingStudio
             AutomationProperties.SetName(button, title + ". " + summary + " Прогресс: " + percent + "%.");
             AutomationProperties.SetAutomationId(button, "HomeClass-" + app);
             button.ToolTip = "Подтверждено сочетаний в текущей раскладке: " + completed + " из " + total +
-                (app == "code" ? ". Начать маршрут VS Code: 40 действий без таймера." : ". Начать тренировку сразу.");
+                ". Открыть тренировку. Если нет черновика: 40 действий без таймера.";
             return button;
         }
 

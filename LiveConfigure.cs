@@ -81,7 +81,7 @@ namespace TouchTypingStudio
             Option[] missions = new Option[0];
             Action refresh = delegate
             {
-                missions = new[] { new Option("", "Подобрать поручение") }.Concat(catalog.Items("missions")
+                missions = new[] { new Option("", "Последовательная практика") }.Concat(catalog.Items("missions")
                     .Where(item => item.S("app") == labApp && item.I("level") == level.SelectedIndex && UsesSelectedDesktop(item))
                     .Select(item => new Option(item.S("id"), item.S("title")))).ToArray();
                 mission.ItemsSource = missions;
@@ -97,7 +97,7 @@ namespace TouchTypingStudio
                 lastLabTimer = Math.Max(0, timer.SelectedIndex);
                 liveConfiguredMissionApp = labApp;
                 liveConfiguredMission = Get(mission);
-                StartLabAttempt(liveConfiguredMission, false);
+                StartLabAttempt(liveConfiguredMission, false, string.IsNullOrEmpty(liveConfiguredMission) ? "course" : "mission");
             }, 10);
             start.Content = "Начать";
             start.IsDefault = true;

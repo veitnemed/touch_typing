@@ -1,7 +1,10 @@
 """Exercise the same Live → VS Code card and Continue entry as the learner."""
+import json
 from unittest.mock import patch
 
 from platform_linux import Engine
+from test_editor_course import checkpoint, first_difference
+from test_project_file_practice import active
 from test_preview2_native import QA, CaptureConsent, out
 from touch_typing import LabPage
 
@@ -41,8 +44,13 @@ class CourseWindowQA(QA):
             yield from self.advance_goal(lab)  # Ctrl+P from the ordinary editor.
             yield from self.typed({"id": "type-code", "text": lab.state["task"]["text"]})
             yield from self.advance_goal(lab)  # open the named notebook
+            for key in ("Enter", "End", "Shift+Left"):
+                yield from self.chord(key)
+            notebook = active(lab.state)["notebook"]
+            assert (lab.state["solved"], notebook["selected"], notebook["editing"]) == (35, 0, True)
+            assert notebook["anchor"] == notebook["caret"] + 1 and notebook["caret"] > 0
             self.capture_widget_png(out/"course-02-notebook-at-35.png")
-            checkpoint = (lab.state["solved"], lab.state["mission"], lab.state["task"], lab.state["scene"]["windows"])
+            expected = checkpoint(lab.state)
             self.return_live_catalog("code")
             for _ in range(20):
                 yield
@@ -63,8 +71,14 @@ class CourseWindowQA(QA):
                 yield
             lab = self.lab
             assert lab.active and lab.state["editorCourse"]
-            assert (lab.state["solved"], lab.state["mission"], lab.state["task"], lab.state["scene"]["windows"]) == checkpoint
+            actual = checkpoint(lab.state)
+            if actual != expected:
+                for name, value in (("saved", expected), ("resumed", actual)):
+                    (out/f"course-checkpoint-{name}.json").write_text(json.dumps(value, ensure_ascii=False, indent=2))
+                raise AssertionError(first_difference(expected, actual))
             assert abs(lab.lesson_meter.get_fraction() - 35 / 40) < .001
+            yield from self.chord("Esc")
+            assert lab.state["solved"] == 35 and not active(lab.state)["notebook"]["editing"]
             while not lab.state["limitDecisionPending"]:
                 yield from self.advance_goal(lab)
             assert lab.active and lab.state["solved"] == 40 and lab.state["limitReached"] == "actions"
