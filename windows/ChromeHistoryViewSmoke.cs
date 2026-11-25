@@ -82,6 +82,9 @@ internal static partial class LiveUiSmoke
             Until(delegate { return BrowserWitness("LabDesktop")[2]=="history" &&
                 Find("LabDesktop").Current.HelpText.Contains("Поиск в истории"); }, "History visibly exposes its focusable search field.");
             int before = ReadSolved();
+            var beforeFilter = BrowserWitness("LabDesktop");
+            Check(beforeFilter[6].Contains("https://practice.local/handbook/backup#procedure"),
+                "The pinned Handbook Backup profile contains the exact previously visited source before filtering.");
             EnterCharacters("Handbook Backup");
             var filtered = BrowserWitness("LabDesktop");
             Check(filtered[1]=="chrome://history" && filtered[2]=="history" && filtered[3]=="Handbook Backup" &&

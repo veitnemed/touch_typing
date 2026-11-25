@@ -23,7 +23,7 @@ $oldWitness=$env:TOUCH_TYPING_QA_BROWSER_CLONE
 $oldPreference=$ErrorActionPreference
 try {
     $env:TOUCH_TYPING_QA_DATA_ROOT=Join-Path $out 'profile'
-    $env:TOUCH_TYPING_QA_SEED='7'
+    $env:TOUCH_TYPING_QA_SEED='1'
     $env:TOUCH_TYPING_QA_BROWSER_CLONE='1'
     $ErrorActionPreference='Continue'
     & $probe $exe $out 2>&1 | Tee-Object -FilePath (Join-Path $out 'native-chrome-history.log')
