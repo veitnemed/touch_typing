@@ -402,10 +402,24 @@ namespace TouchTypingStudio
             if (next.Exists) RenderLab(next);
         }
 
+        private void ApplyLabChromeSurfaceCommand(string action, string owner, int slot)
+        {
+            if (!labActive || paused || !IsActive || referenceHelpOpen || state.B("limitDecisionPending")) return;
+            var next = Request("lab-browser-surface-action", "action", action, "owner", owner, "slot", slot);
+            if (next.Exists) RenderLab(next);
+        }
+
         private void ApplyLabBrowserHistoryCommand(string action, string path)
         {
             if (!labActive || paused || !IsActive || referenceHelpOpen || state.B("limitDecisionPending")) return;
             var next = Request("lab-browser-history-focus", "action", action, "path", path);
+            if (next.Exists) RenderLab(next);
+        }
+
+        private void ApplyLabBrowserTabCommand(string action, string index)
+        {
+            if (!labActive || paused || !IsActive || referenceHelpOpen || state.B("limitDecisionPending")) return;
+            var next = Request("lab-browser-tab-search", "action", action, "index", index);
             if (next.Exists) RenderLab(next);
         }
 

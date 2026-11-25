@@ -266,6 +266,7 @@ namespace TouchTypingStudio
         public readonly string[] Rounds;
         public int Number, CourseSize;
         public int CheckRounds = 4;
+        public bool WholeRounds; // Authored messages keep their complete ending in a finite cycle.
         public LessonStage[] Opening = new LessonStage[0];
         public int PreviousIntroRounds; // 4.x kept each introductory sequence in a separate round.
 

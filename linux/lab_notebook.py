@@ -135,7 +135,7 @@ class NotebookSurface:
     def _on_nb_pointer_move(self, _controller, x, y):
         self._notebook_pointer_pos = (x, y)
         hit = next((part for part in reversed(self._notebook_hits) if contains(part[0], x, y)), None)
-        self.set_cursor_from_name(("text" if hit[1] in ("edit", "browser-history:search") else "pointer") if hit else "default")
+        self.set_cursor_from_name(("text" if hit[1] in ("edit", "browser-history:search", "browser-surface:address") else "pointer") if hit else "default")
         tip = hit[2] if hit else None
         if self.get_tooltip_text() != tip:
             self.set_tooltip_text(tip)
@@ -150,7 +150,8 @@ class NotebookSurface:
             if count < clicks or not contains(box, x, y):
                 continue
             self.grab_focus()
-            if self.explorer_hotspot(action,path) or self.browser_history_hotspot(action,path):
+            if (self.chrome_surface_hotspot(action,path,cell) or self.explorer_hotspot(action,path) or self.browser_history_hotspot(action,path)
+                    or self.browser_tab_hotspot(action,path)):
                 gesture.set_state(Gtk.EventSequenceState.CLAIMED)
                 return
             self._explorer_menu = False
@@ -237,7 +238,7 @@ class NotebookSurface:
         return True
 
     def _nb_hit(self, box, action, title, cell=-1, clicks=1, offset=None, path=""):
-        if not (self.notebook_command or self.explorer_command) or not self.notebook_interaction_clear():
+        if not (self.notebook_command or self.explorer_command or self.browser_history_command or self.chrome_surface_command) or not self.notebook_interaction_clear():
             return
         box = overlap(box, (0, 0, self.get_width(), self.get_height()))
         if min(box[2:]) >= 1:

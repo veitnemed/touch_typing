@@ -1231,7 +1231,7 @@ namespace TouchTypingStudio
                 }
                 else if (Keyboard.Modifiers == ModifierKeys.None && (input == Key.F5 ||
                     (input == Key.Space && !(Keyboard.FocusedElement is ComboBox) &&
-                    (!(Keyboard.FocusedElement is Button) || Keyboard.FocusedElement == beginControl))) &&
+                    (!(Keyboard.FocusedElement is ButtonBase) || Keyboard.FocusedElement == beginControl))) &&
                     beginControl != null && beginControl.IsEnabled && (page == LivePage || page == TypingPage))
                 {
                     e.Handled = true;

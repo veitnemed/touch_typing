@@ -115,7 +115,9 @@ namespace TouchTypingStudio
             AutomationProperties.SetAutomationId(labDesktop, "LabDesktop");
             labDesktop.NotebookCommand += ApplyLabNotebookCommand;
             labDesktop.ExplorerCommand += ApplyLabExplorerCommand;
+            labDesktop.ChromeSurfaceCommand += ApplyLabChromeSurfaceCommand;
             labDesktop.BrowserHistoryCommand += ApplyLabBrowserHistoryCommand;
+            labDesktop.BrowserTabCommand += ApplyLabBrowserTabCommand;
             var sceneFrame = ReferenceLessonPanel(labDesktop, new Thickness(4), 13);
             sceneFrame.Margin = new Thickness(16, 8, 16, 0);
             Grid.SetRow(sceneFrame, 2);
@@ -475,6 +477,21 @@ namespace TouchTypingStudio
             metrics.Children.Add(ReferenceResultMetric("count", "Действия", count.ToString(), ""));
             metrics.Children.Add(ReferenceResultMetric("speed", "Темп", Format(count * 60.0 / Math.Max(1, seconds)), "д/мин"));
             card.Children.Add(metrics);
+
+            if (!pausedPreview && result.D("sourceReview").Exists)
+            {
+                var source = result.D("sourceReview");
+                var receipt = Stack();
+                var sourceCode = ReferenceLabel("Код сверки: " + source.S("code"),15,Ui.Brush("#A9D9AE"),true);
+                AutomationProperties.SetAutomationId(sourceCode, "LabSourceReviewCode");
+                receipt.Children.Add(sourceCode);
+                var address = ReferenceLabel(source.S("url"),13,ReferenceMuted,false);
+                AutomationProperties.SetAutomationId(address, "LabSourceReviewAddress");
+                address.TextWrapping = TextWrapping.Wrap;
+                receipt.Children.Add(address);
+                receipt.Margin = new Thickness(0,0,0,11);
+                card.Children.Add(receipt);
+            }
 
             if (!pausedPreview)
             {

@@ -12,6 +12,26 @@ namespace TouchTypingStudio
     {
         private const string FilesHome = "/home/student";
 
+        private static bool HasFilesSearch(Data window)
+        {
+            string focus = window.S("focus");
+            return window.S("app") == "files" && (focus == "file-search" || focus == "file-results");
+        }
+
+        private static string FilesSearchDescription(Data window)
+        {
+            bool editing = window.S("focus") == "file-search";
+            var entries = window.Items("entries").ToArray();
+            int index = window.I("item", -1);
+            string scope = window.S("windowsPath");
+            if (scope.Length == 0) scope = window.S("folder");
+            return (editing ? "Поле поиска" : "Результаты поиска") + " в «" + scope + "». Запрос «" +
+                window.S(editing ? "input" : "query") + "». Найдено: " + entries.Length + "." +
+                (index >= 0 && index < entries.Length ? " Выбран «" + entries[index].S("title") + "»." : "") +
+                (entries.Length > 0 ? " Первые результаты: " + string.Join("; ", entries.Take(5)
+                    .Select(entry => entry.S("title") + " («" + entry.S("path") + "»)")) + "." : "");
+        }
+
         private static string FilesCaption(Data window, bool windows)
         {
             if (window.S("focus") == "image-preview") return windows ? "Просмотр фотографий" : "Просмотр изображения";
@@ -55,15 +75,20 @@ namespace TouchTypingStudio
             const string home = FilesHome;
             string folder = window.S("folder", home);
             string leaf = FilesCaption(window, windows);
+            string focus = window.S("focus");
+            bool search = focus == "file-search" || focus == "file-results";
+            string query = window.S(focus == "file-search" ? "input" : "query");
+            bool inlineSearch = windows && width > 650;
             string ink = windows ? "#222222" : "#252525";
             string muted = windows ? "#5B6470" : "#5D5C59";
             string edge = windows ? "#DEDFE2" : "#DDD9D5";
             string highlight = windows ? "#CCE8FF" : "#F4E0D4";
             double bar = windows ? top + 27 : top;
-            double listTop = bar + (windows ? 39 : 46);
+            double searchTop = bar + (windows ? 39 : 46);
+            double listTop = searchTop + (search && !inlineSearch ? 37 : 0);
             double side = Math.Min(182, width * .29);
             double addressX = windows ? 82 : 81;
-            double addressRight = width - (windows && width > 650 ? 184 : 12);
+            double addressRight = width - (inlineSearch ? Math.Max(184, Math.Min(229, width * .27)) : 12);
             var entries = window.Items("entries").ToArray();
             int selected = window.I("item", -1);
 
@@ -92,11 +117,20 @@ namespace TouchTypingStudio
                     ? "Домашняя папка" + folder.Substring(home.Length).Replace("/", "   ›   ")
                     : "Файловая система   ›   " + folder.Trim('/').Replace("/", "   ›   ");
             Text(location, addressX + 27, bar + 11, 12, ink, addressRight - addressX - 35);
-            if (windows && width > 650)
+            if (inlineSearch || search)
             {
-                Rectangle(addressRight + 8, bar + 6, width - addressRight - 20, 28, edge);
-                Rectangle(addressRight + 9, bar + 7, width - addressRight - 22, 26, "#FFFFFF");
-                Text("Поиск: " + leaf, addressRight + 16, bar + 11, 11, muted, width - addressRight - 35);
+                bool editing = focus == "file-search";
+                double x = inlineSearch ? addressRight + 8 : 12, y = inlineSearch ? bar + 6 : searchTop + 1;
+                double fieldWidth = width - x - 12, fieldHeight = inlineSearch ? 28 : 29;
+                Rounded(x, y, fieldWidth, fieldHeight, editing ? (windows ? "#0067B8" : "#A34F23") : edge, windows ? 0 : 5);
+                Rounded(x + 1, y + 1, fieldWidth - 2, fieldHeight - 2, "#FFFFFF", windows ? 0 : 4);
+                if (search)
+                {
+                    int prefix = inlineSearch ? 57 : 121;
+                    Text(inlineSearch ? "Поиск" : "Поиск по имени", x + 10, y + 6, 12, muted, prefix - 14);
+                    Field(query, window, x + prefix, y + 5, fieldWidth - prefix - 10, 13, ink, 0, editing, face: regular);
+                }
+                else Text("Поиск: " + leaf, x + 9, y + 5, 11, muted, fieldWidth - 18);
             }
 
             const double bottom = 23;
@@ -125,14 +159,14 @@ namespace TouchTypingStudio
                 Text(names[i], 35, ty + 3, 12, ink, side - 41);
             }
 
-            double kindX = side + (width - side) * .72;
+            double kindX = side + (width - side) * (search ? .59 : .72);
             double start = listTop + 31;
             double available = Math.Max(0, height - bottom - start);
             double row = windows ? 27 : 30;
             int visible = Math.Max(0, (int)(available / row));
             int first = Math.Max(0, selected - visible + 1);
             Text("Имя", side + 15, listTop + 7, 12, muted, kindX - side - 25);
-            Text("Тип", kindX + 8, listTop + 7, 12, muted, width - kindX - 14);
+            Text(search ? "Папка" : "Тип", kindX + 8, listTop + 7, 12, muted, width - kindX - 14);
             Rectangle(side + 1, start - 3, width - side - 1, 1, edge);
             Rectangle(kindX, listTop + 3, 1, 23, edge);
             for (int i = first; i < Math.Min(first + visible, entries.Length); i++)
@@ -151,15 +185,29 @@ namespace TouchTypingStudio
                         kindX - side - 46, 13, ink, 0, true, face: regular);
                 }
                 else Text(name, side + 37, y + (row - 16) / 2, 13, ink, kindX - side - 46);
-                Text(FilesType(name, directory, windows), kindX + 8, y + (row - 15) / 2, 12, muted, width - kindX - 14);
+                string kind = FilesType(name, directory, windows);
+                if (search)
+                {
+                    string prefix = folder.TrimEnd('/') + "/", relative = entries[i].S("path");
+                    if (relative.StartsWith(prefix, StringComparison.Ordinal)) relative = relative.Substring(prefix.Length);
+                    int separator = relative.LastIndexOf('/');
+                    kind = separator >= 0 ? relative.Substring(0, separator) : "Здесь";
+                }
+                Text(kind, kindX + 8, y + (row - 15) / 2, 12, muted, width - kindX - 14);
             }
             if (entries.Length == 0 && available >= 26)
-                Text("Папка пуста", side + 15, start + 10, 13, muted, width - side - 25);
+                Text(!search ? "Папка пуста" : string.IsNullOrWhiteSpace(query) ? "Введите часть имени файла" : "Нет совпадений",
+                    side + 15, start + 10, 13, muted, width - side - 25);
 
             Rectangle(0, height - bottom, width, bottom, windows ? "#F8F8F8" : "#F7F5F3");
             Rectangle(0, height - bottom, width, 1, edge);
-            Text(window.S("focus") == "file-name" ? window.S("status") : "Объектов: " + entries.Length + (selected >= 0 && selected < entries.Length ? "   |   Выбран: " + entries[selected].S("title") : ""),
-                12, height - bottom + 4, 11, muted, width - 24);
+            string status = (search ? "Найдено: " + entries.Length + "   |   В папке: " + leaf : "Объектов: " + entries.Length) +
+                (selected >= 0 && selected < entries.Length ? "   |   Выбран: " + entries[selected].S("title") : "");
+            string actionStatus = window.S("status");
+            if (focus == "file-name" || actionStatus.StartsWith("Создана копия:", StringComparison.Ordinal) ||
+                actionStatus.StartsWith("К копированию:", StringComparison.Ordinal) || actionStatus.StartsWith("Перемещён:", StringComparison.Ordinal))
+                status = actionStatus;
+            Text(status, 12, height - bottom + 4, 11, muted, width - 24);
         }
 
         private void FilesNav(string glyph, double x, double y, bool available, string ink)

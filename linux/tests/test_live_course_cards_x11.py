@@ -3,7 +3,7 @@ import json
 from test_preview2_native import QA, alias, codes, out
 
 TEXT_PREFIX = {"code-rename-confirm", "project-search-submit", "exact-find-submit", "quick-choose"}
-TYPED_FINISH = {"notebook-type", "python-edit-write"}
+TYPED_FINISH = {"notebook-type", "python-edit-write", "file-search-query"}
 
 
 class CourseCards(QA):
@@ -27,7 +27,10 @@ class CourseCards(QA):
         t, m = s["task"], s["mission"]
         goal, previous = t["id"], s["solved"]
         value = t.get("text","")
-        if goal == "project-search-repair":
+        if m == "code-traceback-line" and goal == "save":
+            for key in ("End", "Backspace", value):
+                yield from self.chord(key)
+        elif goal == "project-search-repair":
             for key in ("End","Backspace","5"):
                 yield from self.chord(key)
         elif goal == "save" and m == "code-project-file-move":

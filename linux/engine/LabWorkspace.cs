@@ -31,6 +31,7 @@ internal sealed partial class LabScene
 
     internal LabEntry[] Entries(LabWindow w)
     {
+        if (IsFileSearch(w)) return FileSearchEntries(w);
         if (w.App == "files")
             return Terminal.Entries(w.Folder).Where(path => !NameOf(path).StartsWith('.'))
                 .Select(path => new LabEntry(NameOf(path), path, Terminal.DirectoryExists(path) ? "folder" : "file")).ToArray();
@@ -39,6 +40,7 @@ internal sealed partial class LabScene
             ChromeHistory => HistoryEntries(w),
             "chrome://downloads" => DownloadEntries(),
             "chrome://bookmarks" => w.SavedBookmarks.Order().Select(PageEntry).ToArray(),
+            _ when IsTabReviewUrl(w.Url) => [],
             _ when BrowserPracticeActive && IsSearchResult(w.Url) => PracticeSearchEntries(w.Url),
             _ when BulletinWorkflow => BulletinLinks(w.Url),
             _ when BrowserPracticeActive => BrowserResearchLinks(w.Url),
@@ -93,13 +95,14 @@ internal sealed partial class LabScene
         return w.Snapshot(w.Id == ActiveWindow, Entries(w), paths.Select(Relative), changes, results, projectName, projectRelative,
             WindowsDesktop && w.App == "files" ? WindowsPath(w.Folder) : null, BrowserPracticeActive, EditorProjectRoot.Count(ch => ch == '/'),
             w.App == "code" ? ProjectTree(EditorProjectRoot, w.ExpandedProjectFolders).ToArray() : null, CanUndoProjectFile,
-            CanPasteProjectFile, CanPasteNotebookCell);
+            CanPasteProjectFile, CanPasteNotebookCell,
+            tabSearch: ChromeTabsSnapshot(w), sourceReview: ChromeReviewSnapshot(w));
     }
 
     private static bool IsIdentifier(char c) => char.IsLetterOrDigit(c) || c == '_';
     private static string NameOf(string path) => path[(path.LastIndexOf('/') + 1)..];
     private static string EditorPath(LabTab tab) => tab.Url.StartsWith('/') ? tab.Url : Project + "/" + tab.Url;
-    private LabEntry PageEntry(string url) => BrowserPracticeActive && BrowserPracticePage(url) is { } page
+    private LabEntry PageEntry(string url) => (TabReviewPage(url) ?? (BrowserPracticeActive ? BrowserPracticePage(url) : null)) is { } page
         ? new(page.Title, url, "page") : Links.FirstOrDefault(item => item.Path == url) ?? new(url, url, "page");
     private void OpenDocument(string path)
     {

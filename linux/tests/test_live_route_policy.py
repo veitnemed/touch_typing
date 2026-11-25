@@ -9,6 +9,8 @@ from platform_linux import Engine
 from test_debug_day import png_fixture
 from test_editor_course import advance as advance_editor, enter
 from test_project_file_practice import active, chord
+from test_chrome_tab_search import (BASICS_MISSION as TAB_REVIEW_BASICS, MISSION as TAB_REVIEW,
+                                    MISSIONS as TAB_REVIEWS, advance_tabs, documents)
 
 TERMINAL_FULL = (
     {"terminal-explore", "terminal-handoff", "terminal-backup", "terminal-investigate"},
@@ -45,6 +47,8 @@ def begin(e, app, level=0, desktop="ubuntu", **overrides):
 
 
 def advance(e, s):
+    if s["mission"] in TAB_REVIEWS:
+        return advance_tabs(e, s)
     if s["app"] == "code":
         return advance_editor(e, s)
     if s["task"]["id"] == "terminal-interrupt":
@@ -69,7 +73,7 @@ def advance(e, s):
             # the named app, which must actually become the active window.
             assert not s["scene"].get("overview") or s["scene"].get("search", "") == ""
         enter(e, task["text"])
-        state = chord(e, "Enter")
+        state = e.call("lab-state") if task["id"] == "file-search-query" else chord(e, "Enter")
     assert state["solved"] == before + 1, (s["mission"], task, state["status"], state["scene"]["layout"])
     return state
 
@@ -83,6 +87,56 @@ class LiveRoutePolicyTests(unittest.TestCase):
                 return callback(e)
             finally:
                 e.close()
+
+    def test_normal_chrome_level_zero_reaches_tab_review_without_custom_limits_or_selector(self):
+        old_basics = {"chrome-reader", "chrome-sources", "chrome-return", "chrome-report",
+            "chrome-docs-reference", "chrome-download-verify", "chrome-search-clone", "chrome-project-file-inbox"}
+        for desktop in ("ubuntu", "windows"):
+            with self.subTest(desktop=desktop):
+                def check(e):
+                    missions = {m["id"]: m for m in e.call("lab-catalog", desktopProfile=desktop)["missions"]}
+                    self.assertTrue(old_basics <= {k for k, m in missions.items() if m["app"] == "chrome" and m["level"] == 0})
+                    self.assertEqual((missions[TAB_REVIEW_BASICS]["level"], missions[TAB_REVIEW]["level"]), (0, 1))
+                    encountered = []
+                    for session in range(1, 7):
+                        s = begin(e, "chrome", desktop=desktop, adaptiveGuide=True)
+                        self.assertEqual((s["level"], s["routeKind"], s["actionLimit"], s["timeLimit"]), (0, "course", 40, 0))
+                        self.assertNotIn(s["mission"], TAB_REVIEWS)
+                        if session == 1:
+                            self.assertEqual(s["mission"], "chrome-reader")
+                        for _ in range(41):
+                            if s["limitDecisionPending"] or s["finished"]:
+                                break
+                            mission = s["mission"]
+                            if not encountered or encountered[-1] != mission:
+                                encountered.append(mission)
+                            if mission == TAB_REVIEW_BASICS:
+                                published = s["solved"]
+                                current, _, _, _ = documents(s)
+                                self.assertEqual((len(active(s)["tabs"]), s["scenarioLength"]), (8,10))
+                                s = advance(e, s)
+                                self.assertEqual((s["solved"],active(s)["focus"]), (published+1,"tab-search"))
+                                s = advance(e, s)
+                                self.assertEqual((s["solved"],active(s)["url"]), (published+2,current["url"]))
+                                self.assertTrue(e.call("lab-stop")["saved"])
+                                s = begin(e,"chrome",desktop=desktop,adaptiveGuide=True,**{"continue": True})
+                                self.assertEqual((s["mission"],s["solved"],active(s)["url"]),
+                                                 (TAB_REVIEW_BASICS,published+2,current["url"]))
+                                while s["mission"] == TAB_REVIEW_BASICS and not s["limitDecisionPending"]:
+                                    s = advance(e,s)
+                                self.assertEqual(s["solved"], published+10)
+                                self.assertNotEqual(s["mission"], TAB_REVIEW_BASICS)
+                                self.assertFalse(s["finished"])
+                                self.assertIn("chrome-reader", encountered)
+                                print(f"Chrome {desktop} ordinary 40 actions: tab review on session {session}, after {published} actions.")
+                                return
+                            s = advance(e, s)
+                        self.assertTrue(s["finished"] or s["limitDecisionPending"])
+                        if not s["finished"]:
+                            s = e.call("lab-limit-choice", choice="finish")
+                            self.assertTrue(s["finished"])
+                    self.fail(f"Default Chrome course did not reach tab review: {encountered}")
+                self.run_profile(check, desktop)
 
     def test_all_default_cards_start_foundation_and_progress_past_it(self):
         observations = []

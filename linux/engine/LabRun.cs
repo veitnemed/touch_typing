@@ -24,8 +24,10 @@ internal sealed class LabRun
     private const string SimulatedWindowSwitchEvent = "@simulated-window-switch", TerminalHistoryEvent = "@terminal-reverse-search";
     private const string ExactUrlEvent = "@exact-url", ExactQuickOpenEvent = "@exact-quick-open";
     private const string ChromeHistoryEvent = "@chrome-history-filter", ChromeHistoryPointerEvent = "@chrome-history-pointer";
+    private const string ChromeTabSearchEvent = "@chrome-tab-search", ChromeTabPointerEvent = "@chrome-tab-pointer";
     private const string StrictReportEvent = "@strict-report";
     private const string ClusterNavigationEvent = "@cluster-navigation";
+    private const string ChromeSurfaceEvent = "@chrome-surface-pointer";
     private const string LineEditingEvent = "@line-editing";
     private const string PythonEditingEvent = "@python-editing";
     private const string NotebookWordEraseEvent = "@notebook-word-erase";
@@ -35,6 +37,7 @@ internal sealed class LabRun
     private bool replayLegacyNotebookWordErase, replayLegacyCsvExplorer;
     private const string CsvExplorerScopeEvent = "@csv-explorer-scope";
     private const string StrictTriggersEvent = "@strict-triggers";
+    private const string DesktopFileSearchEvent = "@desktop-file-search";
     private bool replayLegacyTriggers;
     private bool replayLegacyLineEditing, replayLegacyPythonEditing;
     private readonly bool neutralProject, nativeEnglishInput, restoreOriginalGuide;
@@ -43,7 +46,7 @@ internal sealed class LabRun
     private bool initialVirtual;
     internal bool HasDraft => !CompletedRoute && !limitAccepted && (!ReachedLimit || softFinish || FinishingMission) &&
         (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 ||
-        trace.Any(item => item.Key is not (ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent)));
+        trace.Any(item => item.Key is not (ChromeTabSearchEvent or ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent or DesktopFileSearchEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask, inputAtActiveMilliseconds;
@@ -117,7 +120,7 @@ internal sealed class LabRun
     private bool ReachedLimit => LimitReached != null;
     private static bool IsEssentials(string missionId) => missionId?.StartsWith("terminal-essentials-", StringComparison.Ordinal) == true;
     private static bool JoinsTimedRotation(string missionId) => missionId?.StartsWith("chrome-", StringComparison.Ordinal) == true ||
-        missionId is "workday-download-handoff" or "workday-project-file-inbox" ||
+        missionId is "workday-download-handoff" or "workday-project-file-inbox" or "workday-repair-source-link" ||
         missionId?.StartsWith("code-notebook-", StringComparison.Ordinal) == true ||
         missionId?.StartsWith("code-project-file-", StringComparison.Ordinal) == true;
     private bool CompletedRoute => !restoring && mission != null && pending.Count == 0 &&
@@ -179,7 +182,7 @@ internal sealed class LabRun
         // New traces begin with format markers. Old ones acquire the line
         // marker only after the historic keystrokes have been replayed.
         var initialFormat = savedEvents.TakeWhile(e => e.Key is
-            ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent);
+            ChromeTabSearchEvent or ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent or DesktopFileSearchEvent);
         replayLegacyNotebookWordErase = draft != null && !initialFormat.Any(e => e.Key == NotebookWordEraseEvent);
         replayLegacyTriggers = replayLegacyCsvExplorer = draft != null;
         replayLegacyLineEditing = draft != null && !initialFormat.Any(e => e.Key == LineEditingEvent);
@@ -194,6 +197,7 @@ internal sealed class LabRun
         Scene.ReplayLegacyQuickOpen = draft != null && !initialFormat.Any(e => e.Key == ExactQuickOpenEvent);
         Scene.ReplayLegacyTerminalSearch = draft != null && !initialFormat.Any(e => e.Key == TerminalHistoryEvent);
         Scene.ReplayLegacyChromeHistory = draft != null && !initialFormat.Any(e => e.Key == ChromeHistoryEvent);
+        Scene.ReplayLegacyDesktopFileSearch = draft != null && !initialFormat.Any(e => e.Key == DesktopFileSearchEvent);
         if (draft != null)
         {
             Resume();
@@ -212,6 +216,12 @@ internal sealed class LabRun
                 else if (e.Key == NotebookKernelStepEvent) TickNotebook();
                 else if (e.Key == TerminalLogArrivalEvent) AppendTerminalLog();
                 else if (e.Key == SimulatedWindowSwitchEvent) SimulateWindowSwitch();
+                else if (e.Key == ChromeSurfaceEvent)
+                {
+                    string[] args = e.Text.Split(':');
+                    if (args.Length == 3 && int.TryParse(args[2], System.Globalization.NumberStyles.Integer,
+                        System.Globalization.CultureInfo.InvariantCulture, out var slot)) ChromeSurfacePointer(args[0],args[1],slot);
+                }
                 else if (e.Key == ExplorerPointerEvent)
                 {
                     int cut = e.Text.IndexOf(':');
@@ -222,6 +232,12 @@ internal sealed class LabRun
                 else if (e.Key == ExactQuickOpenEvent) { Scene.ReplayLegacyQuickOpen = false; trace.Add(e); }
                 else if (e.Key == TerminalHistoryEvent) EndLegacyTerminalSearch(e);
                 else if (e.Key == ChromeHistoryEvent) EndLegacyChromeHistory(e);
+                else if (e.Key == ChromeTabSearchEvent) { Scene.ReplayLegacyTabSearch = false; trace.Add(e); }
+                else if (e.Key == ChromeTabPointerEvent)
+                {
+                    int cut = e.Text.IndexOf(':');
+                    if (cut > 0) BrowserTabPointer(e.Text[..cut], e.Text[(cut + 1)..]);
+                }
                 else if (e.Key == ChromeHistoryPointerEvent)
                 {
                     int cut = e.Text.IndexOf(':');
@@ -234,12 +250,14 @@ internal sealed class LabRun
                 else if (e.Key == NotebookActionsEvent) { Scene.ReplayLegacyNotebookActions = false; trace.Add(e); }
                 else if (e.Key == NotebookWordEraseEvent) { replayLegacyNotebookWordErase = false; trace.Add(e); }
                 else if (e.Key == StrictTriggersEvent) { replayLegacyTriggers = false; trace.Add(e); }
+                else if (e.Key == DesktopFileSearchEvent) { Scene.ReplayLegacyDesktopFileSearch = false; trace.Add(e); }
                 else if (e.Key == CsvExplorerScopeEvent) { replayLegacyCsvExplorer = false; trace.Add(e); }
                 else Input(e.Key, e.Down, e.Text, e.NativeEnglish ? "EN" : "");
             }
             if (replayLegacyUrl) trace.Add(new(ExactUrlEvent));
             if (Scene.ReplayLegacyTerminalSearch) EndLegacyTerminalSearch(new(TerminalHistoryEvent));
             if (Scene.ReplayLegacyChromeHistory) EndLegacyChromeHistory(new(ChromeHistoryEvent));
+            if (Scene.ReplayLegacyTabSearch) { Scene.ReplayLegacyTabSearch = false; trace.Add(new(ChromeTabSearchEvent)); }
             if (Scene.ReplayLegacyQuickOpen)
             { Scene.ReplayLegacyQuickOpen = false; trace.Add(new(ExactQuickOpenEvent)); }
             if (replayLegacyReport) trace.Add(new(StrictReportEvent));
@@ -247,6 +265,7 @@ internal sealed class LabRun
             if (replayLegacyLineEditing) EndLegacyLineEditing(new(LineEditingEvent));
             if (replayLegacyPythonEditing) EndLegacyPythonEditing(new(PythonEditingEvent));
             if (replayLegacyTriggers) { replayLegacyTriggers = false; trace.Add(new(StrictTriggersEvent)); }
+            if (Scene.ReplayLegacyDesktopFileSearch) { Scene.ReplayLegacyDesktopFileSearch = false; trace.Add(new(DesktopFileSearchEvent)); }
             // Do not earn different credits for already-recorded keys. A resumed CSV
             // lesson starts using object-scoped evidence only for subsequent input.
             if (replayLegacyCsvExplorer && Scene.CsvNotebook) trace.Add(new(CsvExplorerScopeEvent));
@@ -438,6 +457,20 @@ internal sealed class LabRun
         return true;
     }
 
+    internal bool BrowserTabPointer(string action, string index)
+    {
+        if (Finished || AwaitingLimitChoice || Paused || !Scene.BrowserTabPointer(action, index)) return false;
+        trace.Add(new(ChromeTabPointerEvent, Text: action + ":" + index));
+        return true;
+    }
+
+    internal bool ChromeSurfacePointer(string owner, string action, int slot)
+    {
+        if (Finished || AwaitingLimitChoice || Paused || !Scene.ChromeSurfacePointer(owner, action, slot)) return false;
+        trace.Add(new(ChromeSurfaceEvent, Text: owner + ":" + action + ":" + slot.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        return true;
+    }
+
     internal void TickTerminal()
     {
         if (Finished || AwaitingLimitChoice || Paused || !Scene.Terminal.FollowingLog)
@@ -581,11 +614,12 @@ internal sealed class LabRun
             return Miss(key, WrongKeyMessage(key));
         }
         bool changed = Scene.Text(key, useNativeEnglish ? text : VirtualText(key, text), shift, word);
-        bool typedEdit = changed && Task.Action is ("python-edit-write" or "notebook-type") &&
+        bool continuousTextGoal = Task.Action is "python-edit-write" or "notebook-type" or "file-search-query";
+        bool typedEdit = changed && continuousTextGoal &&
             key is not ("Left" or "Right" or "Up" or "Down" or "Home" or "End" or "Enter" or "Backspace" or "Delete") &&
             !string.IsNullOrEmpty(text) && !text.Any(char.IsControl);
         var passed = Observe(key, matches && Scene.Terminal.LastSuccess ? Task.Text : null, actualTaskId:
-            matches && Scene.Terminal.LastSuccess || typedEdit || changed && Task.Action is not ("python-edit-write" or "notebook-type") && Task.Keys.Length == 0 && key == "Enter" && !submitting ? Task.Id : null);
+            matches && Scene.Terminal.LastSuccess || typedEdit || changed && !continuousTextGoal && Task.Keys.Length == 0 && key == "Enter" && !submitting ? Task.Id : null);
         if (passed != null) return passed;
         if (submitting && !Scene.Terminal.LastSuccess) return Miss(key, Scene.Active.Status);
         if (submitting && searching && !matches) return Miss(key, ShowGuide
@@ -686,6 +720,8 @@ internal sealed class LabRun
             }
             var passed = Observe(key, acceptExistingUrlSelection: !replayLegacyUrl && actual.Id == "url" && actual.Keys != "Alt+D", actualTaskId: actual.Id);
             if (passed != null) return passed;
+            if (actual.Id == Task.Id && Scene.ChromeTabReviewRejection(actual.Action) is { } tabError)
+                return Miss(key, tabError);
             if (actual.Id == "terminal-interrupt" && Task.Id == "terminal-interrupt" && !Scene.Terminal.LogIncidentArrived)
                 return Miss(key, "Просмотр остановлен до новой ошибки. Снова наберите " +
                     Scene.TerminalFollowCommand + " и дождитесь строки ERROR.");
@@ -907,12 +943,14 @@ internal sealed class LabRun
                 trace.Add(new(ExactQuickOpenEvent));
                 trace.Add(new(TerminalHistoryEvent));
                 trace.Add(new(ChromeHistoryEvent));
+                trace.Add(new(ChromeTabSearchEvent));
                 trace.Add(new(StrictReportEvent));
                 trace.Add(new(ClusterNavigationEvent));
                 trace.Add(new(LineEditingEvent));
                 trace.Add(new(PythonEditingEvent));
                 trace.Add(new(NotebookActionsEvent));
                 trace.Add(new(StrictTriggersEvent));
+                trace.Add(new(DesktopFileSearchEvent));
                 if (Scene.NotebookCourse) trace.Add(new(NotebookWordEraseEvent));
                 if (Scene.CsvNotebook) trace.Add(new(CsvExplorerScopeEvent));
             }
@@ -961,6 +999,7 @@ internal sealed class LabRun
         bool better = complete && (previousBest == null || Solved > previousBest.Solved || Solved == previousBest.Solved && Errors < previousBest.Errors);
         return new { App, Mode, Level, Solved, Errors, Seconds, TimeLimit, ActionLimit, Guidance,
             SimulatedWindowSwitches, completed = complete,
+            sourceReview = Scene.TabReviewReceipt(),
             accuracy = Solved + Errors == 0 ? 0 : Math.Round(100.0 * Solved / (Solved + Errors), 1),
             record = Math.Max(previousRecord, complete ? Solved : 0), previousRecord, previousRecordErrors = previousBest?.Errors ?? 0, newRecord = better,
             series = points, weak = points.Where(point => !point.Correct).GroupBy(point => point.Task).Select(group =>

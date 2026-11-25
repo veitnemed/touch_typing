@@ -19,7 +19,7 @@ CATALOG = (
      "code-go-definition", "code-rename-symbol", "code-search-error", "code-find-exact-edit",
      "code-line-edit", "code-notebook-read", "code-project-file-move"},
     {"code-refactor", "code-extract", "code-console", "code-symbols", "code-python-edit",
-     "code-diagnostic-test", "code-notebook-repair", "code-project-file-copy"},
+     "code-diagnostic-test", "code-notebook-repair", "code-project-file-copy", "code-traceback-line"},
     {"code-handover", "code-repair", "code-inspection", "code-publish", "code-notebook-recheck"},
 )
 
@@ -80,7 +80,9 @@ def advance(e, state):
         result = notebook_step(e, state)
         assert result["solved"] == before + 1, (mission, task, result["status"], active(result).get("focus"))
         return result
-    if task_id == "project-search-repair":
+    if mission == "code-traceback-line" and task_id == "save":
+        chord(e, "End"); chord(e, "Backspace"); enter(e, value)
+    elif task_id == "project-search-repair":
         chord(e, "End"); chord(e, "Backspace"); enter(e, "5")
     elif mission == "code-project-file-move" and task_id == "save":
         chord(e, "Ctrl+End"); enter(e, value)

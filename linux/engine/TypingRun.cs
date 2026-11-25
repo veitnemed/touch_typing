@@ -74,7 +74,7 @@ internal sealed partial class TypingRun
             variant = requestedRound < 0 ? TrainingProgress.Variant(lesson, profile) : Math.Clamp(requestedRound, 0, lesson.Rounds.Length - 1);
             title = lesson.Title;
             source = lesson.Skill;
-            snippets = [lesson.Rounds[variant]];
+            snippets = lesson.WholeRounds && infinite ? lesson.Rounds : [lesson.Rounds[variant]];
         }
         else
         switch (mode)
@@ -130,17 +130,27 @@ internal sealed partial class TypingRun
                 else throw new ArgumentException("Выберите упражнение.");
                 break;
         }
-        var generator = new ContinuousTyping(random, kind, level, profile.Training.Goal, snippets, authored: lesson != null);
-        if (infinite) continuous = generator;
+        if (lesson?.WholeRounds == true && !infinite)
+        {
+            // This mode asks for a complete note, not a random prefix or a
+            // second note cut at its budget. Keep each round as its own cycle.
+            classic = new ClassicTypingPlan(Enumerable.Range(0, Math.Clamp(cycles, 1, ClassicTypingPlan.MaxCycles))
+                .Select(i => new[] { lesson.Rounds[(variant + i) % lesson.Rounds.Length] }).ToArray());
+        }
         else
         {
-            string first = generator.Attempt.Target;
-            classic = ClassicTypingPlan.Build(cycles, random, () =>
+            var generator = new ContinuousTyping(random, kind, level, profile.Training.Goal, snippets, authored: lesson != null);
+            if (infinite) continuous = generator;
+            else
             {
-                if (first == null) return generator.NextStandardBlock();
-                string next = first; first = null;
-                return next;
-            });
+                string first = generator.Attempt.Target;
+                classic = ClassicTypingPlan.Build(cycles, random, () =>
+                {
+                    if (first == null) return generator.NextStandardBlock();
+                    string next = first; first = null;
+                    return next;
+                });
+            }
         }
         Attempt.Start();
     }

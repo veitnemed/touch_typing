@@ -13,7 +13,22 @@ namespace TouchTypingStudio
         private const string ChromeHistoryBg = "#252629", ChromeHistoryCard = "#2D2E31", ChromeHistoryMuted = "#BDC1C6";
         private const string ChromeSelection = "#415C84";
 
+        private const string ChromeSurfacePrefix = "browser-surface:";
+        internal event Action<string,string,int> ChromeSurfaceCommand;
         internal event Action<string, string> BrowserHistoryCommand;
+
+        private bool OnChromeSurfaceHotspot(NotebookHit hit)
+        {
+            if (ChromeSurfaceCommand == null || !hit.Action.StartsWith(ChromeSurfacePrefix,StringComparison.Ordinal)) return false;
+            ChromeSurfaceCommand(hit.Action.Substring(ChromeSurfacePrefix.Length),hit.Path,hit.Cell);
+            return true;
+        }
+
+        private void AddChromeSurfaceHit(Data window, Rect target, string action, string label, int slot = -1)
+        {
+            if (ChromeSurfaceCommand != null && window.B("active") && window.S("id").Length != 0 && window.S("focus") != "tab-search")
+                AddNotebookHit(target,ChromeSurfacePrefix+action,label,slot,path:window.S("id"));
+        }
 
         private bool OnBrowserHistoryHotspot(NotebookHit hit)
         {
@@ -107,6 +122,9 @@ namespace TouchTypingStudio
             {
                 Rounded(6*unit,7*unit,28*unit,28*unit,"#646464",10*unit);
                 DrawChromeMark("down",12*unit,13*unit,16*unit,ChromeText,"#646464");
+                if (window.B("active") && BrowserTabCommand != null)
+                    AddNotebookHit(new Rect(6*unit,7*unit,28*unit,28*unit),
+                        ChromeTabsPrefix+"open","Поиск открытых вкладок · Ctrl+Shift+A");
             }
             double left = w >= 240 ? 40*unit : 4, controls = 100*unit;
             double available = Math.Max(42,w-left-controls-25*unit);
@@ -119,6 +137,8 @@ namespace TouchTypingStudio
                 bool selected = index == active;
                 double position = left+(index-start)*tabWidth;
                 string tone = selected ? ChromeStrap : "#282828";
+                AddChromeSurfaceHit(window,new Rect(position+2*unit,6*unit,Math.Max(1,tabWidth-27*unit),tabsHeight-6*unit),
+                    "tab","Открыть вкладку: "+tabs[index].S("title","Новая вкладка"),index);
                 if (selected)
                 {
                     Rounded(position,6*unit,tabWidth,tabsHeight-6*unit,tone,11*unit);
@@ -152,10 +172,17 @@ namespace TouchTypingStudio
             Rectangle(0,nav,w,navHeight,ChromeStrap);
             string[] navIcons = w >= 460 ? new[] {"back","forward","refresh","home"} : new[] {"back","refresh"};
             for (int index = 0; index < navIcons.Length; index++)
-                DrawChromeMark(navIcons[index],(16+index*35)*unit,nav+13*unit,16*unit,ChromeIcon);
+            {
+                bool enabled = navIcons[index] != "back" || window.B("canGoBack");
+                DrawChromeMark(navIcons[index],(16+index*35)*unit,nav+13*unit,16*unit,enabled?ChromeIcon:"#757773");
+                if (navIcons[index] == "back" && enabled)
+                    AddChromeSurfaceHit(window,new Rect(7*unit,nav+4*unit,33*unit,34*unit),"back","Назад · Alt+←");
+            }
             bool roomy = w >= 840, editing = window.S("focus") == "url" && window.B("active",true);
             double x = (19+35*navIcons.Length)*unit, right = (roomy ? 145 : 52)*unit;
             double addressWidth = Math.Max(26,w-right-x);
+            double marginL = (addressWidth>=90*unit?35:2)*unit, marginR = (addressWidth>=90*unit?32:2)*unit;
+            AddChromeSurfaceHit(window,new Rect(x+marginL,nav+5*unit,Math.Max(0,addressWidth-marginL-marginR),35*unit),"address","Адрес страницы · Ctrl+L");
             string dark = editing ? "#292B28" : ChromePill, url = window.S("url");
             if (editing) Rounded(x,nav+5*unit,addressWidth,35*unit,ChromeFocus,18*unit);
             Rounded(x+(editing ? 1.5*unit : 0),nav+(editing ? 6.5 : 5)*unit,addressWidth-(editing ? 3*unit : 0),

@@ -1674,6 +1674,13 @@ class MissionTest(unittest.TestCase):
         state = engine.call("lab-resume")
         # Observe real edits, two-press notebook commands and file conflict
         # handling while walking the full named catalog.
+        from test_chrome_tab_search import MISSIONS as TAB_REVIEWS, advance_tabs
+        if mission["id"] in TAB_REVIEWS:
+            for expected in range(1,total+1):
+                state = advance_tabs(engine, state)
+                self.assertEqual(state["solved"], expected)
+            self.assertTrue(state["finished"])
+            return
         from test_notebook_advanced_routes import ROUTES, step as notebook_step
         if mission["id"] in ROUTES:
             for expected in range(1, total + 1):
@@ -1717,6 +1724,10 @@ class MissionTest(unittest.TestCase):
                     if expects_text and attempt == 0:
                         for char in task["text"]:
                             chord(["LShift", "-"] if char == "_" else ["LShift", char] if char.isupper() else ["Space" if char == " " else char.upper()], char)
+                    if mission["id"] == "code-traceback-line" and task["id"] == "save" and attempt == 0:
+                        chord(["End"])
+                        chord(["Backspace"])
+                        chord([task["text"]], task["text"])
                     if task["id"] == "project-search-repair" and attempt == 0:
                         chord(["End"])
                         chord(["Backspace"])
@@ -1729,7 +1740,7 @@ class MissionTest(unittest.TestCase):
                             state = chord([sides.get(k, k) for k in keys.split("+")])
                 elif task["id"] == "notebook-type":
                     pass  # The final character credits the edit. Enter would modify the cell.
-                elif task["id"] == "python-edit-write":
+                elif task["id"] in ("python-edit-write", "file-search-query"):
                     for char in task["text"]:
                         keys = {" ": ["Space"], "=": ["="], "+": ["LShift", "="]}.get(char, [char.upper()])
                         state = chord(keys, char)
