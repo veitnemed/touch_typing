@@ -117,7 +117,7 @@ namespace TouchTypingStudio
             new Territory("qwerty", "QWERTY", "ЛАТИНИЦА", "#6FE1DD", Layout.English,
                 "home-motion home-rest upper-motion lower-motion reach names qwop xc", ExerciseKind.Ghost),
             new Territory("symbols", "Знаки", "ЦИФРЫ И СИМВОЛЫ", "#F7BF84", Layout.English,
-                "plus-motion equals-motion backspace-motion digit-motion apostrophe pairs operators", ExerciseKind.Survival),
+                "plus-motion equals-motion backspace-motion digit-motion apostrophe pairs operators work-note-bilingual", ExerciseKind.Survival),
             new Territory("python", "Python", "КОД И ОТСТУПЫ", "#94AAF9", Layout.English,
                 "assign print list-index call dict attributes function compare for assert comprehension", ExerciseKind.Python),
             new Territory("ru", "ЙЦУКЕН", "КИРИЛЛИЦА", "#BBA6FA", Layout.Russian,

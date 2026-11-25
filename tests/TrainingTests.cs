@@ -76,6 +76,17 @@ namespace TouchTypingStudio
             var p = new StudioProfile();
             var lessons = Atlas.Nodes.Where(n => n.Lesson != null).Select(n => n.Lesson).ToArray();
             Check(lessons.Distinct().Count() == Lessons.All.Length && lessons.Length == Lessons.All.Length, "One node per existing lesson");
+            var note = Lessons.Find("work-note-bilingual");
+            var symbols = Atlas.Find("symbols");
+            Check(Atlas.ForLesson(note) == symbols &&
+                Atlas.NextAfter(Lessons.Find("operators"), p).Lesson == note &&
+                Atlas.NextAfter(note, p) == null && Atlas.Next(p, symbols).Lesson.Id == "plus-motion",
+                "The bilingual note is available after the previous symbol lessons and does not replace their starting route");
+            p.RecallDates.Add(new RecallDate { Lesson = note.Id, Due = Now.Date });
+            var noteReview = ExerciseBank.Create(ExerciseKind.Daily, p, symbols, Now);
+            Check(noteReview != null && noteReview.Recall == note && noteReview.Region == "symbols",
+                "The new lesson keeps a valid region for scheduled review");
+            p.RecallDates.Clear();
             var routes = Atlas.Nodes.Where(n => n.Route != null).Select(n => n.Route).ToArray();
             Check(routes.Distinct().Count() == RouteCatalog.Routes.Length && routes.Length == RouteCatalog.Routes.Length, "One node per existing route");
             foreach (var territory in Atlas.Regions)

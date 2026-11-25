@@ -37,6 +37,14 @@ internal static class LabTests
         if (task.Keys.Length > 0)
         {
             int before = run.Solved;
+            if (run.Scene.ChromeTabReviewActive)
+            {
+                var source = run.Scene.Active.Tabs.Single(tab => tab.Url.EndsWith("/current", StringComparison.Ordinal));
+                if (task.Id == "browser-tabs-choose") Type(run, source.Url);
+                if (task.Id == "browser-review-read") Type(run, task.Text);
+                if (task.Id == "browser-review-submit")
+                    Type(run, source.Body.Split("control-code: ", 2)[1].Split('\n')[0]);
+            }
             for (int i = 0; i < 30 && run.Solved == before; i++) Chord(run, task.Keys);
         }
         else
@@ -345,11 +353,19 @@ internal static class LabTests
         for (int i = 0; i < 50 * expected.Count && !seen.SetEquals(expected); i++)
         {
             seen.Add(rotation.MissionId);
+            var previousScene = rotation.Scene;
+            bool submitting = rotation.Task.Id == "browser-review-submit";
+            int previousScore = rotation.Solved;
             Complete(rotation);
-            Check(!rotation.Finished, "A completed research route must not end a timed Chrome practice block");
+            Check(rotation.Solved == previousScore + 1 && !rotation.Finished,
+                "Every step must advance without ending the timed Chrome block: " + rotation.Task.Id);
+            if (submitting)
+                Check(previousScene.TabReviewReceipt() != null,
+                    "Dynamic rotation writes the exact current source and control code before moving on");
         }
         Check(seen.Contains("chrome-search-clone") && seen.Contains("chrome-reader") &&
-            seen.Contains("chrome-download-verify") && seen.Contains("chrome-project-file-inbox") && seen.SetEquals(expected), "Research routes and original browser work mix in one rotation");
+            seen.Contains("chrome-download-verify") && seen.Contains("chrome-project-file-inbox") &&
+            seen.Contains("chrome-open-tab-review-basics") && seen.SetEquals(expected), "Research routes and original browser work mix in one rotation");
     }
 
     private static void TestHeldBackspaceInLiveFields()

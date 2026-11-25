@@ -99,6 +99,14 @@ internal static class LabStressTests
             int before = Run.Solved;
             if (task.Keys.Length > 0)
             {
+                if (Run.Scene.ChromeTabReviewActive)
+                {
+                    var source = Run.Scene.Active.Tabs.Single(tab => tab.Url.EndsWith("/current", StringComparison.Ordinal));
+                    if (task.Id == "browser-tabs-choose") { Chord("Ctrl+A"); Type(source.Url); }
+                    if (task.Id == "browser-review-read") { Chord("Ctrl+A"); Type(task.Text); }
+                    if (task.Id == "browser-review-submit")
+                    { Chord("Ctrl+A"); Type(source.Body.Split("control-code: ", 2)[1].Split('\n')[0]); }
+                }
                 if (Run.Scene.CompletingMovedReport && task.Id == "save" && task.Text.Length > 0)
                 { Chord("Ctrl+End"); Type(task.Text); }
                 if (Run.Scene.CsvNotebook && task.Id == "save" && task.Text.StartsWith("from csv import", StringComparison.Ordinal))
