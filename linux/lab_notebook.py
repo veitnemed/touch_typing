@@ -1,5 +1,6 @@
 """VS Code workbench surface for the engine-backed teaching notebook."""
 from dataclasses import dataclass
+from math import ceil
 
 from gi.repository import Gdk, Gtk, Pango
 
@@ -29,6 +30,59 @@ def contains(rect, x, y):
 def overlap(a, b):
     x, y = max(a[0], b[0]), max(a[1], b[1])
     return x, y, max(0, min(a[0]+a[2], b[0]+b[2])-x), max(0, min(a[1]+a[3], b[1]+b[3])-y)
+
+
+def fit_code_tabs(widths, space, active):
+    """Keep a contiguous tab strip around the active document."""
+    if sum(widths) <= space:
+        return 0, widths
+    if len(widths) == 1:
+        return 0, [max(1, space)]
+    budget = max(1, space - 36)
+    first, end = active, active + 1
+    remaining = budget - widths[active]
+    while first > 0 and widths[first - 1] <= remaining:
+        first -= 1
+        remaining -= widths[first]
+    while end < len(widths) and widths[end] <= remaining:
+        remaining -= widths[end]
+        end += 1
+    return first, [min(budget, width) for width in widths[first:end]]
+
+
+def fit_notebook_toolbar(width, cramped, busy, menu, status, measure):
+    """Measure the rendered font, including symbol fallback, before reserving each box."""
+    def tool(caption):
+        return max(26, ceil(measure(caption, 12)) + 14)
+
+    def kernel(caption):
+        return ceil(measure(caption, 11)) + 17
+
+    full = ("+ Код", "+ Markdown", "■  Прервать" if busy else "▷▷  Выполнить всё")
+    captions = ["+ ▤", "+ M", "■" if busy else "▷▷"]
+    widths = [tool(caption) for caption in captions]
+    more = tool("···") if menu else 0
+    available = width - 14 - more
+    status_width = kernel(status)
+    if not cramped:
+        if sum(widths[:2]) + tool(full[2]) + 9 + 8 + status_width > available:
+            status, status_width = "Python 3", kernel("Python 3")
+        available -= 8 + status_width
+    elif status_width > width - 14:
+        status, status_width = "Python 3", kernel("Python 3")
+    # Preserve Run and the command menu even in a very narrow split.
+    for index in (1, 0):
+        if sum(widths) + 9 * bool(widths[0] or widths[1]) > available:
+            widths[index] = 0
+    available -= sum(widths) + 9 * bool(widths[0] or widths[1])
+    for index in (2, 0, 1):
+        growth = tool(full[index]) - widths[index]
+        if widths[index] and growth <= available:
+            captions[index] = full[index]
+            widths[index] += growth
+            available -= growth
+    restart = tool("↻  Перезапуск")
+    return captions, widths, restart if restart <= available else 0, more, status, status_width
 
 
 @dataclass
@@ -336,40 +390,41 @@ class NotebookSurface:
     def _nb_toolbar(self, x, y, w, h, total_h, kernel, nb, selected, interactive):
         self.fill(NB_CANVAS, x,y,w,h)
         self.fill(NB_BORDER, x,y+h-1,w,1)
-        compact, cramped = w < 540, w < 290
+        cramped = w < 290
         state = kernel.get("state", "idle")
         busy = state == "busy"
+        name = {"busy":"Выполняется", "interrupted":"Прервано"}.get(state, "Готово")
+        status = "Python 3  ·  " + name if kernel else "Учебное ядро Python"
+        menu = total_h-h >= 54
+        captions, widths, restart, more, status, status_width = fit_notebook_toolbar(
+            w, cramped, busy, menu, status, self.text_width)
         px = x+7
         can_insert = len(nb["cells"])<128
         can_run = any(c["kind"]=="code" for c in nb["cells"])
         if kernel:
-            add, md, run = (30,30,30) if compact else (70,111,106)
-            self._nb_paint_tool("+ ▤" if compact else "+ Код", "add-below", "Добавить ячейку кода ниже",
+            add, md, run = widths
+            self._nb_paint_tool(captions[0], "add-below", "Добавить ячейку кода ниже",
                                 selected, px,y+3,add,interactive and not busy and can_insert); px += add
-            self._nb_paint_tool("+ M" if compact else "+ Markdown", "add-markdown", "Добавить Markdown ниже",
+            self._nb_paint_tool(captions[1], "add-markdown", "Добавить Markdown ниже",
                                 selected, px,y+3,md,interactive and not busy and can_insert); px += md
-            self.fill(NB_BORDER, px+3,y+8,1,15); px += 9
-            caption = ("■" if compact else "■  Прервать") if busy else ("▷▷" if compact else "▷▷  Выполнить всё")
-            self._nb_paint_tool(caption, "interrupt" if busy else "run-all",
+            if add or md:
+                self.fill(NB_BORDER, px+3,y+8,1,15); px += 9
+            self._nb_paint_tool(captions[2], "interrupt" if busy else "run-all",
                                 "Прервать выполнение" if busy else "Выполнить все ячейки по порядку",
                                 -1, px,y+3,run,interactive and (busy or can_run)); px += run
-            if not compact and px+104 < x+w-150:
+            if restart:
                 self._nb_paint_tool("↻  Перезапуск", "restart", "Перезапустить ядро и сбросить переменные",
-                                    -1, px,y+3,101,interactive); px += 101
-            if total_h-h >= 54:
-                self._nb_paint_tool("···", NB_MORE, "Команды блокнота · Shift+F10", -1, px,y+3,29,interactive)
-        name = {"busy":"Выполняется", "interrupted":"Прервано"}.get(state, "Готово")
-        status_x = x+13 if cramped else max(px+32, x+w-(106 if compact else 162))
+                                    -1, px,y+3,restart,interactive); px += restart
+            if menu:
+                self._nb_paint_tool("···", NB_MORE, "Команды блокнота · Shift+F10", -1, px,y+3,more,interactive)
+        status_x = x+7 if cramped else x+w-7-status_width
         status_y = y+25 if cramped else y+7
-        available = x+w-status_x-9
-        if available > 38:
-            self.fill("#e3b341" if busy else NB_ERROR if state=="interrupted" else NB_GREEN,
-                      status_x,status_y+7,6,6,3)
-            label = ("Python 3" if compact else "Python 3  ·  "+name) if kernel else "Учебное ядро Python"
-            self.label(label, status_x+11,status_y,11, NB_FG,width=available-9)
-            if kernel and interactive and total_h-h >= 54:
-                self._nb_hit((status_x-3,status_y-4,available+3,24), NB_KERNEL,
-                             kernel.get("label", "Python 3 · учебное ядро")+" — "+name)
+        self.fill("#e3b341" if busy else NB_ERROR if state=="interrupted" else NB_GREEN,
+                  status_x,status_y+7,6,6,3)
+        self.label(status, status_x+11,status_y,11, NB_FG,width=status_width-11)
+        if kernel and interactive and menu:
+            self._nb_hit((status_x-3,status_y+(2 if cramped else -4),status_width+3,21 if cramped else 24), NB_KERNEL,
+                         kernel.get("label", "Python 3 · учебное ядро")+" — "+name)
 
     def _nb_cell_tools(self, right, row, cell, total, code, clip):
         unit, top = 26, row-11
@@ -387,7 +442,7 @@ class NotebookSurface:
 
     @staticmethod
     def _nb_menu_cell(action, selected):
-        return selected if action in ("run-above","run-below","add-above","move-up","move-down","copy-cell",
+        return selected if action in ("run-above","run-below","add-above","add-below","add-markdown","move-up","move-down","copy-cell",
                                        "duplicate-cell","markdown","code","delete-cell") else -1
 
     def _nb_menu(self, x, y, w, h, toolbar_h, kernel, selected, nb):
@@ -402,7 +457,8 @@ class NotebookSurface:
                        ("paste-cell","Вставить скопированную ячейку"),("move-up","Переместить выше"),
                        ("move-down","Переместить ниже"),("copy-cell","Скопировать ячейку"),("duplicate-cell","Дублировать ячейку"),
                        ("markdown","Сделать Markdown") if code else ("code","Сделать кодом"),
-                       ("delete-cell","Удалить ячейку"),("undo","Восстановить / отменить"),("redo","Повторить изменение"))
+                       ("delete-cell","Удалить ячейку"),("undo","Восстановить / отменить"),("redo","Повторить изменение"),
+                       ("add-below","Добавить ячейку кода ниже"),("add-markdown","Добавить Markdown ниже"))
         panel, top = min(w-14,267), y+toolbar_h
         visible = min(len(actions), max(0,int((h-toolbar_h-24)/22)))
         if visible < 1:
@@ -412,7 +468,11 @@ class NotebookSurface:
             return (bool(cmd) and (cmd=="interrupt" if busy else cmd!="interrupt")
                     and (cmd!="undo" or nb.get("canUndo")) and (cmd!="redo" or nb.get("canRedo"))
                     and (cmd!="move-up" or selected>0) and (cmd!="move-down" or selected+1<count)
-                    and (cmd!="delete-cell" or count>1))
+                    and (cmd != "paste-cell" or nb.get("canPasteCell") and count < 128)
+                    and (cmd not in ("duplicate-cell", "add-above", "add-below", "add-markdown") or count < 128)
+                    and (cmd != "run-above" or any(c["kind"] == "code" for c in nb["cells"][:selected]))
+                    and (cmd != "run-below" or any(c["kind"] == "code" for c in nb["cells"][selected:]))
+                    and (cmd != "clear" or any(c.get("runs") or c.get("output") for c in nb["cells"])))
         states = [(cmd, title, allowed(cmd)) for cmd,title in actions]
         self._notebook_menu_visible = True
         self._notebook_menu_states = states

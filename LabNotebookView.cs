@@ -396,40 +396,64 @@ namespace TouchTypingStudio
         {
             Rectangle(x, y, w, height, CodeCanvas);
             Rectangle(x, y + height - 1, w, 1, NotebookLineBorder);
-            bool cramped = w < 290, compact = w < 540, busy = kernel.S("state") == "busy";
+            bool cramped = w < 290, busy = kernel.S("state") == "busy", hasMenu = totalHeight - height >= 54;
+            string state = kernel.S("state", "idle"), name = busy ? "Выполняется" : state == "interrupted" ? "Прервано" : "Готово";
+            string status = kernel.Exists ? "Python 3  ·  " + name : "Учебное ядро Python";
+            // The same WPF text formatter and DPI draw and measure these captions.
+            Func<string, double> toolWidth = text => Math.Max(26, Math.Ceiling(MeasureSceneText(text, 12)) + 14);
+            Func<string, double> statusMeasure = text => Math.Ceiling(MeasureSceneText(text, 11)) + 17;
+            string[] full = { "+ Код", "+ Markdown", busy ? "■  Прервать" : "▷▷  Выполнить всё" };
+            string[] captions = { "+ ▤", "+ M", busy ? "■" : "▷▷" };
+            double[] widths = captions.Select(toolWidth).ToArray();
+            double more = hasMenu ? toolWidth("···") : 0, statusWidth = statusMeasure(status);
+            double available = w - 14 - more;
+            if ((!cramped && widths[0] + widths[1] + toolWidth(full[2]) + 9 + 8 + statusWidth > available) || cramped && statusWidth > w - 14)
+            {
+                status = "Python 3";
+                statusWidth = statusMeasure(status);
+            }
+            if (!cramped) available -= 8 + statusWidth;
+            // In a very narrow split, prioritize Run; Add actions are also in the command menu.
+            for (int i = 1; i >= 0; i--)
+                if (widths.Sum() + (widths[0] + widths[1] > 0 ? 9 : 0) > available) widths[i] = 0;
+            available -= widths.Sum() + (widths[0] + widths[1] > 0 ? 9 : 0);
+            foreach (int i in new[] { 2, 0, 1 })
+            {
+                double growth = toolWidth(full[i]) - widths[i];
+                if (widths[i] == 0 || growth > available) continue;
+                captions[i] = full[i]; widths[i] += growth; available -= growth;
+            }
+            double restartWidth = toolWidth("↻  Перезапуск");
             double px = x + 7;
             bool canInsert = nb.Items("cells").Count() < 128;
             bool canRun = nb.Items("cells").Any(cell => cell.S("kind") == "code");
             if (kernel.Exists)
             {
-                double addWidth = compact ? 30 : 70, markdownWidth = compact ? 30 : 111, runWidth = compact ? 30 : 106;
-                DrawNotebookTool(px, y + 3, addWidth, compact ? "+ ▤" : "+ Код", "add-below", "Добавить ячейку кода ниже", selected, interactive && !busy && canInsert); px += addWidth;
-                DrawNotebookTool(px, y + 3, markdownWidth, compact ? "+ M" : "+ Markdown", "add-markdown", "Добавить Markdown ниже", selected, interactive && !busy && canInsert); px += markdownWidth;
-                Rectangle(px + 3, y + 8, 1, 15, NotebookLineBorder); px += 9;
-                DrawNotebookTool(px, y + 3, runWidth, busy ? (compact ? "■" : "■  Прервать") : (compact ? "▷▷" : "▷▷  Выполнить всё"),
-                    busy ? "interrupt" : "run-all", busy ? "Прервать выполнение" : "Выполнить все ячейки по порядку", -1, interactive && (busy || canRun)); px += runWidth;
-                if (!compact && px + 104 < x + w - 150)
+                DrawNotebookTool(px, y + 3, widths[0], captions[0], "add-below", "Добавить ячейку кода ниже",
+                    selected, interactive && !busy && canInsert); px += widths[0];
+                DrawNotebookTool(px, y + 3, widths[1], captions[1], "add-markdown", "Добавить Markdown ниже",
+                    selected, interactive && !busy && canInsert); px += widths[1];
+                if (widths[0] + widths[1] > 0)
                 {
-                    DrawNotebookTool(px, y + 3, 101, "↻  Перезапуск", "restart", "Перезапустить ядро и сбросить переменные", -1, interactive); px += 101;
+                    Rectangle(px + 3, y + 8, 1, 15, NotebookLineBorder); px += 9;
                 }
-                if (totalHeight - height >= 54)
-                    DrawNotebookTool(px, y + 3, 29, "···", NotebookOverflow, "Команды блокнота · Shift+F10", -1, interactive);
+                DrawNotebookTool(px, y + 3, widths[2], captions[2], busy ? "interrupt" : "run-all",
+                    busy ? "Прервать выполнение" : "Выполнить все ячейки по порядку", -1, interactive && (busy || canRun)); px += widths[2];
+                if (restartWidth <= available)
+                {
+                    DrawNotebookTool(px, y + 3, restartWidth, "↻  Перезапуск", "restart",
+                        "Перезапустить ядро и сбросить переменные", -1, interactive); px += restartWidth;
+                }
+                if (hasMenu)
+                    DrawNotebookTool(px, y + 3, more, "···", NotebookOverflow, "Команды блокнота · Shift+F10", -1, interactive);
             }
-            string state = kernel.S("state", "idle"), name = state == "busy" ? "Выполняется" :
-                state == "interrupted" ? "Прервано" : "Готово";
-            double statusX = cramped ? x + 13 : Math.Max(px + 32, x + w - (compact ? 106 : 162));
+            double statusX = cramped ? x + 7 : x + w - 7 - statusWidth;
             double statusY = cramped ? y + 25 : y + 7;
-            double available = x + w - statusX - 9;
-            if (available > 38)
-            {
-                Rectangle(statusX, statusY + 7, 6, 6, busy ? "#E3B341" : state == "interrupted" ? NotebookError : NotebookHealthy);
-                string kernelLabel = (compact ? "Python 3" : "Python 3  ·  ") + (compact ? "" : name);
-                if (!kernel.Exists) kernelLabel = "Учебное ядро Python";
-                Text(kernelLabel, statusX + 11, statusY, 11, CodeForeground, available - 9);
-                if (kernel.Exists && interactive && totalHeight - height >= 54)
-                    AddNotebookHit(new Rect(statusX - 3, statusY - 4, available + 3, 24), NotebookKernelMenu,
-                        kernel.S("label", "Python 3 · учебное ядро") + " — " + name, -1);
-            }
+            Rectangle(statusX, statusY + 7, 6, 6, busy ? "#E3B341" : state == "interrupted" ? NotebookError : NotebookHealthy);
+            Text(status, statusX + 11, statusY, 11, CodeForeground, statusWidth - 11);
+            if (kernel.Exists && interactive && hasMenu)
+                AddNotebookHit(new Rect(statusX - 3, statusY + (cramped ? 2 : -4), statusWidth + 3, cramped ? 21 : 24),
+                    NotebookKernelMenu, kernel.S("label", "Python 3 · учебное ядро") + " — " + name, -1);
         }
 
         private void DrawNotebookTool(double x, double y, double w, string caption, string action, string tooltip,
@@ -461,7 +485,7 @@ namespace TouchTypingStudio
 
         private static int NotebookMenuCellFor(string action, int cell)
         {
-            return new[] { "run-above", "run-below", "add-above", "move-up", "move-down", "copy-cell",
+            return new[] { "run-above", "run-below", "add-above", "add-below", "add-markdown", "move-up", "move-down", "copy-cell",
                 "duplicate-cell", "markdown", "code", "delete-cell" }.Contains(action) ? cell : -1;
         }
 
@@ -475,10 +499,10 @@ namespace TouchTypingStudio
                 new[] { "Выполнить ячейки выше", "Выполнить ячейки ниже", "Перезапустить ядро", "Очистить вывод",
                     "Добавить ячейку выше", "Вставить скопированную ячейку", "Переместить выше", "Переместить ниже",
                     "Скопировать ячейку", "Дублировать ячейку", code ? "Сделать Markdown" : "Сделать кодом",
-                    "Удалить ячейку", "Восстановить / отменить", "Повторить изменение" };
+                    "Удалить ячейку", "Восстановить / отменить", "Повторить изменение", "Добавить ячейку кода ниже", "Добавить Markdown ниже" };
             var actions = kernel ? new[] { "", "restart", "interrupt" } :
                 new[] { "run-above", "run-below", "restart", "clear", "add-above", "paste-cell", "move-up", "move-down",
-                    "copy-cell", "duplicate-cell", code ? "markdown" : "code", "delete-cell", "undo", "redo" };
+                    "copy-cell", "duplicate-cell", code ? "markdown" : "code", "delete-cell", "undo", "redo", "add-below", "add-markdown" };
             double panel = Math.Min(w - 14, 267), top = y + toolbarHeight, left = x + w - panel - 7;
             int visible = Math.Min(labels.Length, Math.Max(0, (int)((h - toolbarHeight - 24) / 22)));
             if (visible < 1) { notebookMenu = ""; return; }
@@ -488,7 +512,7 @@ namespace TouchTypingStudio
                 (action != "interrupt" || busy) && (action != "undo" || nb.B("canUndo")) &&
                 (action != "redo" || nb.B("canRedo")) && (action != "move-up" || cell > 0) &&
                 (action != "move-down" || cell + 1 < count) && (action != "paste-cell" || nb.B("canPasteCell") && count < 128) &&
-                (action != "duplicate-cell" && action != "add-above" || count < 128) &&
+                (action != "duplicate-cell" && action != "add-above" && action != "add-below" && action != "add-markdown" || count < 128) &&
                 (action != "run-above" || cells.Take(cell).Any(c => c.S("kind") == "code")) &&
                 (action != "run-below" || cells.Skip(cell).Any(c => c.S("kind") == "code")) &&
                 (action != "clear" || cells.Any(c => c.I("runs") > 0 || c.S("output").Length > 0))).ToArray();

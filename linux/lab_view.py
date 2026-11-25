@@ -1,12 +1,13 @@
 """Native snapshots of simulated Ubuntu and Windows desktops and application windows."""
 import base64
 from functools import partial
+from math import ceil
 from urllib.parse import urlsplit
 
 import gi
 gi.require_version("Gsk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Graphene, Gsk, Gtk, Pango
-from lab_notebook import NB_A11Y, NotebookSurface
+from lab_notebook import NB_A11Y, NotebookSurface, fit_code_tabs
 from lab_explorer import ExplorerSurface
 
 # GitHub Dark Default role mapping: primer/github-vscode-theme, src/theme.js.
@@ -97,6 +98,9 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
             font.set_weight(Pango.Weight.BOLD)
         layout.set_font_description(font)
         return layout
+
+    def text_width(self, value, size):
+        return self.text_layout(value, size).get_size()[0] / Pango.SCALE
 
     def label(self, value, x, y, size=13, color="#eeeeef", width=None, mono=False, bold=False,
               *, family="Noto Sans"):
@@ -1239,18 +1243,19 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         self.fill(CODE_BORDER, editor_x, y + tab_h - 1, editor_w, 1)
         tabs = window.get("tabs", [])
         active_index = min(max(0, window.get("activeTab", 0)), max(0, len(tabs) - 1))
-        capacity = max(1, int((editor_w - 42) / 98))
-        first_tab = max(0, active_index - capacity + 1)
-        visible_tabs = tabs[first_tab:first_tab + capacity]
-        tab_start = editor_x + (20 if first_tab else 0)
+        requested_tabs = [
+            max(88, ceil(self.text_width(tab.get("title", ""), 12)) + 34
+                + (17 if tab.get("title", "").lower().endswith((".py", ".ipynb")) else 0))
+            for tab in tabs]
+        first_tab, widths = fit_code_tabs(requested_tabs, editor_w, active_index)
+        visible_tabs = tabs[first_tab:first_tab + len(widths)]
+        left = editor_x + (18 if first_tab else 0)
         if first_tab:
             self.label("‹", editor_x + 6, y + 5, 15, "#c6ccd4")
-        if first_tab + capacity < len(tabs):
+        if first_tab + len(widths) < len(tabs):
             self.label("›", editor_x + editor_w - 16, y + 5, 15, "#c6ccd4")
-        tab_width = min(115, max(1, (editor_w - 42) / max(1, len(visible_tabs))))
-        for i, tab in enumerate(visible_tabs):
+        for i, (tab, tab_width) in enumerate(zip(visible_tabs, widths)):
             active = first_tab + i == active_index
-            left = tab_start + i * tab_width
             self.fill(CODE_BG if active else CODE_INSET, left, y, tab_width - 1, tab_h)
             self.fill(CODE_BORDER, left + tab_width - 1, y, 1, tab_h)
             if active:
@@ -1265,6 +1270,7 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
             if active or tab.get("modified"):
                 self.label("●" if tab.get("modified") else "×", left + tab_width - 18,
                            y + (7 if wide else 5), 12, CODE_MUTED)
+            left += tab_width
         name = tabs[active_index]["title"] if tabs else ""
         split = window.get("split", False)
         pane = editor_w / 2 if split else editor_w

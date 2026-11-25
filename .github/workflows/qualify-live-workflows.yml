@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - name: Build the release candidates and test the shared engine
+      - name: Build and archive the two release candidates
         shell: bash
         run: |
           set -euo pipefail
@@ -31,6 +31,48 @@ jobs:
           (cd "$p/windows-x64" && zip -qr "$p/touch-typing-candidate-windows-x64.zip" .)
           (cd "$p" && sha256sum touch-typing-candidate-* > SHA256SUMS.txt)
           printf '%s\n' "$PRODUCT_SHA" > "$p/SOURCE-SHA.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: live-verified-archives
+          path: |
+            ${{ runner.temp }}/live-workflows/touch-typing-candidate-*
+            ${{ runner.temp }}/live-workflows/SHA256SUMS.txt
+            ${{ runner.temp }}/live-workflows/SOURCE-SHA.txt
+          if-no-files-found: error
+  engine-regression:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 28
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - id: download_engine_candidate
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: live-verified-archives
+          path: ${{ runner.temp }}/live-workflows
+      - if: steps.download_engine_candidate.outcome == 'failure'
+        shell: bash
+        run: sleep 15
+      - if: steps.download_engine_candidate.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with:
+          name: live-verified-archives
+          path: ${{ runner.temp }}/live-workflows
+      - name: Cross-check engine and catalog against the exact archived binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          p="$RUNNER_TEMP/live-workflows"
+          test "$(cat "$p/SOURCE-SHA.txt")" = "$PRODUCT_SHA"
+          (cd "$p" && sha256sum -c SHA256SUMS.txt)
+          tar -xzf "$p/touch-typing-candidate-linux-x64.tar.gz" -C "$p"
           for suite in SharedRegression LabRegression TerminalRegression LabStressTests NotebookKernelRegression; do
             dotnet run --project "linux/tests/$suite.csproj" -c Release
           done
@@ -54,14 +96,6 @@ jobs:
           /usr/bin/python3 linux/tests/test_project_file_practice.py
           /usr/bin/python3 linux/tests/test_win10_protocol.py "$TOUCH_TYPING_ENGINE"
           /usr/bin/python3 linux/tests/audit_live_shortcuts.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: live-verified-archives
-          path: |
-            ${{ runner.temp }}/live-workflows/touch-typing-candidate-*
-            ${{ runner.temp }}/live-workflows/SHA256SUMS.txt
-            ${{ runner.temp }}/live-workflows/SOURCE-SHA.txt
-          if-no-files-found: error
   linux-native:
     needs: build
     runs-on: ubuntu-24.04
@@ -97,6 +131,13 @@ jobs:
           temp=$(mktemp -d)
           tar -xzf "$p/touch-typing-candidate-linux-x64.tar.gz" -C "$temp"
           package="$temp/touch-typing-linux-x64"
+          # Exercise the package's separate install path as an ordinary user
+          # without replacing a runner profile or any real launcher.
+          mkdir -p "$temp/install home" "$temp/install-config"
+          (export HOME="$temp/install home" XDG_DATA_HOME="$temp/installed" XDG_CONFIG_HOME="$temp/install-config"
+           bash "$package/install.sh"
+           test -s "$XDG_DATA_HOME/applications/com.veitnemed.TouchTyping.desktop"
+           test "$(find "$XDG_DATA_HOME/touch-typing/releases" -name lab_explorer.py -type f | wc -l)" -eq 1)
           export TOUCH_TYPING_QA_OUTPUT="$RUNNER_TEMP/gtk-proof" TOUCH_TYPING_ENGINE="$package/engine/TouchTyping.Engine"
           export XDG_DATA_HOME="$temp/data" XDG_RUNTIME_DIR="$temp/runtime" TOUCH_TYPING_QA_DATA_ROOT="$temp/profile"
           mkdir -p -m 700 "$TOUCH_TYPING_QA_OUTPUT" "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR" "$TOUCH_TYPING_QA_DATA_ROOT"
@@ -186,6 +227,14 @@ jobs:
           $app = "$env:RUNNER_TEMP/TouchTyping Live Candidate"
           Expand-Archive -LiteralPath $zip -DestinationPath $app
           $proof = "$env:RUNNER_TEMP/windows-proof"
+          $render = "$proof/editor-dpi"
+          $previousRoot = $env:TOUCH_TYPING_QA_DATA_ROOT
+          $env:TOUCH_TYPING_QA_DATA_ROOT = "$proof/editor-dpi-profile"
+          try {
+            $renderCheck = Start-Process -FilePath "$app/TouchTyping.exe" -ArgumentList ('--qa --check-live-render "{0}"' -f $render) -WorkingDirectory $app -Wait -PassThru
+            Get-Content "$render/result.txt"
+            if ($renderCheck.ExitCode -ne 0) { throw "WPF render proof failed ($($renderCheck.ExitCode))" }
+          } finally { $env:TOUCH_TYPING_QA_DATA_ROOT = $previousRoot }
           & "./windows/Test-Typing-Session.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-session"
           & "./windows/Test-TypingCardRecords.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-records"
           & "./windows/Test-Typing-Mixed.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-mixed"
@@ -213,7 +262,7 @@ jobs:
 
   publish-preview:
     if: startsWith(github.event.head_commit.message, 'Release v1.9.0-preview.')
-    needs: [build, linux-native, windows-native]
+    needs: [build, engine-regression, linux-native, windows-native]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

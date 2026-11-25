@@ -674,19 +674,34 @@ namespace TouchTypingStudio
             string file = relative.Split('/').Last();
             Rectangle(x, tabsTop, w - x, tabsHeight, CodeInset);
             Rectangle(x, tabsTop + tabsHeight - 1, w - x, 1, CodeBorder);
-            double tabX = x;
-            for (int i = 0; i < tabs.Length && tabX < w - 18; i++)
+            var widths = tabs.Select(tab => Math.Max(88, Math.Ceiling(MeasureSceneText(tab.S("title", file), 13)) + 54)).ToArray();
+            double space = w - x, budget = space;
+            int firstTab = 0, endTab = tabs.Length;
+            if (widths.Sum() > space && tabs.Length > 1)
+            {
+                budget = Math.Max(1, space - 36);
+                firstTab = active; endTab = active + 1;
+                double left = budget - widths[active];
+                while (firstTab > 0 && widths[firstTab - 1] <= left)
+                    left -= widths[--firstTab];
+                while (endTab < tabs.Length && widths[endTab] <= left)
+                    left -= widths[endTab++];
+            }
+            double tabX = x + (firstTab > 0 ? 18 : 0);
+            if (firstTab > 0) Text("‹", x + 6, tabsTop + 6, 15, CodeMuted, 9);
+            if (endTab < tabs.Length) Text("›", w - 16, tabsTop + 6, 15, CodeMuted, 10);
+            for (int i = firstTab; i < endTab; i++)
             {
                 Data tab = tabs[i];
                 string title = tab.S("title", file);
-                double tabWidth = Math.Min(w - tabX, Math.Max(103, Math.Min(177, 48 + title.Length * 7)));
+                double tabWidth = Math.Min(budget, widths[i]);
                 bool selected = i == active;
                 Rectangle(tabX, tabsTop, tabWidth, tabsHeight - (selected ? 0 : 1), selected ? CodeCanvas : CodeInset);
                 Rectangle(tabX + tabWidth - 1, tabsTop, 1, tabsHeight, CodeBorder);
                 if (selected) Rectangle(tabX, tabsTop, tabWidth - 1, 2, CodeAccent);
                 DrawCodeFileIcon(title, tabX + 11, tabsTop + 9);
                 Text(title, tabX + 31, tabsTop + 8, 13, selected ? CodeForeground : CodeMuted, tabWidth - 50);
-                if (selected && tabWidth > 67)
+                if ((selected || tab.B("modified")) && tabWidth > 67)
                     Text(tab.B("modified") ? "●" : "×", tabX + tabWidth - 19, tabsTop + 7, 13, CodeMuted, 14);
                 tabX += tabWidth;
             }
@@ -1093,11 +1108,21 @@ namespace TouchTypingStudio
             }
         }
 
+        private FormattedText SceneText(string value, double size, string ink, bool code)
+        {
+            return new FormattedText(value, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, code ? mono : regular,
+                size, Ui.Brush(ink), VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        }
+
+        private double MeasureSceneText(string value, double size)
+        {
+            return string.IsNullOrEmpty(value) ? 0 : SceneText(value, size, CodeForeground, false).WidthIncludingTrailingWhitespace;
+        }
+
         private void Text(string value, double x, double y, double size, string ink, double width = 1200, int lines = 1, bool code = false)
         {
             if (width <= 0 || string.IsNullOrEmpty(value)) return;
-            var label = new FormattedText(value, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, code ? mono : regular,
-                size, Ui.Brush(ink), VisualTreeHelper.GetDpi(this).PixelsPerDip);
+            var label = SceneText(value, size, ink, code);
             label.MaxTextWidth = Math.Max(1, width);
             label.MaxLineCount = lines;
             label.Trimming = TextTrimming.CharacterEllipsis;
