@@ -3,7 +3,7 @@ import json
 from test_preview2_native import QA, alias, codes, out
 
 TEXT_PREFIX = {"code-rename-confirm", "project-search-submit", "exact-find-submit", "quick-choose"}
-TYPED_FINISH = {"notebook-type", "python-edit-write"}
+TYPED_FINISH = {"notebook-type", "python-edit-write", "file-search-query"}
 
 
 class CourseCards(QA):

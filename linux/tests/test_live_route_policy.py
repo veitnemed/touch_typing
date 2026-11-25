@@ -9,6 +9,7 @@ from platform_linux import Engine
 from test_debug_day import png_fixture
 from test_editor_course import advance as advance_editor, enter
 from test_project_file_practice import active, chord
+from test_chrome_tab_search import MISSION as TAB_REVIEW, advance_tabs
 
 TERMINAL_FULL = (
     {"terminal-explore", "terminal-handoff", "terminal-backup", "terminal-investigate"},
@@ -45,6 +46,8 @@ def begin(e, app, level=0, desktop="ubuntu", **overrides):
 
 
 def advance(e, s):
+    if s["mission"] == TAB_REVIEW:
+        return advance_tabs(e, s)
     if s["app"] == "code":
         return advance_editor(e, s)
     if s["task"]["id"] == "terminal-interrupt":
@@ -69,7 +72,7 @@ def advance(e, s):
             # the named app, which must actually become the active window.
             assert not s["scene"].get("overview") or s["scene"].get("search", "") == ""
         enter(e, task["text"])
-        state = chord(e, "Enter")
+        state = e.call("lab-state") if task["id"] == "file-search-query" else chord(e, "Enter")
     assert state["solved"] == before + 1, (s["mission"], task, state["status"], state["scene"]["layout"])
     return state
 

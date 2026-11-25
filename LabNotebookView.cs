@@ -91,7 +91,7 @@ namespace TouchTypingStudio
 
         private void AddNotebookHit(Rect box, string action, string label, int cell = -1, int clicks = 1, Func<Point,int> offset = null, string path = "")
         {
-            if (NotebookCommand == null && ExplorerCommand == null && BrowserHistoryCommand == null || !NotebookInteractionClear() || box.IsEmpty || box.Width < 1 || box.Height < 1)
+            if (NotebookCommand == null && ExplorerCommand == null && BrowserHistoryCommand == null && BrowserTabCommand == null || !NotebookInteractionClear() || box.IsEmpty || box.Width < 1 || box.Height < 1)
                 return;
             Rect surface = NotebookToSurface(box);
             if (!surface.IsEmpty && surface.Width >= 1 && surface.Height >= 1)
@@ -119,7 +119,7 @@ namespace TouchTypingStudio
                 return;
             }
             Focus();
-            if (OnExplorerHotspot(hit) || OnBrowserHistoryHotspot(hit)) { e.Handled = true; return; }
+            if (OnExplorerHotspot(hit) || OnBrowserHistoryHotspot(hit) || OnBrowserTabHotspot(hit)) { e.Handled = true; return; }
             explorerMenu = false;
             if (hit.Action == NotebookOverflow || hit.Action == NotebookKernelMenu)
             {

@@ -85,6 +85,7 @@ internal sealed partial class LabScene
     {
         sourceBulletin = source.sourceBulletin; sourceConfiguration = source.sourceConfiguration;
         sourceHandoff = source.sourceHandoff;
+        citationCopiedFromSavedNote = source.citationCopiedFromSavedNote;
         currentSourceRead = source.currentSourceRead; archivedSourceRead = source.archivedSourceRead;
     }
 
@@ -178,7 +179,7 @@ internal sealed partial class LabScene
             if (url == b.OldPage) return (b.VersionTitle(false), b.Body(false));
             if (url == b.BriefPage) return ("Подтверждено · " + b.Title, b.Brief);
         }
-        return null;
+        return ArchivedHandbookPage(url);
     }
 
     private LabEntry[] BulletinLinks(string url)
@@ -232,6 +233,7 @@ internal sealed partial class LabScene
     internal LabTask DescribeSourceTask(LabTask task)
     {
         if (!ContextHandoffActive) return task;
+        if (SourceRevision) return DescribeRevision(task);
         if (BulletinWorkflow && task.Action == "find-next")
             return task with { Title = "Перейдите от упоминания к строке таблицы «" + sourceBulletin.Key + "»" };
         if (BulletinWorkflow && task.Action == "bookmark")
@@ -271,6 +273,7 @@ internal sealed partial class LabScene
     internal object SourceHandoffEvidence(LabTask task, string equivalentCommand)
     {
         if (!ContextHandoffActive) return null;
+        if (SourceRevision && RevisionEvidence(task) is object proof) return proof;
         var w = Active;
         var tab = w?.Tab;
         object Selection() => w == null ? null : new { w.Focus, w.Url, w.Find, w.Input, w.Anchor, w.Cursor,
@@ -384,5 +387,6 @@ internal static partial class LiveCourse
                 new("Продолжите на прежней каретке, сохраните значение и проверьте файл в проводнике",
                     "paste save " + (windows ? "win-new-desktop " : "") + explorer + " pick:project file-open pick:@quick-note file-open"));
         }
+        SourceRevisionMissions(list);
     }
 }

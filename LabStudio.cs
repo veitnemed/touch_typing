@@ -409,6 +409,13 @@ namespace TouchTypingStudio
             if (next.Exists) RenderLab(next);
         }
 
+        private void ApplyLabBrowserTabCommand(string action, string index)
+        {
+            if (!labActive || paused || !IsActive || referenceHelpOpen || state.B("limitDecisionPending")) return;
+            var next = Request("lab-browser-tab-search", "action", action, "index", index);
+            if (next.Exists) RenderLab(next);
+        }
+
         private static bool LabEditingRepeat(string key)
         {
             switch (key)

@@ -95,12 +95,19 @@ namespace TouchTypingStudio
             var terminal = scene.Items("windows").FirstOrDefault(w => w.B("active") &&
                 (w.S("app") == "terminal" || w.S("focus") == "terminal" || w.S("focus") == "reverse-search"));
             var editor = scene.Items("windows").FirstOrDefault(w => w.B("active") && w.S("app") == "code");
+            var fileSearch = scene.Items("windows").FirstOrDefault(w => w.B("active") && HasFilesSearch(w));
             string fieldStatus = terminal != null ? "cursor:" + terminal.I("cursor", -1).ToString(CultureInfo.InvariantCulture) :
                 editor == null ? "" : "editor:" + editor.S("focus") + ":" + editor.I("bodyCursor", -1).ToString(CultureInfo.InvariantCulture);
             if (terminal != null && shell.B("followingLog"))
                 fieldStatus += shell.B("logIncidentArrived") ? " · Журнал обновляется, новая ошибка получена" : " · Журнал обновляется";
             System.Windows.Automation.AutomationProperties.SetItemStatus(this, fieldStatus);
-            if (terminal == null && editor != null)
+            if (fileSearch != null)
+            {
+                System.Windows.Automation.AutomationProperties.SetHelpText(this, FilesSearchDescription(fileSearch));
+                System.Windows.Automation.AutomationProperties.SetItemStatus(this, fileSearch.S("focus") == "file-search"
+                    ? "Поле ввода запроса в фокусе" : "Список найденных файлов в фокусе");
+            }
+            else if (terminal == null && editor != null)
             {
                 string focus = editor.S("focus");
                 string description = editor.B("explorerActions") && (focus == "file-name" || focus == "explorer") ?
@@ -119,9 +126,24 @@ namespace TouchTypingStudio
             var history = scene.Items("windows").FirstOrDefault(w => w.B("active") && w.S("url") == "chrome://history");
             if (history != null)
                 System.Windows.Automation.AutomationProperties.SetHelpText(this, ChromeHistoryAccessible(history));
-            if (WitnessPythonEditor)
+            var tabTool = scene.Items("windows").FirstOrDefault(w => w.B("active") &&
+                (w.D("tabSearch").Exists || w.D("sourceReview").Exists));
+            if (tabTool != null)
+                System.Windows.Automation.AutomationProperties.SetHelpText(this,ChromeTabAccessible(tabTool));
+            else if (history == null)
+            {
+                var activeBrowser = scene.Items("windows").FirstOrDefault(w => w.B("active") && w.S("app") == "chrome");
+                if (activeBrowser != null)
+                    System.Windows.Automation.AutomationProperties.SetHelpText(this,
+                        "Открытая вкладка Chrome. " + activeBrowser.Items("tabs").Skip(activeBrowser.I("activeTab"))
+                            .Select(t => t.S("title")).FirstOrDefault());
+            }
+            // A scene may use both existing QA witnesses while switching from
+            // Chrome to the editor. Expose only the currently active surface.
+            bool witnessBrowser = Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_BROWSER_CLONE") == "1";
+            if (WitnessPythonEditor && (editor != null || !witnessBrowser))
                 System.Windows.Automation.AutomationProperties.SetItemType(this, PythonEditorWitness(scene, editor));
-            else if (Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_BROWSER_CLONE") == "1")
+            else if (witnessBrowser)
                 System.Windows.Automation.AutomationProperties.SetItemType(this, BrowserPracticeWitness(scene));
             InvalidateVisual();
         }
@@ -329,7 +351,9 @@ namespace TouchTypingStudio
             string status = window.S("status");
             bool showStatus = status.Length > 0 && status != "Готово";
             double bottom = h - (showStatus ? 24 : url == "chrome://history" ? 0 : 8);
-            if (url == "chrome://history")
+            if (window.D("sourceReview").Exists)
+                DrawChromeSourceReview(window, w, pageTop, bottom);
+            else if (url == "chrome://history")
                 DrawChromeHistory(window, w, pageTop, bottom, entries);
             else if (searchHome || searchResults)
                 DrawSearchPage(window, w, pageTop, bottom, searchHome, body, entries, pageScale);
@@ -337,7 +361,7 @@ namespace TouchTypingStudio
                 DrawBrowserManager(window, w, pageTop, bottom, url, entries, pageScale);
             else
                 DrawBrowserDocument(window, w, pageTop, bottom, url, title, body, entries, pageScale);
-            if (window.S("find").Length > 0 || window.S("focus") == "find")
+            if (window.S("focus") == "find")
             {
                 double boxWidth = Math.Min(323, w - 24), left = w-boxWidth-12, findTop = pageTop+3;
                 Rounded(left, findTop, boxWidth, 38, "#303134", 6);
@@ -352,6 +376,7 @@ namespace TouchTypingStudio
                 Rectangle(0, h - 24, w, 24, ChromePill);
                 Text(status, 10, h - 19, 11, ChromeText, w - 20);
             }
+            DrawChromeTabSearch(window, w, Math.Min(pageTop,42), h);
         }
 
         private void DrawSearchPage(Data window, double width, double top, double bottom, bool home,

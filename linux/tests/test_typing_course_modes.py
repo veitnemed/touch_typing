@@ -138,6 +138,73 @@ class CourseModes(unittest.TestCase):
                 finally:
                     self.engine.close()
 
+    def test_bilingual_work_note_is_whole_varied_and_resumable_without_new_primary_card(self):
+        mode = "lesson:work-note-bilingual"
+        for self.platform, self.layout in (("linux", "RU"), ("windows", "EN")):
+            temp, env = self.temp_profile()
+            with self.subTest(platform=self.platform), temp, env:
+                lib = self.open_engine()
+                try:
+                    primary = {item["id"] for item in lib["typing"]["modes"]}
+                    self.assertTrue(PREVIOUS_PRIMARY <= primary)
+                    self.assertNotIn(mode, primary)
+                    rows = [item for item in lib["typing"]["lessons"] if item["id"] == mode]
+                    self.assertEqual([(item["title"], item["language"]) for item in rows],
+                                     [("Заметка коллеге · RU / EN", "EN / RU")])
+                    notes = [self.start(mode, round=number)["after"] for number in range(6)]
+                    self.assertEqual(len(set(notes)), 6)
+                    for note in notes:
+                        self.assertTrue(350 <= len(note) <= 550)
+                        self.assertRegex(note, r"\b[0-9]{2}\.[0-9]{2}\b")
+                        self.assertRegex(note, r"\b[0-9]{2}:[0-9]{2}\b")
+                        self.assertRegex(note, r"\b[a-z]+/[a-z0-9_]+\.[a-z]+\b")
+                        self.assertRegex(note, r"\b[a-z]+@example\.test\b")
+                        self.assertTrue(note.splitlines()[0].startswith("Тема: "))
+                        self.assertTrue(note.splitlines()[-1].isascii() and note.endswith("."))
+
+                    s = self.start(mode, round=0, cycles=2)
+                    self.assertEqual((s["after"], s["cycleLengths"], s["wantedLayout"]),
+                                     (notes[0], [len(note) for note in notes[:2]], "RU"))
+                    first, second = s["cycleLengths"]
+                    wrong = self.engine.call("typing-key", text="T", layout="EN")
+                    self.assertEqual((wrong["progressDone"], wrong["errors"]), (0, 1))
+                    route = []
+                    for i in range(first + second):
+                        current = notes[0] if i < first else notes[1]
+                        pos = i if i < first else i - first
+                        self.assertEqual(s["after"], current[pos:])  # no truncation, extra blank, or duplicate note
+                        wanted = s["wantedLayout"]
+                        if not route or route[-1] != wanted:
+                            route.append(wanted)
+                        s = self.advance(s)
+                        self.assertEqual(s["progressDone"], i + 1)
+                        if i + 1 == first:
+                            self.assertEqual((s["cycle"], s["after"], s["progressFraction"]),
+                                             (2, notes[1], first / (first + second)))
+                        if current[pos:pos + 6] == "pickup":
+                            draft = {name: s[name] for name in ("id", "cycle", "progressDone", "progressTotal", "after")}
+                            self.engine.call("typing-suspend", layout=wanted)
+                            self.engine.close()
+                            self.open_engine()
+                            s = self.engine.call("typing-continue", id=draft["id"], layout=wanted)
+                            self.assertEqual({name: s[name] for name in draft}, draft)
+                    self.assertTrue(s["finished"])
+                    self.assertIn(["RU", "EN", "RU"], [route[i:i+3] for i in range(len(route))])
+                    self.assertEqual((s["progressDone"], s["errors"]), (first + second, 1))
+                    self.assertNotIn(mode, self.engine.call("typing-records", cycles=1, layout=self.layout))
+                    self.assertEqual(self.engine.call("typing-records", cycles=2, layout=self.layout)[mode]["band"], "green")
+                    trial = self.start(mode, infinite=True)
+                    text = trial["after"]
+                    self.assertIn(text.removesuffix("\n"), notes)
+                    self.assertFalse(trial["progressVisible"])
+                    for _ in range(len(text)):
+                        trial = self.advance(trial)
+                    self.assertFalse(trial["finished"])
+                    self.assertIn(trial["after"].removesuffix("\n"), notes)
+                    self.assertNotEqual(trial["after"], text)
+                finally:
+                    self.engine.close()
+
     def test_checkpoint_from_previous_preview_engine(self):
         # Unmodified anonymized XML from an engine built at f905eb4 (preview.6):
         # settings changed, English 447 correct + 1 miss, WordsEN two-cycle

@@ -107,6 +107,9 @@ namespace TouchTypingStudio
             {
                 Rounded(6*unit,7*unit,28*unit,28*unit,"#646464",10*unit);
                 DrawChromeMark("down",12*unit,13*unit,16*unit,ChromeText,"#646464");
+                if (window.B("active") && BrowserTabCommand != null)
+                    AddNotebookHit(new Rect(6*unit,7*unit,28*unit,28*unit),
+                        ChromeTabsPrefix+"open","Поиск открытых вкладок · Ctrl+Shift+A");
             }
             double left = w >= 240 ? 40*unit : 4, controls = 100*unit;
             double available = Math.Max(42,w-left-controls-25*unit);

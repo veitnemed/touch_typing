@@ -1673,6 +1673,13 @@ class MissionTest(unittest.TestCase):
         state = engine.call("lab-resume")
         # Observe real edits, two-press notebook commands and file conflict
         # handling while walking the full named catalog.
+        from test_chrome_tab_search import MISSION as TAB_REVIEW, advance_tabs
+        if mission["id"] == TAB_REVIEW:
+            for expected in range(1,total+1):
+                state = advance_tabs(engine, state)
+                self.assertEqual(state["solved"], expected)
+            self.assertTrue(state["finished"])
+            return
         from test_notebook_advanced_routes import ROUTES, step as notebook_step
         if mission["id"] in ROUTES:
             for expected in range(1, total + 1):
@@ -1719,7 +1726,7 @@ class MissionTest(unittest.TestCase):
                             state = chord([sides.get(k, k) for k in keys.split("+")])
                 elif task["id"] == "notebook-type":
                     pass  # The final character credits the edit. Enter would modify the cell.
-                elif task["id"] == "python-edit-write":
+                elif task["id"] in ("python-edit-write", "file-search-query"):
                     for char in task["text"]:
                         keys = {" ": ["Space"], "=": ["="], "+": ["LShift", "="]}.get(char, [char.upper()])
                         state = chord(keys, char)

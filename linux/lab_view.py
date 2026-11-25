@@ -42,6 +42,7 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         self.presentation_app = "ubuntu"
         self.reference_chrome = False
         self.browser_history_command = None
+        self.browser_tab_command = None
         self.set_overflow(Gtk.Overflow.HIDDEN)
         self.set_size_request(400, 200)
         self.set_hexpand(True)
@@ -60,7 +61,16 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
                        if active.get("focus") in ("code-problems", "code-quick-fix") else "")
             detail = (self.explorer_description(active) if active.get("explorerActions") and
                       active.get("focus") in ("explorer","file-name") else active.get("notebookDescription") or active.get("body","")[:300])
-            if active.get("url") == "chrome://history":
+            if search := active.get("tabSearch"):
+                rows, index = search["rows"], search["selected"]
+                current = rows[index]["title"] if 0 <= index < len(rows) else ""
+                detail = (f"Поиск открытых вкладок. Запрос: {active.get('input') or 'пусто'}. "
+                          f"Совпадений: {len(rows)}. Выбрано: {current or 'нет'}.")
+            elif review := active.get("sourceReview"):
+                detail = ("Лист сверки. " + ("Сохранено: " + review["saved"] if review["saved"] else
+                          "Трёхзначный код: " + (review["code"] or "пусто") +
+                          ". Скопированный адрес: " + (review["copied"] or "нет")))
+            elif active.get("url") == "chrome://history":
                 query = active.get("historySearch") or ""
                 rows = active.get("entries", ())
                 item = active.get("item", -1)
@@ -696,6 +706,10 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         home = "/home/student"
         folder = window.get("folder", home)
         leaf = self.files_caption(window, win10)
+        focus = window.get("focus")
+        search = focus in ("file-search", "file-results")
+        query = window.get("input" if focus == "file-search" else "query", "")
+        inline_search = win10 and w > 595
         fg = "#232323"
         muted = "#5b6470" if win10 else "#5d5c59"
         edge = "#dedfe2" if win10 else "#ddd9d5"
@@ -703,7 +717,8 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         # Keep the collapsed ribbon and the location bar full-width, even above the sidebar.
         ribbon = 21 if win10 else 0
         bar = y + ribbon
-        list_top = bar + (30 if win10 else 34)
+        search_top = bar + (30 if win10 else 34)
+        list_top = search_top + (32 if search and not inline_search else 0)
         side = min(155, w * .29)
         status_h = 18
         status_y = y + h - status_h
@@ -727,15 +742,25 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         else:
             location = "Файловая система" + (("   ›   " + folder.strip("/").replace("/", "   ›   ")) if folder != "/" else "")
         address_x = x + 62
-        address_right = x + w - (145 if win10 and w > 595 else 9)
+        address_right = x + w - (max(167, min(208, int(w * .27))) if inline_search else 9)
         self.fill(edge, address_x, bar + 3, address_right - address_x, 23, 0 if win10 else 4)
         self.fill("#ffffff", address_x + 1, bar + 4, address_right - address_x - 2, 21, 0 if win10 else 3)
         self.files_glyph("folder" if win10 else "home", address_x + 6, bar + 9, win10)
         self.label(location, address_x + 25, bar + 6, 11, fg, width=address_right - address_x - 31)
-        if win10 and w > 595:
-            self.fill(edge, address_right + 7, bar + 3, x + w - address_right - 16, 23)
-            self.fill("#ffffff", address_right + 8, bar + 4, x + w - address_right - 18, 21)
-            self.label("Поиск: " + leaf, address_right + 14, bar + 6, 10, muted, width=x + w - address_right - 26)
+        if inline_search or search:
+            fx = address_right + 7 if inline_search else x + 9
+            fy = bar + 3 if inline_search else search_top + 1
+            field_w = x + w - fx - 9
+            self.fill(("#0067b8" if win10 else "#a34f23") if focus == "file-search" else edge,
+                      fx, fy, field_w, 23 if inline_search else 25, 0 if win10 else 5)
+            self.fill("#ffffff", fx + 1, fy + 1, field_w - 2, 21 if inline_search else 23, 0 if win10 else 4)
+            if search:
+                prefix = 56 if inline_search else 108
+                self.label("Поиск" if inline_search else "Поиск по имени", fx + 8, fy + 4, 10, muted, width=prefix - 12)
+                self.field(query, window, fx + prefix, fy + 3, field_w - prefix - 10, 12, fg,
+                           focused=focus == "file-search", mono=False, selection_color="#9bc8fa", caret_color="#151515")
+            else:
+                self.label("Поиск: " + leaf, fx + 8, fy + 4, 10, muted, width=field_w - 16)
 
         self.fill("#fafafa" if win10 else "#f5f3f1", x, list_top, side, status_y - list_top)
         self.fill(edge, x + side, list_top, 1, status_y - list_top)
@@ -764,9 +789,9 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         entries = window.get("entries", [])
         selected = window.get("item", -1)
         start = list_top + 25
-        kind_x = x + side + (w - side) * .72
+        kind_x = x + side + (w - side) * (.59 if search else .72)
         self.label("Имя", x + side + 11, list_top + 5, 10, muted, width=kind_x - x - side - 21)
-        self.label("Тип", kind_x + 7, list_top + 5, 10, muted, width=x + w - kind_x - 13)
+        self.label("Папка" if search else "Тип", kind_x + 7, list_top + 5, 10, muted, width=x + w - kind_x - 13)
         self.fill(edge, kind_x, list_top + 3, 1, 17)
         self.fill(edge, x + side + 1, start - 3, w - side - 1, 1)
         row = 22 if win10 else 25
@@ -794,16 +819,20 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
                 "py": "Файл Python", "txt": "Текстовый документ", "md": "Документ Markdown",
                 "csv": "Таблица CSV", "json": "Файл JSON", "png": "Изображение PNG",
             }.get(extension, ("Файл " + extension.upper()) if extension else "Файл")
+            if search:
+                relative = entry.get("path", "").removeprefix(folder.rstrip("/") + "/")
+                kind = relative.rpartition("/")[0] or "Здесь"
             self.label(kind, kind_x + 7, ty + (row - 14) / 2, 10, muted, width=x + w - kind_x - 13)
         if not entries and status_y - start >= 23:
-            self.label("Папка пуста", x + side + 11, start + 7, 11, muted, width=w - side - 21)
+            empty = "Папка пуста" if not search else "Нет совпадений" if query.strip() else "Введите часть имени файла"
+            self.label(empty, x + side + 11, start + 7, 11, muted, width=w - side - 21)
 
         self.fill("#f8f8f8" if win10 else "#f7f5f3", x, status_y, w, status_h)
         self.fill(edge, x, status_y, w, 1)
-        status = f"Объектов: {len(entries)}"
+        status = f"Найдено: {len(entries)}   |   В папке: {leaf}" if search else f"Объектов: {len(entries)}"
         if 0 <= selected < len(entries):
             status += "   |   Выбран: " + entries[selected].get("title", "")
-        if window.get("focus") == "file-name":
+        if focus == "file-name" or window.get("status", "").startswith(("Создана копия:", "К копированию:", "Перемещён:")):
             status = window.get("status") or status
         self.label(status, x + 10, status_y + 2, 10, muted, width=w - 20)
 
@@ -914,6 +943,9 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         if w >= 240:
             self.fill("#646464", x+6*unit, y+7*unit, 28*unit, 28*unit, 10*unit)
             self.chrome_mark("down", x+12*unit, y+13*unit, 16*unit, "#e2e2e2", "#646464")
+            if window.get("active") and self.browser_tab_command:
+                self._nb_hit((x+6*unit, y+7*unit, 28*unit, 28*unit), "browser-tabs:open",
+                             "Поиск открытых вкладок · Ctrl+Shift+A")
         tabs = window.get("tabs", [])
         left, controls = (40*unit if w >= 240 else 4), 100*unit
         avail = max(42, w-left-controls-25*unit)
@@ -1034,6 +1066,8 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         search_home = url == "https://www.google.com/"
         if search_home or url.startswith("https://www.google.com/search?q="):
             self.browser_search_page(window, x, top, w, bottom, search_home, body, entries, scale)
+        elif window.get("sourceReview"):
+            self.chrome_source_review(window, x, top, w, bottom)
         elif url == "chrome://history":
             self.chrome_history(window, x, top, w, bottom, entries)
         elif url in ("chrome://bookmarks", "chrome://downloads"):
@@ -1059,6 +1093,80 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         if show_status:
             self.fill("#32332f", x, y + h - 24, w, 24)
             label(status, x + 9, y + h - 19, 11, "#e2e2e2", width=w - 18)
+        if window.get("tabSearch"):
+            self.chrome_tab_search(window, x, y + min(body_top, 42), w, y + h)
+
+    def chrome_tab_search(self, window, x, top, width, bottom):
+        label = partial(self.label, family=self.chrome_font)
+        field = partial(self.field, family=self.chrome_font, mono=False)
+        search = window["tabSearch"]
+        rows, selected = search["rows"], search["selected"]
+        left, pane, pitch = x+8, min(520, width-16), 39
+        visible = min(len(rows), max(0, int((bottom-top-110)/pitch)))
+        start = min(max(0, selected-visible+1), max(0,len(rows)-visible))
+        if pane < 105 or bottom-top < 102:
+            return
+        self.fill("#16171a", left-1, top, pane+2, 104+visible*pitch, 11)
+        self.fill("#303134", left, top+1, pane, 102+visible*pitch, 10)
+        self.fill("#a7c6fa", left+10, top+10, pane-20, 35, 7)
+        self.fill("#27282b", left+11, top+11, pane-22, 33, 6)
+        self.chrome_mark("search", left+19, top+20, 15, "#bdc1c6", "#27282b")
+        if not window.get("input"):
+            label("Поиск открытых вкладок", left+44, top+18, 13, "#bdc1c6", width=pane-65)
+        field(window["input"], window, left+44, top+18, pane-65, 13, "#ffffff",
+              focused=window.get("active"), scroll_key=("tabs-search",window["id"]), selection_color="#415c84")
+        label("Открытые вкладки · " + str(len(rows)) if rows else "Нет совпадений",
+              left+13, top+55, 12, "#bdc1c6", width=pane-26)
+        for i in range(start, start+visible):
+            item = rows[i]
+            y = top+75+(i-start)*pitch
+            chosen = i == selected
+            tone = "#41536d" if chosen else "#303134"
+            self.fill(tone, left+6, y, pane-12, pitch-2, 6)
+            self.chrome_site_mark(item["url"], left+15, y+10, 17, "#d4e3fb" if chosen else "#bdc1c6", tone)
+            label(item["title"], left+43, y+3, 13, "#f3f4f6", width=pane-60)
+            label(self.browser_short_address(item["url"]), left+43, y+20, 11, "#c2c8d0", width=pane-60)
+            if window.get("active") and self.browser_tab_command:
+                self._nb_hit((left+6,y,pane-12,pitch-2), "browser-tabs:select",
+                             "Перейти: " + item["title"], path=str(i))
+        label("↑ ↓ выбрать  ·  Enter открыть  ·  Esc закрыть", left+13, top+80+visible*pitch,
+              11, "#bdc1c6", width=pane-26)
+
+    def chrome_source_review(self, window, x, top, width, bottom):
+        label = partial(self.label, family=self.chrome_font)
+        field = partial(self.field, family=self.chrome_font, mono=False)
+        review = window["sourceReview"]
+        pane, left = min(660,width-28), x+14
+        left += max(0,(width-28-pane)/2)
+        area=max(0, min(216,bottom-top-16))
+        if area < 100 or pane < 145:
+            return
+        self.fill("#e4e8ef",left,top+8,pane,area,10)
+        self.fill("#ffffff",left+1,top+9,pane-2,area-2,9)
+        label("Лист сверки",left+16,top+19,20,"#202124",width=pane-32)
+        if review["saved"]:
+            label("Сверка сохранена",left+16,top+53,15,"#246143",width=pane-32)
+            for i, line in enumerate(review["saved"].splitlines()):
+                label(line,left+16,top+79+i*21,13,"#3f4651",width=pane-32)
+            return
+        if area >= 170:
+            label("Скопируйте ссылку действующей редакции и внесите её трёхзначный код.",
+                  left+16,top+52,13,"#4c5159",width=pane-32)
+        row = top+(82 if area>=170 else 55)
+        focused = window.get("focus")=="source-review" and window.get("active")
+        self.fill("#3078d2" if focused else "#c1c5cf",left+16,row,154,36,6)
+        self.fill("#ffffff",left+17,row+1,152,34,5)
+        code = review["code"]
+        if not code:
+            label("Контрольный код",left+25,row+9,13,"#555d69",width=123)
+        if focused or code:
+            field(code,window,left+25,row+9,135,13,"#202124",focused=focused,
+                  scroll_key=("source-review",window.get("id")), selection_color="#a7c6fa", caret_color="#1f334c")
+        if window.get("active") and self.browser_tab_command:
+            self._nb_hit((left+16,row,154,36),"browser-tabs:review","Контрольный код")
+        if area >= 154:
+            label("Адрес из буфера",left+16,row+44,12,"#555d69",width=pane-32)
+            label(review["copied"] or "Адрес не скопирован",left+16,row+63,13,"#20324c",width=pane-32)
 
     @staticmethod
     def browser_address_parts(value):
@@ -1172,6 +1280,13 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         if not action.startswith(prefix) or self.browser_history_command is None:
             return False
         self.browser_history_command(action[len(prefix):], path)
+        return True
+
+    def browser_tab_hotspot(self, action, path):
+        prefix = "browser-tabs:"
+        if not action.startswith(prefix) or self.browser_tab_command is None:
+            return False
+        self.browser_tab_command(action[len(prefix):], path)
         return True
 
     def chrome_history(self, window, x, top, width, bottom, entries):

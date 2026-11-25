@@ -150,7 +150,8 @@ class NotebookSurface:
             if count < clicks or not contains(box, x, y):
                 continue
             self.grab_focus()
-            if self.explorer_hotspot(action,path) or self.browser_history_hotspot(action,path):
+            if (self.explorer_hotspot(action,path) or self.browser_history_hotspot(action,path)
+                    or self.browser_tab_hotspot(action,path)):
                 gesture.set_state(Gtk.EventSequenceState.CLAIMED)
                 return
             self._explorer_menu = False

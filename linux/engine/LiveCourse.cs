@@ -17,18 +17,21 @@ internal static partial class LiveCourse
     {
         var result = new List<LiveMission>();
         BrowserMissions(result);
+        ChromeTabReviewMissions(result);
         EditorMissions(result);
         EditorProjectSearchMissions(result);
         EditorExactEditMissions(result);
         LineEditMissions(result);
         PythonEditingMissions(result);
         EditorDiagnosticMissions(result);
+        EditorTracebackMissions(result);
         TerminalMissions(result);
         DesktopMissions(result);
         WindowsDesktopMissions(result);
         WorkdayDebugMissions(result);
         ProjectFileMissions(result);
         SourceHandoffMissions(result);
+        DesktopFileSearchMissions(result);
         return result;
     }
 
@@ -68,7 +71,7 @@ internal static partial class LiveCourse
                 else if (token.StartsWith("open-") && trial.Active?.App == token[5..]) continue;
                 else if ((token == "maximize" && trial.Active?.State == "maximized") ||
                     (!trial.GnomeWindows && ((token == "tile-left" && trial.Active?.State == "left") || (token == "tile-right" && trial.Active?.State == "right")))) continue;
-                else if (token == "save" && !trial.ExactEdit && trial.Active?.Body == trial.Active?.Tab?.SavedBody) continue;
+                else if (token == "save" && !trial.ExactEdit && !trial.TracebackPractice && trial.Active?.Body == trial.Active?.Tab?.SavedBody) continue;
                 else if (token == "bookmark" && trial.Active.SavedBookmarks.Contains(trial.Active.Url)) continue;
                 else if (token == "first-tab" && trial.Active.ActiveTab == 0 || token == "last-tab" && trial.Active.ActiveTab == trial.Active.Tabs.Count - 1) continue;
                 else if (!Demonstrate(task, trial)) throw new InvalidOperationException(mission.Id + ": недоступно " + token);
@@ -97,6 +100,7 @@ internal static partial class LiveCourse
     internal static bool CouldPracticeAny(LiveMission mission, HashSet<string> taskIds) =>
         mission.Phases.SelectMany(RouteTokens).Any(token =>
             IsCommandToken(token) ? taskIds.Contains(CommandId(DecodeCommand(token))) || taskIds.Contains("layout") :
+            token == "browser-review-tab" ? taskIds.Any(id => id.StartsWith("browser-tab-", StringComparison.Ordinal)) :
             IsPickerToken(token) ? taskIds.Contains("file-next") || taskIds.Contains("link-next") ||
                 taskIds.Contains("quick-next") || taskIds.Contains("symbol-next") :
             taskIds.Contains(token));
@@ -108,13 +112,21 @@ internal static partial class LiveCourse
     private static readonly Dictionary<string, LabTask> Actions = LabCatalog.AllTasks.ToDictionary(task => task.Id);
     private static LabTask MakeTask(string token, LabScene scene)
     {
+        token = scene.ResolveTabReviewToken(token);
         if (token == "terminal-incident-filter")
             return new(scene.Terminal.IsPowerShell ? "command/powershell-incident" : "command/filter-incident",
                 "Покажите строки новой попытки из журнала", "",
                 "Возьмите ID из новой строки ERROR, подставьте его в показанную команду и нажмите Enter.",
                 scene.TerminalIncidentFilter, "command");
+        if (scene.DescribeTracebackTask(token) is LabTask traceback) return traceback;
         if (NotebookTask(token, scene) is LabTask notebook) return notebook;
         if (PythonEditTask(token) is LabTask edit) return edit;
+        if (token == "file-search-query")
+            return new(token, "Введите номер заявки «" + scene.FileSearchQuery + "» в поле поиска", "",
+                "В результатах должны быть две версии отчёта из этой папки.", scene.FileSearchQuery, token);
+        if (token == "file-search-verify")
+            return new(token, "В строке approved проверьте контрольное число «" + scene.FileSearchControl + "»", "",
+                "Введите контрольное число в поиске открытой копии и нажмите Enter.", scene.FileSearchControl, token);
         if (token == "moved-report-save") return Actions["save"] with {
             Title = "Допишите «" + scene.NewReportRow + "» в конце перемещённого CSV и сохраните файл",
             Hint = "Ctrl+End перейдёт к пустой строке после данных. Введите " + scene.NewReportRow + " и нажмите Ctrl+S.",
@@ -152,13 +164,13 @@ internal static partial class LiveCourse
         if (IsPickerToken(token))
         {
             var w = scene.Active;
-            string raw = scene.SourceRouteTarget(scene.FileRouteTarget(scene.ResolveBrowserRouteTarget(token[(token.IndexOf(':') + 1)..])));
+            string raw = scene.DesktopSearchTarget(scene.SourceRouteTarget(scene.FileRouteTarget(scene.ResolveBrowserRouteTarget(token[(token.IndexOf(':') + 1)..]))));
             string query = raw.Replace('_', ' ');
             var entry = scene.Entries(w).FirstOrDefault(item => item.Path == raw || item.Path.EndsWith("/" + raw, StringComparison.Ordinal) ||
                 item.Path == query || item.Title == query || item.Path.EndsWith("/" + query, StringComparison.Ordinal));
             if (entry == null) throw new InvalidOperationException("Не найден объект: " + query + " в " + w.Url + w.Folder);
             var picker = Actions[w.Focus == "quick-open" ? "quick-next" : w.Focus == "symbols" ? "symbol-next" : (w.App == "files" || w.Focus == "explorer") ? "file-next" : "link-next"];
-            return picker with { Title = "Выберите «" + entry.Title + "»", Text = entry.Title };
+            return scene.DescribeDesktopSearchTask(picker with { Title = "Выберите «" + entry.Title + "»", Text = entry.Title });
         }
         if (IsCommandToken(token))
         {
@@ -193,7 +205,7 @@ internal static partial class LiveCourse
             string query = token == "project-search-submit" ? LabScene.SearchNeedle : token[13..].Replace('~', ' ');
             return Actions["project-search-submit"] with { Text = query, Title = "Введите «" + query + "» и нажмите Enter" };
         }
-        var task = scene.DescribeSourceTask(scene.WithBinding(Actions[token]));
+        var task = scene.DescribeTabReview(scene.DescribeSourceTask(scene.WithBinding(Actions[token])));
         if (scene.GnomePractice == "matebook" && token == "layout")
             return task with { Title = "Переключите учебный ввод на " + (scene.Layout == "RU" ? "EN" : "RU") };
         if (!scene.ContextHandoffActive && scene.GnomePractice == "same-app" && token.StartsWith("switch-group-", StringComparison.Ordinal))
@@ -213,13 +225,21 @@ internal static partial class LiveCourse
             if (item?.Kind == "reveal") return task with {
                 Title = "Покажите «" + System.IO.Path.GetFileName(item.Path) + "» в папке загрузок",
                 Hint = "Здесь Chrome откроет папку с выбранным файлом. Переименование делается в файловом менеджере." };
-            if (item != null) return task with { Title = (item.Kind == "download" ? "Скачайте" : "Откройте") + " «" + item.Title + "»" };
+            if (item != null) return scene.DescribeDesktopSearchTask(task with { Title = (item.Kind == "download" ? "Скачайте" : "Откройте") + " «" + item.Title + "»" });
         }
-        return task;
+        return scene.DescribeDesktopSearchTask(task);
     }
 
     private static bool Demonstrate(LabTask task, LabScene trial)
     {
+        trial.DemonstrateTabReview(task);
+        if (task.Action == "file-search-query") return trial.Text("Text", task.Text);
+        if (task.Action == "file-search-verify")
+        {
+            trial.Insert(trial.Active, task.Text);
+            return trial.Text("Enter", "");
+        }
+        if (trial.DemonstrateTraceback(task) is bool trace) return trace;
         if (trial.CompletingMovedReport && task.Action == "save" && task.Text.Length > 0)
         {
             trial.Text("End", "", word: true);
@@ -289,7 +309,9 @@ internal static partial class LiveCourse
     {
         var w = scene.Active;
         string app = w?.App ?? "", action = task.Action;
+        if (scene.DesktopFileSearchEvidence(task) is object desktopSearch) return JsonSerializer.Serialize(desktopSearch);
         if (scene.GuideNoteEvidence(task) is object note) return JsonSerializer.Serialize(note);
+        if (scene.TracebackEvidence(task) is object trace) return JsonSerializer.Serialize(trace);
         if (scene.SourceHandoffEvidence(task, equivalentCommand) is object source) return JsonSerializer.Serialize(source);
         if (scene.ProjectFileEvidence(task) is object files) return JsonSerializer.Serialize(files);
         if (scene.NotebookCourse) return JsonSerializer.Serialize(scene.NotebookEvidence(task));
@@ -315,7 +337,7 @@ internal static partial class LiveCourse
                     saved = v.App == "code" ? v.Tab?.SavedBody : null
                 }).ToArray()
             });
-        object value = scene.BrowserPracticeEvidence(task, w) ?? scene.ExactEditEvidence(task) ?? scene.DebugEvidence(action) ?? (action switch
+        object value = scene.ChromeTabEvidence(task, w) ?? scene.BrowserPracticeEvidence(task, w) ?? scene.ExactEditEvidence(task) ?? scene.DebugEvidence(action) ?? (action switch
         {
             _ when action.StartsWith("project-search-", StringComparison.Ordinal) => scene.ProjectSearchEvidence(action),
             _ when action == "code-problem-next" || action.StartsWith("code-fix-", StringComparison.Ordinal) => scene.DiagnosticEvidence(),

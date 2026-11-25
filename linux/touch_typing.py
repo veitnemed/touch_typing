@@ -1909,7 +1909,7 @@ class Studio(Gtk.Application):
                 and not (modifiers & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SUPER_MASK))):
             focus = self.window.get_focus()
             if focus is None or not any(focus.get_ancestor(t) or isinstance(focus, t)
-                                        for t in (Gtk.DropDown, Gtk.Button, Gtk.Popover)):
+                                        for t in (Gtk.DropDown, Gtk.Button, Gtk.Popover, Gtk.Expander)):
                 self.toggle_shortcut() if self.mode == "shortcuts" else self.start_typing()
                 return True
         return False
@@ -2948,6 +2948,7 @@ class LabPage(Gtk.Box):
         self.desktop.notebook_command = self.apply_notebook_command
         self.desktop.explorer_command = self.apply_explorer_command
         self.desktop.browser_history_command = self.apply_browser_history_command
+        self.desktop.browser_tab_command = self.apply_browser_tab_command
         self.desktop.reference_chrome = True
         self.stage = Gtk.Overlay()
         self.stage.add_css_class("reference-workspace")
@@ -3534,6 +3535,14 @@ class LabPage(Gtk.Box):
         if response:
             self.render(response)
 
+    def apply_browser_tab_command(self, action, index):
+        if (not self.active or self.state["paused"] or self.limit_resume_wait or self.save_pending
+                or self.state.get("limitDecisionPending") or self.settings_menu.get_popover().get_mapped()):
+            return
+        response = self.host.call("lab-browser-tab-search", action=action, index=index)
+        if response:
+            self.render(response)
+
     def key_down(self, key, character, modifiers=Gdk.ModifierType(0), keycode=None):
         if self.settings_menu.get_popover().get_mapped():
             return False  # Settings keyboard navigation is not lesson input.
@@ -3847,6 +3856,9 @@ class LabPage(Gtk.Box):
         clear(self.modal_layer)
         panel = self.reference_lesson_panel("Результат", self.state.get("scenario", "Практикум"),
                                              result, completed=result.get("completed", False))
+        if receipt := result.get("sourceReview"):
+            panel.append(text("Код сверки: " + receipt["code"] + "\n" + receipt["url"],
+                              "reference-modal-subtitle", wrap=True))
         note = f'Ошибки: {result["errors"]}    ·    Рекорд: {result.get("record", 0)}'
         if result.get("newRecord"):
             note += "    ·    Новый рекорд"
