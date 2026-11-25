@@ -1227,9 +1227,8 @@ internal static partial class LiveUiSmoke
                     Key("F4");
                     Until(delegate
                     {
-                        var aid = Find("LiveKeyboard");
-                        return Visible("LiveAidPanel") && aid != null &&
-                            aid.Current.HelpText.Contains("7 / Home (NumPad7)");
+                        return Visible("LiveAidPanel") &&
+                            Find("LiveAidPanel").Current.ItemStatus.Contains("7 / Home (NumPad7)");
                     }, "Visible MateBook key points to 7/Home on the number pad");
                     CaptureReferenceFrame("workday-pad7-home");
                     Chord("Alt+7");

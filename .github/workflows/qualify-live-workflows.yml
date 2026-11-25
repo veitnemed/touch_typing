@@ -134,7 +134,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends xvfb xauth ffmpeg x11-xkb-utils gir1.2-gtk-4.0 python3-gi python3-cairo python3-gi-cairo libxtst6 libglib2.0-bin
+          sudo apt-get install -y --no-install-recommends xvfb xauth ffmpeg x11-utils x11-xkb-utils gir1.2-gtk-4.0 python3-gi python3-cairo python3-gi-cairo libxtst6 libglib2.0-bin
           p="$RUNNER_TEMP/archives"
           (cd "$p" && sha256sum -c SHA256SUMS.txt)
           temp=$(mktemp -d)
