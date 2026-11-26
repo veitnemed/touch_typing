@@ -34,7 +34,7 @@ namespace TouchTypingStudio
         private static readonly Brush Night = Ui.Brush("#232833");
         private static readonly Brush Error = Ui.Brush("#F18991");
 
-        private readonly PracticeEngineClient engine;
+        private PracticeEngineClient engine;
         private readonly bool verifyMode;
         private readonly ContentControl center = new ContentControl
         {
@@ -78,7 +78,7 @@ namespace TouchTypingStudio
         public LiveStudio(string initial, bool verify, bool captureHome = false)
         {
             verifyMode = verify;
-            engine = new PracticeEngineClient(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "engine", "TouchTyping.Engine.exe"), verify);
+            engine = CreateLessonEngine();
             Title = "Код вслепую";
             Width = captureHome ? 1006 : 1280;
             Height = captureHome ? 863 : 750;
@@ -224,6 +224,37 @@ namespace TouchTypingStudio
         {
             notice.Text = message;
             notice.Visibility = message.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private PracticeEngineClient CreateLessonEngine()
+        {
+            return new PracticeEngineClient(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                "engine", "TouchTyping.Engine.exe"), verifyMode);
+        }
+
+        private bool EnsureMenuEngine()
+        {
+            if (!engine.HasExited) return true;
+            // Start a clean transport without replaying a possibly accepted write.
+            try
+            {
+                var replacement = CreateLessonEngine();
+                var previous = engine;
+                engine = replacement;
+                previous.Dispose();
+                var fresh = Request("configure", "platform", "windows", "layout", CurrentLayout());
+                if (!fresh.Exists || !string.IsNullOrWhiteSpace(engine.Notice)) return false;
+                library = fresh;
+                HydrateDesktopProfile(fresh);
+                return true;
+            }
+            catch (Exception error)
+            {
+                if (!(error is IOException || error is InvalidOperationException ||
+                    error is System.ComponentModel.Win32Exception || error is UnauthorizedAccessException)) throw;
+                SetNotice("Не удалось запустить учебный движок: " + error.Message);
+                return false;
+            }
         }
 
         private Data Request(string command, params object[] fields)
@@ -556,6 +587,7 @@ namespace TouchTypingStudio
 
         private void StartTyping()
         {
+            if (active || !EnsureMenuEngine()) return;
             selectedTyping = Get(typingSelect);
             selectedTypingLevel = Math.Max(0, typingLevel.SelectedIndex);
             selectedTime = Math.Max(0, typingTime.SelectedIndex);
@@ -568,7 +600,7 @@ namespace TouchTypingStudio
 
         private void StartMistakeReview(string sourceId)
         {
-            if (active) return;
+            if (active || !EnsureMenuEngine()) return;
             var response = Request("typing-review-start", "sourceId", sourceId, "layout", CurrentLayout());
             if (!response.Exists) return;
             // StartSession creates the same real typing surface as an ordinary lesson.

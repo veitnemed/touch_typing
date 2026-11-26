@@ -3,6 +3,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Management;
 using System.Windows.Automation;
 using System.Xml;
 
@@ -24,6 +25,25 @@ internal static partial class LiveUiSmoke
               "visible ordinary Live catalog");
         Check(Visible("ReferenceNav-practice") && Visible("ReferenceNav-learn") &&
               !Visible("ReferenceNav-home") && !Visible("ReferenceNav-progress"), "the two real top level sections");
+    }
+
+    private static void StopOwnedPracticeEngine()
+    {
+        int enginePid = 0;
+        Until(delegate
+        {
+            using (var lookup = new ManagementObjectSearcher("SELECT ProcessId FROM Win32_Process WHERE " +
+                "Name = 'TouchTyping.Engine.exe' AND ParentProcessId = " + app.Id))
+            using (var matches = lookup.Get())
+                foreach (ManagementObject item in matches)
+                    using (item) { enginePid = Convert.ToInt32(item["ProcessId"]); break; }
+            return enginePid != 0;
+        }, "owned engine instance");
+        using (var child = Process.GetProcessById(enginePid))
+        {
+            child.Kill();
+            Check(child.WaitForExit(5000), "instrumented engine exit");
+        }
     }
 
     private static double OrdinaryCourseValue()
@@ -90,6 +110,23 @@ internal static partial class LiveUiSmoke
             CaptureReferenceFrame("ordinary-wpf-03-restored");
             Invoke("LabBack");
             Until(delegate { return Visible("HomeClass-chrome"); }, "return to ordinary route");
+            // Intentionally crash only a child of this disposable test's own app.
+            // The next user action must re-open the durable draft, not re-run an old write.
+            StopOwnedPracticeEngine();
+            Find("HomeClass-chrome").SetFocus(); Key("Enter");
+            Until(delegate { return Visible("LabDesktop") && OrdinaryCourseValue() == 2; },
+                  "desktop menu recovers and resumes the exact saved position");
+            Check(OrdinaryVisibleKeys() == "Ctrl+T", "expected next action after engine relaunch");
+            Invoke("LabBack");
+            Until(delegate { return Visible("HomeClass-chrome"); }, "second return to ordinary route");
+            Chord("Alt+2");
+            Until(delegate { return Visible("TypingStart"); }, "ordinary typing menu");
+            StopOwnedPracticeEngine();
+            Invoke("TypingStart");
+            Until(delegate { return Visible("TypingCount"); }, "typing start recovers the engine too");
+            Key("Escape");
+            Until(delegate { return Visible("TypingChoose"); }, "typing result after recovered start");
+            Invoke("TypingChoose");
             RequestClose(); UntilExit();
             Console.WriteLine("PASS Windows exact EXE, no launch flags, clean profile -> course -> checkpoint -> reopen -> next task.");
             return 0;

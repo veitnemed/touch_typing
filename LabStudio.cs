@@ -157,7 +157,7 @@ namespace TouchTypingStudio
 
         private void LaunchLiveCard(string app, bool resume)
         {
-            if (active) return;
+            if (active || !EnsureMenuEngine()) return;
             var catalog = Request("lab-catalog", "desktopProfile", labDesktopProfile);
             if (!catalog.Exists) return;
             labApp = liveReturnApp = app;
@@ -189,7 +189,7 @@ namespace TouchTypingStudio
         private void StartLabAttempt(string mission, bool resume, string routeKind = "",
             bool defaultBudget = false, int? actionOverride = null, int? timeOverride = null, bool adaptiveGuide = false)
         {
-            if (active) return;
+            if (active || !EnsureMenuEngine()) return;
             if (Keyboard.Modifiers != ModifierKeys.None)
             {
                 SetNotice("Отпустите модификаторы, затем запустите упражнение.");
@@ -214,7 +214,12 @@ namespace TouchTypingStudio
             if (verifyMode && int.TryParse(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_SEED"), out seed))
                 fields.AddRange(new object[] { "seed", seed });
             var initial = Request("lab-start", fields.ToArray());
-            if (!initial.Exists || initial.B("startBlocked")) return;
+            if (!initial.Exists || initial.B("startBlocked"))
+            {
+                if (string.IsNullOrWhiteSpace(notice.Text))
+                    SetNotice(initial.S("saveError", "Не удалось открыть занятие. Повторите запуск."));
+                return;
+            }
             labSavePending = labSaveClosePending = labSaveBackPending = labExplicitFinishPending = false;
             lastLabMission = initial.S("mission");
             lastLabRouteKind = initial.S("routeKind");

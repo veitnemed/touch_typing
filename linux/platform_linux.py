@@ -345,7 +345,11 @@ class Engine:
 
     def close(self):
         if self.process.stdin and not self.process.stdin.closed:
-            self.process.stdin.close()
+            try:
+                self.process.stdin.close()
+            except BrokenPipeError:
+                # The previous process may already be dead when replacing it.
+                pass
         try:
             self.process.wait(timeout=2)
         except subprocess.TimeoutExpired:

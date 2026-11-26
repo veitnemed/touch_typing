@@ -13,7 +13,7 @@ try{
     $options=@('/nologo','/target:exe','/platform:x64','/codepage:65001','/main:OrdinaryWpfLaunchMain',"/out:$probe",
         "/reference:$framework\WPF\UIAutomationClient.dll","/reference:$framework\WPF\UIAutomationTypes.dll",
         "/reference:$framework\WPF\WindowsBase.dll","/reference:$framework\System.Xml.dll",
-        "/reference:$framework\System.Drawing.dll","/reference:$framework\System.Windows.Forms.dll",
+        "/reference:$framework\System.Drawing.dll","/reference:$framework\System.Management.dll","/reference:$framework\System.Windows.Forms.dll",
         (Join-Path $PSScriptRoot 'LiveUiSmoke.cs'),(Join-Path $PSScriptRoot 'TypingProofClient.cs'),
         (Join-Path $PSScriptRoot 'OrdinaryWpfLaunchSmoke.cs'))
     & (Join-Path $framework 'csc.exe') @options

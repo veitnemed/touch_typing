@@ -61,6 +61,7 @@ namespace TouchTypingStudio
         private readonly StreamWriter input;
         private readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = 12 * 1024 * 1024 };
         public string Notice { get; private set; }
+        public bool HasExited { get { return process.HasExited; } }
 
         public PracticeEngineClient(string executable, bool verify)
         {

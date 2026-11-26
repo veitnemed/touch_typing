@@ -776,7 +776,11 @@ class Studio(Gtk.Application):
             target.grab_focus()
 
     def open_reference_module(self, module, draft=None, launch=None):
-        catalog = self.call("lab-catalog") or {}
+        if self.workout or self.lab and self.lab.active or not self.ensure_menu_engine():
+            return
+        catalog = self.call("lab-catalog")
+        if catalog is None:
+            return
         environment = self.lab_desktop_profile()
         available = catalog.get("drafts", ())
         if draft and draft not in available:
@@ -1149,6 +1153,28 @@ class Studio(Gtk.Application):
     def message(self, value=""):
         self.banner.set_label(value or "")
         self.banner.set_visible(bool(value))
+
+    def ensure_menu_engine(self):
+        # Recover only on a new launch, never replay an in-flight write.
+        if self.engine.process.poll() is None:
+            return True
+        try:
+            old = self.engine
+            self.engine = Engine(bool(self.smoke))
+            old.close()
+            forward, backward = self.sources.bindings()
+            self.library = self.engine.call(
+                "configure", layout=self.layout, forward=forward, backward=backward,
+                dock=self.sources.dock(), desktopBindings=self.sources.desktop_bindings(),
+                rightAltMode=self.physical_keyboard.right_alt_mode())
+            if self.engine.storage_error:
+                self.message(self.engine.storage_error)
+                return False
+            self.message()
+            return True
+        except (OSError, EngineError) as exc:
+            self.message(f"Не удалось запустить учебный движок: {exc}")
+            return False
 
     def call(self, operation, **payload):
         try:
@@ -2126,6 +2152,8 @@ class Studio(Gtk.Application):
         if self.workout:
             self.stop()
             return
+        if not self.ensure_menu_engine():
+            return
         self.typing_choice = self.typing_options[self.typing_pick.get_selected()][0]
         choice = self.typing_cycles.get_selected()
         # A pointer click or Space can start an exercise immediately after the
@@ -2143,6 +2171,8 @@ class Studio(Gtk.Application):
 
     def start_mistake_review(self, source_id):
         if self.workout:  # ignore the second activation of a button just replaced
+            return
+        if not self.ensure_menu_engine():
             return
         state = self.call("typing-review-start", sourceId=source_id, layout=self.layout)
         if state is None:
