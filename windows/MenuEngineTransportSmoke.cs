@@ -5,7 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
-using System.Web.Script.Serialization;
+using System.Text;
 using TouchTypingStudio;
 
 internal static class MenuEngineTransportSmoke
@@ -65,15 +65,24 @@ internal static class MenuEngineTransportSmoke
 
     private static int RunChild(string audit)
     {
-        var json = new JavaScriptSerializer();
-        string line;
-        while ((line = Console.ReadLine()) != null)
+        // The shipped engine speaks UTF-8 bytes over the pipes irrespective
+        // of the inherited Windows console code page. Do the same here.
+        var utf8 = new UTF8Encoding(false, true);
+        using (var input = new StreamReader(Console.OpenStandardInput(), utf8, true))
+        using (var output = new StreamWriter(Console.OpenStandardOutput(), utf8) { AutoFlush = true })
         {
-            var operation = new Data(json.DeserializeObject(line)).S("command");
-            File.AppendAllLines(audit, new[] { operation });
-            if (operation == "lab-start") Thread.Sleep(15000);
-            Console.WriteLine(json.Serialize(new { ok = true, value = new { operation } }));
-            Console.Out.Flush();
+            string line;
+            while ((line = input.ReadLine()) != null)
+            {
+                if (String.IsNullOrWhiteSpace(line)) continue;
+                string operation = line == "{\"command\":\"configure\"}" ? "configure" :
+                                   line == "{\"command\":\"lab-start\"}" ? "lab-start" : null;
+                Require(operation != null, "Expected the actual request bytes; received " +
+                    BitConverter.ToString(utf8.GetBytes(line)));
+                File.AppendAllLines(audit, new[] { operation });
+                if (operation == "lab-start") Thread.Sleep(15000);
+                output.WriteLine("{\"ok\":true,\"value\":{\"operation\":\"" + operation + "\"}}");
+            }
         }
         return 0;
     }

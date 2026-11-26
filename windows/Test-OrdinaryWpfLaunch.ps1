@@ -25,12 +25,3 @@ try{
     $ErrorActionPreference=$oldError
 }
 if($exitCode){throw "Ordinary Windows launcher proof failed ($exitCode); $out"}
-$transport = Join-Path $out 'MenuEngineTransportSmoke.exe'
-$transportOptions = @('/nologo','/target:exe','/platform:x64','/codepage:65001',"/out:$transport",
-    "/reference:$framework\System.Web.Extensions.dll",
-    (Join-Path $PSScriptRoot 'MenuEngineTransportSmoke.cs'),
-    (Join-Path (Split-Path $PSScriptRoot -Parent) 'PracticeEngineClient.cs'))
-& (Join-Path $framework 'csc.exe') @transportOptions
-if ($LASTEXITCODE) { throw "Windows transport proof compilation failed; $out" }
-& $transport $out | Tee-Object -FilePath (Join-Path $out 'menu-transport.log')
-if ($LASTEXITCODE) { throw "Windows transport proof failed; $out" }

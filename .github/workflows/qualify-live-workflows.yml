@@ -303,6 +303,19 @@ jobs:
           name: linux-system-typing-wayland
           path: ${{ runner.temp }}/system-typing-wayland/
           if-no-files-found: warn
+  windows-launch-transport:
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Exercise the .NET Framework client against a live stalled local child
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & "./windows/Test-MenuEngineTransport.ps1" -OutputDirectory "$env:RUNNER_TEMP/menu-engine-transport"
   windows-native:
     needs: build
     runs-on: windows-2025
@@ -412,7 +425,7 @@ jobs:
 
   publish-preview:
     if: github.event.head_commit.message == 'Release v1.9.3' || github.event.head_commit.message == 'Release v1.9.2' || github.event.head_commit.message == 'Release v1.9.1' || startsWith(github.event.head_commit.message, 'Release v1.9.0-preview.')
-    needs: [build, engine-regression, linux-native, linux-system-wayland, windows-native]
+    needs: [build, engine-regression, linux-native, linux-system-wayland, windows-launch-transport, windows-native]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
