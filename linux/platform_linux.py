@@ -1,11 +1,13 @@
 """GTK input and the local C# practice engine."""
 import ctypes
+from concurrent.futures import Future, TimeoutError as FutureTimeout
 from functools import lru_cache
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
+from threading import Thread
 
 APP_ID = "com.veitnemed.TouchTyping"
 ROOT = Path(__file__).resolve().parent
@@ -316,6 +318,11 @@ class EngineError(Exception):
 
 
 class Engine:
+    # Limit only menu requests. Never retry a write whose reply was lost.
+    menu_timeout = 4.0
+    menu_requests = frozenset(("configure", "lab-catalog", "shortcut-start",
+                              "lab-start", "typing-start", "typing-continue",
+                              "typing-review-start"))
     def __init__(self, verify=False):
         command = [str(ROOT / "engine" / "TouchTyping.Engine")]
         if override := os.environ.get("TOUCH_TYPING_ENGINE"):
@@ -327,23 +334,54 @@ class Engine:
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         text=True, encoding="utf-8")
         self.storage_error = ""
+        self.disconnected = False
 
     def call(self, operation, **payload):
+        if self.disconnected:
+            raise EngineError("Связь с учебным движком потеряна. Повторите запуск из меню.")
+        message = json.dumps({"command": operation, **payload}, ensure_ascii=False)
+        if operation not in self.menu_requests:
+            return self._exchange(message)
+        reply = Future()
+
+        def exchange():
+            try:
+                reply.set_result(self._exchange(message))
+            except Exception as exc:
+                reply.set_exception(exc)
+
+        Thread(target=exchange, daemon=True).start()
         try:
-            self.process.stdin.write(json.dumps({"command": operation, **payload}, ensure_ascii=False) + "\n")
+            return reply.result(timeout=self.menu_timeout)
+        except FutureTimeout as exc:
+            self.disconnected = True
+            raise EngineError("Учебный движок не ответил. Повторите запуск из меню.") from exc
+
+    def _exchange(self, message):
+        try:
+            self.process.stdin.write(message + "\n")
             self.process.stdin.flush()
             line = self.process.stdout.readline()
         except (BrokenPipeError, OSError) as exc:
-            raise EngineError("Связь с учебным движком потеряна.") from exc
+            self.disconnected = True
+            raise EngineError("Связь с учебным движком потеряна. Повторите запуск из меню.") from exc
         if not line:
-            raise EngineError("Учебный движок завершился.")
-        reply = json.loads(line)
+            self.disconnected = True
+            raise EngineError("Учебный движок завершился. Повторите запуск из меню.")
+        try:
+            reply = json.loads(line)
+        except ValueError as exc:
+            self.disconnected = True
+            raise EngineError("Ответ учебного движка повреждён. Повторите запуск из меню.") from exc
         if not reply["ok"]:
             raise EngineError(reply["error"])
         self.storage_error = reply.get("storageError")
         return reply["value"]
 
     def close(self):
+        if self.disconnected and self.process.poll() is None:
+            self.process.kill()
+            self.process.wait(timeout=2)
         if self.process.stdin and not self.process.stdin.closed:
             try:
                 self.process.stdin.close()

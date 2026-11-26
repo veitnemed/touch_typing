@@ -16,6 +16,7 @@ namespace TouchTypingStudio
 
         private void OpenLiveConfigure(string app)
         {
+            if (active || !EnsureMenuEngine()) return;
             liveReturnApp = labApp = app;
             NavigateReference(ConfigurePage, true);
         }

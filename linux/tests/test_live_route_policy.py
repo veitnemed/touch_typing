@@ -164,7 +164,7 @@ class LiveRoutePolicyTests(unittest.TestCase):
                                 observations.append(f"{desktop}/{app}/{level}: {first}(4), цель выполнена без повторов")
                                 return
                             visited = [first]
-                            for _ in range(max(20, start_length + 1)):
+                            for _ in range(max(30, start_length + 1)):
                                 if s["limitDecisionPending"]:
                                     # A rehearsal may have a more verbose first
                                     # phase on a different key profile. Respect

@@ -77,6 +77,7 @@ jobs:
             dotnet run --project "linux/tests/$suite.csproj" -c Release
           done
           export PYTHONPATH="$PWD/linux" TOUCH_TYPING_ENGINE="$p/touch-typing-linux-x64/engine/TouchTyping.Engine"
+          /usr/bin/python3 linux/tests/test_engine_menu_transport.py
           /usr/bin/python3 linux/tests/test_practice.py
           /usr/bin/python3 linux/tests/test_classic_cycles.py
           /usr/bin/python3 linux/tests/test_mixed_typing.py
@@ -122,7 +123,7 @@ jobs:
   linux-native:
     needs: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 18
+    timeout-minutes: 28
     steps:
       - uses: actions/checkout@v4
         with:
@@ -243,7 +244,7 @@ jobs:
   linux-system-wayland:
     needs: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 22
     steps:
       - id: download_candidate
         continue-on-error: true
@@ -386,7 +387,7 @@ jobs:
           if-no-files-found: warn
 
   publish-preview:
-    if: github.event.head_commit.message == 'Release v1.9.2' || github.event.head_commit.message == 'Release v1.9.1' || startsWith(github.event.head_commit.message, 'Release v1.9.0-preview.')
+    if: github.event.head_commit.message == 'Release v1.9.3' || github.event.head_commit.message == 'Release v1.9.2' || github.event.head_commit.message == 'Release v1.9.1' || startsWith(github.event.head_commit.message, 'Release v1.9.0-preview.')
     needs: [build, engine-regression, linux-native, linux-system-wayland, windows-native]
     runs-on: ubuntu-24.04
     timeout-minutes: 10

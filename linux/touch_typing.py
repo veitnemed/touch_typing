@@ -926,6 +926,8 @@ class Studio(Gtk.Application):
         return menu
 
     def configure_live_card(self, module, title, missions):
+        if not self.ensure_menu_engine():
+            return
         def show_configuration():
             self.reference_catalog_board.set_visible(False)
             self.reference_catalog.set_measure_overlay(layer, True)
@@ -1160,7 +1162,7 @@ class Studio(Gtk.Application):
 
     def ensure_menu_engine(self):
         # Recover only on a new launch, never replay an in-flight write.
-        if self.engine.process.poll() is None:
+        if not self.engine.disconnected and self.engine.process.poll() is None:
             return True
         try:
             old = self.engine
@@ -1199,6 +1201,7 @@ class Studio(Gtk.Application):
                            dock=self.sources.dock(), desktopBindings=self.sources.desktop_bindings())
         if result:
             self.library = result
+        return result is not None
 
     def navigate(self, page, manual=True):
         self.release_system_typing_capture()
@@ -1431,7 +1434,8 @@ class Studio(Gtk.Application):
         if self.workout:
             self.stop()
             return
-        self.refresh()
+        if not self.ensure_menu_engine() or not self.refresh():
+            return
         choice = self.run_picker.get_selected()
         ids = ([item["skill"]["id"] for item in self.visible_skills()] if choice == 2 else
                [item["skill"]["id"] for item in self.entries] if choice == 1 else [self.skill_id])
@@ -2098,6 +2102,9 @@ class Studio(Gtk.Application):
             def continue_draft():
                 system = draft["mode"] == "SystemHotkeys"
                 def resume():
+                    if not self.ensure_menu_engine():
+                        self.release_system_typing_capture()
+                        return
                     state = self.call("typing-continue", id=draft["id"], layout=self.layout, systemCapture=system)
                     if state is None:
                         self.release_system_typing_capture()
@@ -3478,11 +3485,12 @@ class LabPage(Gtk.Box):
         return GLib.SOURCE_REMOVE
 
     def start(self):
-        if self.active or not self.classes:
+        if self.active or not self.classes or not self.host.ensure_menu_engine():
             return
         self.result = False
         self.content.set_can_focus(True)
-        self.host.refresh()
+        if not self.host.refresh():
+            return
         app = self.classes[self.picker.get_selected()]["id"]
         mission = self.choices[self.mission_picker.get_selected()][0]
         budget = ({} if self.default_course_budget else

@@ -237,7 +237,7 @@ namespace TouchTypingStudio
 
         private bool EnsureMenuEngine()
         {
-            if (!engine.HasExited) return true;
+            if (!engine.NeedsReconnect) return true;
             // Start a clean transport without replaying a possibly accepted write.
             try
             {
@@ -453,6 +453,7 @@ namespace TouchTypingStudio
             {
                 var continuation = ActionButton("Продолжить · " + draft.S("title") + " · " +
                     draft.I("done") + "/" + draft.I("total"), delegate {
+                        if (active || !EnsureMenuEngine()) return;
                         bool system = draft.S("mode") == SystemTypingMode;
                         if (system && !AcquireSystemTypingCapture()) return;
                         var restored = Request("typing-continue", "id", draft.S("id"), "layout", CurrentLayout(), "systemCapture", system);
@@ -588,7 +589,7 @@ namespace TouchTypingStudio
 
         private void StartLive()
         {
-            if (!legacyLive) return;
+            if (!legacyLive || active || !EnsureMenuEngine()) return;
             selectedGroup = Get(groupSelect);
             selectedSkill = Get(taskSelect);
             selectedLiveKind = Math.Max(0, kindSelect.SelectedIndex);

@@ -3,6 +3,9 @@
 The fault is injected only into the owned QA child; it reproduces an
 unresponsive launch, not a claim about why a particular user session failed.
 """
+import os
+import signal
+
 from test_preview2_native import QA
 
 
@@ -50,7 +53,30 @@ class Recovery(QA):
                 break
             yield
         assert self.lab and self.lab.active, self.banner.get_label()
-        print("PASS: GTK menu starts typing and Live after an engine exit; return and relaunch work.")
+        assert self.lab.state["solved"] == 0 and self.lab.state["task"]["keys"] == "Ctrl+L"
+        yield from self.chord("Ctrl+L")
+        assert self.lab.state["solved"] == 1 and self.lab.state["task"]["keys"] == "Ctrl+C"
+        self.return_live_catalog("chrome")
+        prior = self.engine
+        prior.menu_timeout = 0.3
+        os.kill(prior.process.pid, signal.SIGSTOP)
+        try:
+            self.home_cards["chrome"].emit("clicked")
+            assert prior.disconnected and prior.process.poll() is None
+            assert "не ответил" in self.banner.get_label(), self.banner.get_label()
+            assert not self.lab or not self.lab.active
+            self.home_cards["chrome"].emit("clicked")
+            for _ in range(50):
+                if self.lab and self.lab.active:
+                    break
+                yield
+            assert self.lab and self.lab.active
+            assert self.lab.state["solved"] == 1 and self.lab.state["task"]["keys"] == "Ctrl+C"
+            assert self.engine is not prior and prior.process.poll() is not None
+        finally:
+            if prior.process.poll() is None:
+                os.kill(prior.process.pid, signal.SIGCONT)
+        print("PASS: GTK menu recovers after engine exit and a live timeout; explicit retry starts Live.")
 
 
 if __name__ == "__main__":

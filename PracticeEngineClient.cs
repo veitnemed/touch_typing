@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 
 namespace TouchTypingStudio
@@ -61,7 +62,13 @@ namespace TouchTypingStudio
         private readonly StreamWriter input;
         private readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = 12 * 1024 * 1024 };
         public string Notice { get; private set; }
-        public bool HasExited { get { return process.HasExited; } }
+        public bool NeedsReconnect { get { return disconnected || process.HasExited; } }
+        private bool disconnected;
+        private static readonly HashSet<string> BoundedRequests = new HashSet<string>
+        {
+            "configure", "lab-catalog", "shortcut-start", "lab-start", "typing-start",
+            "typing-continue", "typing-review-start"
+        };
 
         public PracticeEngineClient(string executable, bool verify)
         {
@@ -79,19 +86,52 @@ namespace TouchTypingStudio
         {
             var message = new Dictionary<string, object> { { "command", command } };
             for (int i = 0; i < fields.Length; i += 2) message.Add((string)fields[i], fields[i + 1]);
-            input.WriteLine(json.Serialize(message));
-            string response = process.StandardOutput.ReadLine();
-            if (response == null) throw new IOException("Учебный движок завершился. Откройте приложение снова.");
-            var reply = new Data(json.DeserializeObject(response));
+            if (disconnected) throw new IOException("Связь с учебным движком потеряна. Повторите запуск из меню.");
+            string request = json.Serialize(message);
+            string response;
+            try
+            {
+                if (BoundedRequests.Contains(command))
+                {
+                    var pending = Task.Run(() => Exchange(request));
+                    if (Task.WhenAny(pending, Task.Delay(4000)).GetAwaiter().GetResult() != pending)
+                    {
+                        pending.ContinueWith(t => { var ignored = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
+                        throw new IOException("Учебный движок не ответил. Повторите запуск из меню.");
+                    }
+                    response = pending.GetAwaiter().GetResult();
+                }
+                else response = Exchange(request);
+                if (response == null) throw new IOException("Учебный движок завершился. Повторите запуск из меню.");
+            }
+            catch (IOException) { disconnected = true; throw; }
+            Data reply;
+            try { reply = new Data(json.DeserializeObject(response)); }
+            catch (ArgumentException error)
+            {
+                disconnected = true;
+                throw new IOException("Ответ учебного движка повреждён. Повторите запуск из меню.", error);
+            }
             Notice = reply.S("storageError");
             if (!reply.B("ok")) throw new InvalidOperationException(reply.S("error", "Не удалось выполнить действие."));
             return reply.D("value");
         }
 
+        private string Exchange(string request)
+        {
+            input.WriteLine(request);
+            return process.StandardOutput.ReadLine();
+        }
+
         public void Dispose()
         {
-            try { input.Dispose(); }
+            try
+            {
+                if (disconnected && !process.HasExited) process.Kill();
+                input.Dispose();
+            }
             catch (IOException) { }
+            catch (InvalidOperationException) { }
             finally
             {
                 try { if (!process.WaitForExit(800)) process.Kill(); }
