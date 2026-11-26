@@ -1727,7 +1727,7 @@ class MissionTest(unittest.TestCase):
                     answer = "2" if free >= needed else "1"
                     state = chord([answer], answer)
                 elif task["keys"]:
-                    expects_text = task["id"] in {"code-rename-confirm", "project-search-submit"} or (
+                    expects_text = task["id"] in {"code-rename-confirm", "project-search-submit", "scm-commit"} or (
                         mission["id"] == "code-find-exact-edit" and task["id"] in {"quick-choose", "exact-find-submit", "save"})
                     if mission["id"] == "code-project-file-move" and task["id"] == "save" and attempt == 0:
                         chord(["LCtrl", "End"])

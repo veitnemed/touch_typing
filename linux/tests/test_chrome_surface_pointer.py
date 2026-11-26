@@ -144,3 +144,7 @@ class ChromeSurfaceTests(unittest.TestCase):
                     click("tab",old_slot); s=chord(e,"Ctrl+L")
                     self.assertEqual(s["solved"],before[0]+1)  # actual required key in its original tab
                 finally: e.close()
+
+
+if __name__ == "__main__":
+    unittest.main()

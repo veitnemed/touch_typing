@@ -108,19 +108,22 @@ class LiveCoachTests(unittest.TestCase):
                 def journal(state):
                     return next(item["content"] for item in state["scene"]["terminal"]["files"]
                                 if item["path"] == "/home/student/project/app.log")
-                s = begin(e, "terminal", adaptiveGuide=True)
+                s = begin(e, "terminal", adaptiveGuide=True, routeKind="mission",
+                          mission="terminal-practical-incident", seed=0)
                 first = journal(s)
                 enter(e, "gerp ERROR app.log")
                 s = chord(e, "Enter")
                 self.assertEqual((s["coachStage"], s["showGuide"]), ("practice", True))
                 self.assertEqual(finish(s)["solved"], 4)
-                s = begin(e, "terminal", adaptiveGuide=True)
+                s = begin(e, "terminal", adaptiveGuide=True, routeKind="mission",
+                          mission="terminal-practical-incident", seed=1)
                 recall = journal(s)
                 self.assertNotEqual(recall, first)
                 self.assertEqual((s["coachStage"], s["showGuide"], s["task"]["id"]),
                                  ("recall", False, "command/grep ERROR app.log"))
                 self.assertEqual(finish(s)["solved"], 4)
-                s = begin(e, "terminal", adaptiveGuide=True)
+                s = begin(e, "terminal", adaptiveGuide=True, routeKind="mission",
+                          mission="terminal-practical-incident", seed=2)
                 self.assertNotEqual(journal(s), recall)
                 self.assertEqual((s["coachStage"], s["showGuide"], s["task"]["id"]),
                                  ("transfer", False, "command/grep ERROR app.log"))
