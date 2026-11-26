@@ -499,10 +499,10 @@ internal sealed partial class LabScene
                 window.OtherTab = window.Tab.Id; window.Split = true; window.Group = 1; window.Focus = "body"; break;
             case "quick-open":
                 if (!code) return false; window.Focus = "quick-open"; window.Cursor = 0; window.Input = ""; window.OptionIndex = 0; break;
-            case "quick-next":
+            case "quick-next": case "quick-prev":
                 var options = Entries(window);
-                if (options.Length == 0) return false;
-                window.OptionIndex = (window.OptionIndex + 1) % options.Length; break;
+                if (options.Length == 0 || options.Length == 1 && action == "quick-prev") return false;
+                window.OptionIndex = (window.OptionIndex + (action == "quick-next" ? 1 : options.Length - 1)) % options.Length; break;
             case "quick-choose":
                 var chosen = Entries(window).ElementAtOrDefault(window.OptionIndex);
                 if (chosen == null) return false;

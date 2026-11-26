@@ -148,31 +148,65 @@ namespace TouchTypingStudio
         {
             var changes = source.Items("changes").ToArray();
             DrawWorkbenchMark("branch", x + 12, 67, 14, CodeMuted);
-            Text(source.S("branch", "main") + " · учебный снимок", x + 32, 68, 11, CodeMuted, width - 41);
+            Text("Git · " + source.S("branch", "main"), x + 32, 68, 11, CodeForeground, width - 41);
             Rectangle(x, 89, width, 24, "#161B22");
             Text("⌄  CHANGES", x + 12, 94, 11, CodeForeground, width - 37);
             Text(changes.Length.ToString(CultureInfo.InvariantCulture), x + width - 26, 94, 11, CodeMuted, 20);
             if (changes.Length == 0)
                 Text("Рабочая копия без изменений", x + 12, 121, 11, CodeMuted, width - 22);
-            double row = 117;
-            foreach (var change in changes)
+            int capacity = Math.Max(1, (int)((h - 142) / 22)), selected = source.I("selected", -1);
+            int first = Math.Max(0, selected - capacity + 1);
+            for (int i = first; i < Math.Min(changes.Length, first + capacity); i++)
             {
-                if (row + 20 >= h - 25) break;
-                string state = change.S("state");
-                DrawCodeFileIcon(change.S("path"), x + 12, row + 3);
-                Text(change.S("path"), x + 30, row + 2, 12, CodeForeground, width - 51);
+                double row = 117 + 22 * (i - first);
+                var change = changes[i];
+                string path = change.S("path"), state = change.S("state");
+                if (i == selected) Rectangle(x + 1, row, width - 3, 21, CodeExplorerSelection);
+                DrawCodeFileIcon(path, x + 12, row + 3);
+                Text(path.Split('/').Last(), x + 30, row + 2, 12, CodeForeground, width - 51);
                 Text(state, x + width - 21, row + 2, 12, state == "D" ? "#FF7B72" : state == "U" ? "#7EE787" : "#D29922", 16);
-                row += 21;
-                foreach (var line in change.Items("diff").Take(6))
-                {
-                    if (row + 17 >= h - 25) break;
-                    string text = line.Value();
-                    bool addition = text.StartsWith("+", StringComparison.Ordinal);
-                    Rectangle(x + 10, row, width - 18, 16, addition ? "#173123" : "#352020");
-                    Text(text, x + 13, row + 1, 10, addition ? "#7EE787" : "#FF7B72", width - 24);
-                    row += 16;
-                }
+                AddNotebookHit(new Rect(x, row, width, 21), ExplorerPrefix + "source-control", "Diff: " + path, path: path);
             }
+        }
+
+        private bool DrawCodeWorkingDiff(Data source, double x, double w, double h)
+        {
+            var changes = source.Items("changes").ToArray();
+            int selected = source.I("selected", -1);
+            if (selected < 0 || selected >= changes.Length) return false;
+            var change = changes[selected];
+            string path = change.S("path"), tab = path.Split('/').Last() + " (Working Tree)";
+            Rectangle(x, 29, w, 35, CodeInset);
+            double tabWidth = Math.Min(w, Math.Max(190, MeasureSceneText(tab, 13) + 23));
+            Rectangle(x, 29, tabWidth, 35, CodeCanvas);
+            Rectangle(x, 29, tabWidth, 2, CodeAccent);
+            Rectangle(x + tabWidth - 1, 29, 1, 35, CodeBorder);
+            Text(tab, x + 13, 37, 13, CodeForeground, tabWidth - 21);
+            Text(string.Join("  ›  ", path.Split('/')), x + 12, 70, 11, CodeMuted, w - 22);
+            var aligned = change.Items("rows").ToArray();
+            int start = Math.Max(0, Array.FindIndex(aligned, row => row.B("changed")) - 2);
+            double pane = w / 2;
+            Action<double, string, string, string, string, string> draw = (at, side, title, sign, color, tint) =>
+            {
+                Rectangle(at, 92, pane, 24, CodeInset);
+                Text(title, at + 12, 97, 11, CodeMuted, pane - 21);
+                int visible = Math.Max(0, (int)((h - 139) / 19));
+                for (int i = start; i < Math.Min(aligned.Length, start + visible); i++)
+                {
+                    double row = 117 + (i - start) * 19;
+                    var line = aligned[i].D(side);
+                    bool changed = aligned[i].B("changed");
+                    if (changed) Rectangle(at, row, pane, 19, line.Exists ? tint : CodeInset);
+                    if (!line.Exists) continue;
+                    Text(line.I("number").ToString(CultureInfo.InvariantCulture), at + 7, row + 2, 11, CodeMuted, 22, code: true);
+                    if (changed) Text(sign, at + 30, row + 1, 12, color, 11);
+                    Text(line.S("text"), at + 44, row + 1, 12, CodeForeground, pane - 50, code: true);
+                }
+            };
+            draw(x, "before", "HEAD", "−", "#FF7B72", "#351B21");
+            draw(x + pane, "after", "Working Tree", "+", "#7EE787", "#142B22");
+            Rectangle(x + pane, 92, 1, Math.Max(1, h - 113), CodeBorder);
+            return true;
         }
 
         private void DrawWorkbenchMark(string name, double x, double y, double size, string color)

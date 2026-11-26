@@ -1619,33 +1619,68 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
 
     def code_source_control(self, source, x, y, width, height):
         changes = source.get("changes", [])
-        self.label("⑂ " + source.get("branch", "main") + " · учебный снимок", x + 12, y + 38, 10,
-                   CODE_MUTED, width=width - 24)
+        self.workbench_mark("branch", x + 10, y + 38, 14, CODE_MUTED)
+        self.label("Git · " + source.get("branch", "main"), x + 30, y + 39, 11, CODE_FG, width=width - 39)
         self.fill("#161b22", x, y + 56, width, 22)
-        self.label("⌄  CHANGES", x + 12, y + 61, 10, CODE_FG, width=width - 30)
+        self.label("⌄  CHANGES", x + 12, y + 61, 10, CODE_FG, width=width - 32)
         self.label(str(len(changes)), x + width - 22, y + 61, 10, CODE_MUTED, width=18)
         if not changes:
             self.label("Рабочая копия без изменений", x + 12, y + 87, 10, CODE_MUTED, width=width - 22)
-        row = y + 81
-        for change in changes:
-            if row + 20 >= y + height - 18:
-                break
+        capacity = max(1, int((height - 101) / 22))
+        selected = source.get("selected", -1)
+        first = max(0, selected - capacity + 1)
+        for i, change in enumerate(changes[first:first+capacity], first):
+            row = y + 81 + 22 * (i - first)
             path = change["path"]
-            if path.endswith(".py"):
-                self.python_file_icon(x + 12, row + 1)
-            self.label(path, x + 27, row + 1, 11, CODE_FG, width=width - 48)
+            if i == selected:
+                self.fill(CODE_LIST_SELECTION, x + 1, row, width - 3, 21)
+            name = path.split("/")[-1]
+            self.code_file_icon(name, x + 10, row + 2) if name.endswith((".py", ".ipynb")) else self.label("▤", x+10, row+3, 11, CODE_MUTED)
+            self.label(name, x + 28, row + 2, 12, CODE_FG, width=width - 52)
             state = change["state"]
-            self.label(state, x + width - 21, row + 1, 11,
+            self.label(state, x + width - 21, row + 2, 11,
                        {"D": "#ff7b72", "U": "#7ee787", "M": "#d29922"}[state], width=16)
-            row += 20
-            for line in change["diff"][:6]:
-                if row + 17 >= y + height - 18:
-                    break
-                addition = line.startswith("+")
-                self.fill("#173123" if addition else "#352020", x + 9, row, width - 17, 16)
-                self.label(line, x + 12, row + 1, 10,
-                           "#7ee787" if addition else "#ff7b72", width=width - 23, mono=True)
-                row += 16
+            self._nb_hit((x, row, width, 21), "explorer:source-control", "Diff: " + path, path=path)
+
+    def code_working_diff(self, source, x, y, width, height, tab_h):
+        idx, rows = source.get("selected", -1), source.get("changes", [])
+        if not 0 <= idx < len(rows):
+            return False
+        change = rows[idx]
+        path = change["path"]
+        self.fill(CODE_BG, x, y, width, height - 19)
+        self.fill(CODE_INSET, x, y, width, tab_h)
+        tab_width = min(width, max(190, self.text_width(path.split("/")[-1], 12) + 135))
+        self.fill(CODE_BG, x, y, tab_width, tab_h)
+        self.fill("#f78166", x, y, tab_width, 2)
+        self.fill(CODE_BORDER, x + tab_width - 1, y, 1, tab_h)
+        self.label(path.split("/")[-1] + " (Working Tree)", x + 13, y + 7, 12, CODE_FG, width=tab_width - 21)
+        self.label("  ›  ".join(path.split("/")), x + 12, y + tab_h + 5, 11, CODE_MUTED, width=width - 20)
+        pane = width / 2
+        body = y + tab_h + 24
+        aligned = change.get("rows") or []
+        visible = max(0, int((y + height - 40 - body) / 19))
+        first = next((i for i, row in enumerate(aligned) if row["changed"]), 0)
+        start = max(0, first - 2)
+        for col, side, bg, ink, sign, title in (
+            (x, "before", "#351b21", "#ff7b72", "−", "HEAD"),
+            (x + pane, "after", "#142b22", "#7ee787", "+", "Working Tree"),
+        ):
+            self.fill(CODE_INSET, col, body, pane, 24)
+            self.label(title, col + 12, body + 4, 11, CODE_MUTED, width=pane - 17)
+            for i, pair in enumerate(aligned[start:start + visible]):
+                row = body + 25 + i*19
+                line = pair.get(side)
+                tint = pair["changed"] and line is not None
+                if pair["changed"]:
+                    self.fill(bg if tint else CODE_INSET, col, row, pane, 19)
+                if line is None:
+                    continue
+                self.label(str(line["number"]), col + 6, row + 2, 10, CODE_MUTED, width=29, mono=True)
+                self.label(sign if tint else "", col + 29, row + 1, 11, ink, width=11)
+                self.label(line["text"], col + 43, row + 1, 11, CODE_FG, width=pane - 47, mono=True)
+        self.fill(CODE_BORDER, x + pane, body, 1, max(1, y + height - body - 19))
+        return True
 
     def python_file_icon(self, x, y):
         """Two-tone Python badge at the Explorer's file-icon size."""
@@ -1691,7 +1726,7 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         if sidebar:
             self.fill(CODE_INSET, x + rail, y, sidebar, h - 19)
             self.fill(CODE_BORDER, x + rail - 1 + sidebar, y, 1, h - 19)
-            self.label({"extensions": "РАСШИРЕНИЯ", "project-search": "ПОИСК", "changes": "ИЗМЕНЕНИЯ"}.get(
+            self.label({"extensions": "РАСШИРЕНИЯ", "project-search": "ПОИСК", "changes": "SOURCE CONTROL"}.get(
                 window.get("view"), "ПРОВОДНИК"), x + rail + 12, y + 10, 10, CODE_FG)
             if wide:
                 self.label("···", x + rail + sidebar - 23, y + 8, 14, CODE_MUTED)
@@ -1753,6 +1788,11 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
                                width=x + rail + sidebar - left - 4)
         editor_x = x + rail + sidebar
         editor_w = w - rail - sidebar
+        if window.get("focus") == "changes" and self.code_working_diff(
+                window.get("sourceControl") or {}, editor_x, y, editor_w, h, tab_h):
+            self.fill(CODE_INSET, x, y + h - 19, w, 19)
+            self.label("Git · main", x + 9, y + h - 17, 10, CODE_MUTED)
+            return
         self.fill(CODE_INSET, editor_x, y, editor_w, tab_h)
         self.fill(CODE_BORDER, editor_x, y + tab_h - 1, editor_w, 1)
         tabs = window.get("tabs", [])

@@ -318,6 +318,19 @@ class PracticeTest(unittest.TestCase):
         self.assertEqual((window["bodyAnchor"], window["bodyCursor"]),
                          (len(first) + 1, len(first) + len(middle) + 2))
 
+    def test_editor_file_switcher_accepts_up_after_down(self):
+        self.open_live("code")
+        opened = self.lab_chord("LCtrl", "P")
+        def position(state):
+            w = next(w for w in state["scene"]["windows"] if w["active"])
+            return (w["focus"], w["optionIndex"], w["url"])
+        at0 = position(opened)
+        self.assertEqual(at0[:2], ("quick-open", 0))
+        forward = self.lab_chord("Down")
+        self.assertEqual(position(forward), ("quick-open", 1, at0[2]))
+        back = self.lab_chord("Up")
+        self.assertEqual(position(back), at0)
+
     def test_palette_arrows_repeat_without_extra_credit(self):
         self.open_live("code")
         opened = self.lab_chord("LCtrl", "LShift", "P")

@@ -87,6 +87,25 @@ class CourseModes(unittest.TestCase):
                         self.assertEqual(len(sets), 2)
                         for mode in modes + arts + sets:
                             with self.subTest(client=self.platform, layout=self.layout, mode=mode):
+                                if mode == "SystemHotkeys":
+                                    # Explicitly opt-in, one fixed-length course. Ordinary
+                                    # finite/infinite options never claim systemic keys.
+                                    with self.assertRaisesRegex(EngineError, "[Зз]ахват системных"):
+                                        self.start(mode)
+                                    run = self.start(mode, infinite=True, cycles=2, seconds=180, level=2, systemCapture=True)
+                                    self.assertEqual((run["mode"], run["cycles"], run["timeLimit"], run["progressTotal"],
+                                                      run["progressVisible"], run["typedActions"]), (mode, 1, 0, 36, True, True))
+                                    keys = set()
+                                    for n in range(1, 37):
+                                        keys.add(run["expected"])
+                                        run = self.advance(run)
+                                        self.assertEqual(run["progressDone"], n)
+                                    self.assertTrue(run["finished"])
+                                    self.assertTrue({"Alt+Tab", "Super+Up", "Super+E" if self.platform == "windows"
+                                                     else "Super+PageUp"} <= keys)
+                                    self.assertNotIn("Super+H", keys)
+                                    self.engine.call("typing-stop", layout=self.layout)
+                                    continue
                                 finite = self.start(mode, cycles=2, level=2)
                                 self.assertEqual((finite["mode"], finite["cycles"], finite["progressDone"],
                                                   finite["progressVisible"]), (mode, 2, 0, True))
@@ -105,7 +124,7 @@ class CourseModes(unittest.TestCase):
                                 self.assertFalse(infinite["finished"])
                                 self.engine.call("typing-stop", layout=self.layout)
                         print(f"Typing {self.platform}/{self.layout}: {len(modes)} primary, {len(arts)} authored "
-                              f"and {len(sets)} custom routes, finite and infinite; 20 accepted on each primary.")
+                              f"and {len(sets)} custom routes, ordinary finite/infinite plus 36 captured system gestures.")
                     finally:
                         self.engine.close()
 

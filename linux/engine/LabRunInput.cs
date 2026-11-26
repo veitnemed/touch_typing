@@ -95,6 +95,11 @@ internal sealed partial class LabRun
         bool commandModifiers = held.Any(item => KeyChord.Family(item) is "Ctrl" or "Alt" or "Super");
         if (Task.Id == "gnome-left-super" && key == "Z")
             return Miss(key, "Это клавиша Z (Я). Левый Super ⊞ находится ниже, левее Alt.");
+        if (key is "Up" or "Down" or "Enter" && Scene.OnSourceControl && !held.Any(KeyChord.IsModifier))
+        {
+            Scene.ReviewSourceControl(key);
+            Status = ""; LastKey = ""; Feedback = "ready"; return null;
+        }
         Watch();
         if (Task.Action == "disk-capacity-verdict")
         {

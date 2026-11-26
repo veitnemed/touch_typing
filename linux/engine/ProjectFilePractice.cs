@@ -239,6 +239,7 @@ internal sealed partial class LabScene
     {
         if (action.StartsWith("desktop-", StringComparison.Ordinal)) return WindowsDesktopPointer(action, path);
         var w = Active;
+        if (action == "source-control") return !Switcher && !Overview && !Screenshot && DesktopOverlay.Length == 0 && SourceControlPick(w, path, 0);
         if (w?.App != "code" || w.Focus is not ("body" or "explorer" or "file-name") ||
             Switcher || Overview || Screenshot || DesktopOverlay.Length > 0) return false;
         if (w.Focus == "file-name") return action switch

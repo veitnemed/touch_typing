@@ -45,7 +45,7 @@ internal static partial class LabCatalog
             "code-rename-cancel" or "code-rename-confirm" => window?.Focus == "symbol-rename",
             "replace-field" => window?.Focus == "replace-find",
             "replace-one" => window?.Focus == "replace-with",
-            "symbol-next" or "symbol-open" => window?.Focus == "symbols",
+            "symbol-next" or "symbol-prev" or "symbol-open" => window?.Focus == "symbols",
             "file-open" or "file-copy" or "file-cut" => (fileList || fileResults) && window.Item >= 0,
             "trash" => window?.App == "files" && window.Focus == "body" && window.Item >= 0,
             "link-open" => window?.App == "chrome" && (window.Focus == "body" || LabScene.OnChromeHistory(window) && window.Focus == "history")
@@ -96,7 +96,7 @@ internal static partial class LabCatalog
             "find" => window != null && !terminal && window.Focus != "find",
             "find-next" => window?.Find.Length > 0,
             "panel" or "extensions" or "quick-open" or "palette" or "goto-line" or "explorer" or "project-search" or "sidebar" or "split" or "terminal-toggle" => window?.App == "code",
-            "quick-next" or "quick-choose" => window?.App == "code" && window.Focus == "quick-open" && scene.Entries(window).Length > 0,
+            "quick-next" or "quick-prev" or "quick-choose" => window?.App == "code" && window.Focus == "quick-open" && scene.Entries(window).Length > 0,
             "palette-next" or "palette-prev" or "palette-choose" => window?.App == "code" && window.Focus == "palette",
             "save" => window?.App == "code" && window.Tab?.Body != window.Tab?.SavedBody,
             "undo" => window?.Tab?.Undo.Count > 0,

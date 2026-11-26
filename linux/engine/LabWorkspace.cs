@@ -98,24 +98,94 @@ internal sealed partial class LabScene
             w.App == "code" ? ProjectTree(EditorProjectRoot, w.ExpandedProjectFolders).ToArray() : null, CanUndoProjectFile,
             CanPasteProjectFile, CanPasteNotebookCell,
             tabSearch: ChromeTabsSnapshot(w), sourceReview: ChromeReviewSnapshot(w),
-            sourceControl: w.App == "code" && w.View == "changes" ? SourceControlSnapshot(paths, Relative) : null);
+            sourceControl: w.App == "code" && w.View == "changes" ? SourceControlSnapshot(w, paths, Relative) : null);
     }
 
     // Model the local working tree against the lesson's starting files rather
     // than against open tabs. Unsaved edits are deliberately not files in Git.
-    private object SourceControlSnapshot(string[] current, Func<string, string> relative)
+    private sealed record SourceChange(string Path, string State, string Before, string After);
+    private SourceChange[] SourceControlFiles(string[] current)
     {
         var root = (DebugDay ? debugDay.Root : EditorProjectRoot) + "/";
-        var files = current.Concat(originalFiles.Keys.Where(path => path.StartsWith(root, StringComparison.Ordinal)))
+        return current.Concat(originalFiles.Keys.Where(path => path.StartsWith(root, StringComparison.Ordinal)))
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).Select(path =>
             {
                 bool existed = originalFiles.TryGetValue(path, out var previous);
                 string saved = Terminal.ReadFile(path);
-                string state = !existed ? "U" : saved == null ? "D" : "M";
-                if (string.Equals(previous, saved, StringComparison.Ordinal)) return null;
-                return new { path = relative(path), state, diff = CompareWorkingLines(previous, saved) };
+                return previous == saved ? null : new SourceChange(path, !existed ? "U" : saved == null ? "D" : "M", previous, saved);
             }).Where(row => row != null).ToArray();
-        return new { branch = "main", changes = files };
+    }
+
+    private object SourceControlSnapshot(LabWindow window, string[] current, Func<string, string> relative)
+    {
+        var states = SourceControlFiles(current);
+        int selected = window.Item;
+        if (selected < 0 || selected >= states.Length)
+        {
+            selected = Array.FindIndex(states, state => state.Path == window.Url);
+            if (selected < 0 && states.Length > 0) selected = 0;
+        }
+        var files = states.Select((state, index) => new { path = relative(state.Path), state.State,
+            diff = CompareWorkingLines(state.Before, state.After), rows = selected == index ? AlignWorkingLines(state.Before, state.After) : null });
+        return new { branch = "main", changes = files, selected };
+    }
+
+    private sealed record SourceLine(int Number, string Text);
+    private sealed record SourceDiffRow(SourceLine Before, SourceLine After, bool Changed);
+
+    private static SourceDiffRow[] AlignWorkingLines(string previous, string saved)
+    {
+        static string[] Lines(string contents) => contents?.TrimEnd('\n').Split('\n').Take(200).ToArray() ?? [];
+        var a = Lines(previous);
+        var b = Lines(saved);
+        var common = new int[a.Length + 1, b.Length + 1];
+        for (int i = a.Length - 1; i >= 0; i--)
+        for (int j = b.Length - 1; j >= 0; j--)
+            common[i, j] = a[i] == b[j] ? 1 + common[i + 1, j + 1] : Math.Max(common[i + 1, j], common[i, j + 1]);
+        var rows = new List<SourceDiffRow>();
+        int left = 0, right = 0;
+        var head = new List<SourceLine>();
+        var tree = new List<SourceLine>();
+        void Flush()
+        {
+            for (int i = 0; i < Math.Max(head.Count, tree.Count); i++)
+                rows.Add(new(head.ElementAtOrDefault(i), tree.ElementAtOrDefault(i), true));
+            head.Clear(); tree.Clear();
+        }
+        while (left < a.Length || right < b.Length)
+        {
+            if (left < a.Length && right < b.Length && a[left] == b[right])
+            {
+                Flush(); rows.Add(new(new(left + 1, a[left]), new(right + 1, b[right]), false)); left++; right++;
+            }
+            else if (left < a.Length && (right == b.Length || common[left + 1, right] >= common[left, right + 1]))
+            { head.Add(new(left + 1, a[left])); left++; }
+            else
+            { tree.Add(new(right + 1, b[right])); right++; }
+        }
+        Flush();
+        return rows.ToArray();
+    }
+
+    internal bool OnSourceControl => Active?.App == "code" && Active.Focus == "changes" && Active.View == "changes" &&
+        !Switcher && !Overview && !Screenshot && DesktopOverlay.Length == 0;
+
+    internal void ReviewSourceControl(string key) => SourceControlPick(Active, "", key == "Up" ? -1 : key == "Down" ? 1 : 0);
+
+    private bool SourceControlPick(LabWindow window, string path, int delta)
+    {
+        if (window?.App != "code" || window.View != "changes") return false;
+        var files = SourceControlFiles(ProjectDocuments().ToArray());
+        if (files.Length == 0) return false;
+        int i = window.Item >= 0 && window.Item < files.Length ? window.Item :
+            Math.Max(0, Array.FindIndex(files, state => state.Path == window.Url));
+        if (path.Length > 0)
+        {
+            i = Array.FindIndex(files, state => path == (DebugDay ? DebugRelative(state.Path) : EditorLessonRelativePath(state.Path)));
+            if (i < 0) return false;
+        }
+        window.Item = Math.Clamp(i + delta, 0, files.Length - 1);
+        window.Focus = "changes"; Version++; return true;
     }
 
     private static string[] CompareWorkingLines(string previous, string saved)
@@ -340,12 +410,16 @@ internal sealed partial class LabScene
                 w.Focus = "body"; Insert(w, replacement); return true;
             case "symbols":
                 w.Focus = "symbols"; w.OptionIndex = 0; w.Input = ""; w.Cursor = 0; return true;
-            case "symbol-next": w.OptionIndex = (w.OptionIndex + 1) % Math.Max(1, Entries(w).Length); return true;
+            case "symbol-next": case "symbol-prev":
+                int symbols = Entries(w).Length;
+                if (symbols <= 1 && action == "symbol-prev") return false;
+                symbols = Math.Max(1, symbols);
+                w.OptionIndex = (w.OptionIndex + (action == "symbol-next" ? 1 : symbols - 1)) % symbols; return true;
             case "symbol-open":
                 var symbol = Entries(w).ElementAtOrDefault(w.OptionIndex);
                 if (symbol == null) return false;
                 w.Focus = "body"; w.Cursor = int.Parse(symbol.Path); return true;
-            case "changes": w.Sidebar = true; w.View = "changes"; w.Focus = "changes"; return true;
+            case "changes": if (w.View != "changes") w.Item = -1; w.Sidebar = true; w.View = "changes"; w.Focus = "changes"; return true;
             case "focus-editor": case "focus-second":
                 int group = action == "focus-editor" ? 0 : 1;
                 if (group != w.Group && w.Split)

@@ -79,6 +79,10 @@ class CheckoutWindow(QA):
                 assert len(changes) == 1 and changes[0]["path"] == "checkout.py" and changes[0]["state"] == "M"
                 assert any(line.startswith("- ") for line in changes[0]["diff"])
                 assert any(line.startswith("+ ") for line in changes[0]["diff"])
+                aligned = changes[0]["rows"]
+                assert any(row["changed"] and row["before"] is not None for row in aligned)
+                assert any(row["changed"] and row["after"] is not None for row in aligned)
+                assert any(not row["changed"] and row["before"]["text"].startswith("def ") for row in aligned)
                 self.capture_widget_png(OUT / ("checkout-02-first-diff.png" if reviews == 1 else "checkout-04-final-diff.png"))
                 yield from self.video_hold("Source Control показывает сохранённую правку и строки до/после.")
         assert reviews == 2 and lab.state["solved"] >= 30 and not lab.active and lab.state["finished"]

@@ -679,6 +679,12 @@ namespace TouchTypingStudio
             double x = sidebar ? activityWidth + Math.Min(226, Math.Max(116, w * .20)) : activityWidth;
             DrawCodeActivity(window, activityWidth, h);
             if (sidebar) DrawCodeSidebar(window, activityWidth, x - activityWidth, h);
+            if (window.S("focus") == "changes" && DrawCodeWorkingDiff(window.D("sourceControl"), x, w - x, h))
+            {
+                Rectangle(0, h - 21, w, 21, CodeInset);
+                Text("Git · main", 11, h - 18, 11, CodeMuted, 94);
+                return;
+            }
 
             var tabs = window.Items("tabs").ToArray();
             int active = Math.Min(Math.Max(0, window.I("activeTab")), Math.Max(0, tabs.Length - 1));
