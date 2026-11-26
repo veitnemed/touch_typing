@@ -21,7 +21,7 @@ class PracticalJournal(CourseCards):
         for _ in range(24):
             yield
         self.focus_window()
-        lesson = yield from self.ordinary_card("terminal")
+        lesson = yield from self.selected_journal(False)
         assert lesson and lesson.window_only_keys and lesson.state["mission"] == "terminal-practical-incident"
         assert lesson.state["actionLimit"] == 0 and lesson.state["scenarioLength"] == 4
         assert lesson.gesture_tokens == ("grep ERROR app.log",), lesson.gesture_tokens
@@ -86,9 +86,9 @@ class PracticalJournal(CourseCards):
         yield from self.rendered_frame("terminal-practical-04-result.png")
         (out / "terminal-practical-witness.json").write_text(json.dumps(dict(
             old_id=old_id, new_id=new_id, result=terminal(lesson.state)["output"][-2:], solved=4,
-            real_entry="Live → Terminal", backend="GTK X11"), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            real_entry="Live → Терминал → Настроить → Найти новый сбой", backend="GTK X11"), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         yield from self.video_hold("Разобран реальный ID новой ошибки, без серии пустых команд")
-        print(f"PASS real GTK ordinary Terminal: native keys, live append, restart, Ctrl+C, {new_id}, 4/4", flush=True)
+        print(f"PASS real GTK selected Terminal: native keys, live append, restart, Ctrl+C, {new_id}, 4/4", flush=True)
 
 
 if __name__ == "__main__":

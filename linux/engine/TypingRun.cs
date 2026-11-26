@@ -305,7 +305,7 @@ internal sealed partial class TypingRun
             key = hint == null ? "" : ShortcutCatalog.KeyName(hint.Cap),
             modifier = hint == null || hint.Modifier == LinuxKey.None ? "" : hint.Modifier == LinuxKey.LeftShift ? "LShift" : "RShift",
             finger = hint?.Cap.Finger, written = Attempt.HasRepairs ? Attempt.Written : "",
-            count = score.Count, errors = score.Errors, accuracy = Math.Round(score.Accuracy, 1),
+            count = score.Count, errors = score.Errors, accuracy = score.Accuracy, accuracyLabel = TypingPrecision.Label(score.Count, score.Errors),
             cpm = Math.Round(score.Cpm), wpm = Math.Round(score.Wpm), seconds = (int)score.Seconds, timeLimit,
             topMistakes = score.TopMistakes.Select(item => new { key = CodeText.Display(item.Key), count = item.Value }),
             running = IsRunning, finished = Finished, correct = LastCorrect, weak = continuous?.Focus,

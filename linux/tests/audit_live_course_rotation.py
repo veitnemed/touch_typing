@@ -41,18 +41,12 @@ def main():
                     assert old <= expected | legacy_in_ubuntu, (desktop, app, level, sorted(old - expected - legacy_in_ubuntu))
                     s = begin(engine, app, level, desktop, actionLimit=0, seconds=0, adaptiveGuide=True)
                     if app == "terminal":
-                        journal = terminal_course(desktop)
-                        assert s["mission"] == journal and s["scenarioLength"] == 4
-                        for i in range(4):
-                            assert s["scenarioCompletedGoals"] == i
-                            s = advance(engine, s)
-                        assert s["finished"] and s["solved"] == 4
-                        print(json.dumps({"desktop": desktop, "app": app, "level": level,
-                            "available": 1, "completed": 1, "curated": 1, "credits": s["solved"],
-                            "sections": [(journal, 4)],
-                            "oldCatalogRetained": len(old), "legacyInUbuntu": sorted(legacy_in_ubuntu),
-                            "manualCatalog": sorted(expected - {journal})}, ensure_ascii=False), flush=True)
-                        return
+                        # Cross-level native tasks plus four historical Bash projects per
+                        # level. One-word drills remain in the explicit selector only.
+                        assert s["mission"] == terminal_course(desktop)
+                        expected = {m["id"] for m in catalog["missions"] if m["app"] == "terminal" and
+                                    (m["desktopProfile"] == desktop or desktop == "ubuntu" and not m["curated"] and m["level"] == level)}
+                        curated = {m["id"] for m in catalog["missions"] if m["id"] in expected and m["curated"]}
                     completed = []
                     for _ in range(2 * len(expected) + 2):
                         if expected <= {name for name, _ in completed}:
@@ -62,6 +56,9 @@ def main():
                         for i in range(length):
                             assert s["mission"] == mission and s["scenarioCompletedGoals"] == i, (
                                 desktop, app, level, mission, length, i, s["scenarioCompletedGoals"])
+                            if app == "terminal":
+                                assert s["task"].get("text") != "whoami", "No routine name quizzes"
+                                assert s["task"].get("keys") != "Ctrl+R", "No forced history search"
                             s = advance(engine, s)
                             assert s["solved"] == before + i + 1 and not s["finished"]
                         completed.append((mission, length))

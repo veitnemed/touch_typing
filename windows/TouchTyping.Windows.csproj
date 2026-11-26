@@ -6,7 +6,7 @@
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
     <AssemblyName>TouchTyping</AssemblyName>
-    <Version>1.9.2</Version>
+    <Version>1.9.3</Version>
     <Product>TouchTyping — Код вслепую</Product>
     <RootNamespace>TouchTypingStudio</RootNamespace>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>

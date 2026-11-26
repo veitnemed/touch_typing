@@ -166,8 +166,8 @@ internal static partial class LabCatalog
                     "windows" => "Пуск, Проводник, окна и виртуальные рабочие столы Windows 10",
                     "chrome" => "Вкладки, навигация, поиск и адресная строка",
                     "code" => "Файлы, код, блокноты, панели и встроенный терминал",
-                    _ => environment == "windows" ? "Windows PowerShell: журнал. Дополнительные задания Bash доступны в параметрах." :
-                        "Ubuntu Bash: поиск сбоя и живой журнал"
+                    _ => environment == "windows" ? "PowerShell: обновить копию, сверить загрузку, проверить место. Дополнительный Bash доступен в параметрах." :
+                        "Ubuntu Bash: обновить копию, сверить загрузку, проверить место"
                 },
                 desktopProfile = app is "windows" or "ubuntu" ? app : null,
                 shortcuts = app == "windows" || app == "workday" && environment == "windows"
@@ -180,7 +180,7 @@ internal static partial class LabCatalog
             missions = (neutralProject ? NeutralProject.MissionCatalog : LiveCourse.Missions)
                 .Where(m => LabScene.MissionEnvironment(m) is null || LabScene.MissionEnvironment(m) == environment)
                 .Select(m => new { m.App, m.Level, m.Id,
-                    Title = environment == "windows" && m.App == "terminal" && m.Id is not (LiveCourse.PracticalPowerShellId or LiveCourse.PowerShellDiskId or LiveCourse.PowerShellDiskRepeatId)
+                    Title = environment == "windows" && m.App == "terminal" && LiveCourse.TerminalEnvironment(m.Id) != "windows"
                         ? "Bash (учебный Ubuntu) · " + m.Title : m.Title,
                     m.Curated, desktopProfile = LabScene.MissionEnvironment(m) }),
             duration = 0, blockSize = 20

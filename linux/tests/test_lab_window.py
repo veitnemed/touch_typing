@@ -381,16 +381,19 @@ class LabWindowTest(Studio):
             raise AssertionError(("system typing capture not granted", self.banner.get_label()))
 
         yield from acquire()
-        assert (self.state["mode"], self.state["progressTotal"]) == ("SystemHotkeys", 36)
+        assert (self.state["mode"], self.state["progressTotal"]) == ("SystemHotkeys", 44)
         capture_png(output / "system-typing-native-captured.png")
         seen = set()
-        for index in range(9):
+        for index in range(11):
             chord_name = self.state["expected"]
             assert self.state["expectedKind"] == "command"
+            if chord_name == "Shift+Super+PageDown":
+                yield from chord("Super+PageDown")  # wrong: switch instead of moving the window
+                assert self.state["progressDone"] == index and self.system_typing_available()
             yield from chord(chord_name)
             assert self.state["progressDone"] == index + 1 and self.system_typing_available(), chord_name
             seen.add(chord_name)
-        assert {"Super+PageUp", "Super+PageDown", "Super+Left", "Alt+Tab", "Alt+Home"} <= seen, seen
+        assert {"Super+PageUp", "Super+PageDown", "Super+A", "Shift+Super+PageDown", "Super+Left", "Alt+Tab", "Alt+Home"} <= seen, seen
 
         # Revoke actual GDK permission while the window still owns the exercise.
         self.window.get_surface().restore_system_shortcuts()
@@ -398,13 +401,24 @@ class LabWindowTest(Studio):
             if self.paused:
                 break
             yield
-        assert self.paused and self.system_typing_capture is None and self.state["progressDone"] == 9
+        assert self.paused and self.system_typing_capture is None and self.state["progressDone"] == 11
         yield from chord("F8")
         yield from acquire()
-        assert self.state["progressDone"] == 9
+        assert self.state["progressDone"] == 11
         yield from chord(self.state["expected"])
-        assert self.state["progressDone"] == 10
+        assert self.state["progressDone"] == 12
         capture_png(output / "system-typing-native-resumed.png")
+        while self.workout == "typing":
+            yield from chord(self.state["expected"])
+        assert self.result_kind == "typing" and self.correction_button.get_mapped()
+        assert self.system_typing_capture is None
+        self.correction_button.grab_focus()
+        yield from chord("Enter")
+        yield from acquire()
+        assert self.workout == "typing" and self.state["requiresSystemCapture"] and self.state["isReview"]
+        assert self.state["expected"] == "Shift+Super+PageDown"
+        yield from chord(self.state["expected"])
+        assert self.state["progressDone"] == 1 and self.system_typing_available()
         yield from chord("Esc")
         assert self.workout is None and self.system_typing_capture is None
         print("PASS GTK Wayland SystemHotkeys:", sorted(seen), "revocation pauses and explicit resume preserves progress", flush=True)

@@ -83,8 +83,8 @@ internal sealed partial class PracticeService
         if (alt is "alt" or "altgr" or "unknown")
         {
             rightAltMode = alt;
-            mixedTyping?.SetGuide(profile.RightHandChord, alt);
-            review?.Run.SetGuide(profile.RightHandChord, alt);
+            mixedTyping?.SetGuide(profile.RightHandChord, alt, windows);
+            review?.Run.SetGuide(profile.RightHandChord, alt, windows);
         }
         if (TryReviewCommand(message, out var reviewResponse)) return reviewResponse;
         bool verifyProfile = false;
@@ -117,10 +117,9 @@ internal sealed partial class PracticeService
                 string suggestApp = Text(message, "app");
                 string suggestEnvironment = RequestedDesktop(message, suggestApp);
                 int suggestLevel = Math.Clamp(Number(message, "level"), 0, 2);
-                if (suggestApp == "terminal") return new { mission = suggestEnvironment == "windows" ?
-                    LiveCourse.PracticalPowerShellId : LiveCourse.PracticalBashId };
                 var routes = (neutralProject ? NeutralProject.MissionCatalog : LiveCourse.Missions)
-                    .Where(m => m.App == suggestApp && m.Level == suggestLevel &&
+                    .Where(m => m.App == suggestApp && (m.Level == suggestLevel || suggestApp == "terminal" && LiveCourse.TerminalEnvironment(m.Id) == suggestEnvironment) &&
+                        (suggestApp != "terminal" || LiveCourse.TerminalCourseMission(m, suggestEnvironment)) &&
                         (LabScene.MissionEnvironment(m) is null || LabScene.MissionEnvironment(m) == suggestEnvironment)).ToArray();
                 if (suggestApp == "code") routes = routes.Where(m => !LiveRoutePolicy.EditorSupplement(m.Id)).ToArray();
                 var lastUsed = profile.ShortcutHistory.Where(a => a.Correct && a.Mission != null)
@@ -157,7 +156,7 @@ internal sealed partial class PracticeService
                 bool course = LiveRoutePolicy.Resolve(routeKind, selectedMission, editorCourse, chosenApp, draft) == LiveRoutePolicy.Course;
                 lab = new LabRun(chosenApp, Text(message, "mode"), Number(message, "level"),
                     Number(message, "seconds", combinedLimits || course || routeKind == LiveRoutePolicy.Mission ? 0 : 180), layout, profile.ShortcutHistory,
-                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit", course && chosenApp != "terminal" ? LiveRoutePolicy.DefaultActions : 0), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: selectedMission, draft: draft, softFinish: Flag(message, "softFinish"), combinedLimits: combinedLimits, windowsBindings: windows, desktopProfile: windows ? null : desktopProfile, neutralProject: neutralProject, environment: chosenEnvironment, nativeEnglishInput: Flag(message, "nativeEnglishInput"), editorCourse: editorCourse, routeKind: routeKind, adaptiveGuide: Flag(message, "adaptiveGuide"));
+                    message.TryGetProperty("seed", out _) ? new Random(Number(message, "seed")) : Random.Shared, actionLimit: Number(message, "actionLimit", course ? LiveRoutePolicy.DefaultActions : 0), guidance: Text(message, "guidance"), dock: dock, layoutKey: windows || string.IsNullOrEmpty(forward) ? DefaultLayoutBinding : forward, missionId: selectedMission, draft: draft, softFinish: Flag(message, "softFinish"), combinedLimits: combinedLimits, windowsBindings: windows, desktopProfile: windows ? null : desktopProfile, neutralProject: neutralProject, environment: chosenEnvironment, nativeEnglishInput: Flag(message, "nativeEnglishInput"), editorCourse: editorCourse, routeKind: routeKind, adaptiveGuide: Flag(message, "adaptiveGuide"));
                 persistedLabAttempts = 0;
                 labCheckpoint = draft;
                 preservePreviousLabDraft = !continuing && Flag(message, "preserveDraft");
@@ -472,7 +471,7 @@ internal sealed partial class PracticeService
             typingHistory = profile.Results.Where(item => item.Activity is "LinuxTyping" or "TypingPractice" or "TypingMistakeReview")
                 .TakeLast(60).Reverse().Select(item => new
             {
-                item.Lesson, item.Date, item.Speed, item.Accuracy, item.Count, item.Errors, item.Seconds,
+                item.Lesson, item.Date, item.Speed, item.Accuracy, accuracyLabel = TypingPrecision.Label(item.Count, item.Errors), item.Count, item.Errors, item.Seconds,
                 sourceId = TypingReviewLedger.HistoryId(item)
             }),
             profile.ShowKeys, profile.ShowHands, profile.LiveShowKeys, profile.LiveShowHands,

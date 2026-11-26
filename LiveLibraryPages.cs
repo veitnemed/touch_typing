@@ -391,8 +391,8 @@ namespace TouchTypingStudio
                 string formattedDate = DateTime.TryParse(rawDate, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out date)
                     ? date.ToString("dd.MM.yyyy", CultureInfo.CurrentCulture) : rawDate;
                 var row = new DockPanel { Margin = new Thickness(0, 9, 0, 0) };
-                var score = Label(string.Format(CultureInfo.CurrentCulture, "{0}  ·  {1} сим/мин  ·  {2:0.#}%  ·  ошибок {3}",
-                    formattedDate, item.I("speed"), item.N("accuracy"), item.I("errors")), 12, Dim);
+                var score = Label(string.Format(CultureInfo.CurrentCulture, "{0}  ·  {1} сим/мин  ·  {2}  ·  ошибок {3}",
+                    formattedDate, item.I("speed"), item.S("accuracyLabel"), item.I("errors")), 12, Dim);
                 string sourceId = item.S("sourceId");
                 if (!string.IsNullOrEmpty(sourceId))
                 {

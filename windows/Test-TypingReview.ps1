@@ -18,7 +18,7 @@ try {
     $request = Join-Path $out 'fixture-request.jsonl'
     $response = Join-Path $out 'fixture-response.jsonl'
     $stderr = Join-Path $out 'fixture-stderr.log'
-    $fixtureText = ('save notes. ' * 40).Substring(0, 390)
+    $fixtureText = ('save notes. ' * 40).Substring(0, 391)
     $body = @{ command = 'typing-save-set'; title = 'Practice: correction'; content = $fixtureText } | ConvertTo-Json -Compress
     $noBom = New-Object System.Text.UTF8Encoding($false)
     [IO.File]::WriteAllText($request, $body + "`n", $noBom)

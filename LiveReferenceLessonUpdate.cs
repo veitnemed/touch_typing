@@ -39,6 +39,7 @@ namespace TouchTypingStudio
             string shown = !guided ? "" : raw.Length > 0 ? string.Join(" → ", steps.Select(chord =>
                 string.Join(" + ", chord.Split('+').Select(LessonCap)))) :
                 task.S("id").StartsWith("open-") ? "⊞  →  " + text + "  →  Enter" :
+                task.S("id") == "command/delivery-read-match" ? (state.S("desktopProfile") == "windows" ? "Get-Content" : "cat") + " [CSV]" :
                 task.S("id") == "command/filter-incident" ? "grep [ID] app.log" :
                 task.S("id") == "command/powershell-incident" ? "Select-String [ID] sync.log" :
                 text;

@@ -11,8 +11,9 @@ internal sealed partial class LabRun
     {
         var courses = (neutralProject ? NeutralProject.MissionCatalog : LiveCourse.Missions)
             .Where(m => m.App == App && (m.Level == Level || App == "terminal" && (IsCourse || EnvironmentProfile == "windows") &&
-                LiveCourse.PracticalTerminalMission(m.Id)) &&
-                (LabScene.MissionEnvironment(m) is null || LabScene.MissionEnvironment(m) == EnvironmentProfile)).ToArray();
+                LiveCourse.TerminalEnvironment(m.Id) == EnvironmentProfile) &&
+                (LabScene.MissionEnvironment(m) is null || LabScene.MissionEnvironment(m) == EnvironmentProfile))
+            .Select(m => App == "terminal" && IsCourse && !restoreLegacyTerminalCourse ? LiveCourse.PracticalBashRoute(m) : m).ToArray();
         if (CompletedRoute)
         {
             Stop();
@@ -25,7 +26,7 @@ internal sealed partial class LabRun
             // of the same rotation as the older browser routes.
             bool essentials = IsEssentials(last);
             var rotation = App == "terminal" && (IsCourse || EnvironmentProfile == "windows")
-                ? courses.Where(m => LiveCourse.PracticalTerminalMission(m.Id)).ToArray()
+                ? courses.Where(m => LiveCourse.TerminalCourseMission(m, EnvironmentProfile)).ToArray()
                 : IsCourse ? courses : courses.Where(m => essentials
                 ? IsEssentials(m.Id)
                 : !m.FinishAfterRoute || (EnvironmentProfile == "windows" || JoinsTimedRotation(m.Id)) && m.Curated).ToArray();
@@ -45,15 +46,7 @@ internal sealed partial class LabRun
                     ? LiveCoach.Outstanding(App, initialLayout, history) : null;
                 mission = LiveRoutePolicy.Pick(available, mission, EnvironmentProfile, history, target);
                 variant = random.Next(3);
-                if (LiveCourse.PracticalTerminalMission(mission.Id))
-                {
-                    var finalSkill = mission.Id == LiveCourse.PracticalPowerShellId ?
-                        "lab/terminal/command/powershell-incident" : "lab/terminal/command/filter-incident";
-                    int previousCase = history.Where(attempt => attempt.Correct && attempt.TerminalCase > 0 &&
-                        attempt.Mission == mission.Id && attempt.Skill == finalSkill)
-                        .OrderByDescending(attempt => attempt.Date).FirstOrDefault()?.TerminalCase ?? 0;
-                    if (variant == previousCase - 1) variant = (variant + 1) % 3;
-                }
+                RotateJournalVariant();
                 Scene = PrepareMissionScene();
                 mission.Prepare?.Invoke(Scene);
                 pending = LiveCourse.Compile(mission, Scene, prepared: true, nativeEnglishInput: nativeEnglishInput);
@@ -98,7 +91,7 @@ internal sealed partial class LabRun
                     mission = NeutralProject.LegacyMission(LiveCourse.Missions.Single(m => m.Id == "code-guide"));
                 if (restoring && restoreLegacyEditorReorder)
                     mission = LiveCourse.LegacyEditorReorder(mission);
-                if (!restoring) variant = random.Next(3);
+                if (!restoring) { variant = random.Next(3); RotateJournalVariant(); }
                 Scene = PrepareMissionScene();
                 mission.Prepare?.Invoke(Scene);
                 pending = LiveCourse.Compile(mission, Scene, prepared: true, nativeEnglishInput: nativeEnglishInput);
@@ -111,6 +104,7 @@ internal sealed partial class LabRun
                 trace.Add(new(ExactQuickOpenEvent));
                 trace.Add(new(TerminalHistoryEvent));
                 trace.Add(new(ChromeHistoryEvent));
+                trace.Add(new(OrdinaryChromeSearchEvent));
                 trace.Add(new(ChromeTabSearchEvent));
                 trace.Add(new(StrictReportEvent));
                 trace.Add(new(ClusterNavigationEvent));
@@ -126,12 +120,23 @@ internal sealed partial class LabRun
             }
             foreach (string key in held) trace.Add(new("@held/" + key, superUsed));
             missionLength = pending.Count;
-            if (!Scene.PracticalTerminal && !Scene.DiskSpaceLesson)
+            if (!Scene.PracticalTerminal && !Scene.DiskSpaceLesson && Scene.Terminal.DeliveryLesson == "" && !(App == "terminal" && IsCourse && !restoreLegacyTerminalCourse))
                 Scene.PrepareHistory(pending.Where(goal => goal.Task.Action == "command" && goal.Task.Text.Length > 12).Select(goal => goal.Task.Text));
         }
         Task = pending[0].Task;
         sinceTask = clock(); HintVisible = hadError = false;
         if (!restoring) UpdateCoaching();
+    }
+
+    private void RotateJournalVariant()
+    {
+        if (!LiveCourse.PracticalTerminalMission(mission.Id)) return;
+        var finalSkill = mission.Id == LiveCourse.PracticalPowerShellId ?
+            "lab/terminal/command/powershell-incident" : "lab/terminal/command/filter-incident";
+        int previousCase = past.Concat(Attempts).Where(attempt => attempt.Correct && attempt.TerminalCase > 0 &&
+            attempt.Mission == mission.Id && attempt.Skill == finalSkill)
+            .OrderByDescending(attempt => attempt.Date).FirstOrDefault()?.TerminalCase ?? 0;
+        if (variant == previousCase - 1) variant = (variant + 1) % 3;
     }
 
     private string CoachContext() =>
@@ -150,6 +155,7 @@ internal sealed partial class LabRun
         var scene = new LabScene(SceneApp, initialLayout, neutralProject)
         { LayoutKey = layoutBinding, LayoutIsVirtual = initialVirtual, ReplayLegacyNavigation = replayLegacyNavigation,
             ReplayLegacyLineEditing = replayLegacyLineEditing, ReplayLegacyPythonEditing = replayLegacyPythonEditing, UseWindowsBindings = windowsBindings };
+        scene.Terminal.LegacyCheckoutStdout = restoring && restoreLegacyCheckout;
         if (dockProfile != null) scene.Dock = dockProfile;
         scene.DesktopProfile = desktopProfile;
         scene.PrepareCase(variant, App);

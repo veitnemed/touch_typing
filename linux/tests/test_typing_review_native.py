@@ -25,6 +25,10 @@ class ReviewWindow(TypingCycles):
     def exercise(self):
         self.focus_window()
         assert self.mode == "home"
+        if os.environ["TT_REVIEW_PHASE"] != "continue":
+            # Author only exercise text. Result and mistakes come exclusively from XTest events.
+            catalog = self.call("typing-save-set", title="Порог исправления · 391", content=("save notes " * 40)[:391])
+            selected = catalog["typing"]["sets"][-1]["id"]
         yield from self.chord("Alt+2")
         assert self.mode == "typing"
         checkpoint = out / "review-native-state.json"
@@ -75,18 +79,19 @@ class ReviewWindow(TypingCycles):
                   "prior per-source mistakes", memo["mistakes"], flush=True)
             return
 
-        self.typing_rows["WordsEN"].grab_focus()
-        yield from self.chord("Enter")
+        self.typing_settings.set_expanded(True)
+        self.typing_pick.set_selected(next(i for i, item in enumerate(self.typing_options) if item[0] == selected))
+        yield from self.chord("F5")
         for _ in range(45):
             if self.workout == "typing":
                 break
             yield
-        assert self.state["mode"] == "WordsEN" and self.state["progressDone"] == 0
+        assert self.state["mode"] == selected and self.state["progressDone"] == 0
         rank, mistakes = [], {}
         while self.workout == "typing" and len(rank) < 3:
             c = self.state["after"][0]
             if c != " " and c not in rank:
-                misses = [15, 8, 5][len(rank)]
+                misses = [4, 3, 1][len(rank)]
                 for _ in range(misses):
                     yield from self.chord("1")
                 rank.append(c)
@@ -104,6 +109,16 @@ class ReviewWindow(TypingCycles):
                 break
             yield
         assert self.result_kind == "typing" and self.correction_button.get_mapped()
+        def visible_labels(widget):
+            if isinstance(widget, Gtk.Label) and widget.get_mapped():
+                yield widget.get_label()
+            child = widget.get_first_child()
+            while child:
+                yield from visible_labels(child)
+                child = child.get_next_sibling()
+        assert total == 391 and sum(mistakes.values()) == 8
+        assert "97,99%" in set(visible_labels(self.window)), list(visible_labels(self.window))
+        print("PASS GTK: 391 correct + 8 errors shows 97,99% plus correction, not 98%.", flush=True)
         yield from self.landmark("review-01-source-result")
         self.correction_button.grab_focus()
         yield from self.chord("Enter")

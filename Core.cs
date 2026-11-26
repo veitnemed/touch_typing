@@ -116,6 +116,7 @@ namespace TouchTypingStudio
     {
         public string SourceId, Title;
         public string Weights, Plan, Mistakes;
+        public bool SystemCapture;
         public int Position, Errors, Revision;
         public double Seconds;
         public bool Completed;

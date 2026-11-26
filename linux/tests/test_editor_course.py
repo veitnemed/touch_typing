@@ -19,8 +19,8 @@ CATALOG = (
      "code-go-definition", "code-rename-symbol", "code-search-error", "code-find-exact-edit",
      "code-line-edit", "code-notebook-read", "code-project-file-move"},
     {"code-refactor", "code-extract", "code-console", "code-symbols", "code-python-edit",
-     "code-diagnostic-test", "code-notebook-repair", "code-project-file-copy", "code-traceback-line"},
-    {"code-handover", "code-repair", "code-inspection", "code-publish", "code-notebook-recheck"},
+     "code-diagnostic-test", "code-notebook-repair", "code-project-file-copy", "code-traceback-line", "code-publish-handoff"},
+    {"code-handover", "code-repair", "code-inspection", "code-publish", "code-notebook-recheck", "code-publish-config"},
 )
 
 
@@ -86,7 +86,7 @@ def advance(e, state):
         chord(e, "End"); chord(e, "Backspace"); enter(e, "5")
     elif mission == "code-project-file-move" and task_id == "save":
         chord(e, "Ctrl+End"); enter(e, value)
-    elif (not keys or task_id in ("code-rename-confirm", "project-search-submit") or
+    elif (not keys or task_id in ("code-rename-confirm", "project-search-submit", "scm-commit") or
           mission.startswith("code-notebook-") and task_id in ("quick-choose", "save") or
           mission == "code-find-exact-edit" and task_id in ("quick-choose", "exact-find-submit", "save")):
         enter(e, value)

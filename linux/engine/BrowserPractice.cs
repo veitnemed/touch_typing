@@ -15,7 +15,21 @@ internal sealed partial class LabScene
     internal const string CloneReadme = CloneRoot + "/README.md";
     internal const string CloneReadmeBody = "# TouchTyping\n\nУчебная копия проекта.\nРазделы: «Печать» и Live.\n";
     private const string ResultsPrefix = "https://www.google.com/search?q=";
-    internal bool BrowserPracticeActive;
+    internal bool BrowserPracticeActive, LegacyOrdinarySearch;
+
+    // Normal Chrome can search the existing authored documents. Dedicated
+    // research exercises keep their own ordered candidate sets and distractors.
+    private LabEntry[] OrdinarySearchEntries(string url)
+    {
+        string[] terms = SearchQuery(url).Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+        if (terms.Length == 0) return [];
+        bool Match(string haystack) => terms.All(t => haystack.Contains(t,StringComparison.OrdinalIgnoreCase));
+        var material = ResearchCases.Where(c => Match(c.Query+" "+c.Title+" "+c.Topic+" "+c.Target+
+            (c.Download.Length==0 ? "" : " "+c.Download+" report отчёт отчет таблица CSV")))
+            .Select(c => new LabEntry(c.Title,c.Target,"page"));
+        var pages=Links.Where(e => e.Kind=="page" && Match(e.Title+" "+e.Path));
+        return PracticeSearchEntries(url).Concat(material).Concat(pages).DistinctBy(e=>e.Path).ToArray();
+    }
     internal bool RepoCloned;
     internal string BrowserPracticeQuery = "touch_typing github";
 

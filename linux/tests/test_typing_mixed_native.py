@@ -273,6 +273,13 @@ class NativeMixed(TypingCycles):
                          "Ctrl+Left", "Ctrl+Right", "Ctrl+Backspace", "Ctrl+Delete", "Shift+Home", "Shift+End"}
         self.evidence.append(dict(case="physical-left-right-alt-and-everyday-chords", shortcuts=sorted(extra)))
 
+        added = []
+        for _ in range(8):
+            added.append(self.state["expected"])
+            yield from self.type_unit()
+        assert added == ["Alt+Home", "Alt+Right", "Shift+Left", "Shift+Right", "Shift+Tab", "Alt+Down", "F3", "Shift+F3"]
+        self.evidence.append(dict(case="foreground-selection-fields-and-find", shortcuts=added))
+
         # NumLock off: keypad navigation is not a typed digit. Turn it on and
         # use the same key; report the GDK key symbols that were actually delivered.
         yield from self.choose("Digits")

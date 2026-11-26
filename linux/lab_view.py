@@ -67,6 +67,46 @@ def chrome_badge():
     return Gdk.MemoryTexture.new(size,size,Gdk.MemoryFormat.R8G8B8A8,GLib.Bytes.new(bytes(rgba)),size*4)
 
 
+@lru_cache(maxsize=4)
+def win_shell_glyph(kind):
+    """Original 24-unit silhouettes, rasterised once (GTK 4.8 does not have GskPath).
+    Alpha coverage is generated from the edges; no symbol font or host icon dependency.
+    The WPF paths in WindowsShellGlyph use the same coordinates."""
+    marks = {
+        "code": (("#2489ca", ((1,7),(4,5),(18,15),(18,23))),
+                 ("#1679b8", ((1,17),(17,2),(20,1),(22,2),(18,10),(4,19))),
+                 ("#36aaf2", ((17,2),(20,1),(23,3),(23,21),(19,23),(17,22)))),
+        "files": (("#df9b30", ((1,5),(9,5),(12,8),(22,8),(22,20),(1,20))),
+                  ("#fff0b1", ((3,8),(21,8),(21,18),(3,18))),
+                  ("#f9cb58", ((1,10),(23,10),(22,21),(2,21))),
+                  ("#2784c3", ((6,16),(18,16),(18,19),(6,19)))),
+        "download": (("#279586", ((9,2),(15,2),(15,12),(21,12),(12,22),(3,12),(9,12))),),
+        "desktop": (("#287cb6", ((1,3),(23,3),(23,17),(13,17),(13,19),(19,19),(19,21),(5,21),(5,19),(11,19),(11,17),(1,17))),
+                    ("#86c7f2", ((3,5),(21,5),(21,14),(3,14)))),
+    }
+    size = 60
+    colors = [tuple(bytes.fromhex(color[1:])) for color,_ in marks[kind]]
+    # Sample at 2x the final texture size, scan-converting every polygon once per row.
+    pixels = bytearray()
+    for row in range(size):
+        rows = []
+        for oy in (.25,.75):
+            y = (row+oy)*24/size
+            line = [-1]*(size*2)
+            for layer,(_,poly) in enumerate(marks[kind]):
+                hits = sorted(x0+(y-y0)*(x1-x0)/(y1-y0) for (x0,y0),(x1,y1)
+                              in zip(poly,poly[1:]+poly[:1]) if (y0>y)!=(y1>y))
+                for a,b in zip(hits[::2],hits[1::2]):
+                    lo=max(0,ceil(a*size/12-.5)); hi=min(size*2,ceil(b*size/12-.5))
+                    line[lo:hi]=[layer]*(hi-lo)
+            rows.append(line)
+        for i in range(0,size*2,2):
+            covered = [colors[j] for j in (rows[0][i],rows[0][i+1],rows[1][i],rows[1][i+1]) if j>=0]
+            pixels.extend(tuple(round(sum(c)/len(covered)) for c in zip(*covered))+(round(255*len(covered)/4),)
+                          if covered else (0,0,0,0))
+    return Gdk.MemoryTexture.new(size,size,Gdk.MemoryFormat.R8G8B8A8,GLib.Bytes.new(bytes(pixels)),size*4)
+
+
 class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
     __gtype_name__ = "TouchTypingLabDesktop"
 
@@ -377,10 +417,8 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
                 "terminal": "Терминал", "settings": "Параметры"}.get(app, app)
 
     def win10_app_icon(self, app, x, y, size):
-        if app == "files":
-            self.fill("#ffc951", x, y + size * .19, size * .51, size * .35, 2)
-            self.fill("#f9db79", x, y + size * .32, size, size * .54, 2)
-            self.fill("#2f83c5", x + size * .19, y + size * .59, size * .62, size * .2)
+        if app in ("files","code"):
+            self.snapshot.append_texture(win_shell_glyph(app),self.rect(x,y,size,size))
         elif app == "terminal":
             self.fill("#0c1520", x, y + size * .12, size, size * .77, 2)
             self.label(">_", x + size * .14, y + size * .12, size * .58, "#dceafe", mono=True)
@@ -699,7 +737,7 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
                        "#1c2937", width=w - 111)
             for i, icon in enumerate(("min", "restore" if window.get("state")=="maximized" else "max", "close")):
                 bx = x+w-78+i*26
-                self.chrome_mark(icon, bx+5, y+6, 16, "#263648", "#f4f7fa")
+                self.caption_mark(icon, bx+5, y+6, 16, "#263648")
                 self.win10_caption_hit(window,i,(bx,y,26,27))
         elif app == "files":
             self.fill("#f6f4f2" if window.get("active") else "#eceae7", x, y, w, 27)
@@ -824,9 +862,11 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
             if win10 and i == 5:
                 self.fill(edge, x + 8, ty - 3, side - 16, 1)
             path = alias if alias in ("", "/", home) else home + alias
-            current = path and (folder == path or (path not in ("/", home) and folder.startswith(path + "/")))
+            # A pinned parent is not the current folder. Highlighting project while
+            # showing project/logs misleads the "Выберите project" exercise.
+            current = path and (folder == path or (not win10 and path not in ("/", home) and folder.startswith(path + "/")))
             if current:
-                self.fill(selected_bg, x + 5, ty - 1, side - 10, 20, 0 if win10 else 4)
+                self.fill("#e7e7e7" if win10 else selected_bg, x + 5, ty - 1, side - 10, 20, 0 if win10 else 4)
             self.files_glyph(icon, x + 11, ty + 3, win10)
             self.label(name, x + 30, ty + 1, 11, fg, width=side - 35)
 
@@ -847,7 +887,12 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
             name = entry.get("title", "")
             extension = name.rsplit(".", 1)[-1].lower() if "." in name.strip(".") else ""
             if i == selected:
-                self.fill(selected_bg, x + side + 4, ty, w - side - 8, row - 1, 0 if win10 else 4)
+                row_focused = bool(window.get("active")) and focus not in ("file-search","file-name")
+                if win10 and row_focused:
+                    self.fill("#7db4da",x+side+4,ty,w-side-8,row-1)
+                    self.fill(selected_bg,x+side+5,ty+1,w-side-10,row-3)
+                else:
+                    self.fill("#e7e7e7" if win10 else selected_bg,x+side+4,ty,w-side-8,row-1,0 if win10 else 4)
             elif not win10 and (i - first) % 2:
                 self.fill("#faf9f8", x + side + 1, ty, w - side - 1, row - 1)
             self.files_glyph("folder" if is_folder else "picture" if extension == "png" else "file",
@@ -882,7 +927,9 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
 
     def files_glyph(self, kind, x, y, win10):
         icon = "#337aae" if win10 else "#67645f"
-        if kind == "folder":
+        if win10 and kind in ("download","desktop"):
+            self.snapshot.append_texture(win_shell_glyph(kind),self.rect(x-1,y-1,15,15))
+        elif kind == "folder":
             self.fill("#dcae47" if win10 else "#967568", x + 1, y, 6, 4, 1.5)
             self.fill("#f3ca5e" if win10 else "#af8a79", x, y + 3, 14, 9, 1.5)
             self.fill("#ffe391" if win10 else "#ccaa9a", x + 1, y + 4, 12, 1)
@@ -900,6 +947,23 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         else:
             self.label({"home": "⌂", "desktop": "▣", "star": "★",
                         "clock": "◷", "bin": "▤"}[kind], x, y - 3, 13, icon)
+
+    def caption_mark(self, kind, x, y, size, color):
+        # Square joints, independent of glyph metrics and the caption background.
+        # For Restore, draw only the visible edges of the rear window.
+        s = size/16
+        def bar(u,v,w,h): self.fill(color,x+u*s,y+v*s,w*s,h*s)
+        if kind=="close":
+            self.chrome_mark("close",x,y,size,color)
+        elif kind=="min":
+            bar(3,8,10,1)
+        else:
+            if kind=="restore":
+                bar(5,2,9,1); bar(13,2,1,9); bar(11,10,2,1); bar(5,2,1,3)
+                u,v,n=2,5,9
+            else:
+                u,v,n=3,3,10
+            bar(u,v,n,1); bar(u,v+n-1,n,1); bar(u,v,1,n); bar(u+n-1,v,1,n)
 
     def chrome_mark(self, kind, x, y, size, color, background="#3d3d3d"):
         """Small vector browser marks; no missing-glyph squares on either theme."""
@@ -1032,26 +1096,34 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
             else:
                 self.chrome_site_mark(tab.get("url",""), position+6*unit, y+13*unit, 15*unit,
                                       "#b7babc", tone)
-            self.chrome_mark("close", position+tw-19*unit, y+14*unit, 12*unit,
-                             "#e7e7e7" if current else "#bcbcbe", tone)
+            if len(tabs) > 1:
+                hit((position+tw-24*unit, y+6*unit, 23*unit, tabs_h-7*unit), "close-tab",
+                    "Закрыть вкладку: " + (tab.get("title") or "Новая вкладка"), i)
+                self.chrome_mark("close", position+tw-19*unit, y+14*unit, 12*unit,
+                                 "#e7e7e7" if current else "#bcbcbe", tone)
         plus = x+left+tw*count+4*unit
         if plus+28*unit <= x+w-controls+8*unit:
             self.fill("#646464", plus, y+7*unit, 28*unit, 28*unit, 14*unit)
+            hit((plus,y+7*unit,28*unit,28*unit), "new-tab", "Новая вкладка · Ctrl+T")
             self.chrome_mark("plus", plus+6*unit, y+13*unit, 16*unit, "#e2e2e2", "#646464")
         win10 = self.scene.get("desktopStyle") == "win10"
         for i, icon in enumerate(("min","restore" if win10 and window.get("state")=="maximized" else "max","close")):
             cx = x+w-(90-32*i)*unit
-            self.chrome_mark(icon, cx, y+13*unit, 16*unit, "#e1e1e1", "#272727")
+            if win10:
+                self.caption_mark(icon,cx,y+13*unit,16*unit,"#e1e1e1")
+            else:
+                self.chrome_mark(icon, cx, y+13*unit, 16*unit, "#e1e1e1", "#272727")
             if win10:
                 self.win10_caption_hit(window,i,(cx-8*unit,y,32*unit,tabs_h))
         nav_y = y+tabs_h
         self.fill(strap, x, nav_y, w, nav_h)
-        steps = ("back", "forward", "refresh", "home") if w>=460 else ("back","refresh")
+        steps = ("back","forward","refresh","home") if w>=460 else ("back","forward","refresh") if w>=300 else ("back","refresh")
+        nav_labels = {"back":"Назад · Alt+←", "forward":"Вперёд · Alt+→", "refresh":"Обновить · Ctrl+R","home":"Учебная начальная страница"}
         for i, icon in enumerate(steps):
-            enabled = icon != "back" or window.get("canGoBack",False)
+            enabled = window.get("canGoBack",False) if icon=="back" else window.get("canGoForward",False) if icon=="forward" else True
             self.chrome_mark(icon, x+(16+i*35)*unit, nav_y+13*unit, 16*unit, "#c4c7c5" if enabled else "#757773", strap)
-            if icon == "back" and enabled:
-                hit((x+7*unit,nav_y+4*unit,33*unit,34*unit), "back", "Назад · Alt+←")
+            if enabled and icon in nav_labels:
+                hit((x+(7+i*35)*unit,nav_y+4*unit,33*unit,34*unit), icon, nav_labels[icon])
         roomy = w >= 840
         ox, right = x+(19+35*len(steps))*unit, (145 if roomy else 52)*unit
         ow = max(26, x+w-right-ox)
@@ -1082,11 +1154,13 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         else:
             label(visible, ox+text_indent,nav_y+12*unit,14*unit,"#f3f3f3",width=address_width)
         if ow>=90*unit:
+            hit((ox+ow-31*unit,nav_y+5*unit,29*unit,34*unit),"bookmark","Сохранить в закладки · Ctrl+D")
             saved = window.get("url") in window.get("savedBookmarks",[])
             if saved:
                 label("★", ox+ow-24*unit, nav_y+9*unit, 17*unit, "#a7c6fa", width=19*unit)
             else:
                 self.chrome_mark("star", ox+ow-24*unit, nav_y+14*unit, 16*unit, "#c4c7c5", dark)
+        hit((x+w-(136 if roomy else 47)*unit,nav_y+4*unit,26*unit,34*unit),"downloads","Загрузки · Ctrl+J")
         self.chrome_mark("download", x+w-(131 if roomy else 42)*unit, nav_y+12*unit, 18*unit,"#c4c7c5",strap)
         if roomy:
             self.fill("#32332f", x+w-104*unit, nav_y+5*unit, 70*unit, 34*unit, 17*unit)
@@ -1133,7 +1207,7 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         show_status = bool(status) and status != "Готово"
         bottom = y + h - (24 if show_status else 0 if url == "chrome://history" else 8)
         entries = window.get("entries", [])
-        search_home = url == "https://www.google.com/"
+        search_home = url in ("https://www.google.com/","about:blank")
         if search_home or url.startswith("https://www.google.com/search?q="):
             self.browser_search_page(window, x, top, w, bottom, search_home, body, entries, scale)
         elif window.get("sourceReview"):
@@ -1297,6 +1371,8 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
             self.google_wordmark(x + width / 2, logo_y, logo_size * min(1.18, scale), True)
             bar_w = min(584, width - 2 * pad)
             bar_y = logo_y + (logo_size + 20) * min(1.18, scale)
+            if window.get("active") and self.chrome_surface_command:
+                self._nb_hit((x+(width-bar_w)/2,bar_y,bar_w,44),"browser-surface:page-search","Введите поисковый запрос",path=window["id"])
             self.browser_search_bar(x + (width - bar_w) / 2, bar_y, bar_w, "Поиск в Google", False)
             self.browser_centered("Начните поиск в адресной строке: Ctrl+L", x + width / 2, bar_y + 54,
                                   12, "#5f6368", bar_w)
@@ -1309,6 +1385,8 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         bar_w = min(612, x + width - left - pad)
         if width >= 700:
             self.google_wordmark(x + pad, top + 14, 22, False)
+        if window.get("active") and self.chrome_surface_command:
+            self._nb_hit((left,top+9,bar_w,40),"browser-surface:page-search","Изменить поисковый запрос",path=window["id"])
         self.browser_search_bar(left, top + 9, bar_w, query, True)
         label("Все", left + 4, top + 55, 12, "#202124", width=66)
         label("Учебный поиск", left + 45, top + 55, 11, "#5f6368", width=bar_w - 45)
@@ -1327,6 +1405,9 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         start = max(0, selected - visible + 1)
         for i, entry in enumerate(entries[start:start + visible], start):
             row_y = first_y + (i - start) * pitch
+            if window.get("active") and self.chrome_surface_command:
+                self._nb_hit((left,row_y,bar_w,max(1,min(pitch-2,bottom-row_y))),"browser-surface:search-result",
+                             "Открыть: "+entry["title"],cell=i,path=window["id"])
             if i == selected and window.get("focus") == "body":
                 self.fill("#e9f1fd", left - 8, row_y - 3, bar_w + 12, pitch - 2, 8)
                 self.fill("#1a73e8", left - 8, row_y + 3, 2, pitch - 14)
@@ -1614,33 +1695,74 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
             self.fill(CODE_BG, x+3, y+6, 8, 4, 2)
             self.fill("#f4a261", x+11, y+2, 2, 2)
             self.fill("#b1bac4", x+1, y+12, 2, 2)
+        elif name.lower().endswith(".py"):
+            self.python_file_icon(x,y)
         else:
-            self.python_file_icon(x, y)
+            self.fill("#8b949e",x+2,y+1,10,13,1)
+            self.fill(CODE_INSET,x+3,y+2,8,11)
+            for line in (5,8):
+                self.fill("#58a6ff" if name.lower().endswith(".md") else "#8b949e",x+4,y+line,5,1)
 
     def code_source_control(self, source, x, y, width, height):
         changes = source.get("changes", [])
-        self.workbench_mark("branch", x + 10, y + 38, 14, CODE_MUTED)
-        self.label("Git · " + source.get("branch", "main"), x + 30, y + 39, 11, CODE_FG, width=width - 39)
-        self.fill("#161b22", x, y + 56, width, 22)
-        self.label("⌄  CHANGES", x + 12, y + 61, 10, CODE_FG, width=width - 32)
-        self.label(str(len(changes)), x + width - 22, y + 61, 10, CODE_MUTED, width=18)
-        if not changes:
-            self.label("Рабочая копия без изменений", x + 12, y + 87, 10, CODE_MUTED, width=width - 22)
-        capacity = max(1, int((height - 101) / 22))
+        self.label("⌄  CHANGES",x+8,y+37,10,CODE_FG,width=width-75,bold=True)
+        branch=source.get("branch","main")
+        self.workbench_mark("branch",x+width-61,y+38,12,CODE_MUTED)
+        self.label(branch,x+width-44,y+37,10,CODE_MUTED,width=38)
+        focus = source.get("focus")
+        message, caret = source.get("message", ""), source.get("messageCursor", 0)
+        self.fill("#2f81f7" if focus == "scm-message" else CODE_BORDER, x+8, y+57, width-16, 27, 3)
+        self.fill(CODE_BG, x+9, y+58, width-18, 25, 2)
+        if focus == "scm-message":
+            # Keep the insertion point visible as a long message is edited.
+            start = max(0, caret - max(4, int((width-32)/7)))
+            displayed = message[start:caret] + "│" + message[caret:]
+        else:
+            displayed = message or "Message (Ctrl+Enter)"
+        self.label(displayed, x+14, y+63, 11, CODE_FG if message or focus=="scm-message" else CODE_MUTED, width=width-29)
+        self._nb_hit((x+8,y+57,width-16,27), "explorer:scm-message", "Сообщение локального коммита")
+        enabled = source.get("canCommit", False) and bool(message.strip())
+        self.fill("#238636" if enabled else "#182821", x+8, y+89, width-16, 23, 3)
+        self.label("✓  Commit",x+(width-self.text_width("✓  Commit",11))/2,y+93,11,"#ffffff" if enabled else CODE_MUTED,width=width/2+10)
+        if enabled:
+            self._nb_hit((x+8,y+89,width-16,23), "explorer:scm-commit", "Зафиксировать подготовленные изменения")
         selected = source.get("selected", -1)
-        first = max(0, selected - capacity + 1)
-        for i, change in enumerate(changes[first:first+capacity], first):
-            row = y + 81 + 22 * (i - first)
-            path = change["path"]
-            if i == selected:
-                self.fill(CODE_LIST_SELECTION, x + 1, row, width - 3, 21)
-            name = path.split("/")[-1]
-            self.code_file_icon(name, x + 10, row + 2) if name.endswith((".py", ".ipynb")) else self.label("▤", x+10, row+3, 11, CODE_MUTED)
-            self.label(name, x + 28, row + 2, 12, CODE_FG, width=width - 52)
-            state = change["state"]
-            self.label(state, x + width - 21, row + 2, 11,
-                       {"D": "#ff7b72", "U": "#7ee787", "M": "#d29922"}[state], width=16)
-            self._nb_hit((x, row, width, 21), "explorer:source-control", "Diff: " + path, path=path)
+        # Flatten headers and files into a viewport, so a keyboard selection scrolls
+        # into view without rendering over the lower status bar.
+        listing = []
+        for staged, heading in ((True,"Staged Changes"), (False,"Changes")):
+            group = [(i,c) for i,c in enumerate(changes) if bool(c.get("staged")) == staged]
+            if not group and staged:
+                continue
+            listing += [(-1,(heading,len(group)))] + group
+        slot = next((n for n,(i,_) in enumerate(listing) if i==selected), 0) if selected>=0 else 0
+        capacity = max(0,int((height-139)/22))
+        start = max(0,slot-capacity+1)
+        for n,(i,item) in enumerate(listing[start:start+capacity]):
+            row = y+119+22*n
+            if i == -1:
+                self.fill(CODE_INSET, x,row,width,21)
+                self.label("⌄  " + item[0], x+8,row+2,11,CODE_FG,width=width-32)
+                self.fill("#30363d",x+width-27,row+3,20,15,7)
+                self.label(str(item[1]),x+width-17-self.text_width(str(item[1]),10)/2,row+3,10,CODE_FG,width=17)
+                continue
+            path,state,staged = item["path"],item["state"],item.get("staged",False)
+            if i==selected: self.fill(CODE_LIST_SELECTION,x+1,row,width-3,21)
+            self.code_file_icon(path.split("/")[-1],x+7,row+3)
+            self.label(path.split("/")[-1],x+25,row+2,11,CODE_FG,width=width-69)
+            self.label(state,x+width-18,row+2,11, "#ff7b72" if state=="D" else "#d29922" if state=="M" else "#7ee787",width=15)
+            self.label("−" if staged else "+",x+width-43,row+1,14,CODE_FG,width=16)
+            self._nb_hit((x,row,width-48,21),"explorer:" + ("scm-index" if staged else "source-control"),"Diff: "+path,path=path)
+            self._nb_hit((x+width-48,row,25,21),"explorer:scm-" + ("unstage" if staged else "stage"),"Убрать из индекса" if staged else "Подготовить",path=path)
+        if focus == "scm-menu" and 0<=selected<len(changes):
+            it=changes[selected]; staged=it.get("staged",False)
+            top=y+max(56,min(height-51,119+(slot-start+1)*22))
+            self.fill(CODE_BORDER,x+9,top,width-18,28,3)
+            self.fill("#1f2937",x+10,top+1,width-20,26,2)
+            self.label("Unstage Changes" if staged else "Stage Changes",x+18,top+6,11,CODE_FG,width=width-32)
+            self._nb_hit((x+9,top,width-18,28),"explorer:scm-" + ("unstage" if staged else "stage"),"Применить к выбранному файлу",path=it["path"])
+        if not changes and height>187:
+            self.label("Рабочая копия чиста",x+10,y+146,11,CODE_MUTED,width=width-21)
 
     def code_working_diff(self, source, x, y, width, height, tab_h):
         idx, rows = source.get("selected", -1), source.get("changes", [])
@@ -1654,7 +1776,7 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         self.fill(CODE_BG, x, y, tab_width, tab_h)
         self.fill("#f78166", x, y, tab_width, 2)
         self.fill(CODE_BORDER, x + tab_width - 1, y, 1, tab_h)
-        self.label(path.split("/")[-1] + " (Working Tree)", x + 13, y + 7, 12, CODE_FG, width=tab_width - 21)
+        self.label(path.split("/")[-1] + (" (Index)" if change.get("staged") else " (Working Tree)"), x + 13, y + 7, 12, CODE_FG, width=tab_width - 21)
         self.label("  ›  ".join(path.split("/")), x + 12, y + tab_h + 5, 11, CODE_MUTED, width=width - 20)
         pane = width / 2
         body = y + tab_h + 24
@@ -1663,8 +1785,8 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         first = next((i for i, row in enumerate(aligned) if row["changed"]), 0)
         start = max(0, first - 2)
         for col, side, bg, ink, sign, title in (
-            (x, "before", "#351b21", "#ff7b72", "−", "HEAD"),
-            (x + pane, "after", "#142b22", "#7ee787", "+", "Working Tree"),
+            (x, "before", "#351b21", "#ff7b72", "−", "HEAD" if change.get("staged") else "Index"),
+            (x + pane, "after", "#142b22", "#7ee787", "+", "Index" if change.get("staged") else "Working Tree"),
         ):
             self.fill(CODE_INSET, col, body, pane, 24)
             self.label(title, col + 12, body + 4, 11, CODE_MUTED, width=pane - 17)
@@ -1719,6 +1841,13 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
             if i == 2:
                 size = 20 if wide else 17
                 self.workbench_mark("branch", x + (rail - size) / 2, y + i * step + (step - size) / 2, size, color)
+                changes=window.get("sourceControl")
+                count=(len({c["path"] for c in changes.get("changes",[])}) if changes is not None else len(window.get("changedFiles", [])))
+                if count:
+                    badge=str(min(count,99));bx=x+rail-21;by=y+(i+1)*step-18
+                    self.fill("#1f6feb",bx,by,17,16,8)
+                    self.label(badge,bx+(17-self.text_width(badge,10))/2,by+1,10,"#ffffff",width=15)
+                self._nb_hit((x,y+i*step,rail,step),"explorer:scm-open","Source Control · Git")
             else:
                 self.label(icon, x + (12 if wide else 8), y + 9 + i * step, 21 if wide else 18, color)
         show_tree = window.get("explorerActions") and window.get("focus") in ("explorer","file-name")
@@ -1788,10 +1917,10 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
                                width=x + rail + sidebar - left - 4)
         editor_x = x + rail + sidebar
         editor_w = w - rail - sidebar
-        if window.get("focus") == "changes" and self.code_working_diff(
+        if window.get("focus") in ("changes", "scm-message", "scm-menu") and self.code_working_diff(
                 window.get("sourceControl") or {}, editor_x, y, editor_w, h, tab_h):
             self.fill(CODE_INSET, x, y + h - 19, w, 19)
-            self.label("Git · main", x + 9, y + h - 17, 10, CODE_MUTED)
+            self.label("Git · " + self.scene.get("terminal",{}).get("branch","main"), x + 9, y + h - 17, 10, CODE_MUTED)
             return
         self.fill(CODE_INSET, editor_x, y, editor_w, tab_h)
         self.fill(CODE_BORDER, editor_x, y + tab_h - 1, editor_w, 1)
@@ -1951,7 +2080,7 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         self.fill(CODE_BG, x, y + h - 19, w, 19)
         self.fill(CODE_BORDER, x, y + h - 19, w, 1)
         self.workbench_mark("branch", x + 9, y + h - 15, 11, CODE_MUTED)
-        self.label("main    ✓ 0   ⚠ " + str(self.scene.get("diagnosticProblemCount", 0)), x + 23, y + h - 16, 9, CODE_MUTED)
+        self.label(self.scene.get("terminal",{}).get("branch","main") + "    ⓧ " + str(self.scene.get("diagnosticProblemCount", 0)) + "   ⚠ 0", x + 23, y + h - 16, 9, CODE_MUTED)
         before = window.get("body", "").encode("utf-16-le")[:window.get("bodyCursor", 0) * 2].decode("utf-16-le", "ignore")
         line, col = before.count("\n") + 1, self.units(before.rsplit("\n", 1)[-1]) + 1
         support = "Python" if name.lower().endswith(".py") else "Текст"
@@ -1968,6 +2097,14 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         self.fill("#181818" if embedded else "#012456" if powershell else "#291726", x, y, w, h)
         visible = max(0, int((h - 38) / 21))
         output = "\n".join(terminal.get("output", [])).splitlines()
+        # A checksum must be readable to the last digit. The ordinary console scrolls
+        # wrapped rows; ellipsising a SHA would make the exercise impossible.
+        if any(len(part) == 64 and all(c in "0123456789abcdefABCDEF" for c in part)
+               for line in output for part in line.split()):
+            glyph = self.text_layout("0", 13, mono=True).get_pixel_size()[0]
+            cols = max(8, int((w - 35) // max(1, glyph)))
+            output = [piece for line in output
+                      for piece in ([line[i:i + cols] for i in range(0, len(line), cols)] or [""])]
         recent = output[-visible:] if visible else []
         for i, line in enumerate(recent):
             self.label(line, x + 16, y + 9 + i * 21, 13, "#E7EFFB" if powershell else "#dccfdc", width=w - 32, mono=True)

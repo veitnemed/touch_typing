@@ -427,7 +427,7 @@ namespace TouchTypingStudio
             {
                 string sourceId = pending.S("sourceId");
                 var action = ActionButton("Продолжить исправление · " + pending.S("title") + " · " +
-                    pending.I("position") + "/" + pending.I("total"), delegate { StartMistakeReview(sourceId); });
+                    pending.I("position") + "/" + pending.I("total"), delegate { StartMistakeReview(sourceId, pending.B("reviewRequiresCapture")); });
                 AutomationProperties.SetAutomationId(action, "TypingContinueReview_" + sourceId);
                 root.Children.Add(action);
             }
@@ -575,8 +575,7 @@ namespace TouchTypingStudio
                 var color = Ui.Brush(record.S("band") == "green" ? "#A7D4B4" : record.S("band") == "orange" ? "#ECC38F" :
                     record.S("band") == "red" ? "#EAA2AD" : "#AAA4AE");
                 row.Mark.Background = color; row.Accuracy.Foreground = color;
-                row.Accuracy.Text = known ? (Math.Floor(record.N("accuracy") * 100) / 100)
-                    .ToString("0.##", CultureInfo.GetCultureInfo("ru-RU")) + "%" : "—";
+                row.Accuracy.Text = known ? record.S("accuracyLabel") : "—";
                 int secs = (int)record.N("seconds");
                 row.Seconds.Text = record.D("seconds").Exists ? (secs / 60).ToString("00") + ":" + (secs % 60).ToString("00") : "—";
                 string note = row.Name + ". " + (known ? "Лучшая точность: " + row.Accuracy.Text + ". Активное время этой попытки: " +
@@ -635,7 +634,7 @@ namespace TouchTypingStudio
 
         private void ReceiveSystemTypingKey(int vk, int scan, bool extended, bool down, bool repeat, string value, IntPtr inputLayout)
         {
-            if (!active || paused || labActive || page != TypingPage || state.S("mode") != SystemTypingMode) return;
+            if (!active || paused || labActive || page != TypingPage || !state.B("requiresSystemCapture")) return;
             string key = ScanKey(scan, extended, vk);
             if (key.Length == 0) return;
             if (down && HandleControls(key, repeat)) return;
@@ -658,11 +657,12 @@ namespace TouchTypingStudio
             else StopSystemTypingCapture();
         }
 
-        private void StartMistakeReview(string sourceId)
+        private void StartMistakeReview(string sourceId, bool system)
         {
             if (active || !EnsureMenuEngine()) return;
-            var response = Request("typing-review-start", "sourceId", sourceId, "layout", CurrentLayout());
-            if (!response.Exists) return;
+            if (system && !AcquireSystemTypingCapture()) return;
+            var response = Request("typing-review-start", "sourceId", sourceId, "layout", CurrentLayout(), "systemCapture", system);
+            if (!response.Exists) { StopSystemTypingCapture(); return; }
             // StartSession creates the same real typing surface as an ordinary lesson.
             ShowPage(TypingPage);
             StartSession(response);
@@ -994,7 +994,7 @@ namespace TouchTypingStudio
         {
             if (!active) return;
             if (!paused) { PauseSession(); return; }
-            bool system = page == TypingPage && state.S("mode") == SystemTypingMode;
+            bool system = page == TypingPage && state.B("requiresSystemCapture");
             if (system && !AcquireSystemTypingCapture()) return;
             pressed.Clear();
             var next = page == LivePage ? Request("shortcut-resume") :
@@ -1099,7 +1099,7 @@ namespace TouchTypingStudio
                 (seconds % 60).ToString("00"), ""));
             metrics.Children.Add(ReferenceResultMetric("count", "Набрано", count.ToString(), "зн."));
             metrics.Children.Add(ReferenceResultMetric("speed", "Скорость", Format(speed), "зн/мин"));
-            metrics.Children.Add(ReferenceResultMetric("accuracy", "Точность", Format(score.N("accuracy")) + "%", ""));
+            metrics.Children.Add(ReferenceResultMetric("accuracy", "Точность", score.S("accuracyLabel"), ""));
             card.Children.Add(metrics);
             var details = new Expander { Header = ReferenceLabel("Разбор попытки", 15, ReferenceText, true),
                 Foreground = ReferenceText, Focusable = true };
@@ -1123,7 +1123,7 @@ namespace TouchTypingStudio
             if (offered)
             {
                 string sourceId = score.S("attemptId");
-                corrective = ReferenceResultAction("Работа над ошибками", delegate { StartMistakeReview(sourceId); }, "TypingStartReview", 2);
+                corrective = ReferenceResultAction("Работа над ошибками", delegate { StartMistakeReview(sourceId, score.B("reviewRequiresCapture")); }, "TypingStartReview", 2);
                 corrective.Margin = new Thickness(0, 0, 0, 8);
                 corrective.ToolTip = "Короткая практика только по промахам этой попытки";
                 card.Children.Add(corrective);

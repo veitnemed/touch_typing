@@ -161,8 +161,8 @@ namespace TouchTypingStudio
                 double ty = listTop + 7 + i * 27 + (windows && i >= 5 ? 10 : 0);
                 if (ty + 23 > height - bottom) break;
                 if (windows && i == 5) Rectangle(10, ty - 5, side - 20, 1, edge);
-                bool current = paths[i].Length > 0 && (folder == paths[i] || (paths[i] != "/" && paths[i] != home && folder.StartsWith(paths[i] + "/", StringComparison.Ordinal)));
-                if (current) Rounded(5, ty - 1, side - 10, 24, highlight, windows ? 0 : 5);
+                bool current = paths[i].Length > 0 && (folder == paths[i] || (!windows && paths[i] != "/" && paths[i] != home && folder.StartsWith(paths[i] + "/", StringComparison.Ordinal)));
+                if (current) Rounded(5, ty - 1, side - 10, 24, windows ? "#E7E7E7" : highlight, windows ? 0 : 5);
                 FilesGlyph(icons[i], 13, ty + 5, windows);
                 Text(names[i], 35, ty + 3, 12, ink, side - 41);
             }
@@ -182,7 +182,16 @@ namespace TouchTypingStudio
                 double y = start + (i - first) * row;
                 bool directory = entries[i].S("kind") == "folder";
                 string name = entries[i].S("title");
-                if (i == selected) Rounded(side + 5, y, width - side - 10, row - 1, highlight, windows ? 0 : 5);
+                if (i == selected)
+                {
+                    bool rowFocused=window.B("active") && focus!="file-search" && focus!="file-name";
+                    if (windows && rowFocused)
+                    {
+                        Rectangle(side+5,y,width-side-10,row-1,"#7DB4DA");
+                        Rectangle(side+6,y+1,width-side-12,row-3,highlight);
+                    }
+                    else Rounded(side+5,y,width-side-10,row-1,windows ? "#E7E7E7" : highlight,windows ? 0 : 5);
+                }
                 else if (!windows && (i - first) % 2 == 1) Rectangle(side + 1, y, width - side - 1, row - 1, "#FAF9F8");
                 FilesGlyph(directory ? "folder" : name.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "picture" : "file",
                     side + 15, y + (row - 14) / 2, windows);
@@ -240,6 +249,11 @@ namespace TouchTypingStudio
         private void FilesGlyph(string kind, double x, double y, bool windows)
         {
             string icon = windows ? "#337AAE" : "#67645F";
+            if (windows && (kind=="download" || kind=="desktop"))
+            {
+                WindowsShellGlyph(kind=="download" ? 2 : 3,x-1,y-1,17);
+                return;
+            }
             switch (kind)
             {
                 case "folder":

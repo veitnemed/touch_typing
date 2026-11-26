@@ -32,9 +32,8 @@ internal static class LiveRoutePolicy
                      mission.Id == "windows-desktop-return-" + mission.Level,
         "workday" when environment == "windows" => mission.Id == "workday-windows-" + mission.Level ||
                      mission.Id == "workday-windows-return-" + mission.Level,
-        // A single bounded practical route for the ordinary Bash card.
-        // Other Terminal exercises stay independently selectable.
-        "terminal" => LiveCourse.PracticalTerminalMission(mission.Id),
+        // Ordinary shell practice rotates through useful projects, not isolated command-name drills.
+        "terminal" => LiveCourse.TerminalCourseMission(mission, environment),
         _ => !mission.Curated
     };
 

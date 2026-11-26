@@ -15,6 +15,8 @@ internal sealed partial class LabRun
         var progress = draft?.Progress;
         this.neutralProject = draft == null ? neutralProject : draft.ProjectFixture == NeutralProject.FixtureId;
         this.nativeEnglishInput = draft?.NativeEnglishInput ?? nativeEnglishInput;
+        restoreLegacyTerminalCourse = draft?.App == "terminal" && draft.RouteKind == LiveRoutePolicy.Course && draft.MissionRevision != LiveCourse.TerminalCourseRevision;
+        restoreLegacyCheckout = draft?.Mission == "code-repair-checkout" && draft.MissionRevision != LabScene.CheckoutRevision;
         restoreOriginalGuide = this.neutralProject && draft?.Mission == "code-guide" &&
             draft.MissionRevision != LabScene.GuideNoteRevision;
         restoreLegacyEditorReorder = draft?.Mission is "code-refactor" or "code-repair" or "code-inspection" &&
@@ -53,7 +55,7 @@ internal sealed partial class LabRun
         // New traces begin with format markers. Old ones acquire the line
         // marker only after the historic keystrokes have been replayed.
         var initialFormat = savedEvents.TakeWhile(e => e.Key is
-            ChromeTabSearchEvent or ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent or DesktopFileSearchEvent or WindowsRecoveryScopeEvent or ExplorerTargetGuardEvent);
+            OrdinaryChromeSearchEvent or ChromeTabSearchEvent or ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent or DesktopFileSearchEvent or WindowsRecoveryScopeEvent or ExplorerTargetGuardEvent);
         replayLegacyNotebookWordErase = draft != null && !initialFormat.Any(e => e.Key == NotebookWordEraseEvent);
         replayLegacyTriggers = replayLegacyCsvExplorer = replayLegacyWindowsRecovery = replayLegacyExplorerTargetGuard = draft != null;
         replayLegacyLineEditing = draft != null && !initialFormat.Any(e => e.Key == LineEditingEvent);
@@ -67,6 +69,7 @@ internal sealed partial class LabRun
         Scene.ReplayLegacyNotebookActions = legacyNotebookActions;
         Scene.ReplayLegacyQuickOpen = draft != null && !initialFormat.Any(e => e.Key == ExactQuickOpenEvent);
         Scene.ReplayLegacyTerminalSearch = draft != null && !initialFormat.Any(e => e.Key == TerminalHistoryEvent);
+        Scene.LegacyOrdinarySearch = draft != null && !initialFormat.Any(e => e.Key == OrdinaryChromeSearchEvent);
         Scene.ReplayLegacyChromeHistory = draft != null && !initialFormat.Any(e => e.Key == ChromeHistoryEvent);
         Scene.ReplayLegacyDesktopFileSearch = draft != null && !initialFormat.Any(e => e.Key == DesktopFileSearchEvent);
         if (draft != null)
@@ -102,6 +105,7 @@ internal sealed partial class LabRun
                 else if (e.Key == ExactUrlEvent) { replayLegacyUrl = false; trace.Add(e); }
                 else if (e.Key == ExactQuickOpenEvent) { Scene.ReplayLegacyQuickOpen = false; trace.Add(e); }
                 else if (e.Key == TerminalHistoryEvent) EndLegacyTerminalSearch(e);
+                else if (e.Key == OrdinaryChromeSearchEvent) { Scene.LegacyOrdinarySearch=false; trace.Add(e); }
                 else if (e.Key == ChromeHistoryEvent) EndLegacyChromeHistory(e);
                 else if (e.Key == ChromeTabSearchEvent) { Scene.ReplayLegacyTabSearch = false; trace.Add(e); }
                 else if (e.Key == ChromeTabPointerEvent)
@@ -129,6 +133,7 @@ internal sealed partial class LabRun
             }
             if (replayLegacyUrl) trace.Add(new(ExactUrlEvent));
             if (Scene.ReplayLegacyTerminalSearch) EndLegacyTerminalSearch(new(TerminalHistoryEvent));
+            if (Scene.LegacyOrdinarySearch) { Scene.LegacyOrdinarySearch=false; trace.Add(new(OrdinaryChromeSearchEvent)); }
             if (Scene.ReplayLegacyChromeHistory) EndLegacyChromeHistory(new(ChromeHistoryEvent));
             if (Scene.ReplayLegacyTabSearch) { Scene.ReplayLegacyTabSearch = false; trace.Add(new(ChromeTabSearchEvent)); }
             if (Scene.ReplayLegacyQuickOpen)

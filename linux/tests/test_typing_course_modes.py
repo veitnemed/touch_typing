@@ -94,9 +94,9 @@ class CourseModes(unittest.TestCase):
                                         self.start(mode)
                                     run = self.start(mode, infinite=True, cycles=2, seconds=180, level=2, systemCapture=True)
                                     self.assertEqual((run["mode"], run["cycles"], run["timeLimit"], run["progressTotal"],
-                                                      run["progressVisible"], run["typedActions"]), (mode, 1, 0, 36, True, True))
+                                                      run["progressVisible"], run["typedActions"]), (mode, 1, 0, 44, True, True))
                                     keys = set()
-                                    for n in range(1, 37):
+                                    for n in range(1, 45):
                                         keys.add(run["expected"])
                                         run = self.advance(run)
                                         self.assertEqual(run["progressDone"], n)
@@ -124,7 +124,7 @@ class CourseModes(unittest.TestCase):
                                 self.assertFalse(infinite["finished"])
                                 self.engine.call("typing-stop", layout=self.layout)
                         print(f"Typing {self.platform}/{self.layout}: {len(modes)} primary, {len(arts)} authored "
-                              f"and {len(sets)} custom routes, ordinary finite/infinite plus 36 captured system gestures.")
+                              f"and {len(sets)} custom routes, ordinary finite/infinite plus 44 captured system gestures.")
                     finally:
                         self.engine.close()
 

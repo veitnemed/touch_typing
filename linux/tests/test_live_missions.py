@@ -113,8 +113,8 @@ class MissionTest(unittest.TestCase):
                 def suggestion(app, level=0, desktop="ubuntu"):
                     return engine.call("lab-next-mission", app=app, level=level, desktopProfile=desktop)["mission"]
                 for level in range(3):
-                    self.assertEqual(suggestion("terminal", level), "terminal-practical-incident")
-                    self.assertEqual(suggestion("terminal", level, "windows"), "terminal-powershell-diagnostic")
+                    self.assertEqual(suggestion("terminal", level), "terminal-delivery-sync-bash")
+                    self.assertEqual(suggestion("terminal", level, "windows"), "terminal-delivery-sync-ps")
                 self.assertEqual(suggestion("chrome"), "chrome-reader")
                 options = dict(app="terminal", mode="sandbox", level=0, guidance="guided", seconds=0, seed=0)
                 engine.call("lab-start", **options, mission="terminal-essentials-locate")
@@ -123,7 +123,7 @@ class MissionTest(unittest.TestCase):
                     engine.call("lab-key", key=key, pressed=True, text=char)
                     engine.call("lab-key", key=key, pressed=False)
                 engine.call("lab-stop")
-                self.assertEqual(suggestion("terminal"), "terminal-practical-incident")
+                self.assertEqual(suggestion("terminal"), "terminal-delivery-sync-bash")
                 resumed = engine.call("lab-start", **options, **{"continue": True})
                 self.assertEqual((resumed["mission"], resumed["solved"]), ("terminal-essentials-locate", 1))
             finally:

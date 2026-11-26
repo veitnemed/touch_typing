@@ -32,7 +32,8 @@ internal static class TypingReviewLedger
             Find(p, sourceId) != null) return;
         var m = misses.Where(item => item.Count > 0).ToArray();
         if (m.Length == 0) return; // Do not invent per-key data for an old/aggregate-only result.
-        p.TypingReviews.Add(new TypingReviewTicket { SourceId = sourceId, Title = title, Weights = TypingReviewPlan.Save(m) });
+        p.TypingReviews.Add(new TypingReviewTicket { SourceId = sourceId, Title = title, Weights = TypingReviewPlan.Save(m),
+            SystemCapture = m.Any(x => x.Kind == "command" && Gesture.TryParse(x.Value, out var g) && g.Chords.Any(c => c.UsesSystem)) });
     }
 
     internal static TypingReviewTicket Open(StudioProfile p, string id)
@@ -72,7 +73,7 @@ internal static class TypingReviewLedger
         return true;
     }
 
-    internal static object HistoricalResult(StudioProfile p, string id)
+    internal static object HistoricalResult(StudioProfile p, string id, bool windows)
     {
         var row = !string.IsNullOrEmpty(id) ? p.Results.LastOrDefault(t => HistoryId(t) == id) : null;
         if (row == null) throw new ArgumentException("Эта попытка не найдена в истории занятий.");
@@ -81,9 +82,10 @@ internal static class TypingReviewLedger
         string evidence = isReview ? ticket?.Mistakes : ticket?.Weights;
         var counts = string.IsNullOrEmpty(evidence) ? Array.Empty<ReviewMiss>() : TypingReviewPlan.Load<ReviewMiss[]>(evidence);
         return new { state = new { title = row.Lesson, count = row.Count, errors = row.Errors, seconds = (int)row.Seconds,
-            cpm = row.Speed, accuracy = row.Accuracy, attemptId = id, isReview, isHistory = true,
+            cpm = row.Speed, accuracy = row.Accuracy, accuracyLabel = TypingPrecision.Label(row.Count, row.Errors), attemptId = id, isReview, isHistory = true,
+            reviewRequiresCapture = !isReview && ticket is { Completed: false, SystemCapture: true },
             reviewAvailable = !isReview && ticket is { Completed: false }, finished = row.Completed,
-            topMistakes = counts.GroupBy(m => m.Value).Select(g => new { key = g.Key, count = g.Sum(m => m.Count) })
+            topMistakes = counts.GroupBy(m => new TypingAtom(m.Kind, m.Value, m.Layout).LabelFor(windows)).Select(g => new { key = g.Key, count = g.Sum(m => m.Count) })
                 .OrderByDescending(m => m.count).ThenBy(m => m.key, StringComparer.Ordinal).ToArray() }, series = Array.Empty<object>() };
     }
 
@@ -97,7 +99,7 @@ internal static class TypingReviewLedger
                 // A corrupt corrective draft must not break startup or the rest of the catalog.
                 var deck = TypingReviewPlan.ReadDeck(t.Plan);
                 if (t.Position < 0 || t.Position >= deck.Units.Length) continue;
-                drafts.Add(new { sourceId = t.SourceId, title = t.Title, position = t.Position, total = deck.Units.Length });
+                drafts.Add(new { sourceId = t.SourceId, title = t.Title, reviewRequiresCapture = t.SystemCapture, position = t.Position, total = deck.Units.Length });
             }
             catch (Exception ex) when (ex is ArgumentException or System.Text.Json.JsonException) { }
         }

@@ -66,17 +66,18 @@ internal static partial class LiveUiSmoke
             Check(fixture != null && profile.SelectSingleNode("/StudioProfile/Results/TypingResult | /StudioProfile/TypingReviews/TypingReviewTicket") == null,
                 "Only the exercise, no result or review, is present in the isolated fixture");
             string text = fixture.SelectSingleNode("Content").InnerText;
-            Check(text.Length == 390 && text[0] == 's', "Known 390-character source exercise authored by the engine");
+            Check(text.Length == 391 && text[0] == 's', "Known 391-character source exercise authored by the engine");
             string set = fixture.SelectSingleNode("Id").InnerText;
             OpenReviewApp(path);
             ((ExpandCollapsePattern)Find("TypingMore").GetCurrentPattern(ExpandCollapsePattern.Pattern)).Expand();
             Invoke("TypingRow-set:" + set);
-            Until(delegate { return Exists("TypingCount") && Name("TypingCount") == "0/390"; }, "known 390-character primary attempt");
-            // Exactly ten errors on the first requested s: 390/(390+10) = 97.5%.
-            for (int n = 0; n < 10; n++) Key("X");
-            Check(Name("TypingCount") == "0/390", "errors do not advance the primary position");
-            EnterReviewedText(text, 0, 390, 390);
-            Until(delegate { return Visible("PracticeResult") && Visible("TypingStartReview"); }, "97.5 percent review offer", 20000);
+            Until(delegate { return Exists("TypingCount") && Name("TypingCount") == "0/391"; }, "known 391-character primary attempt");
+            // Eight errors: 391/399 is 97.9949...%, below the 98% cutoff.
+            for (int n = 0; n < 8; n++) Key("X");
+            Check(Name("TypingCount") == "0/391", "errors do not advance the primary position");
+            EnterReviewedText(text, 0, 391, 391);
+            Until(delegate { return Visible("PracticeResult") && Visible("TypingStartReview"); }, "below 98 percent review offer", 20000);
+            Check(Name("ResultMetric-accuracy").Contains("97,99%"), "actual visible accuracy stays below 98 percent");
             CaptureReferenceFrame("review-wpf-01-source-result");
             Find("TypingStartReview").SetFocus();
             Key("Enter");

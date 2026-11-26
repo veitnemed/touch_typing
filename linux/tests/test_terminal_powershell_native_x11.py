@@ -51,7 +51,7 @@ class PowerShellWindow(CourseCards):
         saved = out / "powershell-checkpoint.json"
         if not self.resuming:
             yield from self.frame("powershell-01-catalog.png")
-        lab = yield from self.ordinary_card("terminal")
+        lab = yield from (self.ordinary_card("terminal") if self.resuming else self.selected_journal(True))
         assert lab and lab.active and lab.window_only_keys
         assert (lab.state["mission"], lab.state["scenarioLength"], lab.state["actionLimit"], lab.state["desktopProfile"]) == (
             POWERSHELL, 4, 0, "windows")
@@ -126,7 +126,7 @@ class PowerShellWindow(CourseCards):
             real_entry="Live → Windows 10 → PowerShell", backend="GTK / X11 (Windows simulation, not host)"),
             ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         yield from self.video_hold("Старый ID отклонён; две реальные строки по новой попытке зачтены")
-        print(f"PASS real GTK ordinary PowerShell: native keys, new application process, Ctrl+C, {new_id}, 4/4", flush=True)
+        print(f"PASS real GTK selected PowerShell: native keys, new application process, Ctrl+C, {new_id}, 4/4", flush=True)
 
 
 if __name__ == "__main__":

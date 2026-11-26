@@ -40,6 +40,7 @@ internal sealed partial class LabScene
         "    def test_order(self):\n        self.assertEqual(checkout_total(4, 3), 14)\n" +
         "    def test_empty_order(self):\n        self.assertEqual(checkout_total(1, 0), 2)\n";
     internal const string CheckoutExpectedCall = "checkout_total(4, 3)";
+    internal const string CheckoutRevision = "checkout-stderr/v1";
     internal const string CheckoutReport = "checkout-test.txt";
     internal const string CheckoutOutput = "Учебная проверка checkout\nПроверки: обычный и пустой заказ.\nRan 2 tests\nOK\n";
     private static string RunCheckoutTests(VirtualTerminal fixture)
@@ -129,7 +130,7 @@ internal static partial class LiveCourse
                 "quick-open quick:test_checkout.py quick-choose find checkout-expect escape"),
             new("Запустите две проверки и запишите результат в текстовый файл",
                 "terminal-toggle cmd:cd~" + LabScene.BlockRepairRoot + " cmd:python3~-m~unittest~test_checkout " +
-                "cmd:python3~-m~unittest~test_checkout~>~" + LabScene.CheckoutReport + " cmd:cat~" + LabScene.CheckoutReport),
+                "cmd:python3~-m~unittest~test_checkout~>~" + LabScene.CheckoutReport + "~2>&1 cmd:cat~" + LabScene.CheckoutReport),
             new("Откройте сохранённое свидетельство в редакторе",
                 "terminal-toggle quick-open quick:" + LabScene.CheckoutReport + " quick-choose")
         ], FinishAfterRoute: true, Curated: true, Prepare: scene => scene.PrepareBlockRepair()));

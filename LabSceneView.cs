@@ -94,12 +94,30 @@ namespace TouchTypingStudio
             var shell = scene.D("terminal");
             var terminal = scene.Items("windows").FirstOrDefault(w => w.B("active") &&
                 (w.S("app") == "terminal" || w.S("focus") == "terminal" || w.S("focus") == "reverse-search"));
+            // The drawn terminal has no native text control. Expose the same request and
+            // measured free space to accessibility clients as are shown on the screen.
+            if (terminal != null)
+            {
+                var capacity = shell.Items("output").Select(item => item.Value()).Where(line =>
+                    line.StartsWith("Размер архива:") || line.StartsWith("Проверен диск ")).ToArray();
+                if (capacity.Length > 0) System.Windows.Automation.AutomationProperties.SetName(this,
+                    System.Windows.Automation.AutomationProperties.GetName(this) + ". " + string.Join(". ", capacity));
+            }
             var editor = scene.Items("windows").FirstOrDefault(w => w.B("active") && w.S("app") == "code");
             var fileSearch = scene.Items("windows").FirstOrDefault(w => w.B("active") && HasFilesSearch(w));
             string fieldStatus = terminal != null ? "cursor:" + terminal.I("cursor", -1).ToString(CultureInfo.InvariantCulture) :
                 editor == null ? "" : "editor:" + editor.S("focus") + ":" + editor.I("bodyCursor", -1).ToString(CultureInfo.InvariantCulture);
             if (terminal != null && shell.B("followingLog"))
                 fieldStatus += shell.B("logIncidentArrived") ? " · Журнал обновляется, новая ошибка получена" : " · Журнал обновляется";
+            if (editor != null && editor.D("sourceControl").Exists && editor.S("focus") != "terminal" &&
+                (editor.S("focus") == "changes" || editor.S("focus") == "scm-message" || editor.S("focus") == "scm-menu"))
+            {
+                var git = editor.D("sourceControl");
+                fieldStatus = "Git · " + git.S("branch") + "; индекс: " +
+                    string.Join(", ",git.Items("changes").Where(c=>c.B("staged")).Select(c=>c.S("path"))) +
+                    "; рабочие изменения: " + string.Join(", ",git.Items("changes").Where(c=>!c.B("staged")).Select(c=>c.S("path"))) +
+                    "; последний локальный коммит: " + git.S("lastCommit") + "; фокус: " + editor.S("focus");
+            }
             System.Windows.Automation.AutomationProperties.SetItemStatus(this, fieldStatus);
             if (fileSearch != null)
             {
@@ -352,7 +370,7 @@ namespace TouchTypingStudio
             string title = active == null ? "Рабочие материалы" : active.S("title", "Рабочие материалы");
             var entries = window.Items("entries").ToArray();
             bool manager = url == "chrome://downloads" || url == "chrome://bookmarks";
-            bool searchHome = url == "https://www.google.com/";
+            bool searchHome = url == "https://www.google.com/" || url == "about:blank";
             bool searchResults = url.StartsWith("https://www.google.com/search?q=", StringComparison.Ordinal);
             string status = window.S("status");
             bool showStatus = status.Length > 0 && status != "Готово";
@@ -400,6 +418,7 @@ namespace TouchTypingStudio
                 double barWidth = Math.Min(584, width - pad * 2);
                 double barX = (width - barWidth) / 2;
                 double barY = logoY + (logoSize + 20) * Math.Min(1.18, scale);
+                AddChromeSurfaceHit(window,new Rect(barX,barY,barWidth,44),"page-search","Введите поисковый запрос");
                 DrawSearchBar(barX, barY, barWidth, "Поиск в Google", false);
                 DrawBrowserCentered("Начните поиск в адресной строке: Ctrl+L", width / 2, barY + 54, 12, muted, barWidth);
                 if (bottom - barY > 106)
@@ -413,6 +432,7 @@ namespace TouchTypingStudio
             double left = width >= 700 ? 133 : pad;
             double barWidthResults = Math.Min(612, width - left - pad);
             if (width >= 700) DrawGoogleWordmark(pad, top + 14, 22, false);
+            AddChromeSurfaceHit(window,new Rect(left,top+9,barWidthResults,40),"page-search","Изменить поисковый запрос");
             DrawSearchBar(left, top + 9, barWidthResults, query, true);
             Text("Все", left + 4, top + 55, 12, ink, 66);
             Text("Учебный поиск", left + 45, top + 55, 11, muted, barWidthResults - 45);
@@ -434,6 +454,8 @@ namespace TouchTypingStudio
             {
                 Data entry = entries[i];
                 double rowY = firstY + (i - start) * pitch;
+                AddChromeSurfaceHit(window,new Rect(left,rowY,barWidthResults,Math.Max(1,Math.Min(pitch-2,bottom-rowY))),
+                    "search-result","Открыть: "+entry.S("title"),i);
                 bool hasFocus = selected == i && window.S("focus") == "body";
                 if (hasFocus)
                 {
@@ -679,7 +701,7 @@ namespace TouchTypingStudio
             double x = sidebar ? activityWidth + Math.Min(226, Math.Max(116, w * .20)) : activityWidth;
             DrawCodeActivity(window, activityWidth, h);
             if (sidebar) DrawCodeSidebar(window, activityWidth, x - activityWidth, h);
-            if (window.S("focus") == "changes" && DrawCodeWorkingDiff(window.D("sourceControl"), x, w - x, h))
+            if ((window.S("focus") == "changes" || window.S("focus") == "scm-message" || window.S("focus") == "scm-menu") && DrawCodeWorkingDiff(window.D("sourceControl"), x, w - x, h))
             {
                 Rectangle(0, h - 21, w, 21, CodeInset);
                 Text("Git · main", 11, h - 18, 11, CodeMuted, 94);
@@ -871,9 +893,27 @@ namespace TouchTypingStudio
             var terminal = scene.D("terminal");
             bool powershell = terminal.S("shell") == "powershell";
             Rectangle(0, 29, w, h - 29, powershell ? "#012456" : "#2B1028");
-            string output = string.Join("\n", terminal.Items("output").Select(line => line.Value()).Reverse().Take(13).Reverse());
-            Text(output, 16, 45, 13, powershell ? "#E7EFFB" : "#E4DCE6", w - 35, 14, true);
-            double y = Math.Min(h - 45, 72 + Math.Min(11, output.Split('\n').Length) * 20);
+            var output = terminal.Items("output").Select(line => line.Value()).ToArray();
+            bool checksum = output.Any(line => line.Split(' ').Any(part => part.Length == 64 && part.All(Uri.IsHexDigit)));
+            double y;
+            if (checksum)
+            {
+                var rows = new List<string>();
+                int cols = Math.Max(8,(int)((w-38) / Math.Max(1,SceneText("0",13,"#FFFFFF",true).WidthIncludingTrailingWhitespace)));
+                foreach (string line in output)
+                    if (line.Length == 0) rows.Add("");
+                    else for (int i=0;i<line.Length;i+=cols) rows.Add(line.Substring(i,Math.Min(cols,line.Length-i)));
+                int visible = Math.Max(0,(int)((h-88)/20));
+                var shown = rows.Skip(Math.Max(0,rows.Count-visible)).ToArray();
+                for(int i=0;i<shown.Length;i++) Text(shown[i],16,45+i*20,13,powershell ? "#E7EFFB" : "#E4DCE6",w-35,1,true);
+                y = Math.Min(h-45,52+shown.Length*20);
+            }
+            else
+            {
+                string text = string.Join("\n", output.Reverse().Take(13).Reverse());
+                Text(text,16,45,13,powershell ? "#E7EFFB" : "#E4DCE6",w-35,14,true);
+                y = Math.Min(h-45,72+Math.Min(11,text.Split('\n').Length)*20);
+            }
             if (terminal.B("followingLog"))
                 Text(terminal.B("logIncidentArrived") ? "Новая ошибка получена · просмотр продолжается" :
                     "Просмотр открыт · ожидаются новые записи", 16, y, 12, "#F1C77C", w - 32);

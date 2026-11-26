@@ -33,6 +33,7 @@ internal static partial class LiveCourse
         ProjectFileMissions(result);
         SourceHandoffMissions(result);
         DesktopFileSearchMissions(result);
+        EditorReleaseMissions(result);
         return result;
     }
 
@@ -46,7 +47,7 @@ internal static partial class LiveCourse
         {
             foreach (string token in RouteTokens(mission.Phases[phase]))
             {
-                if (!nativeEnglishInput && (IsCommandToken(token) || token is "disk-capacity-query" or "source-log-command" or "source-config-test" || IsProjectSearchQuery(token) || token is "browser-search" or "code-clone-command" or "research-find" or "file-name-commit" ||
+                if (!nativeEnglishInput && (token.StartsWith("release-find-", StringComparison.Ordinal) || token == "scm-commit" || token.StartsWith("delivery-", StringComparison.Ordinal) || IsCommandToken(token) || token is "disk-capacity-query" or "source-log-command" or "source-config-test" || IsProjectSearchQuery(token) || token is "browser-search" or "code-clone-command" or "research-find" or "file-name-commit" ||
                     NotebookEnglishToken(token) || token is "checkout-expect" or "terminal-incident-filter" or "code-rename-confirm" or "debug-unit" or "debug-report-check"
                     or "debug-project-query" or "debug-doc-submit" or "debug-rewrite" or "exact-find-submit" or "python-edit-write" or "python-edit-write-fee" or "python-edit-write-total" or "notebook-file" or "notebook-report" or "notebook-type" or "notebook-report-save" or "moved-report-save" ||
                     trial.ExactEdit && token is "quick-choose" or "save") && trial.Layout == "RU")
@@ -115,14 +116,16 @@ internal static partial class LiveCourse
     private static LabTask MakeTask(string token, LabScene scene)
     {
         token = scene.ResolveTabReviewToken(token);
+        if (token.StartsWith("delivery-", StringComparison.Ordinal)) return scene.DeliveryTask(token);
         if (scene.DiskSpaceLesson && scene.MakeDiskCapacityTask(token) is LabTask diskTask) return diskTask;
         if (token == "terminal-incident-filter")
             return new(scene.Terminal.IsPowerShell ? "command/powershell-incident" : "command/filter-incident",
                 "Покажите строки новой попытки из журнала", "",
                 "Возьмите ID из новой строки ERROR, подставьте его в показанную команду и нажмите Enter.",
                 scene.TerminalIncidentFilter, "command");
+        if (ReleaseTask(token, scene) is LabTask release) return release;
         if (scene.DescribeTracebackTask(token) is LabTask traceback) return traceback;
-        if (NotebookTask(token, scene) is LabTask notebook) return notebook;
+        if (NotebookTask(token, scene) is LabTask notebook) return scene.DescribeNotebookObjective(notebook);
         if (PythonEditTask(token) is LabTask edit) return edit.Action == "python-edit-write" ? edit with { Id = edit.Action } : edit;
         if (token == "checkout-expect") return new(token, "Найдите вызов checkout_total(4, 3) в тесте", "",
             "Введите выражение без обёртки assertEqual и нажмите Enter. Сверьте значение 14.",
@@ -170,6 +173,7 @@ internal static partial class LiveCourse
         if (IsPickerToken(token))
         {
             var w = scene.Active;
+            token = scene.ReleasePicker(token);
             string raw = scene.DesktopSearchTarget(scene.SourceRouteTarget(scene.FileRouteTarget(scene.ResolveBrowserRouteTarget(token[(token.IndexOf(':') + 1)..]))));
             string query = raw.Replace('_', ' ');
             var entry = scene.Entries(w).FirstOrDefault(item => item.Path == raw || item.Path.EndsWith("/" + raw, StringComparison.Ordinal) ||
@@ -181,8 +185,12 @@ internal static partial class LiveCourse
         if (IsCommandToken(token))
         {
             string value = DecodeCommand(token);
+            if (scene.BlockRepair && scene.Terminal.LegacyCheckoutStdout && value.EndsWith(" 2>&1", StringComparison.Ordinal)) value = value[..^5];
             string objective = value switch
             {
+                "cd " + LabScene.ReleaseRoot when scene.ReleasePractice => "Перейдите в репозиторий handoff для независимой проверки в терминале",
+                "git log --oneline" when scene.ReleasePractice => "Проверьте, что сообщение локального коммита появилось в истории",
+                "git status --short" when scene.ReleasePractice => "Проверьте, что личная заметка осталась вне коммита",
                 "pwd" => "Узнайте, в какой папке вы находитесь",
                 "ls" => "Посмотрите, что лежит в текущей папке",
                 "cd" => "Перейдите в домашнюю папку",
@@ -195,7 +203,7 @@ internal static partial class LiveCourse
                 "reboot" => "Перезапустите только учебную систему",
                 "cd " + LabScene.BlockRepairRoot when scene.BlockRepair => "Перейдите в папку checkout для запуска проверок",
                 "python3 -m unittest test_checkout" when scene.BlockRepair => "Запустите обе проверки сохранённого расчёта",
-                "python3 -m unittest test_checkout > " + LabScene.CheckoutReport when scene.BlockRepair => "Сохраните вывод проверок в checkout-test.txt",
+                "python3 -m unittest test_checkout > " + LabScene.CheckoutReport or "python3 -m unittest test_checkout > " + LabScene.CheckoutReport + " 2>&1" when scene.BlockRepair => "Сохраните вывод проверок в checkout-test.txt",
                 "cat " + LabScene.CheckoutReport when scene.BlockRepair => "Убедитесь, что файл содержит две пройденные проверки",
                 "grep ERROR app.log" when scene.PracticalTerminal => "Выведите только строки ERROR из app.log",
                 "tail -f app.log" when scene.PracticalTerminal => "Следите за новыми строками app.log",
@@ -203,7 +211,7 @@ internal static partial class LiveCourse
                 "Get-Content sync.log -Wait" when scene.PracticalTerminal => "Следите за новыми строками sync.log",
                 _ => "Выполните «" + value + "»"
             };
-            return new(CommandId(value), objective, "", !scene.BlockRepair && !scene.PracticalTerminal && value.Length > 12 ?
+            return new(CommandId(value), objective, "", !scene.BlockRepair && !scene.ReleasePractice && !scene.PracticalTerminal && value.Length > 12 ?
                 "Введите команду и нажмите Enter. Если она уже в истории: Ctrl+R, фрагмент, сверка строки, затем Enter." :
                 "Наберите команду целиком и нажмите Enter.", value, "command");
         }
@@ -258,12 +266,13 @@ internal static partial class LiveCourse
                 Hint = "Здесь Chrome откроет папку с выбранным файлом. Переименование делается в файловом менеджере." };
             if (item != null) return scene.DescribeDesktopSearchTask(task with { Title = (item.Kind == "download" ? "Скачайте" : "Откройте") + " «" + item.Title + "»" });
         }
-        return scene.DescribeDesktopSearchTask(scene.DescribeChecklistTask(scene.DescribeBlockTask(scene.DescribeSymbolTarget(task))));
+        return scene.DescribeDesktopSearchTask(scene.DescribeChecklistTask(scene.DescribeBlockTask(scene.DescribeSymbolTarget(scene.DescribeEditorContext(task)))));
     }
 
     private static bool Demonstrate(LabTask task, LabScene trial)
     {
         trial.DemonstrateTabReview(task);
+        if (trial.DemonstrateRelease(task) is bool release) return release;
         if (task.Action == "checkout-expect")
         {
             trial.Active.Input = task.Text;
@@ -347,6 +356,9 @@ internal static partial class LiveCourse
     {
         var w = scene.Active;
         string app = w?.App ?? "", action = task.Action;
+        if (scene.ReleaseEvidence(task, equivalentCommand) is object release) return JsonSerializer.Serialize(release);
+        if (task.Id.StartsWith("command/delivery-", StringComparison.Ordinal))
+            return JsonSerializer.Serialize(scene.Terminal.DeliveryProof(task.Id, equivalentCommand));
         if (scene.DiskCapacityEvidence(task) is object disk) return JsonSerializer.Serialize(disk);
         if (scene.DesktopFileSearchEvidence(task) is object desktopSearch) return JsonSerializer.Serialize(desktopSearch);
         if (scene.GuideNoteEvidence(task) is object note) return JsonSerializer.Serialize(note);

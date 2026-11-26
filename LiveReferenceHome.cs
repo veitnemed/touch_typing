@@ -431,8 +431,8 @@ namespace TouchTypingStudio
                 app == "windows" ? "Работа в Windows 10: Пуск, окна, задачи и рабочие столы." :
                 app == "chrome" ? "Эффективная работа в браузере без мыши." :
                 app == "code" ? "Навигация, редактирование и управление проектом." :
-                app == "terminal" ? (labDesktopProfile == "windows" ? "Windows PowerShell: отбор строк и просмотр живого журнала." :
-                    "Ubuntu Bash: поиск сбоя и просмотр живого журнала.") :
+                app == "terminal" ? (labDesktopProfile == "windows" ? "PowerShell: копии, загрузки и свободное место." :
+                    "Ubuntu Bash: копии, загрузки и свободное место.") :
                 "Реальные сценарии: переключение, поиск, организация.";
             var secondary = ReferenceLabel(summary, 17, ReferenceMuted, false);
             secondary.Margin = new Thickness(0, 6, 0, 0);
@@ -487,7 +487,7 @@ namespace TouchTypingStudio
             AutomationProperties.SetName(button, title + ". " + summary + " Прогресс: " + percent + "%.");
             AutomationProperties.SetAutomationId(button, "HomeClass-" + app);
             button.ToolTip = "Подтверждено сочетаний в текущей раскладке: " + completed + " из " + total +
-                ". Открыть тренировку." + (app == "terminal" ? " Одно поручение без таймера." : " Если нет черновика: 40 действий без таймера.");
+                ". Открыть тренировку. Если нет черновика: 40 действий без таймера.";
             return button;
         }
 

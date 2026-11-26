@@ -68,7 +68,7 @@ internal static partial class LiveUiSmoke
     private static void MixedStep(uint thread, string atom, string group)
     {
         int before = MixedCount();
-        if (atom[0] == '⟦') Chord(atom.Substring(1, atom.Length-2));
+        if (atom[0] == '⟦') Chord(atom.Substring(1, atom.Length-2).Replace("Win+", "Super+"));
         else
         {
             bool ru = group == "RU";
@@ -260,15 +260,22 @@ internal static partial class LiveUiSmoke
             MixedChoose("SystemHotkeys");
             MixedLandmark("wpf-system-typing-start");
             var captured = new HashSet<string>(StringComparer.Ordinal);
-            for (int i = 0; i < 9; i++)
+            for (int i = 0; i < 11; i++)
             {
                 string atom = MixedAtom();
                 Check(atom.StartsWith("⟦", StringComparison.Ordinal), "system mode has only physical chords");
                 captured.Add(atom.Trim('⟦', '⟧'));
+                if (atom == "⟦Win+Alt+1⟧")
+                {
+                    int before = MixedCount();
+                    Chord("Alt+1"); Chord("Super+1"); Wait(100);
+                    Check(MixedCount() == before && GetForegroundWindow() == trainer,
+                        "partial taskbar gestures neither score nor leave the protected foreground");
+                }
                 MixedStep(thread, atom, MixedLayoutTitle());
                 Check(GetForegroundWindow() == trainer, "system gesture remains inside the trainer: " + atom);
             }
-            Check(captured.Contains("Super+E") && captured.Contains("Alt+Tab") && !captured.Contains("Super+H"),
+            Check(captured.Contains("Win+E") && captured.Contains("Win+Alt+1") && captured.Contains("Win+I") && captured.Contains("Alt+Tab") && !captured.Contains("Win+H"),
                 "native Windows typing recognizes Win+E and Alt+Tab and does not assign speech hotkey");
             int beforeFocus = MixedCount();
             FocusMixedNumLockProbe();
@@ -279,8 +286,20 @@ internal static partial class LiveUiSmoke
             Until(delegate { return !MixedPaused(); }, "explicit F8 resumes system Typing");
             MixedStep(thread, MixedAtom(), MixedLayoutTitle());
             MixedLandmark("wpf-system-typing-credited");
+            while (MixedCount() < 43) MixedStep(thread, MixedAtom(), MixedLayoutTitle());
+            string finalSystem = MixedAtom().Trim('⟦', '⟧').Replace("Win+", "Super+");
+            Chord(finalSystem);
+            Until(delegate { return Visible("TypingStartReview"); }, "system errors offer a corrective exercise");
+            Invoke("TypingStartReview");
+            Until(delegate { return Visible("TypingCount"); }, "captured correction opened");
+            Check(MixedCount() == 0 && MixedAtom() == "⟦Win+Alt+1⟧", "only the missed gesture is in the generated exercise");
+            MixedStep(thread, MixedAtom(), MixedLayoutTitle());
+            FocusMixedNumLockProbe(); Until(MixedPaused, "captured correction pauses when focus leaves");
+            Focus(); Key("F8"); Until(delegate { return !MixedPaused(); }, "correction reacquires capture on resume");
+            MixedStep(thread, MixedAtom(), MixedLayoutTitle());
+            Check(MixedCount() == 2 && GetForegroundWindow() == trainer, "capture does not leak taskbar action");
             Key("Esc");
-            Until(delegate { return Visible("TypingChoose"); }, "system Typing stops normally");
+            Until(delegate { return Visible("TypingChoose"); }, "captured corrective exercise can be suspended");
             Console.WriteLine("PASS " + count + " real WPF mixed checks; isolated profile, real HKLs, SendInput scan codes (no claim of physical laptop test).");
             return 0;
         }

@@ -5,6 +5,6 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="TerminalRegression.cs;../engine/VirtualTerminal.cs;../engine/VirtualPowerShell.cs;../engine/VirtualTerminalStorage.cs" />
+    <Compile Include="TerminalRegression.cs;../engine/VirtualTerminal.cs;../engine/VirtualPowerShell.cs;../engine/VirtualTerminalStorage.cs;../engine/VirtualTerminalDelivery.cs" />
   </ItemGroup>
 </Project>

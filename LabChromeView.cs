@@ -157,12 +157,18 @@ namespace TouchTypingStudio
                         selected ? "#F2F2F2" : "#BCBCBC",tabWidth-55*unit);
                 }
                 else DrawChromeSiteMark(tabs[index].S("url"),position+6*unit,13*unit,15*unit,"#B7BABC",tone);
-                DrawChromeMark("close",position+tabWidth-19*unit,14*unit,12*unit,selected ? "#E7E7E7" : "#BCBCBE",tone);
+                if (tabs.Length > 1)
+                {
+                    AddChromeSurfaceHit(window,new Rect(position+tabWidth-24*unit,6*unit,23*unit,tabsHeight-7*unit),
+                        "close-tab","Закрыть вкладку: "+tabs[index].S("title","Новая вкладка"),index);
+                    DrawChromeMark("close",position+tabWidth-19*unit,14*unit,12*unit,selected ? "#E7E7E7" : "#BCBCBE",tone);
+                }
             }
             double plus = left+tabWidth*count+4*unit;
             if (plus+28*unit <= w-controls+8*unit)
             {
                 Rounded(plus,7*unit,28*unit,28*unit,"#646464",14*unit);
+                AddChromeSurfaceHit(window,new Rect(plus,7*unit,28*unit,28*unit),"new-tab","Новая вкладка · Ctrl+T");
                 DrawChromeMark("plus",plus+6*unit,13*unit,16*unit,ChromeText,"#646464");
             }
             bool win10 = scene.S("desktopStyle") == "win10";
@@ -170,19 +176,22 @@ namespace TouchTypingStudio
             for (int index = 0; index < controlsIcons.Length; index++)
             {
                 double cx = w-(90-32*index)*unit;
-                DrawChromeMark(controlsIcons[index],cx,13*unit,16*unit,ChromeText,ChromeTray);
+                if (win10) WindowsCaptionMark(controlsIcons[index],cx,13*unit,16*unit,ChromeText);
+                else DrawChromeMark(controlsIcons[index],cx,13*unit,16*unit,ChromeText,ChromeTray);
                 if (win10) AddWindowsCaptionHit(window, index, new Rect(cx-8*unit, 0, 32*unit, tabsHeight));
             }
 
             double nav = tabsHeight;
             Rectangle(0,nav,w,navHeight,ChromeStrap);
-            string[] navIcons = w >= 460 ? new[] {"back","forward","refresh","home"} : new[] {"back","refresh"};
+            string[] navIcons = w >= 460 ? new[] {"back","forward","refresh","home"} : w >= 300 ? new[] {"back","forward","refresh"} : new[] {"back","refresh"};
             for (int index = 0; index < navIcons.Length; index++)
             {
-                bool enabled = navIcons[index] != "back" || window.B("canGoBack");
+                string action = navIcons[index];
+                bool enabled = action == "back" ? window.B("canGoBack") : action != "forward" || window.B("canGoForward");
                 DrawChromeMark(navIcons[index],(16+index*35)*unit,nav+13*unit,16*unit,enabled?ChromeIcon:"#757773");
-                if (navIcons[index] == "back" && enabled)
-                    AddChromeSurfaceHit(window,new Rect(7*unit,nav+4*unit,33*unit,34*unit),"back","Назад · Alt+←");
+                if (enabled)
+                    AddChromeSurfaceHit(window,new Rect((7+index*35)*unit,nav+4*unit,33*unit,34*unit),action,
+                        action == "back" ? "Назад · Alt+←" : action == "forward" ? "Вперёд · Alt+→" : action=="home" ? "Учебная начальная страница" : "Обновить · Ctrl+R");
             }
             bool roomy = w >= 840, editing = window.S("focus") == "url" && window.B("active",true);
             double x = (19+35*navIcons.Length)*unit, right = (roomy ? 145 : 52)*unit;
@@ -215,9 +224,11 @@ namespace TouchTypingStudio
             var saved = window.Items("savedBookmarks").Select(item => item.Value()).ToArray();
             if (addressWidth >= 90*unit)
             {
+                AddChromeSurfaceHit(window,new Rect(x+addressWidth-31*unit,nav+5*unit,29*unit,34*unit),"bookmark","Сохранить в закладки · Ctrl+D");
                 if (saved.Contains(url)) Text("★",x+addressWidth-24*unit,nav+9*unit,17*unit,ChromeFocus,19*unit);
                 else DrawChromeMark("star",x+addressWidth-24*unit,nav+14*unit,16*unit,ChromeIcon,dark);
             }
+            AddChromeSurfaceHit(window,new Rect(w-(roomy?136:47)*unit,nav+4*unit,26*unit,34*unit),"downloads","Загрузки · Ctrl+J");
             DrawChromeMark("download",w-(roomy?131:42)*unit,nav+12*unit,18*unit,ChromeIcon);
             if (roomy)
             {

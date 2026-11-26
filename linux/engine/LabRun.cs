@@ -23,6 +23,7 @@ internal sealed partial class LabRun
     private const string NativeLayoutEvent = "@native-layout";
     private const string SimulatedWindowSwitchEvent = "@simulated-window-switch", TerminalHistoryEvent = "@terminal-reverse-search";
     private const string ExactUrlEvent = "@exact-url", ExactQuickOpenEvent = "@exact-quick-open";
+    private const string OrdinaryChromeSearchEvent = "@ordinary-chrome-search";
     private const string ChromeHistoryEvent = "@chrome-history-filter", ChromeHistoryPointerEvent = "@chrome-history-pointer";
     private const string ChromeTabSearchEvent = "@chrome-tab-search", ChromeTabPointerEvent = "@chrome-tab-pointer";
     private const string StrictReportEvent = "@strict-report";
@@ -36,6 +37,7 @@ internal sealed partial class LabRun
         ExplorerPointerEvent = "@explorer-pointer";
     private bool replayLegacyNotebookWordErase, replayLegacyCsvExplorer;
     private bool replayLegacyExplorerTargetGuard;
+    private readonly bool restoreLegacyCheckout, restoreLegacyTerminalCourse;
     private const string ExplorerTargetGuardEvent = "@explorer-target-guard-v1";
     private const string CsvExplorerScopeEvent = "@csv-explorer-scope";
     private const string StrictTriggersEvent = "@strict-triggers";
@@ -50,7 +52,7 @@ internal sealed partial class LabRun
     private bool initialVirtual;
     internal bool HasDraft => !CompletedRoute && !limitAccepted && (!ReachedLimit || softFinish || FinishingMission) &&
         (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 ||
-        trace.Any(item => item.Key is not (ChromeTabSearchEvent or ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent or DesktopFileSearchEvent or WindowsRecoveryScopeEvent or ExplorerTargetGuardEvent)));
+        trace.Any(item => item.Key is not (OrdinaryChromeSearchEvent or ChromeTabSearchEvent or ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent or DesktopFileSearchEvent or WindowsRecoveryScopeEvent or ExplorerTargetGuardEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask, inputAtActiveMilliseconds;
@@ -130,7 +132,7 @@ internal sealed partial class LabRun
         missionId?.StartsWith("code-project-file-", StringComparison.Ordinal) == true;
     private bool CompletedRoute => !restoring && mission != null && pending.Count == 0 &&
         (FinishingMission || softFinish && ReachedLimit || RouteKind == LiveRoutePolicy.Mission ||
-            IsCourse && LiveCourse.PracticalTerminalMission(mission.Id) ||
+            restoreLegacyTerminalCourse && LiveCourse.PracticalTerminalMission(mission.Id) ||
             !IsCourse && (finishSingleRoute || mission.Curated && (EnvironmentProfile != "windows" && !IsEssentials(mission.Id) && !JoinsTimedRotation(mission.Id) || TimeLimit == 0 && ActionLimit == 0))
                 && mission.FinishAfterRoute);
     private bool PendingLimitChoice => softFinish && !restoring && ReachedLimit &&

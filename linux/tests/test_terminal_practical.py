@@ -22,7 +22,8 @@ def options(desktop="ubuntu", **extra):
 
 
 def begin(engine, desktop, seed):
-    engine.call("lab-start", **options(desktop, seed=seed))
+    engine.call("lab-start", **options(desktop, seed=seed, routeKind="mission",
+        mission="terminal-powershell-diagnostic" if desktop == "windows" else PRACTICAL))
     return engine.call("lab-resume")
 
 

@@ -82,7 +82,7 @@ namespace TouchTypingStudio
             dc.DrawGeometry(Ui.Brush("#244AB3F3"), null, WindowsLight);
             dc.DrawGeometry(Ui.Brush("#642DCEFF"), new Pen(Ui.Brush("#9AF3FF"), 1.4), WindowsPanes);
 
-            Icon("files", 23, 29, 31);
+            WindowsAppIcon("files", 23, 29, 31);
             Text("Проводник", 14, 67, 12, "#F4F9FF", 85);
             var all = scene.Items("windows").Where(w => w.S("state") != "closed").ToArray();
             var current = all.Where(w => w.I("workspace") == scene.I("workspace")).ToArray();
@@ -138,18 +138,33 @@ namespace TouchTypingStudio
             else DrawFiles(window, bounds.Width, bounds.Height);
             Rectangle(0, 0, bounds.Width, 29, window.B("active") ? "#F4F8FC" : "#DCE4EE");
             if (app == "files") FilesGlyph("folder", 12, 8, true);
-            else Icon(app, 10, 5, 18);
+            else WindowsAppIcon(app, 10, 5, 18);
             Text(app == "files" ? FilesCaption(window, true) : window.S("title", AppTitle(app)),
                 36, 6, 13, "#152438", Math.Max(10, bounds.Width - 170));
             for (int i = 0; i < 3; i++)
             {
                 double left = bounds.Width - 108 + i * 36;
-                DrawChromeMark(WindowsCaptionIcon(window, i), left + 10, 6, 16, "#152438");
+                WindowsCaptionMark(WindowsCaptionIcon(window, i),left+10,6,16,"#152438");
                 AddWindowsCaptionHit(window, i, new Rect(left, 0, 36, 29));
             }
             context.DrawRectangle(null, new Pen(Ui.Brush(window.B("active") ? "#42A5E2" : "#798B9F"), 1),
                 new Rect(.5, .5, bounds.Width - 1, bounds.Height - 1));
             context.Pop(); context.Pop();
+        }
+
+        private void WindowsCaptionMark(string kind,double x,double y,double size,string ink)
+        {
+            double s=size/16;
+            Action<double,double,double,double> bar=(u,v,w,h)=>Rectangle(x+u*s,y+v*s,w*s,h*s,ink);
+            if (kind=="close") { DrawChromeMark(kind,x,y,size,ink); return; }
+            if (kind=="min") { bar(3,8,10,1); return; }
+            int left=3, top=3, n=10;
+            if (kind=="restore")
+            {
+                bar(5,2,9,1); bar(13,2,1,9); bar(11,10,2,1); bar(5,2,1,3);
+                left=2; top=5; n=9;
+            }
+            bar(left,top,n,1); bar(left,top+n-1,n,1); bar(left,top,1,n); bar(left+n-1,top,1,n);
         }
 
         private static string WindowsCaptionIcon(Data window, int index)
@@ -180,13 +195,46 @@ namespace TouchTypingStudio
                 var running = windows.Where(w => w.S("app") == apps[i]).ToArray();
                 if (running.Any(w => w.B("active") && w.S("state") != "minimized" && !scene.B("showDesktop")))
                     Rectangle(x - 7, WindowsWorkHeight + 2, 40, 40, "#354860");
-                Icon(apps[i], x, WindowsWorkHeight + 9, 25);
+                WindowsAppIcon(apps[i], x, WindowsWorkHeight + 9, 25);
                 AddNotebookHit(new Rect(x-7, WindowsWorkHeight, 40, HeightUnits-WindowsWorkHeight),
                     ExplorerPrefix + "desktop-taskbar", AppTitle(apps[i]), path: apps[i]);
                 if (running.Length > 0) Rectangle(x, HeightUnits - 3, 25, 2, "#65C7FF");
             }
             Text(scene.S("layout", "EN") + "     ▰    ›", 1080, WindowsWorkHeight + 11, 13, "#FFFFFF");
             Rectangle(1193, WindowsWorkHeight, 1, 44, "#5E768A");
+        }
+
+        // Original compact training artwork, the same coordinates and colors as
+        // win_shell_glyph on GTK. No dependency on a Windows/Linux system icon font.
+        private static readonly Geometry[][] WindowsShellPaths = {
+            new[] { Geometry.Parse("M1,7L4,5 18,15 18,23Z"), Geometry.Parse("M1,17L17,2 20,1 22,2 18,10 4,19Z"), Geometry.Parse("M17,2L20,1 23,3 23,21 19,23 17,22Z") },
+            new[] { Geometry.Parse("M1,5L9,5 12,8 22,8 22,20 1,20Z"),Geometry.Parse("M3,8H21V18H3Z"),Geometry.Parse("M1,10H23L22,21H2Z"),Geometry.Parse("M6,16H18V19H6Z") },
+            new[] { Geometry.Parse("M9,2H15V12H21L12,22 3,12H9Z") },
+            new[] { Geometry.Parse("M1,3H23V17H13V19H19V21H5V19H11V17H1Z"),Geometry.Parse("M3,5H21V14H3Z") }
+        };
+        private static readonly string[][] WindowsShellColors = {
+            new[] { "#2489CA","#1679B8","#36AAF2" },new[] {"#DF9B30","#FFF0B1","#F9CB58","#2784C3"},
+            new[] { "#279586" },new[] { "#287CB6","#86C7F2" }
+        };
+
+        private void WindowsShellGlyph(int index,double x,double y,double size)
+        {
+            context.PushTransform(new TranslateTransform(x,y));
+            context.PushTransform(new ScaleTransform(size/24,size/24));
+            for (int i=0;i<WindowsShellPaths[index].Length;i++) context.DrawGeometry(Ui.Brush(WindowsShellColors[index][i]),null,WindowsShellPaths[index][i]);
+            context.Pop(); context.Pop();
+        }
+
+        private void WindowsAppIcon(string app,double x,double y,double size)
+        {
+            if (app=="files") WindowsShellGlyph(1,x,y,size);
+            else if (app=="code" || app=="vscode") WindowsShellGlyph(0,x,y,size);
+            else if (app=="terminal")
+            {
+                Rounded(x,y+.12*size,size,.77*size,"#0C1520",2);
+                Text(">_",x+.14*size,y+.12*size,.58*size,"#DCEAFE");
+            }
+            else Icon(app,x,y,size);
         }
 
         private void WindowsMark(double x, double y, double size)
@@ -210,7 +258,7 @@ namespace TouchTypingStudio
             {
                 double y = WindowsWorkHeight - 242 + i * 43;
                 if (i == selected) Rectangle(11, y - 3, 365, 39, "#306294");
-                Icon(apps[i], 21, y, 29);
+                WindowsAppIcon(apps[i], 21, y, 29);
                 Text(AppTitle(apps[i]), 67, y + 5, 15, "#FFFFFF", 299);
             }
         }
@@ -248,7 +296,7 @@ namespace TouchTypingStudio
                 double y = (snap ? 81 : 151) + (i / (snap ? 2 : 3)) * 135;
                 double w = snap ? 257 : 337;
                 Rounded(x, y, w, 114, i == selected ? "#3079AC" : "#314760", 7);
-                Icon(candidates[i].S("app"), x + 17, y + 18, 28);
+                WindowsAppIcon(candidates[i].S("app"), x + 17, y + 18, 28);
                 Text(candidates[i].S("title"), x + 55, y + 20, 14, "#F0F8FF", w - 70);
             }
         }

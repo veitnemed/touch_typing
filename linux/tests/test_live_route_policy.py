@@ -22,7 +22,7 @@ TERMINAL_POWERSHELL = "terminal-powershell-diagnostic"
 
 
 def terminal_course(desktop):
-    return TERMINAL_POWERSHELL if desktop == "windows" else TERMINAL_PRACTICAL
+    return "terminal-delivery-sync-" + ("ps" if desktop == "windows" else "bash")
 
 BASE_START = {
     "ubuntu": ("ubuntu-start", "ubuntu-research", "ubuntu-briefing"),
@@ -60,6 +60,10 @@ def advance(e, s):
     task = s["task"]
     before = s["solved"]
     key = task["keys"]
+    if task["id"] == "disk-capacity-verdict":
+        from test_terminal_disk_space import visible_capacity
+        needed, free = visible_capacity(s["scene"]["terminal"]["output"], s["desktopProfile"] == "windows")
+        return chord(e, "2" if free >= needed else "1")
     if task["id"] == "project-search-submit":
         enter(e, task["text"])
     if key:
@@ -154,14 +158,17 @@ class LiveRoutePolicyTests(unittest.TestCase):
                             limits = {} if level == 0 else {"actionLimit": 100}
                             s = begin(e, app, level, desktop, **limits)
                             self.assertEqual((s["mission"], s["routeKind"], s["timeLimit"], s["actionLimit"]),
-                                             (first, "course", 0, limits.get("actionLimit", 0 if app == "terminal" else 40)))
+                                             (first, "course", 0, limits.get("actionLimit", 40)))
                             start_length = s["scenarioLength"]
                             if app == "terminal":
-                                for _ in range(start_length):
-                                    s = advance(e, s)
-                                self.assertEqual((s["solved"], s["finished"]), (4, True))
-                                self.assertTrue(e.call("lab-result")["completed"])
-                                observations.append(f"{desktop}/{app}/{level}: {first}(4), цель выполнена без повторов")
+                                ids |= {m["id"] for m in catalog["missions"] if m["app"] == "terminal"
+                                        and m["desktopProfile"] == desktop}
+                                seen = {first}
+                                for _ in range(30):
+                                    s = advance(e, s); seen.add(s["mission"])
+                                self.assertEqual((s["solved"], s["finished"]), (30, False))
+                                self.assertTrue(seen <= ids and len(seen) >= 5, seen)
+                                observations.append(f"{desktop}/{app}/{level}: {first} → {s['mission']}, 30 квитанций")
                                 return
                             visited = [first]
                             for _ in range(max(30, start_length + 1)):
@@ -230,7 +237,7 @@ class LiveRoutePolicyTests(unittest.TestCase):
                         self.assertTrue(e.call("lab-stop")["saved"])
                         fresh = begin(e, app, desktop=profile)
                         self.assertNotEqual(fresh["mission"], old)
-                        self.assertEqual((fresh["solved"], fresh["actionLimit"]), (0, 0 if app == "terminal" else 40))
+                        self.assertEqual((fresh["solved"], fresh["actionLimit"]), (0, 40))
                         self.assertFalse(fresh["mission"].startswith(("code-notebook-", "code-project-file-", "terminal-essentials-")))
                         advance(e, fresh)
                         self.assertTrue(e.call("lab-stop")["saved"])

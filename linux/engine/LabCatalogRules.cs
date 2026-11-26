@@ -8,6 +8,7 @@ internal static partial class LabCatalog
 {
     internal static bool Available(LabTask task, LabScene scene)
     {
+        if (task.Id.StartsWith("scm-", StringComparison.Ordinal)) return scene.GitActionAvailable(task.Action);
         if (task.Id.StartsWith("win-", StringComparison.Ordinal)) return scene.WindowsActionAvailable(task.Action);
         if (scene.ChromeTabActionAvailable(task.Action) is bool tabAvailable) return tabAvailable;
         var window = scene.Active;

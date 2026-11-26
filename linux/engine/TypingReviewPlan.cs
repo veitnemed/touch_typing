@@ -19,13 +19,13 @@ internal sealed record ReviewDeck(TypingAtom[] Units, int[] GroupEnds)
 
     // Groups are visual only. A separator is never an extra action, never the
     // next expected unit, and never changes the physical command identity.
-    internal string Ribbon(int start, int end, bool separatorAfterEnd = false)
+    internal string Ribbon(int start, int end, bool windows, bool separatorAfterEnd = false)
     {
         var buffer = new StringBuilder();
         for (int i = start; i < end; i++)
         {
             if (i > start && Array.BinarySearch(GroupEnds, i) >= 0) buffer.Append("   ");
-            buffer.Append(Units[i].Display);
+            buffer.Append(Units[i].DisplayFor(windows));
         }
         if (separatorAfterEnd && end > 0 && end < Units.Length && Array.BinarySearch(GroupEnds, end) >= 0) buffer.Append("   ");
         return buffer.ToString();

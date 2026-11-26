@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<StudioProfile xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <Configured>false</Configured>
+  <F2Seen>false</F2Seen>
+  <ShowKeys>false</ShowKeys>
+  <ShowHands>false</ShowHands>
+  <LiveShowKeys>false</LiveShowKeys>
+  <LiveShowHands>false</LiveShowHands>
+  <ShowMistakeKey>true</ShowMistakeKey>
+  <KeyboardProfile>matebook-d16</KeyboardProfile>
+  <FnMode>hotkeys</FnMode>
+  <RightHandChord>true</RightHandChord>
+  <SelectedLesson>home-motion</SelectedLesson>
+  <PythonLesson>home-motion</PythonLesson>
+  <AdaptivePythonLevel>0</AdaptivePythonLevel>
+  <PracticeSets />
+  <PracticeRecords />
+  <TypingModeBests />
+  <Shortcuts />
+  <ShortcutHistory />
+  <LiveDrafts>
+    <LiveDraft>
+      <App>chrome</App>
+      <Mission>chrome-reader</Mission>
+      <Layout>EN</Layout>
+      <Guidance>guided</Guidance>
+      <Trace>[{"Key":"@exact-url","Down":false,"Text":"","NativeEnglish":false},{"Key":"@exact-quick-open","Down":false,"Text":"","NativeEnglish":false},{"Key":"@terminal-reverse-search","Down":false,"Text":"","NativeEnglish":false},{"Key":"@chrome-history-filter","Down":false,"Text":"","NativeEnglish":false},{"Key":"@chrome-tab-search","Down":false,"Text":"","NativeEnglish":false},{"Key":"@strict-report","Down":false,"Text":"","NativeEnglish":false},{"Key":"@cluster-navigation","Down":false,"Text":"","NativeEnglish":false},{"Key":"@line-editing","Down":false,"Text":"","NativeEnglish":false},{"Key":"@python-editing","Down":false,"Text":"","NativeEnglish":false},{"Key":"@notebook-actions-v2","Down":false,"Text":"","NativeEnglish":false},{"Key":"@strict-triggers","Down":false,"Text":"","NativeEnglish":false},{"Key":"@desktop-file-search","Down":false,"Text":"","NativeEnglish":false},{"Key":"@chrome-surface-pointer","Down":false,"Text":"window-1:address:-1","NativeEnglish":false},{"Key":"X","Down":true,"Text":"r","NativeEnglish":false},{"Key":"X","Down":false,"Text":"","NativeEnglish":false},{"Key":"X","Down":true,"Text":"e","NativeEnglish":false},{"Key":"X","Down":false,"Text":"","NativeEnglish":false},{"Key":"X","Down":true,"Text":"p","NativeEnglish":false},{"Key":"X","Down":false,"Text":"","NativeEnglish":false},{"Key":"X","Down":true,"Text":"o","NativeEnglish":false},{"Key":"X","Down":false,"Text":"","NativeEnglish":false},{"Key":"X","Down":true,"Text":"r","NativeEnglish":false},{"Key":"X","Down":false,"Text":"","NativeEnglish":false},{"Key":"X","Down":true,"Text":"t","NativeEnglish":false},{"Key":"X","Down":false,"Text":"","NativeEnglish":false},{"Key":"Enter","Down":true,"Text":"","NativeEnglish":false},{"Key":"Enter","Down":false,"Text":"","NativeEnglish":false}]</Trace>
+      <LayoutKey>Super+Space</LayoutKey>
+      <ProjectFixture>task-list/v1</ProjectFixture>
+      <DesktopEnvironment>ubuntu</DesktopEnvironment>
+      <Dock>
+        <string>chrome</string>
+        <string>code</string>
+        <string>terminal</string>
+        <string>files</string>
+      </Dock>
+      <Level>0</Level>
+      <Variant>0</Variant>
+      <VirtualLayout>false</VirtualLayout>
+      <NativeEnglishInput>true</NativeEnglishInput>
+      <EditorCourse>false</EditorCourse>
+      <RouteKind>course</RouteKind>
+      <AdaptiveGuide>false</AdaptiveGuide>
+      <CoachStage />
+      <CoachReason />
+      <Progress>
+        <Session>00dfab1d154042cfba6bdd8e8f0d5756</Session>
+        <Mode>sandbox</Mode>
+        <Series>[]</Series>
+        <Revision>087329814dd7446ba14f6ec3c5c5d71a</Revision>
+        <TimeLimit>0</TimeLimit>
+        <ActionLimit>40</ActionLimit>
+        <Solved>0</Solved>
+        <Errors>0</Errors>
+        <SimulatedWindowSwitches>0</SimulatedWindowSwitches>
+        <ActiveMilliseconds>100</ActiveMilliseconds>
+        <LimitDecisionPending>false</LimitDecisionPending>
+        <FinishingMission>false</FinishingMission>
+      </Progress>
+    </LiveDraft>
+  </LiveDrafts>
+  <LabSessions />
+  <LabRecords />
+  <TypingCourse>5</TypingCourse>
+  <CardX>NaN</CardX>
+  <CardY>NaN</CardY>
+  <Drafts />
+  <GoodPasses />
+  <CompletedRoutes />
+  <TypingReviews />
+  <Results />
+  <KeyHistory />
+  <Notes />
+  <RecallDates />
+  <RouteResults />
+  <Training>
+    <Accuracy>95</Accuracy>
+    <GuidedRounds>2</GuidedRounds>
+    <FadeFrom>55</FadeFrom>
+    <FirstDays>1</FirstDays>
+    <LaterDays>3</LaterDays>
+    <SurvivalErrors>3</SurvivalErrors>
+    <ReduceMotion>false</ReduceMotion>
+  </Training>
+  <Motor />
+  <Records />
+  <Awards />
+  <StableKeys />
+  <Exams />
+  <ProgressionVersion>1</ProgressionVersion>
+  <ChallengeStart>0001-01-01T00:00:00</ChallengeStart>
+  <ChallengeMinutes>45</ChallengeMinutes>
+  <ChallengePlan />
+  <ChallengeNotes />
+</StudioProfile>

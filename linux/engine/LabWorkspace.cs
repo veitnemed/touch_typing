@@ -42,8 +42,10 @@ internal sealed partial class LabScene
             "chrome://bookmarks" => w.SavedBookmarks.Order().Select(PageEntry).ToArray(),
             _ when IsTabReviewUrl(w.Url) => [],
             _ when BrowserPracticeActive && IsSearchResult(w.Url) => PracticeSearchEntries(w.Url),
+            _ when !LegacyOrdinarySearch && IsSearchResult(w.Url) => OrdinarySearchEntries(w.Url),
+            "about:blank" or SearchHome when !LegacyOrdinarySearch => [],
             _ when BulletinWorkflow => BulletinLinks(w.Url),
-            _ when BrowserPracticeActive => BrowserResearchLinks(w.Url),
+            _ when BrowserPracticeActive || !LegacyOrdinarySearch && ResearchPage(w.Url) != null => BrowserResearchLinks(w.Url),
             _ => Links
         };
         if (w.App == "code" && w.Focus is "explorer" or "file-name") return ProjectTree(EditorProjectRoot, w.ExpandedProjectFolders).ToArray();
@@ -73,7 +75,7 @@ internal sealed partial class LabScene
 
     private readonly Dictionary<string, string> originalFiles = [];
     internal string EditorLessonRelativePath(string path) => path.StartsWith(EditorProjectRoot + "/", StringComparison.Ordinal) ? path[(EditorProjectRoot.Length + 1)..] : path;
-    private string EditorProjectRoot => NotebookCourse ? NotebookRoot : RepoCloned ? CloneRoot : ExactEdit ? ExactRoot : BlockRepair ? BlockRepairRoot : PythonEditingExercise ? PythonEditRoot : DiagnosticWorkspace ? DiagnosticRoot : SearchProjectRoot ?? (symbolWorkspace ? SymbolProject : Project);
+    private string EditorProjectRoot => ReleasePractice ? ReleaseRoot : NotebookCourse ? NotebookRoot : RepoCloned ? CloneRoot : ExactEdit ? ExactRoot : BlockRepair ? BlockRepairRoot : PythonEditingExercise ? PythonEditRoot : DiagnosticWorkspace ? DiagnosticRoot : SearchProjectRoot ?? (symbolWorkspace ? SymbolProject : Project);
     private IEnumerable<string> ProjectDocuments() => projectFileFamily != null || ContextHandoffActive || NotebookCourse ?
         ProjectTree(EditorProjectRoot, null, recursive: true).Where(e => e.Kind == "file").Select(e => e.Path) : DebugDay ? DebugProjectDocuments() :
         DiagnosticWorkspace ? Terminal.Entries(DiagnosticRoot).Where(path => !Terminal.DirectoryExists(path)) :
@@ -101,33 +103,16 @@ internal sealed partial class LabScene
             sourceControl: w.App == "code" && w.View == "changes" ? SourceControlSnapshot(w, paths, Relative) : null);
     }
 
-    // Model the local working tree against the lesson's starting files rather
-    // than against open tabs. Unsaved edits are deliberately not files in Git.
-    private sealed record SourceChange(string Path, string State, string Before, string After);
-    private SourceChange[] SourceControlFiles(string[] current)
-    {
-        var root = (DebugDay ? debugDay.Root : EditorProjectRoot) + "/";
-        return current.Concat(originalFiles.Keys.Where(path => path.StartsWith(root, StringComparison.Ordinal)))
-            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).Select(path =>
-            {
-                bool existed = originalFiles.TryGetValue(path, out var previous);
-                string saved = Terminal.ReadFile(path);
-                return previous == saved ? null : new SourceChange(path, !existed ? "U" : saved == null ? "D" : "M", previous, saved);
-            }).Where(row => row != null).ToArray();
-    }
-
     private object SourceControlSnapshot(LabWindow window, string[] current, Func<string, string> relative)
     {
         var states = SourceControlFiles(current);
-        int selected = window.Item;
-        if (selected < 0 || selected >= states.Length)
-        {
-            selected = Array.FindIndex(states, state => state.Path == window.Url);
-            if (selected < 0 && states.Length > 0) selected = 0;
-        }
-        var files = states.Select((state, index) => new { path = relative(state.Path), state.State,
-            diff = CompareWorkingLines(state.Before, state.After), rows = selected == index ? AlignWorkingLines(state.Before, state.After) : null });
-        return new { branch = "main", changes = files, selected };
+        int selected = SelectedChange(window, states);
+        var files = states.Select((state, i) => new { path = relative(state.Path), state.State, state.Staged,
+            diff = CompareWorkingLines(state.Before, state.After), rows = selected == i ? AlignWorkingLines(state.Before, state.After) : null });
+        return new { branch = Terminal.WorkbenchBranch, changes = files, selected, focus = window.Focus,
+            message = window.Focus == "scm-message" ? window.Input : gitMessage,
+            messageCursor = window.Cursor, lastCommit = Terminal.HasWorkbenchRepo(GitRoot) ? Terminal.LastLocalCommit : "",
+            canCommit = states.Any(s => s.Staged) };
     }
 
     private sealed record SourceLine(int Number, string Text);
@@ -172,7 +157,7 @@ internal sealed partial class LabScene
 
     internal void ReviewSourceControl(string key) => SourceControlPick(Active, "", key == "Up" ? -1 : key == "Down" ? 1 : 0);
 
-    private bool SourceControlPick(LabWindow window, string path, int delta)
+    private bool SourceControlPick(LabWindow window, string path, int delta, bool staged = false)
     {
         if (window?.App != "code" || window.View != "changes") return false;
         var files = SourceControlFiles(ProjectDocuments().ToArray());
@@ -181,7 +166,7 @@ internal sealed partial class LabScene
             Math.Max(0, Array.FindIndex(files, state => state.Path == window.Url));
         if (path.Length > 0)
         {
-            i = Array.FindIndex(files, state => path == (DebugDay ? DebugRelative(state.Path) : EditorLessonRelativePath(state.Path)));
+            i = Array.FindIndex(files, state => state.Staged == staged && path == (DebugDay ? DebugRelative(state.Path) : EditorLessonRelativePath(state.Path)));
             if (i < 0) return false;
         }
         window.Item = Math.Clamp(i + delta, 0, files.Length - 1);
@@ -223,7 +208,7 @@ internal sealed partial class LabScene
     private static bool IsIdentifier(char c) => char.IsLetterOrDigit(c) || c == '_';
     private static string NameOf(string path) => path[(path.LastIndexOf('/') + 1)..];
     private static string EditorPath(LabTab tab) => tab.Url.StartsWith('/') ? tab.Url : Project + "/" + tab.Url;
-    private LabEntry PageEntry(string url) => (TabReviewPage(url) ?? (BrowserPracticeActive ? BrowserPracticePage(url) : null)) is { } page
+    private LabEntry PageEntry(string url) => (TabReviewPage(url) ?? ((BrowserPracticeActive || !LegacyOrdinarySearch) ? BrowserPracticePage(url) : null)) is { } page
         ? new(page.Title, url, "page") : Links.FirstOrDefault(item => item.Path == url) ?? new(url, url, "page");
     private void OpenDocument(string path)
     {
@@ -419,7 +404,7 @@ internal sealed partial class LabScene
                 var symbol = Entries(w).ElementAtOrDefault(w.OptionIndex);
                 if (symbol == null) return false;
                 w.Focus = "body"; w.Cursor = int.Parse(symbol.Path); return true;
-            case "changes": if (w.View != "changes") w.Item = -1; w.Sidebar = true; w.View = "changes"; w.Focus = "changes"; return true;
+            case "changes": if (w.View != "changes" || ReleasePractice && w.Focus == "body") w.Item = -1; w.Sidebar = true; w.View = "changes"; w.Focus = "changes"; return true;
             case "focus-editor": case "focus-second":
                 int group = action == "focus-editor" ? 0 : 1;
                 if (group != w.Group && w.Split)

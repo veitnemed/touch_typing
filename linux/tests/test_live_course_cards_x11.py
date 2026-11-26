@@ -28,6 +28,17 @@ class CourseCards(QA):
         t, m = s["task"], s["mission"]
         goal, previous = t["id"], s["solved"]
         value = t.get("text","")
+        if goal == "disk-capacity-verdict":
+            from test_terminal_disk_space import visible_capacity
+            need, free = visible_capacity(s["scene"]["terminal"]["output"], s["desktopProfile"] == "windows")
+            yield from self.chord("2" if free >= need else "1")
+            assert lab.state["solved"] == previous + 1
+            return
+        if goal == "terminal-interrupt":
+            for _ in range(750):
+                if lab.state["scene"]["terminal"]["logIncidentArrived"]: break
+                yield
+            assert lab.state["scene"]["terminal"]["logIncidentArrived"]
         if m == "code-traceback-line" and goal == "save":
             for key in ("End", "Backspace", value):
                 yield from self.chord(key)
@@ -52,6 +63,20 @@ class CourseCards(QA):
         assert lab.state["solved"] == previous+1, (
             m, goal, value, s["phase"], t.get("keys"), lab.state.get("status"), lab.state["solved"], previous
         )
+
+    def selected_journal(self, ps):
+        choose, picker, level, mode, actions, timer, start = self.home_configure["terminal"]
+        choose.grab_focus()
+        yield from self.chord("Space")
+        titles = picker.get_model()
+        name = "Разобрать сбой синхронизации в Windows PowerShell" if ps else "Найти новый сбой в журнале Bash"
+        picker.set_selected(next(i for i in range(titles.get_n_items()) if titles.get_string(i)==name))
+        actions.set_selected(0); timer.set_selected(0); start.grab_focus()
+        yield from self.chord("Enter")
+        for _ in range(90):
+            if self.lab and self.lab.active and not self.lab.state["paused"]: break
+            yield
+        return self.lab
 
     def ordinary_card(self, app):
         self.home_cards[app].grab_focus()
@@ -78,7 +103,7 @@ class CourseCards(QA):
                 for _ in range(18): yield
                 lab = yield from self.ordinary_card(app)
                 assert (lab and lab.active and not lab.state["paused"] and lab.window_only_keys and lab.surface is None
-                    and lab.state["app"] == app and lab.state["actionLimit"] == (0 if app == "terminal" else 40)), (environment,app,lab.state if lab else None)
+                    and lab.state["app"] == app and lab.state["actionLimit"] == 40), (environment,app,lab.state if lab else None)
                 assert not lab.prep.get_visible(), "a card must not open a new catalog"
                 self.focus_window()
                 lab.desktop.grab_focus()
@@ -87,30 +112,7 @@ class CourseCards(QA):
                 trace=[]
                 self.capture_widget_png(out/f"card-{environment}-{app}-01-start.png")
                 if app == "terminal":
-                    expected = "terminal-powershell-diagnostic" if environment == "windows" else "terminal-practical-incident"
-                    assert first == expected and length == 4
-                    for _ in range(2):
-                        trace.append(lab.state["task"]["text"])
-                        yield from self.advance_card(lab)
-                    assert lab.state["scene"]["terminal"]["followingLog"]
-                    for _ in range(600):
-                        if lab.state["scene"]["terminal"]["logIncidentArrived"]:
-                            break
-                        yield
-                    assert lab.state["scene"]["terminal"]["logIncidentArrived"]
-                    self.capture_widget_png(out/f"card-{environment}-{app}-02-journal.png")
-                    trace.append("Ctrl+C")
-                    yield from self.advance_card(lab)
-                    trace.append(lab.state["task"]["text"])
-                    yield from self.advance_card(lab)
-                    assert lab.state["finished"] and lab.state["solved"] == 4 and not lab.active
-                    witness.append(dict(environment=environment, app=app, initial=first, first_actions=length,
-                                        second=None, successful=lab.state["solved"], trace=trace))
-                    self.return_live_catalog(app)
-                    for _ in range(22):
-                        yield
-                    print("PASS GTK", environment, app, first, "4 meaningful actions", flush=True)
-                    continue
+                    assert first == "terminal-delivery-sync-" + ("ps" if environment == "windows" else "bash") and length == 4
                 while lab.state["solved"] < 20 or lab.state["mission"] == first:
                     s=lab.state
                     assert lab.active and not s.get("limitDecisionPending") and s["solved"] < 100, (app,s["solved"],s["mission"],length)

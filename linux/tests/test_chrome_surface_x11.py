@@ -17,9 +17,9 @@ class ChromeSurfaceX11(CourseCards):
         other=w["tabs"][target]["url"]
         def pointer(kind,slot=-1):
             return WorkbenchWindow.pointer(self,"browser-surface:"+kind,cell=slot,path=owner)
-        def no_back():
-            return not any(part[1]=="browser-surface:back" for part in lab.desktop._notebook_hits)
-        assert no_back(),"a disabled Back arrow must not consume clicks"
+        def missing(command):
+            return not any(part[1]=="browser-surface:"+command for part in lab.desktop._notebook_hits)
+        assert missing("back") and missing("forward"),"disabled history buttons must not consume clicks"
         yield from pointer("address")
         w=active(lab); assert (w["focus"],w["anchor"],w["cursor"],lab.state["solved"])==("url",0,len(url),0)
         self.capture_widget_png(out/"01-pointer-selected-address.png")
@@ -34,16 +34,49 @@ class ChromeSurfaceX11(CourseCards):
         visiting=active(lab); assert visiting["canGoBack"] and "report" in visiting["url"] and visiting["url"]!=url
         before=lab.state["solved"]
         self.capture_widget_png(out/"03-pointer-back-enabled.png")
+        assert visiting["url"]=="https://www.google.com/search?q=report" and len(visiting["entries"])>=2
+        hit_index=next(i for i,e in enumerate(visiting["entries"]) if e["path"].endswith("/shipments"))
+        yield from pointer("search-result",hit_index)
+        assert active(lab)["url"]==visiting["entries"][hit_index]["path"] and lab.state["solved"]==before
+        self.capture_widget_png(out/"03b-report-opened.png")
+        yield from pointer("back")
+        assert active(lab)["url"]==visiting["url"] and active(lab)["item"]==hit_index
+
         yield from pointer("back")
         assert active(lab)["url"]==url and not active(lab)["canGoBack"] and lab.state["solved"]==before
         for _ in range(10): yield
-        assert no_back()
+        assert missing("back") and not missing("forward")
         self.capture_widget_png(out/"04-pointer-back-restored.png")
+        yield from pointer("forward")
+        assert active(lab)["url"]==visiting["url"] and active(lab)["canGoForward"]
+        yield from pointer("forward")
+        assert active(lab)["url"]==visiting["entries"][hit_index]["path"] and not active(lab)["canGoForward"]
+        yield from pointer("back")
+        yield from pointer("refresh")
+        assert "обновлена" in active(lab)["status"] and lab.state["solved"]==before
+        yield from pointer("back")
+        self.capture_widget_png(out/"05-pointer-forward-and-back.png")
+        yield from pointer("new-tab")
+        assert active(lab)["url"]=="about:blank" and active(lab)["focus"]=="url"
+        self.capture_widget_png(out/"06-pointer-new-tab.png")
+        # Close a background tab, keeping the active address field and its text.
+        yield from self.typed({"id":"type-code","text":"draft"})
+        yield from pointer("close-tab",target)
+        assert active(lab)["input"]=="draft" and active(lab)["focus"]=="url" and active(lab)["cursor"]==5
+        source=next(i for i,t in enumerate(active(lab)["tabs"]) if t["url"]==url)
+        yield from pointer("tab",source)
+        assert lab.state["solved"]==before
+        yield from pointer("bookmark"); assert url in active(lab)["savedBookmarks"]
+        yield from pointer("downloads"); assert active(lab)["url"]=="chrome://downloads"
+        yield from pointer("close-tab",active(lab)["activeTab"])
+        yield from pointer("tab",source)
+        yield from pointer("home"); assert active(lab)["url"]=="https://www.google.com/"
+        yield from pointer("back"); assert active(lab)["url"]==url and lab.state["solved"]==before
         yield from self.chord("Ctrl+L")
         assert lab.state["solved"]==1 and active(lab)["selected"]
-        print(f"PASS native X11 ordinary Chrome {lab.desktop.get_width()}×{lab.desktop.get_height()}: three real pointer actions; restored {url}; no mouse credit; physical Ctrl+L earned 1.",flush=True)
+        print(f"PASS native X11 ordinary Chrome {lab.desktop.get_width()}×{lab.desktop.get_height()}: Back/Forward, reload, new/close and background-tab draft; restored {url}; no mouse credit; physical Ctrl+L earned 1.",flush=True)
 
 
 if __name__=="__main__":
-    app=ChromeSurfaceX11(); app.window_size=(1024,640)
+    app=ChromeSurfaceX11(); app.window_size=(1024,600)
     code=app.run([]); raise SystemExit(1 if app.smoke_failure else code)

@@ -696,7 +696,7 @@ class Studio(Gtk.Application):
         ("ubuntu", "Ubuntu", "Работа в Linux: окна, файлы,\nприложения, система."),
         ("chrome", "Chrome", "Эффективная работа\nв браузере без мыши."),
         ("code", "VS Code", "Навигация, редактирование\nи управление проектом."),
-        ("terminal", "Терминал", "Ubuntu Bash: поиск сбоя\nи просмотр живого журнала."),
+        ("terminal", "Терминал", "Ubuntu Bash: копии, загрузки\nи свободное место."),
         ("workday", "Рабочий день", "Реальные сценарии:\nпереключение, поиск, организация."),
     )
 
@@ -1066,11 +1066,11 @@ class Studio(Gtk.Application):
                 module, title = "windows", "Windows 10"
                 description = "Работа в Windows: Пуск,\nокна, рабочие столы."
             elif module == "terminal" and environment == "windows":
-                title, description = "PowerShell", "Windows PowerShell: отбор строк\nи просмотр живого журнала."
+                title, description = "PowerShell", "PowerShell: копии, загрузки\nи свободное место."
             tile = button("", lambda dest=module: self.open_reference_module(dest), "reference-card", "module-" + module)
             if index > 2:
                 tile.add_css_class("reference-card-lower")
-            length = "Одно поручение без таймера." if module == "terminal" else "Если нет черновика: 40 действий без таймера."
+            length = "Если нет черновика: 40 действий без таймера."
             tile.set_tooltip_text(f"Открыть «{title}». {length}")
             inner = box(Gtk.Orientation.VERTICAL, 0, "reference-card-inner")
             picture = ReferenceGlyph(module, 43 if index > 2 else 48)
@@ -1203,8 +1203,9 @@ class Studio(Gtk.Application):
             self.library = result
         return result is not None
 
-    def navigate(self, page, manual=True):
-        self.release_system_typing_capture()
+    def navigate(self, page, manual=True, *, keep_typing_capture=False):
+        if not keep_typing_capture:
+            self.release_system_typing_capture()
         if self.lab:
             if self.lab.active:
                 self.lab.stop(show=False, on_saved=lambda: self.navigate(page, manual))
@@ -1886,7 +1887,7 @@ class Studio(Gtk.Application):
             self.send_shortcut_key(key or "Неизвестная клавиша", True, character)
             return True
         if self.workout == "typing":
-            if self.state.get("mode") == "SystemHotkeys" and not self.paused and not self.system_typing_available():
+            if self.state.get("requiresSystemCapture") and not self.paused and not self.system_typing_available():
                 self.typing_pause()
                 self.message("Захват системных клавиш прерван. Продолжите занятие, чтобы запросить его снова.")
                 return True
@@ -2064,7 +2065,7 @@ class Studio(Gtk.Application):
         self.review_continuations = []
         for pending in reversed(catalog.get("reviewDrafts", [])):
             action = button(f'Продолжить исправление · {pending["title"]} · {pending["position"]}/{pending["total"]}',
-                            lambda id=pending["sourceId"]: self.start_mistake_review(id))
+                            lambda id=pending["sourceId"], cap=pending.get("reviewRequiresCapture", False): self.start_mistake_review(id, cap))
             self.typing_prep.append(action)
             self.review_continuations.append(action)
         self.typing_rows, self.typing_record_labels = {}, {}
@@ -2171,8 +2172,7 @@ class Studio(Gtk.Application):
                 else:
                     control.remove_css_class(cls)
             # Truncate for display, never round a non-qualifying score UP to a boundary.
-            acc = "—" if accuracy is None else (f"{math.floor(accuracy * 100) / 100:.2f}"
-                                                 .rstrip("0").rstrip(".").replace(".", ",") + "%")
+            acc = "—" if accuracy is None else record["accuracyLabel"]
             duration = "—" if seconds is None else self.clock_text(seconds)
             labels[0].set_label(acc)
             labels[1].set_label(duration)
@@ -2265,17 +2265,23 @@ class Studio(Gtk.Application):
             begin()
 
 
-    def start_mistake_review(self, source_id):
+    def start_mistake_review(self, source_id, system=False):
         if self.workout:  # ignore the second activation of a button just replaced
             return
         if not self.ensure_menu_engine():
             return
         self.release_system_typing_capture()
-        state = self.call("typing-review-start", sourceId=source_id, layout=self.layout)
-        if state is None:
-            return
-        self.navigate("typing")
-        self.accept_typing_run(state)
+        def begin():
+            state = self.call("typing-review-start", sourceId=source_id, layout=self.layout, systemCapture=system)
+            if state is None:
+                self.release_system_typing_capture()
+                return
+            self.navigate("typing", keep_typing_capture=system)
+            self.accept_typing_run(state)
+        if system:
+            self.request_system_typing_capture(begin)
+        else:
+            begin()
 
     def accept_typing_run(self, state):
         self.message()
@@ -2357,7 +2363,7 @@ class Studio(Gtk.Application):
             self.render_typing_state(state)
 
     def typing_resume(self):
-        system = self.state.get("mode") == "SystemHotkeys"
+        system = self.state.get("requiresSystemCapture")
         def resume():
             state = self.call("typing-resume", layout=self.layout, systemCapture=system)
             if state:
@@ -2646,7 +2652,7 @@ class Studio(Gtk.Application):
             count = state["count"]
             speed = f'{state["cpm"]:g}'
             speed_label = "Знаков/мин"
-            accuracy = f'{state["accuracy"]:g}%' if state["count"] + state["errors"] else "—"
+            accuracy = state["accuracyLabel"]
             errors = state["errors"]
             points = []
             prior_errors = 0
@@ -2693,7 +2699,7 @@ class Studio(Gtk.Application):
         self.correction_button = None
         if offer:
             self.correction_button = button("Работа над ошибками",
-                lambda: self.start_mistake_review(result["state"]["attemptId"]), "reference-primary")
+                lambda: self.start_mistake_review(result["state"]["attemptId"], result["state"].get("reviewRequiresCapture", False)), "reference-primary")
             self.correction_button.set_tooltip_text("Короткая практика только по промахам этой попытки")
             panel.append(self.correction_button)
         finish = button("К урокам" if review else "Завершить", lambda: self.navigate(kind),
@@ -2766,7 +2772,7 @@ class Studio(Gtk.Application):
         self.typing_history_results = {}
         for item in self.library["typingHistory"]:
             when = item["date"][:10].split("-")
-            label = f'{when[2]}.{when[1]}.{when[0]}  ·  {item["speed"]} сим/мин  ·  {item["accuracy"]:.1f}%  ·  ошибок {item["errors"]}'
+            label = f'{when[2]}.{when[1]}.{when[0]}  ·  {item["speed"]} сим/мин  ·  {item["accuracyLabel"]}  ·  ошибок {item["errors"]}'
             entry = add(row(8), expand(text(item["lesson"], wrap=True)), text(label, "muted"))
             if item.get("sourceId"):
                 view = button("Результат", lambda source=item["sourceId"]: self.open_typing_result(source))
@@ -3867,6 +3873,8 @@ class LabPage(Gtk.Box):
         gesture = raw_keys.replace("+", " + ") or task.get("text", "")
         if guided and not task.get("keys") and task.get("id", "").startswith("open-"):
             gesture = "⊞ → " + task["text"] + " → Enter"
+        elif guided and task.get("id") == "command/delivery-read-match":
+            gesture = ("Get-Content" if state.get("desktopProfile") == "windows" else "cat") + " [CSV]"
         elif guided and task.get("id") == "command/filter-incident":
             gesture = "grep [ID] app.log"
         elif guided and task.get("id") == "command/powershell-incident":

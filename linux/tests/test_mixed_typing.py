@@ -168,12 +168,18 @@ class MixedTypingTest(unittest.TestCase):
                 s = self.engine.call("typing-start", mode="SystemHotkeys", systemCapture=True, layout="EN", seed=17,
                                      infinite=True, cycles=5, seconds=300)
                 self.assertEqual((s["mode"], s["progressTotal"], s["cycles"], s["timeLimit"]),
-                                 ("SystemHotkeys", 36, 1, 0))
+                                 ("SystemHotkeys", 44, 1, 0))
                 seen = set()
-                while s["progressDone"] < 9:
+                while s["progressDone"] < 11:
                     wanted = s["expected"]
                     keys = ["L" + name if name in ("Alt", "Super", "Ctrl", "Shift") else name for name in wanted.split("+")]
                     before = s["progressDone"]
+                    if wanted == "Alt+Super+1":
+                        self.assertEqual(s["expectedDisplay"], "⟦Win+Alt+1⟧")
+                        self.assertIn("последних файлов", s["expectedNote"])
+                        self.assertEqual(len({t["finger"] for t in s["expectedTargets"]}), 3)
+                        for wrong in ("Alt+1", "Super+1", "Alt+Super+NumPad1"):
+                            self.assertEqual(self.chord(wrong)["progressDone"], before, wrong)
                     for key in keys:
                         s = self.key(key)
                     self.assertEqual(s["progressDone"], before + 1)
@@ -182,8 +188,11 @@ class MixedTypingTest(unittest.TestCase):
                         s = self.key(key, False)
                     seen.add(wanted)
                 self.assertIn(expected, seen)
+                self.assertTrue(({"Alt+Super+1", "Super+I"} if platform == "windows" else
+                                 {"Shift+Super+PageDown", "Super+A"}) <= seen)
+                self.assertNotIn("Super+H", seen)
                 self.assertIn("Alt+Tab", seen)
-                self.assertEqual(s["progressDone"], 9)
+                self.assertEqual(s["progressDone"], 11)
                 self.engine.call("typing-pause", layout="EN")
                 with self.assertRaises(EngineError):
                     self.engine.call("typing-resume", layout="EN")
@@ -193,7 +202,7 @@ class MixedTypingTest(unittest.TestCase):
                 with self.assertRaises(EngineError):
                     self.engine.call("typing-continue", layout="EN")
                 s = self.engine.call("typing-continue", layout="EN", systemCapture=True)
-                self.assertEqual(s["progressDone"], 9)
+                self.assertEqual(s["progressDone"], 11)
 
     def test_mixed_switches_and_restarts_without_crediting_paste_or_layout_switch(self):
         s=self.start("WordsDigitsHotkeys", cycles=2)

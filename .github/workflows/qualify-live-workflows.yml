@@ -78,6 +78,15 @@ jobs:
           done
           export PYTHONPATH="$PWD/linux" TOUCH_TYPING_ENGINE="$p/touch-typing-linux-x64/engine/TouchTyping.Engine"
           /usr/bin/python3 linux/tests/test_engine_menu_transport.py
+          prior="$RUNNER_TEMP/live-v192"
+          mkdir -p "$prior"
+          curl -fLSs --retry 2 --max-time 120 \
+            'https://github.com/veitnemed/touch_typing/releases/download/v1.9.2/touch-typing-v1.9.2-linux-x64.tar.gz' \
+            -o "$prior/package.tar.gz"
+          (cd "$prior" && printf '%s  package.tar.gz\n' '0766e720a9a70e8cb6bce20e7d85f2df495ad59a20db8e4bcd218d6d1b2e3ddc' | sha256sum -c -)
+          tar -xzf "$prior/package.tar.gz" -C "$prior"
+          /usr/bin/python3 linux/tests/check_checkout_upgrade.py \
+            "$prior/touch-typing-linux-x64/engine/TouchTyping.Engine" "$TOUCH_TYPING_ENGINE"
           /usr/bin/python3 linux/tests/test_practice.py
           /usr/bin/python3 linux/tests/test_classic_cycles.py
           /usr/bin/python3 linux/tests/test_mixed_typing.py
@@ -93,6 +102,8 @@ jobs:
           /usr/bin/python3 linux/tests/test_live_missions.py
           /usr/bin/python3 linux/tests/test_terminal_history_theory.py
           /usr/bin/python3 linux/tests/test_chrome_history_filter.py
+          /usr/bin/python3 linux/tests/test_editor_git_release.py
+          /usr/bin/python3 linux/tests/test_editor_objective_names.py
           /usr/bin/python3 linux/tests/test_editor_traceback.py
           /usr/bin/python3 linux/tests/test_desktop_file_search.py
           /usr/bin/python3 linux/tests/test_windows_folder_recovery.py
@@ -104,6 +115,12 @@ jobs:
           /usr/bin/python3 linux/tests/test_terminal_practical.py
           /usr/bin/python3 linux/tests/test_terminal_powershell.py
           /usr/bin/python3 linux/tests/test_terminal_disk_space.py
+          /usr/bin/python3 linux/tests/test_terminal_deliveries.py
+          if ! command -v rsync >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends rsync
+          fi
+          /usr/bin/python3 linux/tests/test_delivery_real_tools.py --require-native
           /usr/bin/python3 linux/tests/test_live_coach.py
           /usr/bin/python3 linux/tests/audit_live_course_rotation.py --baseline qa/fixtures/live-course-f905eb4-missions.json
           /usr/bin/python3 linux/tests/test_editor_course.py
@@ -176,7 +193,7 @@ jobs:
             /usr/bin/python3 linux/tests/test_preview2_native.py
           ' | tee "$TOUCH_TYPING_QA_OUTPUT/gtk-test.log"
           native_failures=()
-          for scenario in test_editor_notebooks_x11.py test_project_files_x11.py test_editor_course_x11.py test_editor_checkout_x11.py test_typing_cycles_native.py test_typing_records_gtk.py test_typing_mixed_native.py test_typing_mixed_native.py:base test_live_guide_layout_native.py test_live_course_cards_x11.py test_notebook_workbench_native.py test_source_handoff_x11.py test_source_handoff_x11.py:course test_live_coach_x11.py test_notebook_file_handoff_x11.py test_live_pause_focus_x11.py test_menu_engine_recovery_x11.py test_ubuntu_window_switch_x11.py test_terminal_history_theory_x11.py test_terminal_practical_native_x11.py test_terminal_powershell_native_x11.py test_terminal_disk_space_x11.py test_chrome_history_native.py test_chrome_history_pointer_x11.py test_editor_traceback_x11.py test_desktop_file_search_x11.py test_windows_folder_recovery_x11.py test_workday_source_revision_x11.py test_chrome_tab_search_x11.py test_chrome_surface_x11.py test_typing_normal_launch_x11.py test_typing_work_note_native.py test_typing_review_native.py; do
+          for scenario in test_editor_notebooks_x11.py test_project_files_x11.py test_editor_course_x11.py test_editor_checkout_x11.py test_editor_git_release_x11.py test_typing_cycles_native.py test_typing_records_gtk.py test_typing_mixed_native.py test_typing_mixed_native.py:base test_live_guide_layout_native.py test_live_course_cards_x11.py test_notebook_workbench_native.py test_source_handoff_x11.py test_source_handoff_x11.py:course test_live_coach_x11.py test_notebook_file_handoff_x11.py test_live_pause_focus_x11.py test_menu_engine_recovery_x11.py test_ubuntu_window_switch_x11.py test_terminal_history_theory_x11.py test_terminal_practical_native_x11.py test_terminal_powershell_native_x11.py test_terminal_disk_space_x11.py test_terminal_deliveries_x11.py test_chrome_history_native.py test_chrome_history_pointer_x11.py test_editor_traceback_x11.py test_desktop_file_search_x11.py test_windows_folder_recovery_x11.py test_workday_source_revision_x11.py test_chrome_tab_search_x11.py test_chrome_surface_x11.py test_typing_normal_launch_x11.py test_typing_work_note_native.py test_typing_review_native.py; do
             script="${scenario%%:*}"
             proof_name="${script%.py}"
             unset TOUCH_TYPING_QA_SOURCE_MODE TOUCH_TYPING_QA_MIXED_BASE TOUCH_TYPING_QA_SEED
@@ -342,6 +359,8 @@ jobs:
           & "./windows/Test-LiveSourceHandoffs.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/source-handoffs"
           & "./windows/Test-Notebook-Workbench.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/notebook-workbench"
           & "./windows/Test-Notebook-File-Handoff.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/notebook-file-handoff"
+          python linux/tests/test_delivery_real_tools.py --require-native
+          if ($LASTEXITCODE) { throw "Real PowerShell/Robocopy delivery fixture failed" }
           & "./windows/Test-OrdinaryWpfLaunch.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/ordinary-launch"
           & "./windows/Test-ChromeHistory.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/chrome-history"
           & "./windows/Test-Chrome-History-View.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/chrome-history-frame"
@@ -349,6 +368,7 @@ jobs:
           & "./windows/Test-Chrome-Surface.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/chrome-surface"
           & "./windows/Test-Desktop-File-Search.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/desktop-file-search"
           & "./windows/Test-Windows-Folder-Recovery.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/windows-folder-recovery"
+          & "./windows/Test-EditorGitRelease.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/editor-git-release"
           & "./windows/Test-EditorTraceback.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/editor-traceback"
           & "./windows/Test-WorkdaySourceRevision.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/workday-sourced-link"
       - name: Verify visible adaptive guidance in two ordinary Chrome routes

@@ -27,8 +27,11 @@ internal static partial class LiveCourse
     };
     private static void TerminalMissions(List<LiveMission> list)
     {
-        AddPracticalTerminal(list);
+        AddTerminalDeliveries(list);
         AddTerminalDiskSpace(list);
+        AddPracticalTerminal(list);
+        var repeats = list.FindAll(m => m.Id is BashDiskRepeatId or PowerShellDiskRepeatId);
+        list.RemoveAll(m => m.Id is BashDiskRepeatId or PowerShellDiskRepeatId);
         void Essentials(int level, string id, string title, params LivePhase[] phases) =>
             list.Add(new("terminal", level, "terminal-essentials-" + id, title, phases,
                 FinishAfterRoute: true, Curated: true, Prepare: scene => scene.Terminal.StartInsideProject()));
@@ -73,5 +76,6 @@ internal static partial class LiveCourse
         Add(2,"snapshot","Зафиксировать состояние рабочей среды","inventory","tools","archive","commit");
         Add(2,"incident","Передать результаты разбора сбоя","logs","permissions","notes","commit","delivery");
         Add(2,"changes","Проверить историю и передать изменения","archive","commit","diff","delivery");
+        list.AddRange(repeats); // Retry the disk decision after intervening projects.
     }
 }

@@ -112,5 +112,10 @@ internal sealed partial class LabScene
 
     internal string BrowserResearchNeedle => browserResearch?.Fact.Split('\n').Last().Split(',')[0] ?? "";
 
-    private string BrowserDownloadBody(string name) => browserResearch is { } item && name == item.Download ? item.Fact + "\n" : null;
+    private string BrowserDownloadBody(string name)
+    {
+        var item=browserResearch ?? (!LegacyOrdinarySearch && Active?.App=="chrome" ?
+            ReportCases.FirstOrDefault(c=>c.Target==Active.Url) : null);
+        return item!=null && name==item.Download ? item.Fact+"\n" : null;
+    }
 }

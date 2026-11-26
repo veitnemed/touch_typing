@@ -40,6 +40,7 @@ internal sealed partial class VirtualTerminal
     internal bool LogInterrupted { get; private set; }
     private readonly Dictionary<string, List<int>> branchLogs = new(StringComparer.Ordinal);
 
+    internal bool LegacyCheckoutStdout { get; set; }
     internal string Cwd { get; private set; } = Home;
     internal string[] History => history.TakeLast(160).ToArray();
     internal string LastCommand { get; private set; } = "";
@@ -211,6 +212,7 @@ internal sealed partial class VirtualTerminal
     {
         try
         {
+            if (DeliveryLesson != "") return DeliveryMatches(submitted, expected);
             if (IsPowerShell) return PowerShellMatches(submitted, expected);
             var actualTokens = Tokenize(submitted);
             var targetTokens = Tokenize(expected);
@@ -248,12 +250,13 @@ internal sealed partial class VirtualTerminal
     {
         var copy = new VirtualTerminal
         {
-            Cwd = Cwd, repository = repository, branch = branch, packagesUpdated = packagesUpdated,
+            LegacyCheckoutStdout = LegacyCheckoutStdout, Cwd = Cwd, repository = repository, branch = branch, packagesUpdated = packagesUpdated,
             reboots = reboots, shutdowns = shutdowns, Version = Version, LastSuccess = LastSuccess, LastCommand = LastCommand, LastOutput = LastOutput,
             liveLogPath = liveLogPath, followedLogPath = followedLogPath, liveLogFeed = liveLogFeed,
             liveLogNext = liveLogNext, liveLogIncidentIndex = liveLogIncidentIndex, LogInterrupted = LogInterrupted, IsPowerShell = IsPowerShell
         };
         CopyTrainingVolumes(copy);
+        CopyDelivery(copy);
         Replace(copy.files, files); Replace(copy.modes, modes); Replace(copy.owners, owners);
         copy.directories.Clear(); copy.directories.UnionWith(directories);
         copy.packages.Clear(); copy.packages.UnionWith(packages);
@@ -298,12 +301,13 @@ internal sealed partial class VirtualTerminal
         try
         {
             if (command.Length > 32768 || command.Contains('\0')) throw Error("input", "слишком длинная строка или недопустимый нулевой символ");
-            var output = Lines(trainingVolumes.Length != 0
+            bool succeeded = true;
+            var output = Lines(DeliveryLesson != "" ? DeliveryCommand(command) : trainingVolumes.Length != 0
                 ? (IsPowerShell ? RunPowerShellStorage(command) : RunBashStorage(command))
-                : IsPowerShell ? RunPowerShell(command) : RunBashPipeline(command));
-            LastSuccess = true;
+                : IsPowerShell ? RunPowerShell(command) : RunBashPipeline(command, out succeeded));
+            LastSuccess = succeeded;
             history.AddRange(output); LastOutput = output;
-            return new(true, output);
+            return new(succeeded, output);
         }
         catch (ArgumentException error)
         {
@@ -313,8 +317,9 @@ internal sealed partial class VirtualTerminal
         }
     }
 
-    private string RunBashPipeline(string command)
+    private string RunBashPipeline(string command, out bool succeeded)
     {
+        succeeded = true;
         var stages = SplitPipeline(Tokenize(command));
         if (stages.Count > 32) throw Error("input", "учебный конвейер ограничен 32 командами");
         if (stages.Count == 1 && stages[0] is [var commandToken, var follow, var path] &&
@@ -322,20 +327,28 @@ internal sealed partial class VirtualTerminal
             follow.Value is "-f" or "--follow" && !path.Operator)
             return FollowLog(path.Value);
         string input = "";
-        foreach (var stage in stages) input = ExecuteStage(stage, input);
-        return input;
+        var screen = new StringBuilder();
+        foreach (var stage in stages) input = ExecuteStage(stage, input, screen, out succeeded);
+        return screen.Append(input).ToString();
     }
 
-    private string ExecuteStage(List<Token> tokens, string input)
+    private string ExecuteStage(List<Token> tokens, string input, StringBuilder screen, out bool succeeded)
     {
+        succeeded = true;
         if (tokens.Count == 0) throw Error("syntax", "ожидалась команда");
         string redirect = null, operation = null;
+        bool stderrDuplicated = false, stderrToFile = false;
         var arguments = new List<string>();
         for (int i = 0; i < tokens.Count; i++)
         {
             var token = tokens[i];
             if (token.Operator)
             {
+                if (token.Value == "2>&1")
+                {
+                    // dup2 takes a snapshot of stdout *at this point*, not after parsing.
+                    stderrDuplicated = true; stderrToFile = redirect != null; continue;
+                }
                 if (i + 1 >= tokens.Count || tokens[i + 1].Operator)
                     throw Error("syntax", "после перенаправления нужно имя файла");
                 if (token.Value == "<") input = File(Resolve(tokens[++i].Value));
@@ -350,10 +363,27 @@ internal sealed partial class VirtualTerminal
             }
             arguments.AddRange(token.Expand ? Expand(token.Value) : [token.Value]);
         }
-        string output = Run(arguments.ToArray(), input);
-        if (redirect == null) return output;
-        Write(redirect, operation == ">>" ? files.GetValueOrDefault(redirect, "") + output : output);
-        return "";
+        bool unittest = arguments.ToArray() is ["python" or "python3", "-m", "unittest", var selector] &&
+            lessonUnitTests.ContainsKey(selector) && !(LegacyCheckoutStdout && selector == "test_checkout");
+        string output;
+        try { output = Run(arguments.ToArray(), input); }
+        catch (ArgumentException failure) when (unittest)
+        {
+            // A failing test still emitted its report. Do not leave an old green
+            // receipt in a file which the shell is supposed to truncate.
+            succeeded = false;
+            output = failure.Message.TrimEnd('\n') + "\n";
+        }
+        // Python's default TextTestRunner writes the report to stderr. Never send
+        // that stream down a pipe or into a file unless the learner redirected it.
+        string pipe = redirect == null && !unittest || unittest && stderrDuplicated && !stderrToFile ? output : "";
+        if (unittest && !stderrDuplicated) screen.Append(output);
+        if (redirect != null)
+        {
+            string fileOutput = !unittest || stderrToFile ? output : "";
+            Write(redirect, operation == ">>" ? files.GetValueOrDefault(redirect, "") + fileOutput : fileOutput);
+        }
+        return pipe;
     }
 
     private string Run(string[] words, string input, bool privileged = false)
@@ -828,14 +858,20 @@ internal sealed partial class VirtualTerminal
         {
             case "status":
                 if (args.Any(a => a is not ("--short" or "-s"))) throw Error("git status", "поддерживаются --short и -s");
-                var status = new List<string> { "On branch " + branch };
-                foreach (string path in current.Keys.Union(committed.Keys).Order())
+                bool shortForm = args.Length != 0;
+                var status = new List<string>();
+                if (!shortForm) status.Add("On branch " + branch);
+                // XY columns compare HEAD->index and index->worktree independently.
+                foreach (string path in committed.Keys.Union(index.Keys).Union(current.Keys).Order(StringComparer.Ordinal))
                 {
-                    bool staged = current.GetValueOrDefault(path) == index.GetValueOrDefault(path) && index.GetValueOrDefault(path) != committed.GetValueOrDefault(path);
-                    string prefix = !committed.ContainsKey(path) ? (index.ContainsKey(path) ? "A " : "??") : !current.ContainsKey(path) ? " D" : current.GetValueOrDefault(path) != committed.GetValueOrDefault(path) ? staged ? "M " : " M" : "";
-                    if (prefix.Length > 0) status.Add(prefix + " " + path);
+                    var head = committed.GetValueOrDefault(path); var staged = index.GetValueOrDefault(path);
+                    var work = current.GetValueOrDefault(path);
+                    static char Delta(string a, string b) => a == b ? ' ' : a == null ? 'A' : b == null ? 'D' : 'M';
+                    string flags = head == null && staged == null && work != null ? "??" :
+                        string.Concat(Delta(head, staged), Delta(staged, work));
+                    if (flags != "  ") status.Add(flags + " " + path);
                 }
-                if (status.Count == 1) status.Add("nothing to commit, working tree clean");
+                if (!shortForm && status.Count == 1) status.Add("nothing to commit, working tree clean");
                 return JoinLines(status);
             case "add":
                 bool all = args.FirstOrDefault() is "-A" or "--all";
@@ -1028,6 +1064,11 @@ internal sealed partial class VirtualTerminal
             }
             if (c is '\'' or '"') { quote = c; started = quoted = true; continue; }
             if (char.IsWhiteSpace(c)) { Flush(); continue; }
+            if (!started && c == '2' && text.AsSpan(position).StartsWith("2>&1") &&
+                (position + 4 == text.Length || char.IsWhiteSpace(text[position + 4]) || text[position + 4] is '|' or '>' or '<'))
+            {
+                tokens.Add(new("2>&1", true)); position += 3; continue;
+            }
             if (c is '|' or '>' or '<')
             {
                 Flush();

@@ -49,7 +49,7 @@ internal static partial class LiveUiSmoke
                         var console=Find("LabDesktop").Current.BoundingRectangle;
                         var copy=Find("LabTheoryTitle").Current.BoundingRectangle;
                         Check(console.Right<=copy.Left && console.Width>350,"Sidebar to the right does not overlap input");
-                        Check(Name("LabTheoryWhy").Contains(environment=="windows"?"Select-String":"grep"),"First shell command explained");
+                        Check(Name("LabTheoryObserve").Contains(environment=="windows"?"/L":"-n"),"First shell command explained");
                         Key("F2");
                         Until(delegate {return !Visible("LabTheoryTitle");},"hide explanation");
                         Check(ReadSolved()==0,"Closing theory does not submit the exercise");
@@ -58,17 +58,26 @@ internal static partial class LiveUiSmoke
                     }
                     else if(mode=="chrome") Check(!Visible("LabTerminalTheory") && !Visible("LabTheoryTitle"),"No command sidebar in browser");
                     CaptureReferenceFrame("course-"+environment+"-"+mode+"-start");
-                    bool shortTerminal = mode=="terminal";
-                    for(int cap=0;cap<100 && !Visible("LabResult") && (ReadSolved()<20||CourseScenario()==initial);cap++)
+                    bool shellCourse = mode=="terminal";
+                    for(int cap=0;cap<100 && !Visible("LabResult") && (ReadSolved()<(shellCourse?30:20)||CourseScenario()==initial);cap++)
                     {
                         int before=ReadSolved();
                         string prompt=Find("LabTask").Current.ItemStatus;
-                        if (shortTerminal && before==1)
-                            Check(Name("LabTheoryWhy").Contains(environment=="windows"?"-Wait":"-f"),"Theory changes with current command");
-                        if (shortTerminal && before==2)
-                            Check(!Visible("LabTerminalTheory") && !Visible("LabTheoryTitle"),"No command sidebar on interrupt shortcut");
-                        if (shortTerminal && before==3)
-                            Check(Name("LabTheoryTitle").Contains("одной попытки"),"Returned prompt has lookup theory");
+                        if (shellCourse && before==1)
+                            Check(Name("LabTheoryTitle").Contains("не стирая"),"Theory changes with current operation");
+                        if (shellCourse && before==2)
+                            Check(Name("LabTheoryTitle").Contains("саму копию"),"Verify the destination, not the source");
+                        if (shellCourse && Name("LabTask").Contains("Хватит места"))
+                        {
+                            string observed = Name("LabDesktop");
+                            var needed = System.Text.RegularExpressions.Regex.Match(observed, @"Размер архива: ([0-9,]+) ГиБ");
+                            var free = System.Text.RegularExpressions.Regex.Matches(observed, @"свободно ([0-9,]+) ГиБ");
+                            Check(needed.Success && free.Count>0,"Both advertised capacity and actual query visible to UI Automation");
+                            var ru = System.Globalization.CultureInfo.GetCultureInfo("ru-RU");
+                            Key(Decimal.Parse(free[free.Count-1].Groups[1].Value,ru) >= Decimal.Parse(needed.Groups[1].Value,ru) ? "2":"1");
+                            Until(delegate {return ReadSolved()==before+1;},"real capacity decision");
+                            continue;
+                        }
                         if (prompt.StartsWith("text:",StringComparison.Ordinal))
                         {
                             EnterCharacters(prompt.Substring(5));
@@ -78,7 +87,7 @@ internal static partial class LiveUiSmoke
                         {
                             Check(prompt.StartsWith("keys:",StringComparison.Ordinal),"A credited step expects a real typed action: "+prompt);
                             string keys=prompt.Substring(5);
-                            if (shortTerminal && keys=="Ctrl+C")
+                            if (shellCourse && keys=="Ctrl+C")
                                 Until(delegate {return Find("LabDesktop").Current.ItemStatus.Contains("новая ошибка");},
                                       "actual virtual log event before interrupting its viewer");
                             string prefix=Exists("LabKeys") ? Find("LabKeys").Current.ItemStatus : "";
@@ -91,17 +100,7 @@ internal static partial class LiveUiSmoke
                         }
                         Until(delegate {return Visible("LabResult") || ReadSolved()==before+1;},
                               environment+"/"+mode+" "+before+" "+prompt);
-                        if (!shortTerminal) Check(!Visible("LabResult"),"Ordinary practice didn't terminate at the end of its first activity");
-                    }
-                    if (shortTerminal)
-                    {
-                        Check(Visible("LabResult") && Find("LabResult").Current.HelpText.Contains("Выполнено 4."),
-                              "The bounded journal incident completes four actions without unrelated additions");
-                        CaptureReferenceFrame("course-"+environment+"-"+mode+"-completed");
-                        Console.WriteLine("COURSE " + environment + "/" + mode + ": " + initial + " | single practical journal completed.");
-                        Invoke("LabChooseClass");
-                        Until(delegate {return Visible("HomeClass-"+mode);},"terminal card restores after finite result");
-                        continue;
+                        Check(!Visible("LabResult"),"Ordinary practice didn't terminate at the end of its first activity");
                     }
                     int earned=ReadSolved();
                     string next=CourseScenario();

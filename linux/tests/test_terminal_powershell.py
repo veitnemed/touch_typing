@@ -135,7 +135,7 @@ class TerminalPowerShellTests(unittest.TestCase):
         native_powershell = {
             POWERSHELL,
             "terminal-disk-space-powershell",
-            "terminal-disk-repeat-powershell",
+            "terminal-disk-repeat-powershell", "terminal-delivery-sync-ps", "terminal-delivery-hash-ps",
         }
         self.assertTrue(all(item["title"].startswith("Bash (учебный Ubuntu) · ")
                             for key, item in windows_missions.items() if key not in native_powershell))

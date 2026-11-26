@@ -16,7 +16,7 @@ internal sealed partial class PracticeService
             Number(m, "level"), Number(m, "seconds"), Number(m, "cycles", 1), Flag(m, "infinite"),
             verifyInputs && m.TryGetProperty("seed", out _) ? new Random(Number(m, "seed")) : Random.Shared, rightAltMode, windows);
         mixedTyping.SetLayoutBindings(forward, backward);
-        mixedTyping.SetGuide(profile.RightHandChord, rightAltMode);
+        mixedTyping.SetGuide(profile.RightHandChord, rightAltMode, windows);
         BeginTypingOwnership(profile.ClassicTypingDraft, false);
         typing = null;
         return true;
@@ -28,7 +28,7 @@ internal sealed partial class PracticeService
         if (restored == null) return false;
         mixedTyping = restored;
         mixedTyping.SetLayoutBindings(forward, backward);
-        mixedTyping.SetGuide(profile.RightHandChord, rightAltMode);
+        mixedTyping.SetGuide(profile.RightHandChord, rightAltMode, windows);
         BeginTypingOwnership(profile.ClassicTypingDraft, true);
         typing = null;
         return true;
@@ -56,7 +56,7 @@ internal sealed partial class PracticeService
             p.Results.Add(item);
             TypingModeRecords.Record(p, item, t.Level, t.Cycles, t.TimeLimit, -1, t.StartLayout, completed: item.Completed);
             if (p.Results.Count > 500) p.Results.RemoveRange(0, p.Results.Count - 500);
-            if (item.Completed && t.Mode != MixedTypingRun.SystemMode) TypingReviewLedger.Register(p, item, t.AttemptId, t.Title, ReviewMisses(t.Mistakes));
+            if (item.Completed) TypingReviewLedger.Register(p, item, t.AttemptId, t.Title, ReviewMisses(t.Mistakes));
         })) t.Saved();
     }
 

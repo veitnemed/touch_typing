@@ -124,7 +124,7 @@ internal sealed class LabWindow(string app, int number, int workspace)
     internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults, string projectName, string projectRelative, string windowsPath = null, bool browserPractice = false, int projectRootDepth = 3,
         LabEntry[] explorerEntries = null, bool canUndoExplorer = false, bool explorerCanPaste = false, bool canPasteCell = false,
         object tabSearch = null, object sourceReview = null, object sourceControl = null) => new { sourceControl, windowsPath, browserPractice, projectRootDepth, renamePath = RenamePath, tabSearch, sourceReview,
-        explorerActions = App == "code", explorerEntries, canUndoExplorer, explorerCanPaste, expandedFolders = ExpandedProjectFolders, notebook = Tab?.Notebook?.Snapshot(canPasteCell), notebookDescription = Tab?.Notebook?.Describe(), syntax = App == "code" ? PythonHighlight.For(Body, Url) : [], projectFiles, changedFiles, searchResults, projectName, projectRelative, ProjectSearchQuery, Id, App, Title, Workspace, State, NormalSlot, canGoBack = App == "chrome" && Tab?.HistoryIndex > 0, restoreState = MinimizedFrom, active, Folder, folderCanBack = FolderBack.Count != 0, folderCanForward = FolderForward.Count != 0, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(App == "code"), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
+        explorerActions = App == "code", explorerEntries, canUndoExplorer, explorerCanPaste, expandedFolders = ExpandedProjectFolders, notebook = Tab?.Notebook?.Snapshot(canPasteCell), notebookDescription = Tab?.Notebook?.Describe(), syntax = App == "code" ? PythonHighlight.For(Body, Url) : [], projectFiles, changedFiles, searchResults, projectName, projectRelative, ProjectSearchQuery, Id, App, Title, Workspace, State, NormalSlot, canGoBack = App == "chrome" && Tab?.HistoryIndex > 0, canGoForward = App == "chrome" && Tab != null && Tab.HistoryIndex + 1 < Tab.History.Count, restoreState = MinimizedFrom, active, Folder, folderCanBack = FolderBack.Count != 0, folderCanForward = FolderForward.Count != 0, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(App == "code"), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
         tabs = Tabs.Select(tab => tab.Snapshot()), ActiveTab, Url, Body, Focus, Input, HistorySearch, Find, Sidebar, Split, Status = StatusFor(entries), Zoom, Selected, Cursor, Anchor, Panel, bodyCursor = Tab?.Position.Caret ?? 0, bodyAnchor = Tab?.Position.Anchor ?? 0, OptionIndex, Bookmarks, savedBookmarks = SavedBookmarks.ToArray() };
     internal LabWindow Clone()
     {
@@ -221,6 +221,7 @@ internal sealed partial class LabScene
         guideExpected = source.guideExpected;
         journalCase = source.journalCase;
         tracebackCase = source.tracebackCase;
+        LegacyOrdinarySearch = source.LegacyOrdinarySearch;
         BrowserPracticeActive = source.BrowserPracticeActive; RepoCloned = source.RepoCloned; BrowserPracticeQuery = source.BrowserPracticeQuery;
         notebookCase = source.notebookCase; notebookLevel = source.notebookLevel;
         notebookFamily = source.notebookFamily; csvNotebook = source.csvNotebook; verifiedNotebookBody = source.verifiedNotebookBody;
@@ -229,6 +230,7 @@ internal sealed partial class LabScene
         ReplayLegacyTabSearch = source.ReplayLegacyTabSearch;
         projectFileFamily = source.projectFileFamily; lastProjectFileEdit = source.lastProjectFileEdit;
         lastFileConflict = source.lastFileConflict;
+        releaseCase = source.releaseCase; gitMessage = source.gitMessage;
         Terminal = source.Terminal.Clone(); captureImage = source.captureImage;
         CloneDebugDay(source);
         CloneDiskCapacity(source);
@@ -317,6 +319,8 @@ internal sealed partial class LabScene
     {
         if (action.StartsWith("win-", StringComparison.Ordinal)) return ApplyWindowsAction(action);
         var window = Active;
+        if (action.StartsWith("scm-", StringComparison.Ordinal))
+        { bool applied = ApplyGitAction(window, action); if (applied) Version++; return applied; }
         if (ApplyNotebook(action, window) is bool notebookChanged) return notebookChanged;
         if (ApplyNotebookPalette(action, window) is bool notebookCommand) return notebookCommand;
         if (ApplyDebugDayAction(action, window) is bool debug) return debug;
@@ -477,9 +481,9 @@ internal sealed partial class LabScene
                 if (!browser || window.Tab == null) return false;
                 int destination = window.Tab.HistoryIndex + (action == "back" ? -1 : 1);
                 if (destination < 0 || destination >= window.Tab.History.Count) return false;
-                if (BrowserPracticeActive) window.Tab.PracticeHistoryItems[window.Tab.HistoryIndex] = window.Item;
+                if (BrowserPracticeActive || !LegacyOrdinarySearch) window.Tab.PracticeHistoryItems[window.Tab.HistoryIndex] = window.Item;
                 window.Tab.HistoryIndex = destination; SetPage(window.Tab, window.Tab.History[destination]);
-                if (BrowserPracticeActive)
+                if (BrowserPracticeActive || !LegacyOrdinarySearch)
                 {
                     window.Item = window.Tab.PracticeHistoryItems.GetValueOrDefault(destination, -1);
                     window.Focus = "body";
@@ -681,6 +685,7 @@ internal sealed partial class LabScene
         else if (w.Focus != "body")
         {
             w.Input = updated;
+            if (w.Focus == "scm-message") gitMessage = updated;
             if (w.Focus == "history" && OnChromeHistory(w)) { w.Item = -1; w.PromptHistorySelection = false; }
             if (w.Focus == "tab-search") w.TabSearchIndex = 0;
             if (w.Focus == "source-review") w.Status = "Готово";
@@ -703,7 +708,7 @@ internal sealed partial class LabScene
     }
 
     private static bool EditableInputFocus(string focus) => focus is
-        "url" or "find" or "history" or "tab-search" or "source-review" or "palette" or "clone-url" or "quick-open" or "goto-line" or "symbols"
+        "url" or "find" or "history" or "tab-search" or "source-review" or "scm-message" or "palette" or "clone-url" or "quick-open" or "goto-line" or "symbols"
         or "symbol-rename" or "file-name" or "file-search" or "project-search" or "replace-find" or "replace-with";
 
     internal bool CanRepeatText()
@@ -769,7 +774,7 @@ internal sealed partial class LabScene
             window.PromptHistorySelection = true; Version++;
             return true;
         }
-        if (window.App == "files" && window.Focus == "file-results") return false;
+        if (window.App == "files" && window.Focus == "file-results" || window.Focus is "scm-menu" or "changes") return false;
         bool terminal = window.App == "terminal" || window.Focus == "terminal";
         if (window.Focus == "reverse-search")
         {
@@ -800,10 +805,10 @@ internal sealed partial class LabScene
             else if (window.Focus == "url")
             {
                 string url = window.Input.Trim(); if (url.Length == 0) return false;
-                if (BrowserPracticeActive) url = PracticeAddress(url);
+                if (BrowserPracticeActive || !LegacyOrdinarySearch) url = PracticeAddress(url);
                 else if (!url.Contains("://") && url != "about:blank") url = url.Contains('.') ? "https://" + url : "https://search.local/?q=" + Uri.EscapeDataString(url);
                 var tab = window.Tab; tab.Position = new(); tab.History.RemoveRange(tab.HistoryIndex + 1, tab.History.Count - tab.HistoryIndex - 1);
-                if (BrowserPracticeActive)
+                if (BrowserPracticeActive || !LegacyOrdinarySearch)
                 {
                     foreach (int entry in tab.PracticeHistoryItems.Keys.Where(index => index > tab.HistoryIndex).ToArray())
                         tab.PracticeHistoryItems.Remove(entry);

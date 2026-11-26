@@ -95,6 +95,12 @@ internal sealed partial class LabRun
         bool commandModifiers = held.Any(item => KeyChord.Family(item) is "Ctrl" or "Alt" or "Super");
         if (Task.Id == "gnome-left-super" && key == "Z")
             return Miss(key, "Это клавиша Z (Я). Левый Super ⊞ находится ниже, левее Alt.");
+        if (LiveCourse.ResolveGitKey(key, held, Scene) is LabTask git)
+        {
+            if (git.Action == "scm-commit" && Scene.ReleasePractice && Task.Action != "scm-commit")
+                return Miss(key, "Сначала завершите текущую проверку: " + Task.Title);
+            Watch(); return Perform(git, key);
+        }
         if (key is "Up" or "Down" or "Enter" && Scene.OnSourceControl && !held.Any(KeyChord.IsModifier))
         {
             Scene.ReviewSourceControl(key);
@@ -196,6 +202,12 @@ internal sealed partial class LabRun
             return Miss(key, "Команда выполнена, но отчёт не совпадает с заданием. Проверьте весь сохранённый файл и папку «Загрузки».");
         if (matches && watching?.Any(item => item.Goal.Task == Task && item.Goal.ArtifactPath != null) == true)
             return Miss(key, "Сохранённая заметка отличается от исходника. Вернитесь в редактор, вставьте скопированный текст целиком и сохраните файл.");
+        if (submitting && Scene.Terminal.DeliveryLesson != "") return Miss(key, Task.Id switch {
+            "command/delivery-read-match" => "Открытая версия не совпала с квитанцией. Сверьте обе суммы и попробуйте другую копию.",
+            "command/delivery-read-copy" => "Проверьте заметку в Backup, а не её исходник в Work.",
+            "command/delivery-preview" or "command/delivery-recheck" => "Нужен предварительный список без записи в Backup.",
+            _ => "Команда сработала, но пока не показала нужный результат. Сверьте папку и цель."
+        });
         if (submitting && Scene.DiskSpaceLesson) return Miss(key, "Вы проверили другой диск. Сверьте назначение в заявке.");
         if (submitting && Scene.PracticalTerminal)
             return Miss(key, LiveCourse.TerminalIncidentTask(Task.Id)
@@ -230,6 +242,8 @@ internal sealed partial class LabRun
             "code-clone-command" => Scene.BrowserPracticeActive && window.Focus == "palette",
             "palette-choose" => Scene.AdvancedNotebook && window.Focus == "palette" && Task.Text.Length > 0,
             "notebook-type" => Scene.OnNotebook && window.Tab.Notebook.Editing,
+            "release-find" => window.App == "code" && window.Focus == "find",
+            "scm-commit" => window.App == "code" && window.Focus == "scm-message",
             "checkout-expect" => window.App == "code" && window.Focus == "find",
             "python-edit-write" or "gnome-write" or "debug-rewrite" => window.App == "code" && window.Focus == "body",
             "debug-doc-submit" => window.App == "chrome" && window.Focus == "find",

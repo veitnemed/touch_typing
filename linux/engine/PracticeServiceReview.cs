@@ -42,6 +42,12 @@ internal sealed partial class PracticeService
     private static IEnumerable<ReviewMiss> ReviewMisses(IReadOnlyDictionary<TypingAtom, int> entries) =>
         entries.Select(e => new ReviewMiss(e.Key.Kind, e.Key.Value, e.Key.Layout, e.Value));
 
+    private static void RequireReviewCapture(bool needs, JsonElement message)
+    {
+        if (needs && !Flag(message, "systemCapture"))
+            throw new InvalidOperationException("Для этой работы над ошибками требуется захват системных клавиш.");
+    }
+
     private bool TryReviewCommand(JsonElement m, out object response)
     {
         response = null;
@@ -50,7 +56,7 @@ internal sealed partial class PracticeService
         {
             profile = store.Read(); // including completions made by a second open window
             if (store.Error != null) throw new InvalidOperationException(store.Error);
-            response = TypingReviewLedger.HistoricalResult(profile, Text(m, "sourceId"));
+            response = TypingReviewLedger.HistoricalResult(profile, Text(m, "sourceId"), windows);
             return true;
         }
         if (command == "typing-review-start")
@@ -58,6 +64,7 @@ internal sealed partial class PracticeService
             string id = Text(m, "sourceId");
             if (review?.SourceId == id && !review.Conflict && !review.FinishedOnDisk)
             {
+                RequireReviewCapture(review.RequiresCapture, m);
                 review.Run.Resume();
                 response = review.State(lang);
                 return true;
@@ -67,6 +74,7 @@ internal sealed partial class PracticeService
             if (store.Error != null) throw new InvalidOperationException(store.Error);
             var available = TypingReviewLedger.Find(current, id);
             if (available == null || available.Completed) throw new ArgumentException("Для этой попытки нет незавершённой работы над ошибками.");
+            RequireReviewCapture(available.SystemCapture, m);
             if (review != null && !review.Conflict) PersistReview(pause: true, force: true);
             if (review == null && (typing != null || mixedTyping != null))
             {
@@ -75,11 +83,15 @@ internal sealed partial class PracticeService
             }
             if (store.Error != null) throw new InvalidOperationException(store.Error);
             TypingReviewSession opened = null;
-            Save(p => opened = new TypingReviewSession(TypingReviewLedger.Open(p, id)));
+            Save(p =>
+            {
+                opened = new TypingReviewSession(TypingReviewLedger.Open(p, id));
+                RequireReviewCapture(opened.RequiresCapture, m);
+            });
             if (store.Error != null) throw new InvalidOperationException(store.Error);
             review = opened;
             review.Run.SetLayoutBindings(forward, backward);
-            review.Run.SetGuide(profile.RightHandChord, rightAltMode);
+            review.Run.SetGuide(profile.RightHandChord, rightAltMode, windows);
             typing = null;
             mixedTyping = null;
             response = review.State(lang);
@@ -113,7 +125,7 @@ internal sealed partial class PracticeService
             case "typing-state": PersistReview(); break;
             case "typing-stop": case "typing-suspend": case "typing-pause":
                 PersistReview(pause: true, force: true); break;
-            case "typing-resume": review.Run.Resume(); break;
+            case "typing-resume": RequireReviewCapture(review.RequiresCapture, m); review.Run.Resume(); break;
             default: return false;
         }
         response = review.State(lang);

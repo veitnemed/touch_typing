@@ -217,10 +217,38 @@ internal static class TerminalRegression
         Check(StableState(git) == before, "Equivalence probes preserve dirty working tree");
         Run(git, "git add feature.txt"); Run(git, "git commit -m edited"); Run(git, "git switch main");
         Check(!git.ReadFile("README.md").Contains("altered"), "Rejected equivalence mutation never leaked");
+        Run(git,"echo staged > README.md"); Run(git,"git add README.md"); Run(git,"echo later > README.md");
+        Check(Run(git,"git status --short").Output.Contains("MM README.md"), "Short status shows both index and worktree differences");
+        Run(git,"git commit -m snapshot");
+        Check(Run(git,"git status --short").Output.SequenceEqual(new[]{" M README.md"}), "Committing an index snapshot leaves later changes unstaged");
+    }
+
+    private static void UnittestReceiptStreams()
+    {
+        const string cmd = "python3 -m unittest test_checkout";
+        var term = new VirtualTerminal();
+        term.InstallUnitTest("test_checkout", _ => "Ran 2 tests\nOK\n");
+        Check(Run(term, cmd + " > receipt.txt").Output.Contains("OK") && term.ReadFile("receipt.txt") == "",
+            "unittest default reporter is stderr, not stdout");
+        Check(Run(term, cmd + " > receipt.txt 2>&1").Output.Length == 0 &&
+            term.ReadFile("receipt.txt").EndsWith("OK\n"), "left-to-right redirections combine both streams in the receipt");
+        Check(Run(term, cmd + " 2>&1 > receipt.txt").Output.Contains("OK") && term.ReadFile("receipt.txt") == "",
+            "duplicating first retains the previous stdout target");
+        term.InstallUnitTest("test_broken", _ => throw new ArgumentException("Ran 2 tests\nFAILED (failures=1)"));
+        term.StoreFile("receipt.txt", "stale OK\n");
+        var bad = term.Execute("python3 -m unittest test_broken > receipt.txt 2>&1");
+        Check(!bad.Success && bad.Output.Length == 0 && term.ReadFile("receipt.txt").Contains("FAILED") &&
+              !term.ReadFile("receipt.txt").Contains("OK"), "failed combined report must replace stale success");
+        bad = term.Execute("python3 -m unittest test_broken > receipt.txt");
+        Check(!bad.Success && bad.Output.Any(l => l.Contains("FAILED")) && term.ReadFile("receipt.txt") == "",
+            "unredirected stderr is visible while stdout-only destination is truncated");
+        term.LegacyCheckoutStdout = true;
+        Check(Run(term.Clone(), cmd + " > old.txt").Output.Length == 0, "legacy checkout only: v1.9.2 replay");
     }
 
     private static void Main()
     {
+        UnittestReceiptStreams();
         var terminal = new VirtualTerminal();
         Check(terminal.Cwd == "/home/student", "Home at launch");
         Check(Run(terminal, "pwd").Output.Single() == "/home/student", "pwd result");

@@ -45,7 +45,7 @@ internal sealed partial class LabRun
     internal LiveDraft Draft() => new() { App = App, DesktopEnvironment = EnvironmentProfile, Level = Level, Mission = MissionId, Layout = initialLayout, Guidance = Guidance,
         Dock = Scene.Dock, ProjectFixture = neutralProject ? NeutralProject.FixtureId : null, DesktopProfile = Scene.GnomePractice.Length == 0 ? null : Scene.DesktopProfile, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, NativeEnglishInput = nativeEnglishInput, EditorCourse = EditorCourse, RouteKind = RouteKind,
         AdaptiveGuide = AdaptiveGuide, CoachStage = CoachStage, CoachReason = CoachReason,
-        MissionRevision = Scene.GuideNoteActive ? LabScene.GuideNoteRevision : Scene.SafeReorder ? LabScene.SafeReorderRevision : null,
+        MissionRevision = App == "terminal" && IsCourse && !restoreLegacyTerminalCourse ? LiveCourse.TerminalCourseRevision : Scene.BlockRepair && !Scene.Terminal.LegacyCheckoutStdout ? LabScene.CheckoutRevision : Scene.GuideNoteActive ? LabScene.GuideNoteRevision : Scene.SafeReorder ? LabScene.SafeReorderRevision : null,
         Trace = JsonSerializer.Serialize(trace),
         Progress = new() { Session = Session, Mode = Mode, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Solved = Solved,
             Errors = Errors, SimulatedWindowSwitches = SimulatedWindowSwitches, ActiveMilliseconds = ActiveMilliseconds,
@@ -125,6 +125,13 @@ internal sealed partial class LabRun
     internal bool ExplorerPointer(string action, string path)
     {
         if (Finished || AwaitingLimitChoice || Paused) return false;
+        if (Scene.ReleasePractice && action is "scm-commit" or "scm-stage" or "scm-unstage")
+        {
+            // Performing the assessed mutation early with a mouse would leave a
+            // learner with no key transition to demonstrate (commits cannot be undone here).
+            Status = "В этом поручении действие Git проверяется с клавиатуры. " + Task.Title;
+            return false;
+        }
         int before = Scene.Version;
         if (!Scene.ExplorerPointer(action, path) && before == Scene.Version) return false;
         trace.Add(new(ExplorerPointerEvent, Text: action + ":" + path));

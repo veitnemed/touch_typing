@@ -13,6 +13,7 @@ internal sealed class TypingReviewSession
     internal readonly string SourceId;
     internal readonly ReviewDeck Deck;
     internal readonly MixedTypingRun Run;
+    internal readonly bool RequiresCapture;
     internal int Revision;
     internal int WrittenAt;
     internal double SavedSeconds;
@@ -21,6 +22,7 @@ internal sealed class TypingReviewSession
     {
         SourceId = ticket.SourceId;
         Deck = TypingReviewPlan.ReadDeck(ticket.Plan);
+        RequiresCapture = ticket.SystemCapture || Deck.Units.Any(a => a.Command && a.Chord.UsesSystem);
         if (ticket.Position < 0 || ticket.Position >= Deck.Units.Length || ticket.Errors < 0 ||
             !double.IsFinite(ticket.Seconds) || ticket.Seconds < 0)
             throw new ArgumentException("Сохранённая позиция исправления неверна. Другие упражнения доступны.");
@@ -39,7 +41,9 @@ internal sealed class TypingReviewSession
         var payload = JsonSerializer.SerializeToNode(result, Program.Json).AsObject();
         var state = payload["state"].AsObject();
         state["attemptId"] = attemptId; state["isReview"] = false;
-        state["reviewAvailable"] = TypingReviewLedger.Find(profile, attemptId) is { Completed: false };
+        var ticket = TypingReviewLedger.Find(profile, attemptId);
+        state["reviewAvailable"] = ticket is { Completed: false };
+        state["reviewRequiresCapture"] = ticket is { Completed: false, SystemCapture: true };
         return payload;
     }
 
@@ -47,10 +51,11 @@ internal sealed class TypingReviewSession
     {
         var state = JsonSerializer.SerializeToNode(Run.State(layout), Program.Json).AsObject();
         int at = Run.Position;
-        state["before"] = Deck.Ribbon(Math.Max(0, at - 18), at, separatorAfterEnd: true);
-        state["after"] = Deck.Ribbon(at, Math.Min(Deck.Units.Length, at + 75));
+        state["before"] = Deck.Ribbon(Math.Max(0, at - 18), at, Run.WindowsLabels, separatorAfterEnd: true);
+        state["after"] = Deck.Ribbon(at, Math.Min(Deck.Units.Length, at + 75), Run.WindowsLabels);
         state["source"] = Deck.GroupLabel(at);
         state["isReview"] = true;
+        state["requiresSystemCapture"] = RequiresCapture;
         state["attemptId"] = SourceId;
         state["reviewAvailable"] = false;
         return state;

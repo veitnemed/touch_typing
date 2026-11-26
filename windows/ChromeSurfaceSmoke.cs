@@ -79,9 +79,18 @@ internal static partial class LiveUiSmoke
             ChromePointerClick(23,60);
             Check(BrowserWitness("LabDesktop")[1]==original && ReadSolved()==before,"Disabled Back is a no-op, without credit.");
             CaptureReferenceFrame("chrome-surface-04-restored");
+            ChromePointerClick(58,60);
+            Until(delegate {return BrowserWitness("LabDesktop")[1].IndexOf("report",StringComparison.OrdinalIgnoreCase)>=0;},
+                "enabled Forward reopened the same history entry");
+            string visited=BrowserWitness("LabDesktop")[1];
+            ChromePointerClick(58,60);
+            Check(BrowserWitness("LabDesktop")[1]==visited && ReadSolved()==before,"Disabled Forward is a no-op without shortcut credit.");
+            CaptureReferenceFrame("chrome-surface-05-forward");
+            ChromePointerClick(23,60);
+            Until(delegate {return BrowserWitness("LabDesktop")[1]==original;},"Back after Forward retains the source");
             Chord("Ctrl+L");
             Until(delegate{return ReadSolved()==1 && BrowserWitness("LabDesktop")[2]=="url";},"a physical Ctrl+L earns exactly one step");
-            Console.WriteLine("PASS native WPF Chrome: three physical pointer targets, exact outcome, no mouse shortcut credit.");return 0;
+            Console.WriteLine("PASS native WPF Chrome: physical address, tabs, Back and Forward, exact outcome, no mouse shortcut credit.");return 0;
         }
         catch(Exception ex)
         {

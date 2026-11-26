@@ -60,7 +60,18 @@ namespace TouchTypingStudio
                 double y = 29 + index * 44;
                 if (current == index && window.B("sidebar", true)) Rectangle(0, y, 2, 44, CodeForeground);
                 string tint = current == index ? CodeForeground : CodeMuted;
-                if (index == 2) DrawWorkbenchMark("branch", (width - 20) / 2, y + 12, 20, tint);
+                if (index == 2) {
+                    DrawWorkbenchMark("branch", (width - 20) / 2, y + 12, 20, tint);
+                    var git=window.D("sourceControl");
+                    int count=git.Exists ? git.Items("changes").Select(c=>c.S("path")).Distinct().Count() : window.Items("changedFiles").Count();
+                    if (count>0)
+                    {
+                        string badge=Math.Min(count,99).ToString(CultureInfo.InvariantCulture);
+                        Rounded(width-21,y+26,17,16,"#1F6FEB",8);
+                        Text(badge,width-12.5-MeasureSceneText(badge,10)/2,y+26,10,"#FFFFFF",16);
+                    }
+                    AddNotebookHit(new Rect(0,y,width,44),ExplorerPrefix+"scm-open","Source Control · Git");
+                }
                 else Text(glyphs[index], 12, y + 9, 23, tint, 29);
             }
             if (h > 270) Text("◉", 12, h - 93, 22, CodeMuted, 27);
@@ -147,26 +158,65 @@ namespace TouchTypingStudio
         private void DrawCodeSourceControl(Data source, double x, double width, double h)
         {
             var changes = source.Items("changes").ToArray();
-            DrawWorkbenchMark("branch", x + 12, 67, 14, CodeMuted);
-            Text("Git · " + source.S("branch", "main"), x + 32, 68, 11, CodeForeground, width - 41);
-            Rectangle(x, 89, width, 24, "#161B22");
-            Text("⌄  CHANGES", x + 12, 94, 11, CodeForeground, width - 37);
-            Text(changes.Length.ToString(CultureInfo.InvariantCulture), x + width - 26, 94, 11, CodeMuted, 20);
-            if (changes.Length == 0)
-                Text("Рабочая копия без изменений", x + 12, 121, 11, CodeMuted, width - 22);
-            int capacity = Math.Max(1, (int)((h - 142) / 22)), selected = source.I("selected", -1);
-            int first = Math.Max(0, selected - capacity + 1);
-            for (int i = first; i < Math.Min(changes.Length, first + capacity); i++)
+            Text("⌄  CHANGES",x+8,66,11,CodeForeground,width-75);
+            DrawWorkbenchMark("branch",x+width-62,68,12,CodeMuted);
+            Text(source.S("branch","main"),x+width-44,66,11,CodeMuted,39);
+            string focus = source.S("focus"), message = source.S("message");
+            Rounded(x + 8, 88, width - 16, 27, focus == "scm-message" ? CodeCaret : CodeBorder, 3);
+            Rounded(x + 9, 89, width - 18, 25, CodeCanvas, 2);
+            string display = message.Length == 0 ? "Message (Ctrl+Enter)" : message;
+            if (focus == "scm-message")
             {
-                double row = 117 + 22 * (i - first);
-                var change = changes[i];
-                string path = change.S("path"), state = change.S("state");
-                if (i == selected) Rectangle(x + 1, row, width - 3, 21, CodeExplorerSelection);
-                DrawCodeFileIcon(path, x + 12, row + 3);
-                Text(path.Split('/').Last(), x + 30, row + 2, 12, CodeForeground, width - 51);
-                Text(state, x + width - 21, row + 2, 12, state == "D" ? "#FF7B72" : state == "U" ? "#7EE787" : "#D29922", 16);
-                AddNotebookHit(new Rect(x, row, width, 21), ExplorerPrefix + "source-control", "Diff: " + path, path: path);
+                int caret = Math.Max(0, Math.Min(message.Length, source.I("messageCursor")));
+                int left = Math.Max(0, caret - Math.Max(4, (int)((width-32)/7)));
+                display = message.Substring(left,caret-left) + "│" + message.Substring(caret);
             }
+            Text(display, x+14, 93, 12, message.Length != 0 || focus == "scm-message" ? CodeForeground : CodeMuted, width-29);
+            AddNotebookHit(new Rect(x+8,88,width-16,27), ExplorerPrefix+"scm-message","Сообщение локального коммита");
+            bool enabled = source.B("canCommit") && !string.IsNullOrWhiteSpace(message);
+            Rounded(x+8,120,width-16,23,enabled ? "#238636" : "#182821",3);
+            Text("✓  Commit",x+(width-MeasureSceneText("✓  Commit",12))/2,123,12,enabled ? "#FFFFFF" : CodeMuted,width/2+10);
+            if (enabled) AddNotebookHit(new Rect(x+8,120,width-16,23),ExplorerPrefix+"scm-commit","Зафиксировать подготовленные изменения");
+            int selected = source.I("selected", -1), stage = changes.Count(c=>c.B("staged"));
+            var listing = new List<int>();
+            if (stage!=0) listing.Add(-2);
+            listing.AddRange(Enumerable.Range(0,changes.Length).Where(i=>changes[i].B("staged")));
+            listing.Add(-1);
+            listing.AddRange(Enumerable.Range(0,changes.Length).Where(i=>!changes[i].B("staged")));
+            int slot = selected<0 ? 0 : Math.Max(0,listing.IndexOf(selected));
+            int capacity = Math.Max(0,(int)((h-174)/22));
+            int start = Math.Max(0,slot-capacity+1);
+            for (int n=start;n<Math.Min(listing.Count,start+capacity);n++)
+            {
+                int i=listing[n]; double row=150+22*(n-start);
+                if (i<0)
+                {
+                    Rectangle(x,row,width,21,CodeInset);
+                    Text(i==-2 ? "⌄  Staged Changes" : "⌄  Changes", x+9,row+2,12,CodeForeground,width-36);
+                    string count=(i==-2 ? stage : changes.Length-stage).ToString(CultureInfo.InvariantCulture);
+                    Rounded(x+width-27,row+3,20,15,CodeBorder,7);
+                    Text(count,x+width-17-MeasureSceneText(count,10)/2,row+2,10,CodeForeground,17);
+                    continue;
+                }
+                var change=changes[i]; string path=change.S("path"), state=change.S("state");
+                bool staged=change.B("staged");
+                if (i==selected) Rectangle(x+1,row,width-3,21,CodeExplorerSelection);
+                DrawCodeFileIcon(path,x+8,row+3);
+                Text(path.Split('/').Last(),x+26,row+2,12,CodeForeground,width-72);
+                Text(state,x+width-18,row+2,11,state=="D" ? "#FF7B72" : state=="M" ? "#D29922" : "#7EE787",16);
+                Text(staged ? "−" : "+",x+width-43,row,15,CodeForeground,15);
+                AddNotebookHit(new Rect(x,row,width-48,21),ExplorerPrefix+(staged?"scm-index":"source-control"),"Diff: "+path,path:path);
+                AddNotebookHit(new Rect(x+width-48,row,25,21),ExplorerPrefix+(staged?"scm-unstage":"scm-stage"),staged?"Убрать из индекса":"Подготовить",path:path);
+            }
+            if (focus=="scm-menu" && selected>=0 && selected<changes.Length)
+            {
+                var c=changes[selected]; double top=Math.Max(88,Math.Min(h-56,150+(slot-start+1)*22));
+                Rounded(x+9,top,width-18,28,CodeBorder,3);
+                Rounded(x+10,top+1,width-20,26,"#1F2937",2);
+                Text(c.B("staged")?"Unstage Changes":"Stage Changes",x+18,top+4,12,CodeForeground,width-32);
+                AddNotebookHit(new Rect(x+9,top,width-18,28),ExplorerPrefix+(c.B("staged")?"scm-unstage":"scm-stage"),"Применить к выбранному файлу",path:c.S("path"));
+            }
+            if (changes.Length==0 && h>221) Text("Рабочая копия чиста",x+10,177,11,CodeMuted,width-21);
         }
 
         private bool DrawCodeWorkingDiff(Data source, double x, double w, double h)
@@ -175,7 +225,7 @@ namespace TouchTypingStudio
             int selected = source.I("selected", -1);
             if (selected < 0 || selected >= changes.Length) return false;
             var change = changes[selected];
-            string path = change.S("path"), tab = path.Split('/').Last() + " (Working Tree)";
+            string path = change.S("path"), tab = path.Split('/').Last() + (change.B("staged") ? " (Index)" : " (Working Tree)");
             Rectangle(x, 29, w, 35, CodeInset);
             double tabWidth = Math.Min(w, Math.Max(190, MeasureSceneText(tab, 13) + 23));
             Rectangle(x, 29, tabWidth, 35, CodeCanvas);
@@ -203,8 +253,8 @@ namespace TouchTypingStudio
                     Text(line.S("text"), at + 44, row + 1, 12, CodeForeground, pane - 50, code: true);
                 }
             };
-            draw(x, "before", "HEAD", "−", "#FF7B72", "#351B21");
-            draw(x + pane, "after", "Working Tree", "+", "#7EE787", "#142B22");
+            draw(x, "before", change.B("staged") ? "HEAD" : "Index", "−", "#FF7B72", "#351B21");
+            draw(x + pane, "after", change.B("staged") ? "Index" : "Working Tree", "+", "#7EE787", "#142B22");
             Rectangle(x + pane, 92, 1, Math.Max(1, h - 113), CodeBorder);
             return true;
         }
@@ -247,7 +297,13 @@ namespace TouchTypingStudio
                 Rectangle(x + 11, y + 1, 2, 2, "#F4A261");
                 Rectangle(x + 2, y + 11, 2, 2, "#B1BAC4");
             }
-            else Text("▪", x + 2, y - 2, 14, CodeMuted, 12);
+            else
+            {
+                Rounded(x+2,y+1,10,13,CodeMuted,1);
+                Rectangle(x+3,y+2,8,11,CodeInset);
+                string ink = file.EndsWith(".md",StringComparison.OrdinalIgnoreCase) ? "#58A6FF" : CodeMuted;
+                Rectangle(x+4,y+5,5,1,ink); Rectangle(x+4,y+8,5,1,ink);
+            }
         }
 
         private void DrawCodeStatus(Data window, double w, double h, int line, int column, string file)
@@ -258,7 +314,7 @@ namespace TouchTypingStudio
                 file.EndsWith(".md", StringComparison.OrdinalIgnoreCase) ? "Markdown" : "Plain Text";
             double rightWidth = Math.Min(w * .64, 345);
             DrawWorkbenchMark("branch", 12, h - 18, 13, CodeMuted);
-            Text("main   ⓧ " + scene.I("diagnosticProblemCount") + "   ⚠ 0",
+            Text(scene.D("terminal").S("branch", "main") + "   ⓧ " + scene.I("diagnosticProblemCount") + "   ⚠ 0",
                 28, h - 19, 12, CodeMuted, w - rightWidth - 34);
             if (window.D("notebook").Exists)
             {

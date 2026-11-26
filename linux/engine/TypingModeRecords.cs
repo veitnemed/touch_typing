@@ -8,7 +8,7 @@ namespace TouchTypingStudio;
 // speed and accuracy maxima (which could also come from manually stopped practice).
 internal static class TypingModeRecords
 {
-    private sealed record Card(double Accuracy, double? Seconds, string Band, bool Legacy);
+    private sealed record Card(double Accuracy, string AccuracyLabel, double? Seconds, string Band, bool Legacy);
 
     // Only the course itself can say whether its intended goal was reached.
     // Stamp unfinished runs, too: they may remain in history but cannot be records.
@@ -143,7 +143,7 @@ internal static class TypingModeRecords
         {
             var b = pair.Value;
             long total = (long)b.Count + b.Errors, score = b.Count * 1000L;
-            return new Card(100.0 * b.Count / total, KnownTime(b.ActiveSeconds) ? b.ActiveSeconds : null,
+            return new Card(100.0 * b.Count / total, TypingPrecision.Label(b.Count, b.Errors), KnownTime(b.ActiveSeconds) ? b.ActiveSeconds : null,
                 score < 900 * total ? "red" : score < 975 * total ? "orange" : "green", b.Conditions == null);
         }, StringComparer.Ordinal);
     }

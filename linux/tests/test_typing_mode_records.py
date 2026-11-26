@@ -120,7 +120,7 @@ class ModeRecords(unittest.TestCase):
                     (self.result("English", 49, 1, None), None),
                     (self.result("English", 1, 0, 3, activity="TypingMistakeReview"), None)],
                    {"Id": "linux-typing/Symbols", "Speed": 900, "Accuracy": 100})
-        self.assertEqual(self.card()["Russian"], {"accuracy": 97.5, "seconds": 50.5, "band": "green", "legacy": True})
+        self.assertEqual(self.card()["Russian"], {"accuracy": 97.5, "accuracyLabel":"97,5%", "seconds": 50.5, "band": "green", "legacy": True})
         self.assertEqual(self.card()["English"]["seconds"], None)
         self.assertNotIn("Symbols", self.card())
         self.assertNotIn("Russian", self.card(level=1))
@@ -146,7 +146,7 @@ class ModeRecords(unittest.TestCase):
         self.start()
         key = stored.findtext("Task")
         self.assertEqual(self.card()[key], {
-            "accuracy": 100.0 * 150 / 151, "seconds": float(stored.findtext("Seconds")),
+            "accuracy": 100.0 * 150 / 151, "accuracyLabel":"99,33%", "seconds": float(stored.findtext("Seconds")),
             "legacy": True, "band": "green",
         })
         self.assertEqual(self.file.read_bytes(), original)
@@ -183,7 +183,7 @@ class ModeRecords(unittest.TestCase):
         self.assertNotIn(mode, self.card())
         self.assertEqual(self.card(cycles=2, level=1)[mode], {
             "band": "green", "legacy": False, "accuracy": 100.0 * state["count"] / (1 + state["count"]),
-            "seconds": duration})
+            "accuracyLabel": f'{(10000 * state["count"] // (1 + state["count"]) / 100):.2f}'.rstrip("0").rstrip(".").replace(".", ",") + "%", "seconds": duration})
 
     def test_custom_set_revision_remains_attached_to_restarted_draft(self):
         self.start()
@@ -214,7 +214,7 @@ class ModeRecords(unittest.TestCase):
         self.engine.call("typing-stop")
         self.assertFalse(any(r.findtext("Task") == "English" for r in ET.parse(self.file).findall("./Results/TypingResult")))
         self.start()
-        self.assertEqual(self.card()["English"], {"accuracy": 97.5, "seconds": 15.25,
+        self.assertEqual(self.card()["English"], {"accuracy": 97.5, "accuracyLabel":"97,5%", "seconds": 15.25,
                                                   "band": "green", "legacy": True})
         self.assertNotIn("Symbols", self.card())
 

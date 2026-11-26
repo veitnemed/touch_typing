@@ -160,8 +160,15 @@ class TypingReviewProtocol(unittest.TestCase):
         src = self.main("e", errors={0:10}, chars=390)
         self.assertEqual(src["accuracy"], 97.5)
         self.assertTrue(src["reviewAvailable"])
+        self.assertEqual(src["accuracyLabel"], "97,5%")
+        under = self.main("e", errors={0:8}, chars=391)
+        self.assertTrue(under["reviewAvailable"])
+        self.assertAlmostEqual(under["accuracy"], 100*391/399)
+        self.assertEqual(under["accuracyLabel"], "97,99%")
+        self.assertEqual(self.eng.call("typing-history-result", sourceId=under["attemptId"])["state"]["accuracyLabel"], "97,99%")
+        self.assertEqual(next(r for r in self.eng.call("library")["typingHistory"] if r["sourceId"] == under["attemptId"])["accuracyLabel"], "97,99%")
         equal = self.main("e", errors={0:8}, chars=392)
-        self.assertEqual(equal["accuracy"], 98.0)
+        self.assertEqual((equal["accuracy"], equal["accuracyLabel"]), (98.0, "98%"))
         self.assertFalse(equal["reviewAvailable"])
         with self.assertRaises(EngineError):
             self.start_review(equal["attemptId"])
@@ -274,6 +281,56 @@ class TypingReviewProtocol(unittest.TestCase):
         with self.assertRaises(EngineError):
             self.start_review(src["attemptId"])
         self.assertTrue(self.eng.call("typing-start", mode="English")["running"])
+
+    def test_system_correction_requires_capture_again_after_pause_restart_and_is_once_only(self):
+        self.eng.call("configure", platform="windows", layout="RU")
+        s = self.eng.call("typing-start", mode="SystemHotkeys", layout="RU", seed=17, systemCapture=True)
+        missed = False
+        while not s["finished"]:
+            if s["expected"] == "Alt+Super+1" and not missed:
+                self.physical(["LAlt", "1"])  # partial chord should not pass; source of the corrective target
+                missed = True
+            s = self.physical(s["expectedKeys"])
+        self.assertTrue(missed)
+        src = self.result()
+        source = src["attemptId"]
+        self.assertEqual((src["reviewAvailable"], src["reviewRequiresCapture"], src["count"], src["errors"]),
+                         (True, True, 44, 1))
+        history = self.eng.call("typing-history-result", sourceId=source)["state"]
+        self.assertTrue(history["reviewRequiresCapture"])
+        self.assertEqual(src["topMistakes"], [{"key": "Win+Alt+1", "count": 1}])
+        self.assertEqual(history["topMistakes"], src["topMistakes"])
+        with self.assertRaisesRegex(EngineError, "захват"):
+            self.start_review(source)
+        self.assertFalse(self.eng.call("library")["typing"]["reviewDrafts"])
+        def open_captured():
+            return self.eng.call("typing-review-start", sourceId=source, layout="RU", systemCapture=True)
+        s = open_captured()
+        self.assertEqual((s["requiresSystemCapture"], s["expectedDisplay"]), (True, "⟦Win+Alt+1⟧"))
+        self.assertEqual(self.physical(["LAlt", "1"])["progressDone"], 0)
+        real = s["expectedKeys"]
+        self.assertTrue("LSuper" in real and "1" in real)
+        self.assertEqual(self.physical(real)["progressDone"], 1)
+        self.eng.call("typing-pause")
+        for cmd, args in (("typing-resume", {}), ("typing-review-start", {"sourceId":source})):
+            with self.assertRaisesRegex(EngineError, "захват"):
+                self.eng.call(cmd, **args)
+        self.assertFalse(self.eng.call("typing-state")["running"])
+        self.eng.call("typing-resume", systemCapture=True)
+        self.eng.call("typing-suspend")
+        self.eng.close(); self.eng = Engine(verify=True)
+        cat = self.eng.call("configure", platform="windows", layout="RU")
+        self.assertTrue(cat["typing"]["reviewDrafts"][0]["reviewRequiresCapture"])
+        with self.assertRaisesRegex(EngineError, "захват"):
+            self.start_review(source)
+        s = open_captured()
+        self.assertEqual(s["progressDone"], 1)
+        while not s["finished"]:
+            s = self.physical(s["expectedKeys"])
+        self.assertFalse(self.result()["reviewAvailable"])
+        with self.assertRaises(EngineError):
+            open_captured()
+        self.assertEqual(sum(r.findtext("ReviewOf") == source for r in self.xml().findall("./Results/TypingResult")), 1)
 
     def test_command_drill_never_accepts_command_name_as_text(self):
         s = self.eng.call("typing-start", mode="Hotkeys", level=0, layout="RU")

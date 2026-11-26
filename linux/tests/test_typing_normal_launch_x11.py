@@ -23,10 +23,16 @@ def run(application, data_root, out):
     if not Path(data_root).is_absolute() or Path(data_root) == Path.home() / ".local/share":
         raise ValueError("Use a disposable absolute profile parent")
     display = os.environ["DISPLAY"]
-    match = re.fullmatch(r":(\d+)(?:\.0)?", display)
+    # Sandboxed builders can lack AF_UNIX; permit only authenticated loopback
+    # to our own disposable Xvfb. Never target an arbitrary hostname/display.
+    match = re.fullmatch(r"(?:127\.0\.0\.1)?:(\d+)(?:\.0)?", display)
+    if display.startswith("127.0.0.1:"):
+        auth = Path(os.environ.get("XAUTHORITY", "/dev/null"))
+        if not auth.is_file() or auth.stat().st_uid != os.getuid() or auth.stat().st_mode & 0o077:
+            raise ValueError("Disposable loopback Xvfb requires a private, owned Xauthority")
     if not match or os.environ.get("GDK_BACKEND") != "x11":
         raise ValueError("Disposable local X11 display required")
-    process = subprocess.run(["pgrep", "-f", "^([^ ]*/)?Xvfb :" + match[1] + "( |$)"],
+    process = subprocess.run(["pgrep", "-u", str(os.getuid()), "-f", "^([^ ]*/)?Xvfb :" + match[1] + "( |$)"],
                              capture_output=True, text=True)
     if process.returncode != 0 or not process.stdout.strip():
         raise ValueError("Guard: no isolated Xvfb owns the selected display")

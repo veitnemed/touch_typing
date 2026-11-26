@@ -10,7 +10,15 @@ namespace TouchTypingStudio;
 internal sealed record TypingAtom(string Kind, string Value, string Layout)
 {
     internal bool Command => Kind == "command";
-    internal string Display => Command ? "⟦" + Value + "⟧" : Value;
+    internal string DisplayFor(bool windows) => Command ? "⟦" + LabelFor(windows) + "⟧" : Value;
+    internal string LabelFor(bool windows)
+    {
+        if (!Command) return Value;
+        // The stored, layout-independent physical gesture remains unchanged.
+        if (!windows || !Value.Contains("Super", StringComparison.Ordinal)) return Value;
+        return string.Join("+", Chord.Tokens.OrderBy(k => KeyChord.Family(k) == "Super" ? 0 : 1)
+            .Select(k => k.Replace("Super", "Win", StringComparison.Ordinal)));
+    }
     internal KeyChord Chord => Command ? Gesture.Parse(Value).Chords[0] : null;
 
     internal bool IsValid() => (Layout is "RU" or "EN") &&
@@ -23,8 +31,8 @@ internal sealed partial class MixedTypingRun
     internal const string SystemMode = "SystemHotkeys";
     private static readonly string[] SystemCommon = ["Super+Left", "Super+Right", "Super+Up",
         "Alt+Tab", "Alt+Left", "Alt+Right", "Alt+Home"];
-    private static readonly string[] SystemWindows = ["Super+E", "Super+D"];
-    private static readonly string[] SystemUbuntu = ["Super+PageUp", "Super+PageDown"];
+    private static readonly string[] SystemWindows = ["Super+E", "Super+D", "Super+I", "Alt+Super+1"];
+    private static readonly string[] SystemUbuntu = ["Super+PageUp", "Super+PageDown", "Super+A", "Shift+Super+PageDown"];
     internal static readonly IReadOnlyDictionary<string, string> Modes = new Dictionary<string, string>
     {
         ["Digits"] = "Цифры", ["TopRow"] = "Цифры и знаки верхнего ряда",
@@ -61,6 +69,7 @@ internal sealed partial class MixedTypingRun
     private KeyChord[] layoutBindings = [];
     private string rightAltMode = "alt";
     private bool paired = true;
+    internal bool WindowsLabels { get; private set; }
     private bool saved;
     internal string AttemptId { get; } = Guid.NewGuid().ToString("N");
     internal int Position { get; private set; }
@@ -135,7 +144,8 @@ internal sealed partial class MixedTypingRun
         }];
         string[] rotation = mode == "Hotkeys"
             ? [.. commands, .. commands, .. navigation,
-                .. EverydayCommands.Except(commands).OrderBy(_ => random.Next()), "Alt+Home", "Alt+Right"]
+                .. EverydayCommands.Except(commands).OrderBy(_ => random.Next()), "Alt+Home", "Alt+Right",
+                .. new[] { "Shift+Left", "Shift+Right", "Shift+Tab", "Alt+Down", "F3", "Shift+F3" }.Except(commands)]
             : commands;
         string Command(int index) => rotation[index % rotation.Length];
         void Text(string text, string lang)
@@ -177,8 +187,8 @@ internal sealed partial class MixedTypingRun
         return atoms;
     }
 
-    internal void SetGuide(bool usePairedTechnique, string actualRightAltMode)
-    { paired = usePairedTechnique; rightAltMode = actualRightAltMode; }
+    internal void SetGuide(bool usePairedTechnique, string actualRightAltMode, bool windows)
+    { paired = usePairedTechnique; rightAltMode = actualRightAltMode; WindowsLabels = windows; }
 
     internal void SetLayoutBindings(params string[] bindings) => layoutBindings = bindings
         .Where(b => Gesture.TryParse(b, out var g) && g.Chords.Length == 1)
@@ -252,7 +262,7 @@ internal sealed partial class MixedTypingRun
         if (Completed) { watch.Stop(); return; }
         if (IsInfinite && Position == absoluteOffset + plan.Count)
         {
-            carry = string.Concat(plan.TakeLast(9).Select(a=>a.Display));
+            carry = string.Concat(plan.TakeLast(9).Select(a=>a.DisplayFor(WindowsLabels)));
             absoluteOffset += plan.Count; cycleIndex++;
             plan.Clear(); plan.AddRange(Generate(Mode, StartLayout, Level, random, rightAltMode));
         }
@@ -270,6 +280,10 @@ internal sealed partial class MixedTypingRun
             (modifier == "" ? new[] { key } : [modifier, key]).Select(k => new GuideKey(k, k, ShortcutCatalog.Finger(k))).ToArray();
         string expectedNote = atom?.Value switch
         {
+            "Alt+Super+1" => "В Windows открывает список последних файлов и действий первого приложения на панели задач. Нажмите 1 в верхнем ряду.",
+            "Super+I" => "В Windows открывает параметры компьютера без поиска в меню «Пуск».",
+            "Super+A" => "В GNOME открывает список приложений: можно сразу искать по названию.",
+            "Shift+Super+PageDown" => "В GNOME переносит активное окно на следующий рабочий стол.",
             "LAlt+Right" => "Вперёд по истории: левый Alt большим пальцем, правая рука на стрелке.",
             "LAlt+Left" when rightAltMode == "unknown" =>
                 "Назад по истории: левый Alt большим пальцем. Роль правой клавиши не подтверждена; этот цикл не требует её.",
@@ -282,22 +296,22 @@ internal sealed partial class MixedTypingRun
             _ => atom?.Command == true ? ShortcutCatalog.AltGuideNote(atom.Chord, rightAltMode) : ""
         };
         int visibleIndex = Position - absoluteOffset;
-        string before = (IsInfinite && visibleIndex < 9 ? carry : "") + string.Concat(plan.Take(visibleIndex).TakeLast(18).Select(a => a.Display));
-        string after = string.Concat(plan.Skip(visibleIndex).Take(75).Select(a => a.Display));
-        var errors = Mistakes.GroupBy(kv => kv.Key.Value).Select(g => new { key = g.Key, count = g.Sum(kv => kv.Value) }).OrderByDescending(a => a.count).ThenBy(a => a.key).ToArray();
+        string before = (IsInfinite && visibleIndex < 9 ? carry : "") + string.Concat(plan.Take(visibleIndex).TakeLast(18).Select(a => a.DisplayFor(WindowsLabels)));
+        string after = string.Concat(plan.Skip(visibleIndex).Take(75).Select(a => a.DisplayFor(WindowsLabels)));
+        var errors = Mistakes.GroupBy(kv => kv.Key.LabelFor(WindowsLabels)).Select(g => new { key = g.Key, count = g.Sum(kv => kv.Value) }).OrderByDescending(a => a.count).ThenBy(a => a.key).ToArray();
         return new {
-            id = AttemptId, infinite = IsInfinite, completedPlan = Completed, title = Title, source = "", mode = Mode, typedActions = true, expectedKind = atom?.Kind ?? "", expectedKeys = targets.Select(k => k.Key).ToArray(),
+            id = AttemptId, infinite = IsInfinite, completedPlan = Completed, title = Title, source = "", mode = Mode, typedActions = true, requiresSystemCapture = Mode == SystemMode, expectedKind = atom?.Kind ?? "", expectedKeys = targets.Select(k => k.Key).ToArray(),
             expectedTargets = targets.Select(k => new { key = k.Key, finger = k.Finger }).ToArray(), expectedNote,
             expected = atom == null ? "" : atom.Command ? atom.Value : CodeText.Display(atom.Value[0]),
             // Ribbon: command label is an atomic unit, not the sequence of characters C,t,r,l,+,...
-            expectedDisplay = atom?.Display ?? "", before, after,
+            expectedDisplay = atom?.DisplayFor(WindowsLabels) ?? "", before, after,
             wantedLayout = atom?.Layout ?? StartLayout, key, modifier, finger = key == "" ? (int?)null : ShortcutCatalog.Finger(key),
             held = held.ToArray(), consumePhysical = ConsumePhysical, written = "", weak = (string)null,
             count = Position, progressDone = Position, progressTotal = PlannedUnits, progressVisible = !IsInfinite,
             progressFraction = PlannedUnits is int total ? (double)Position / total : (double?)null,
             fragmentProgress = !IsInfinite ? (double)Position / plan.Count : 0d, cycle = cycleIndex + 1, cycles = Cycles,
             cycleLengths = IsInfinite ? Array.Empty<int>() : lengths, level = Level,
-            errors = Errors, accuracy = Accuracy, cpm = Seconds > 0 ? Math.Round(60 * Position / Seconds) : 0, wpm = Seconds > 0 ? Math.Round(12 * Position / Seconds) : 0,
+            errors = Errors, accuracy = Accuracy, accuracyLabel = TypingPrecision.Label(Position, Errors), cpm = Seconds > 0 ? Math.Round(60 * Position / Seconds) : 0, wpm = Seconds > 0 ? Math.Round(12 * Position / Seconds) : 0,
             seconds = (int)Seconds, timeLimit = TimeLimit, topMistakes = errors, running = Running, finished = Finished,
             correct = LastCorrect, round = 0, rounds = 0, lesson = (string)null
         };
