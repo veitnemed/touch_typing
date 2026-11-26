@@ -53,8 +53,9 @@ internal static class TerminalRegression
         bash.AddTrainingFolder("/mnt/team/Incoming reports");
         string untouched = StableState(bash);
         var linuxVolume = Run(bash, "df -h -- '/mnt/team/Incoming reports'");
-        Check(linuxVolume.Output[0].Contains(" Avail ") &&
-            linuxVolume.Output[1].Split(' ', StringSplitOptions.RemoveEmptyEntries)[3] == "512M" &&
+        Check(linuxVolume.Output[0] == "Проверен диск /mnt/team · свободно 0,5 ГиБ" &&
+            linuxVolume.Output[1].Contains(" Avail ") &&
+            linuxVolume.Output[2].Split(' ', StringSplitOptions.RemoveEmptyEntries)[3] == "512M" &&
             bash.LastCapacityQuery is { Mount: "/mnt/team", FreeMiB: 512 },
             "Bash capacity output reports the mount of its quoted path");
         Check(StableState(bash) == untouched, "Capacity query must not mutate the workspace");
@@ -72,8 +73,9 @@ internal static class TerminalRegression
             new("E", @"E:\", 16384, 3072)], "Учебная заявка");
         untouched = StableState(ps);
         var windowsVolume = Run(ps, "get-psdrive -Name 'e'");
-        Check(windowsVolume.Output[0].Contains("Free (GB)") &&
-            windowsVolume.Output[1].Split(' ', StringSplitOptions.RemoveEmptyEntries)[2] == "3.00" &&
+        Check(windowsVolume.Output[0] == @"Проверен диск E:\ · свободно 3 ГиБ" &&
+            windowsVolume.Output[1].Contains("Free (GB)") &&
+            windowsVolume.Output[2].Split(' ', StringSplitOptions.RemoveEmptyEntries)[2] == "3.00" &&
             ps.LastCapacityQuery is { Name: "E", FreeMiB: 3072 },
             "PowerShell drive name and capacity parse correctly");
         Check(StableState(ps) == untouched, "PowerShell capacity query must not mutate the workspace");

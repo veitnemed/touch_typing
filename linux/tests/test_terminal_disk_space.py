@@ -42,7 +42,9 @@ class DiskCapacityTests(unittest.TestCase):
                     expected = s["task"]["text"]
                     output = terminal(s)["output"]
                     files = terminal(s)["files"]
-                    self.assertTrue(any("Назначение:" in line for line in output))
+                    self.assertTrue(output[0].startswith("Не удалось сохранить архив "))
+                    self.assertTrue(output[1].startswith("Назначение: "))
+                    self.assertTrue(output[2].endswith(" ГиБ."))
                     bad = ("Get-PSDrive C", "Get-PSDrive " + expected[-1] + ":", 'Get-PSDrive X',
                            'Get-PSDrive ' + expected[-1] + '; rm something') if ps else (
                            "df -h .", "df -h /a/real/path", "rm notes.txt", "df -h / > stolen.txt")
@@ -58,6 +60,9 @@ class DiskCapacityTests(unittest.TestCase):
                     self.assertIn("Free (GB)" if ps else "Avail", terminal(state)["output"][-2])
                     requested, free = visible_capacity(terminal(state)["output"], ps)
                     self.assertEqual(free, {0: 1024, 1: 512, 5: 3072}[seed])
+                    shown = {0: "1", 1: "0,5", 5: "3"}[seed]
+                    mount = expected[-1] + ":\\" if ps else output[1].split(": ", 1)[1].rsplit("/", 1)[0]
+                    self.assertEqual(terminal(state)["output"][-3], f"Проверен диск {mount} · свободно {shown} ГиБ")
                     enough = free >= requested
                     capacities.add(enough)
                     self.assertIsNone(state["commandTheory"])

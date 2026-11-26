@@ -39,6 +39,12 @@ internal sealed partial class VirtualTerminal
         (mib / 1024m).ToString("0.##", CultureInfo.InvariantCulture) + "G";
     private static string DiskPsSize(int mib) => (mib / 1024m).ToString("0.00", CultureInfo.InvariantCulture);
 
+    internal static string LessonCapacityGiB(int mib) =>
+        (mib / 1024m).ToString("0.##", CultureInfo.GetCultureInfo("ru-RU")) + " ГиБ";
+
+    private static string CapacityReading(TrainingVolume volume) =>
+        $"Проверен диск {volume.Mount} · свободно {LessonCapacityGiB(volume.FreeMiB)}\n";
+
     private string RunBashStorage(string command)
     {
         var tokens = Tokenize(command);
@@ -61,7 +67,7 @@ internal sealed partial class VirtualTerminal
             path.StartsWith(v.Mount + "/", StringComparison.Ordinal)).MaxBy(v => v.Mount.Length);
         var volume = LastCapacityQuery;
         int used = volume.SizeMiB - volume.FreeMiB;
-        return "Filesystem    Size  Used Avail Use% Mounted on\n" +
+        return CapacityReading(volume) + "Filesystem    Size  Used Avail Use% Mounted on\n" +
             $"{volume.Name,-12} {DiskBashSize(volume.SizeMiB),5} {DiskBashSize(used),5} " +
             $"{DiskBashSize(volume.FreeMiB),5} {Math.Ceiling(100m * used / volume.SizeMiB),3}% {volume.Mount}\n";
     }
@@ -77,7 +83,7 @@ internal sealed partial class VirtualTerminal
         LastCapacityQuery = trainingVolumes.FirstOrDefault(v => v.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
             ?? throw Error("Get-PSDrive", "учебный диск не найден: " + name + ". Укажите букву без двоеточия.");
         var volume = LastCapacityQuery;
-        return "Name   Used (GB)   Free (GB)   Root\n" +
+        return CapacityReading(volume) + "Name   Used (GB)   Free (GB)   Root\n" +
             $"{volume.Name,-5} {DiskPsSize(volume.SizeMiB - volume.FreeMiB),11} {DiskPsSize(volume.FreeMiB),11}   {volume.Mount}\n";
     }
 }
