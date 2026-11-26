@@ -29,6 +29,7 @@ internal static partial class LabCatalog
         T("quick-next", "Выберите следующий файл", "Down", "quick-next"),
         T("quick-choose", "Откройте выбранный файл", "Enter", "quick-choose"),
         T("palette", "Откройте палитру команд", "Ctrl+Shift+P", "palette"),
+        T("palette-prev", "Выберите предыдущую команду", "Up", "palette-prev"),
         T("palette-next", "Выберите следующую команду", "Down", "palette-next"),
         T("palette-choose", "Выполните выбранную команду", "Enter", "palette-choose"),
         T("goto-line", "Откройте переход к строке", "Ctrl+G", "goto-line", 1),

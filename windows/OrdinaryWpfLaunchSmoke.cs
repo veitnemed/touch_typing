@@ -124,7 +124,7 @@ internal static partial class LiveUiSmoke
             StopOwnedPracticeEngine();
             Invoke("TypingStart");
             Until(delegate { return Visible("TypingCount"); }, "typing start recovers the engine too");
-            Key("Escape");
+            Key("Esc");
             Until(delegate { return Visible("TypingChoose"); }, "typing result after recovered start");
             Invoke("TypingChoose");
             RequestClose(); UntilExit();

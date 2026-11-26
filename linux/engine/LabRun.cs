@@ -38,6 +38,8 @@ internal sealed partial class LabRun
     private const string CsvExplorerScopeEvent = "@csv-explorer-scope";
     private const string StrictTriggersEvent = "@strict-triggers";
     private const string DesktopFileSearchEvent = "@desktop-file-search";
+    private const string WindowsRecoveryScopeEvent = "@windows-recovery-scope";
+    private bool replayLegacyWindowsRecovery;
     private bool replayLegacyTriggers;
     private bool replayLegacyLineEditing, replayLegacyPythonEditing;
     private readonly bool neutralProject, nativeEnglishInput, restoreOriginalGuide;
@@ -46,7 +48,7 @@ internal sealed partial class LabRun
     private bool initialVirtual;
     internal bool HasDraft => !CompletedRoute && !limitAccepted && (!ReachedLimit || softFinish || FinishingMission) &&
         (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 ||
-        trace.Any(item => item.Key is not (ChromeTabSearchEvent or ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent or DesktopFileSearchEvent)));
+        trace.Any(item => item.Key is not (ChromeTabSearchEvent or ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent or DesktopFileSearchEvent or WindowsRecoveryScopeEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask, inputAtActiveMilliseconds;
@@ -97,7 +99,8 @@ internal sealed partial class LabRun
     internal LabTask Task { get; private set; }
     internal bool Paused { get; private set; } = true;
     internal bool Saved { get; private set; }
-    internal string Status { get; private set; } = "Нажмите «Продолжить» после передачи клавиш в учебное окно.";
+    private string status = "Нажмите «Продолжить» после передачи клавиш в учебное окно.";
+    internal string Status { get => WindowsRecoveryHint() ?? status; private set => status = value; }
     internal string Feedback { get; private set; } = "ready";
     internal string LastKey { get; private set; } = "";
     internal int Solved { get; private set; }

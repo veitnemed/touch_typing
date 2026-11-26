@@ -128,14 +128,18 @@ internal sealed partial class LabScene
 
     private bool? ApplyNotebookPalette(string action, LabWindow w)
     {
-        if (ReplayLegacyNotebookActions || w?.App != "code" || w.Focus != "palette" || action is not ("palette-next" or "palette-choose")) return null;
+        if (ReplayLegacyNotebookActions || w?.App != "code" || w.Focus != "palette" || action is not ("palette-next" or "palette-prev" or "palette-choose")) return null;
         var available = NotebookPalette(w);
         // Preserve older editor/clone palette behavior unless a notebook
         // command is actually selected from the filtered list.
         if (available.Length == 0) return w.Tab?.Notebook != null ? false : null;
         if (w.Tab?.Notebook == null && w.Input.Trim().Length == 0) return null;
-        if (action == "palette-next")
-        { w.OptionIndex = (w.OptionIndex + 1) % available.Length; Version++; return true; }
+        if (action is "palette-next" or "palette-prev")
+        {
+            int direction = action == "palette-next" ? 1 : available.Length - 1;
+            w.OptionIndex = (Math.Clamp(w.OptionIndex, 0, available.Length - 1) + direction) % available.Length;
+            Version++; return true;
+        }
         var command = available[Math.Clamp(w.OptionIndex, 0, available.Length - 1)].Path;
         if (command == "new-notebook") return CreateNotebook(w);
         if (command == "new-folder")

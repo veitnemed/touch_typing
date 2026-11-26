@@ -237,6 +237,7 @@ internal sealed partial class LabScene
 
     internal bool ExplorerPointer(string action, string path)
     {
+        if (action.StartsWith("desktop-", StringComparison.Ordinal)) return WindowsDesktopPointer(action, path);
         var w = Active;
         if (w?.App != "code" || w.Focus is not ("body" or "explorer" or "file-name") ||
             Switcher || Overview || Screenshot || DesktopOverlay.Length > 0) return false;

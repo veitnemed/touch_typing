@@ -20,10 +20,15 @@ internal sealed record TypingAtom(string Kind, string Value, string Layout)
 
 internal sealed partial class MixedTypingRun
 {
+    internal const string SystemMode = "SystemHotkeys";
+    private static readonly string[] SystemCommon = ["Super+Left", "Super+Right", "Super+Up",
+        "Alt+Tab", "Alt+Left", "Alt+Right", "Alt+Home"];
+    private static readonly string[] SystemWindows = ["Super+E", "Super+D"];
+    private static readonly string[] SystemUbuntu = ["Super+H", "Super+PageDown"];
     internal static readonly IReadOnlyDictionary<string, string> Modes = new Dictionary<string, string>
     {
         ["Digits"] = "Цифры", ["TopRow"] = "Цифры и знаки верхнего ряда",
-        ["Hotkeys"] = "Горячие клавиши", ["WordsDigits"] = "Слова и цифры",
+        ["Hotkeys"] = "Горячие клавиши", [SystemMode] = "Win/Super и Alt · с захватом клавиш", ["WordsDigits"] = "Слова и цифры",
         ["WordsDigitsHotkeys"] = "Слова, цифры и горячие клавиши"
     };
     // These run inside a normal unprivileged foreground window. System-reserved chords
@@ -94,10 +99,17 @@ internal sealed partial class MixedTypingRun
         if (!Finished) watch.Start();
     }
 
-    internal static MixedTypingRun Create(string mode, string layout, int level, int seconds, int cycles, bool infinite, Random random, string rightAltMode = "alt")
+    internal static MixedTypingRun Create(string mode, string layout, int level, int seconds, int cycles, bool infinite, Random random, string rightAltMode = "alt", bool windows = false)
     {
         if (!Modes.TryGetValue(mode, out string title)) throw new ArgumentException("Выберите режим практики.");
         layout = layout == "RU" ? "RU" : "EN"; level = Math.Clamp(level, 0, 2);
+        if (mode == SystemMode)
+        {
+            string[] commands = [.. SystemCommon, .. windows ? SystemWindows : SystemUbuntu];
+            var plan = Enumerable.Range(0, 4).SelectMany(_ => commands.OrderBy(_ => random.Next()))
+                .Select(key => new TypingAtom("command", key, layout)).ToArray();
+            return new(mode, title, layout, 0, 0, false, [plan], random);
+        }
         var plans = Enumerable.Range(0, infinite ? 1 : Math.Clamp(cycles, 1, 5))
             .Select(_ => (IReadOnlyList<TypingAtom>)Generate(mode, layout, level, random, rightAltMode)).ToArray();
         return new(mode, title, layout, level, seconds, infinite, plans, random);
@@ -123,7 +135,7 @@ internal sealed partial class MixedTypingRun
         }];
         string[] rotation = mode == "Hotkeys"
             ? [.. commands, .. commands, .. navigation,
-                .. EverydayCommands.Except(commands).OrderBy(_ => random.Next())]
+                .. EverydayCommands.Except(commands).OrderBy(_ => random.Next()), "Alt+Home", "Alt+Right"]
             : commands;
         string Command(int index) => rotation[index % rotation.Length];
         void Text(string text, string lang)

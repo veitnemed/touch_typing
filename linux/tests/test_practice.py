@@ -318,6 +318,43 @@ class PracticeTest(unittest.TestCase):
         self.assertEqual((window["bodyAnchor"], window["bodyCursor"]),
                          (len(first) + 1, len(first) + len(middle) + 2))
 
+    def test_live_repeated_edits_never_resubmit_or_credit(self):
+        self.open_live("terminal")
+        def key(name, text="", down=True):
+            return self.engine.call("lab-key", key=name, pressed=down, text=text)
+        def position(state):
+            scene = state["scene"]
+            window = next(w for w in scene["windows"] if w["active"])
+            return scene["terminalInput"], window["cursor"]
+
+        first = key("A", "a")
+        for _ in range(3):
+            after = key("A", "a")
+        self.assertEqual(position(after), ("aaaa", 4))
+        self.assertEqual((after["solved"], after["errors"]), (first["solved"], first["errors"]))
+        key("A", down=False)
+        key("Left")
+        self.assertEqual(position(key("Left")), ("aaaa", 2))
+        key("Left", down=False)
+        key("Delete")
+        self.assertEqual(position(key("Delete")), ("aa", 2))
+        key("Delete", down=False)
+
+        key("LCtrl")
+        first = key("C", "c")
+        key("LCtrl", down=False)
+        after = key("C", "c")
+        self.assertEqual(position(after), position(first))
+        self.assertEqual(after["errors"], first["errors"])
+        key("C", down=False)
+
+        self.lab_chord("P", text="pwd")
+        first = key("Enter")
+        after = key("Enter")
+        self.assertEqual(after["scene"], first["scene"])
+        self.assertEqual((after["solved"], after["errors"]), (first["solved"], first["errors"]))
+        key("Enter", down=False)
+
     def test_live_word_navigation_keeps_grapheme_clusters(self):
         self.open_live("terminal")
         def edit(*keys, text=""):

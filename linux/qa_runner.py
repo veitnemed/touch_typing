@@ -30,6 +30,7 @@ def main():
     parser.add_argument("--daily-use", action="store_true", help="Пройти сценарии VS Code и GNOME и сохранить реальные кадры")
     parser.add_argument("--gnome-profile", action="store_true", help="Проверить учебные рабочие столы, окна и клавиши профиля GNOME")
     parser.add_argument("--debug-day", action="store_true", help="Пройти обе миссии отладки с реальным снимком учебного терминала")
+    parser.add_argument("--system-typing-native", action="store_true", help="Проверить реальный захват Win/Super в «Печати»")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -71,6 +72,7 @@ def main():
             if args.gnome_profile: command.append("--gnome-profile")
             if args.debug_day: command.append("--debug-day")
             if args.full: command.append("--full")
+            if args.system_typing_native: command.append("--system-typing-native")
             return subprocess.run(command, env=environment).returncode
     return run_checks(args)
 
@@ -128,7 +130,7 @@ def run_checks(args):
                 raise RuntimeError("Полная проверка требует исходники и SDK .NET 10.")
             for name in projects:
                 check(name, [dotnet, "run", "--project", str(tests / (name + ".csproj"))], timeout=300)
-        if not args.terminal_only:
+        if not args.terminal_only and not args.system_typing_native:
             check("missions", [sys.executable, str(tests / "test_live_missions.py")], timeout=300)
             check("bash-practical-journal", [sys.executable, str(tests / "test_terminal_practical.py")])
             check("powershell-practical-journal", [sys.executable, str(tests / "test_terminal_powershell.py")])
@@ -150,6 +152,11 @@ def run_checks(args):
                 raise RuntimeError("Тестовый GNOME не запустился. См. compositor.log.")
             time.sleep(.1)
         time.sleep(1)
+        if args.system_typing_native:
+            report["coverage"] = ["GTK Wayland real SystemHotkeys capture, revocation and resume"]
+            ok = check("native-system-typing", [sys.executable, str(tests / "test_lab_window.py"), "--system-typing-native"])
+            report["status"] = "passed" if ok else "failed"
+            return 0 if ok else 1
         if args.reference_home:
             report["coverage"].append("GTK 1006x863 home reference capture")
             with tempfile.TemporaryDirectory(prefix="typing-reference-home-") as folder:

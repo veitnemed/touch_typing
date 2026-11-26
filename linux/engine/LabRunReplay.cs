@@ -51,9 +51,9 @@ internal sealed partial class LabRun
         // New traces begin with format markers. Old ones acquire the line
         // marker only after the historic keystrokes have been replayed.
         var initialFormat = savedEvents.TakeWhile(e => e.Key is
-            ChromeTabSearchEvent or ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent or DesktopFileSearchEvent);
+            ChromeTabSearchEvent or ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent or DesktopFileSearchEvent or WindowsRecoveryScopeEvent);
         replayLegacyNotebookWordErase = draft != null && !initialFormat.Any(e => e.Key == NotebookWordEraseEvent);
-        replayLegacyTriggers = replayLegacyCsvExplorer = draft != null;
+        replayLegacyTriggers = replayLegacyCsvExplorer = replayLegacyWindowsRecovery = draft != null;
         replayLegacyLineEditing = draft != null && !initialFormat.Any(e => e.Key == LineEditingEvent);
         replayLegacyPythonEditing = draft != null && !initialFormat.Any(e => e.Key == PythonEditingEvent);
         Scene = new LabScene(SceneApp, draft?.Layout ?? layout, this.neutralProject) { LayoutKey = layoutKey, LayoutIsVirtual = draft?.VirtualLayout ?? false };
@@ -121,6 +121,7 @@ internal sealed partial class LabRun
                 else if (e.Key == StrictTriggersEvent) { replayLegacyTriggers = false; trace.Add(e); }
                 else if (e.Key == DesktopFileSearchEvent) { Scene.ReplayLegacyDesktopFileSearch = false; trace.Add(e); }
                 else if (e.Key == CsvExplorerScopeEvent) { replayLegacyCsvExplorer = false; trace.Add(e); }
+                else if (e.Key == WindowsRecoveryScopeEvent) { replayLegacyWindowsRecovery = false; trace.Add(e); }
                 else Input(e.Key, e.Down, e.Text, e.NativeEnglish ? "EN" : "");
             }
             if (replayLegacyUrl) trace.Add(new(ExactUrlEvent));
@@ -139,6 +140,9 @@ internal sealed partial class LabRun
             // lesson starts using object-scoped evidence only for subsequent input.
             if (replayLegacyCsvExplorer && Scene.CsvNotebook) trace.Add(new(CsvExplorerScopeEvent));
             replayLegacyCsvExplorer = false;
+            if (replayLegacyWindowsRecovery && LiveCourse.HasWindowsRecoveryScope(MissionId))
+                trace.Add(new(WindowsRecoveryScopeEvent));
+            replayLegacyWindowsRecovery = false;
             // Earlier notebook drafts recorded rejected Ctrl+Delete/Backspace
             // as key events. Do not turn them into edits while replaying.
             if (replayLegacyNotebookWordErase && Scene.NotebookCourse) trace.Add(new(NotebookWordEraseEvent));

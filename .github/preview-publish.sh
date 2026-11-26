@@ -12,9 +12,10 @@ if [[ $subject =~ ^Release\ (v1\.9\.0-preview\.([1-9][0-9]*))$ ]]; then
     previous="v1.9.0-preview.$((number - 1))"
     title="TouchTyping 1.9.0 Preview $number"
     flags=(--prerelease --latest=false)
-elif [[ $subject =~ ^Release\ (v1\.9\.[01])$ ]]; then
+elif [[ $subject =~ ^Release\ (v1\.9\.[012])$ ]]; then
     tag=${BASH_REMATCH[1]}
     previous=v1.9.0-preview.14
+    if [[ $tag == v1.9.2 ]]; then previous=v1.9.1; fi
     title="TouchTyping ${tag#v} — Код вслепую"
     flags=(--draft --latest=false)
 else

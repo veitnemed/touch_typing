@@ -46,6 +46,8 @@ namespace TouchTypingStudio
         private readonly HashSet<string> pressed = new HashSet<string>();
         private Data library = Data.Empty, state = Data.Empty;
         private HwndSource nativeWindow;
+        private LabKeyboardCapture systemTypingCapture;
+        private const string SystemTypingMode = "SystemHotkeys";
         private string page = LivePage;
         private bool active, paused;
         private bool closeAccepted;
@@ -144,6 +146,7 @@ namespace TouchTypingStudio
             Closed += delegate
             {
                 StopLabCapture();
+                StopSystemTypingCapture();
                 timer.Stop();
                 ComponentDispatcher.ThreadFilterMessage -= FilterTypingPhysical;
                 if (nativeWindow != null && !nativeWindow.IsDisposed) nativeWindow.RemoveHook(NativeInput);
@@ -450,8 +453,10 @@ namespace TouchTypingStudio
             {
                 var continuation = ActionButton("Продолжить · " + draft.S("title") + " · " +
                     draft.I("done") + "/" + draft.I("total"), delegate {
-                        var restored = Request("typing-continue", "id", draft.S("id"), "layout", CurrentLayout());
-                        if (!restored.Exists) return;
+                        bool system = draft.S("mode") == SystemTypingMode;
+                        if (system && !AcquireSystemTypingCapture()) return;
+                        var restored = Request("typing-continue", "id", draft.S("id"), "layout", CurrentLayout(), "systemCapture", system);
+                        if (!restored.Exists) { StopSystemTypingCapture(); return; }
                         selectedTyping = draft.S("mode", "Russian");
                         selectedTypingLevel = Math.Max(0, Math.Min(2, draft.I("level")));
                         selectedCycleChoice = Math.Max(0, Math.Min(4, draft.I("cycles", 1) - 1));
@@ -465,7 +470,13 @@ namespace TouchTypingStudio
             summary.Margin = new Thickness(0, 7, 0, 4);
             Action describe = delegate {
                 int index = Math.Max(0, typingCycles.SelectedIndex);
-                bool hasCommands = Get(typingSelect) == "Hotkeys" || Get(typingSelect) == "WordsDigitsHotkeys";
+                string mode = Get(typingSelect);
+                if (mode == SystemTypingMode)
+                {
+                    summary.Text = "Системные сочетания · без таймера · нужен захват клавиш";
+                    return;
+                }
+                bool hasCommands = mode == "Hotkeys" || mode == "WordsDigitsHotkeys";
                 summary.Text = (index == 5 ? "Бесконечная печать" : cycleOptions[index]) + "  ·  " +
                     new[] { "без таймера", "1 мин", "3 мин", "5 мин", "10 мин" }[Math.Max(0, typingTime.SelectedIndex)] +
                     (index == 5 ? "" : hasCommands ? "  ·  350–550 действий в цикле" : "  ·  350–550 знаков в цикле") +
@@ -476,6 +487,12 @@ namespace TouchTypingStudio
             typingTime.SelectionChanged += delegate { describe(); };
             describe();
             root.Children.Add(summary);
+            var systemKeys = ActionButton("Win/Super: тренировать в Live", delegate {
+                liveReturnApp = labDesktopProfile;
+                ReturnToLiveCatalog();
+            });
+            systemKeys.ToolTip = "Системные сочетания тренируются на учебном рабочем столе с захватом клавиш.";
+            root.Children.Add(systemKeys);
             var settings = Stack(true);
             var volume = Stack(); ConfigureField(volume, "Объём", typingCycles); settings.Children.Add(volume);
             var difficulty = Stack(); ConfigureField(difficulty, "Сложность", typingLevel); settings.Children.Add(difficulty);
@@ -585,6 +602,45 @@ namespace TouchTypingStudio
             if (answer.Exists) StartSession(answer);
         }
 
+        private bool AcquireSystemTypingCapture()
+        {
+            if (!IsActive || nativeWindow == null || nativeWindow.IsDisposed)
+            {
+                SetNotice("Захват системных клавиш недоступен. Можно выбрать обычные горячие клавиши.");
+                return false;
+            }
+            try
+            {
+                if (systemTypingCapture == null)
+                    systemTypingCapture = new LabKeyboardCapture(nativeWindow.Handle, Dispatcher, ReceiveSystemTypingKey);
+                else
+                    systemTypingCapture.Resume();
+                return true;
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                StopSystemTypingCapture();
+                SetNotice("Windows не разрешила захват. Занятие Win/Super не запущено.");
+                return false;
+            }
+        }
+
+        private void StopSystemTypingCapture()
+        {
+            if (systemTypingCapture == null) return;
+            systemTypingCapture.Dispose();
+            systemTypingCapture = null;
+        }
+
+        private void ReceiveSystemTypingKey(int vk, int scan, bool extended, bool down, bool repeat, string value, IntPtr inputLayout)
+        {
+            if (!active || paused || labActive || page != TypingPage || state.S("mode") != SystemTypingMode) return;
+            string key = ScanKey(scan, extended, vk);
+            if (key.Length == 0) return;
+            if (down && HandleControls(key, repeat)) return;
+            SendTypingPhysical(key, down);
+        }
+
         private void StartTyping()
         {
             if (active || !EnsureMenuEngine()) return;
@@ -592,10 +648,13 @@ namespace TouchTypingStudio
             selectedTypingLevel = Math.Max(0, typingLevel.SelectedIndex);
             selectedTime = Math.Max(0, typingTime.SelectedIndex);
             selectedCycleChoice = Math.Max(0, typingCycles.SelectedIndex);
+            bool system = selectedTyping == SystemTypingMode;
+            if (system && !AcquireSystemTypingCapture()) return;
             var answer = Request("typing-start", "cycles", selectedCycleChoice == 5 ? 0 : selectedCycleChoice + 1,
                 "infinite", selectedCycleChoice == 5, "mode", selectedTyping, "level", selectedTypingLevel,
-                "seconds", new[] { 0, 60, 180, 300, 600 }[selectedTime], "layout", CurrentLayout());
+                "seconds", new[] { 0, 60, 180, 300, 600 }[selectedTime], "layout", CurrentLayout(), "systemCapture", system);
             if (answer.Exists) StartSession(answer);
+            else StopSystemTypingCapture();
         }
 
         private void StartMistakeReview(string sourceId)
@@ -934,16 +993,20 @@ namespace TouchTypingStudio
         {
             if (!active) return;
             if (!paused) { PauseSession(); return; }
-            paused = false;
+            bool system = page == TypingPage && state.S("mode") == SystemTypingMode;
+            if (system && !AcquireSystemTypingCapture()) return;
             pressed.Clear();
-            var next = page == LivePage ? Request("shortcut-resume") : Request("typing-resume", "layout", CurrentLayout());
-            if (next.Exists) RenderState(next);
+            var next = page == LivePage ? Request("shortcut-resume") :
+                Request("typing-resume", "layout", CurrentLayout(), "systemCapture", system);
+            if (next.Exists) { paused = false; RenderState(next); }
+            else if (system && systemTypingCapture != null) systemTypingCapture.Suspend();
         }
 
         private void PauseSession()
         {
             if (!active || paused) return;
             paused = true;
+            if (systemTypingCapture != null) systemTypingCapture.Suspend();
             pressed.Clear();
             var next = page == LivePage ? Request("shortcut-pause") : Request("typing-pause", "layout", CurrentLayout());
             if (next.Exists) state = next;
@@ -954,6 +1017,7 @@ namespace TouchTypingStudio
         {
             if (labActive) { FinishLab(); return; }
             if (!active) return;
+            StopSystemTypingCapture();
             active = false;
             paused = false;
             pressed.Clear();

@@ -54,7 +54,7 @@ class MixedTypingTest(unittest.TestCase):
             with self.subTest(os=os):
                 s = self.start("Hotkeys", layout=os)
                 seen = {}
-                for index in range(14):  # all seven beginner chords with both exercise layouts
+                for index in range(29):  # baseline, side-specific Alt, everyday, and additional Alt
                     command = s["expected"]
                     layout = s["wantedLayout"]
                     self.assertEqual((s["expectedKind"], s["progressDone"]), ("command", index))
@@ -79,6 +79,7 @@ class MixedTypingTest(unittest.TestCase):
                 self.assertEqual(seen["Ctrl+V"], {"RU", "EN"})
                 self.assertEqual(seen["Ctrl+C"], {"RU", "EN"})
                 self.assertEqual(seen["F2"], {"RU", "EN"})
+                self.assertTrue({"LAlt+Right", "Alt+Home", "Alt+Right"} <= seen.keys())
         # Layout independent physical key positions of the laptop's ANSI rows.
         self.assertEqual([PHYSICAL[k] for k in (12, 55, 56, 68, 79)], ["3", "V", "B", "F2", "NumPad7"])
 
@@ -152,6 +153,47 @@ class MixedTypingTest(unittest.TestCase):
                 seen.add(wanted)
                 s=self.answer(s); self.assertEqual(s["progressDone"],i+1)
             self.assertTrue({"Ctrl+Shift+P", "F12","Ctrl+2"} <= seen)
+
+    def test_opt_in_system_shortcuts_require_capture_on_start_resume_and_draft(self):
+        with self.assertRaises(EngineError):
+            self.start("SystemHotkeys")
+        normal = self.start("Hotkeys")
+        for _ in range(26):
+            self.assertNotIn("Super", normal["expected"])
+            normal = self.answer(normal)
+        self.os = "EN"
+        for platform, expected in (("linux", "Super+H"), ("windows", "Super+E")):
+            with self.subTest(platform=platform):
+                self.engine.call("configure", platform=platform, layout="EN")
+                s = self.engine.call("typing-start", mode="SystemHotkeys", systemCapture=True, layout="EN", seed=17,
+                                     infinite=True, cycles=5, seconds=300)
+                self.assertEqual((s["mode"], s["progressTotal"], s["cycles"], s["timeLimit"]),
+                                 ("SystemHotkeys", 36, 1, 0))
+                seen = set()
+                while s["progressDone"] < 9:
+                    wanted = s["expected"]
+                    keys = ["L" + name if name in ("Alt", "Super", "Ctrl", "Shift") else name for name in wanted.split("+")]
+                    before = s["progressDone"]
+                    for key in keys:
+                        s = self.key(key)
+                    self.assertEqual(s["progressDone"], before + 1)
+                    self.assertEqual(self.key(keys[-1])["progressDone"], before + 1)
+                    for key in reversed(keys):
+                        s = self.key(key, False)
+                    seen.add(wanted)
+                self.assertIn(expected, seen)
+                self.assertIn("Alt+Tab", seen)
+                self.assertEqual(s["progressDone"], 9)
+                self.engine.call("typing-pause", layout="EN")
+                with self.assertRaises(EngineError):
+                    self.engine.call("typing-resume", layout="EN")
+                s = self.engine.call("typing-resume", layout="EN", systemCapture=True)
+                self.assertTrue(s["running"])
+                self.engine.call("typing-suspend", layout="EN")
+                with self.assertRaises(EngineError):
+                    self.engine.call("typing-continue", layout="EN")
+                s = self.engine.call("typing-continue", layout="EN", systemCapture=True)
+                self.assertEqual(s["progressDone"], 9)
 
     def test_mixed_switches_and_restarts_without_crediting_paste_or_layout_switch(self):
         s=self.start("WordsDigitsHotkeys", cycles=2)

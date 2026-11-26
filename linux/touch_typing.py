@@ -627,6 +627,10 @@ class Studio(Gtk.Application):
         self.capture_surface = None
         self.capture_handler = None
         self.capture_requested = False
+        self.system_typing_capture = None
+        self.system_typing_pending = None
+        self.system_typing_handler = 0
+        self.system_typing_timeout = 0
         self.capture_timeout = 0
         self.capture_dialog_seen = False
         self.request_exact = False
@@ -1197,6 +1201,7 @@ class Studio(Gtk.Application):
             self.library = result
 
     def navigate(self, page, manual=True):
+        self.release_system_typing_capture()
         if self.lab:
             if self.lab.active:
                 self.lab.stop(show=False, on_saved=lambda: self.navigate(page, manual))
@@ -1635,6 +1640,7 @@ class Studio(Gtk.Application):
         return GLib.SOURCE_REMOVE
 
     def close_request(self, *_):
+        self.release_system_typing_capture()
         if self.allow_close:
             return False
         active = bool(self.lab and self.lab.active) or bool(self.workout) or self.recording
@@ -1689,6 +1695,8 @@ class Studio(Gtk.Application):
             self.lab.focus(active)
             return
         if active:
+            if self.system_typing_pending:
+                GLib.idle_add(self.resolve_system_typing_capture)
             if self.workout == "shortcuts" and self.state["inputMode"] == "waiting":
                 GLib.idle_add(self.resolve_capture)
                 if self.capture_dialog_seen:
@@ -1703,7 +1711,7 @@ class Studio(Gtk.Application):
                 return
             if self.state["activity"] not in ("layout", "layout-back", "layout-after") and not self.paused:
                 self.pause_live()
-        elif self.workout == "typing":
+        elif self.workout == "typing" and not self.paused:
             self.typing_pause()
 
     def pause_live(self):
@@ -1734,6 +1742,7 @@ class Studio(Gtk.Application):
         self.paused = False
         self.tabs.set_visible(True)
         self.update_capture(False)
+        self.release_system_typing_capture()
         self.pressed.clear()
         if previous == "shortcuts":
             result = self.call("shortcut-result")
@@ -1873,6 +1882,10 @@ class Studio(Gtk.Application):
             self.send_shortcut_key(key or "Неизвестная клавиша", True, character)
             return True
         if self.workout == "typing":
+            if self.state.get("mode") == "SystemHotkeys" and not self.paused and not self.system_typing_available():
+                self.typing_pause()
+                self.message("Захват системных клавиш прерван. Продолжите занятие, чтобы запросить его снова.")
+                return True
             physical = self.state.get("typedActions", False)
             command_target = self.state.get("expectedKind") == "command" and key in self.state.get("expectedKeys", ())
             modified = modifiers & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK |
@@ -2029,7 +2042,11 @@ class Studio(Gtk.Application):
             index = self.typing_cycles.get_selected()
             caption = ["1 цикл", "2 цикла", "3 цикла", "4 цикла", "5 циклов", "Бесконечная печать"][index]
             timer = ["без таймера", "1 мин", "3 мин", "5 мин", "10 мин"][self.typing_time.get_selected()]
-            has_commands = self.typing_options[self.typing_pick.get_selected()][0] in ("Hotkeys", "WordsDigitsHotkeys")
+            mode = self.typing_options[self.typing_pick.get_selected()][0]
+            if mode == "SystemHotkeys":
+                self.typing_summary.set_label("Системные сочетания · без таймера · нужен захват клавиш")
+                return
+            has_commands = mode in ("Hotkeys", "WordsDigitsHotkeys")
             units = "действий" if has_commands else "знаков"
             self.typing_summary.set_label(f"{caption}  ·  {timer}" + (f"  ·  350–550 {units} в цикле" if index < 5 else "")
                                           + ("  ·  сочетание = 1 действие" if has_commands else ""))
@@ -2066,6 +2083,10 @@ class Studio(Gtk.Application):
             return grid
         self.typing_prep.append(text("Упражнение   ·   лучшая точность и активное время одной попытки", "muted", wrap=True))
         self.typing_prep.append(grid_of(self.typing_options[:main_count]))
+        system_keys = button("Win/Super: тренировать в Live",
+                             lambda: self.return_live_catalog(self.lab_desktop_profile()), "reference-quiet")
+        system_keys.set_tooltip_text("Системные сочетания тренируются на учебном рабочем столе с захватом клавиш.")
+        self.typing_prep.append(system_keys)
         more = Gtk.Expander(label=f"Дополнительные уроки и материалы · {len(self.typing_options) - main_count}")
         more.set_child(grid_of(self.typing_options[main_count:]))
         self.typing_prep.append(more)
@@ -2075,14 +2096,21 @@ class Studio(Gtk.Application):
         draft = catalog.get("draft")
         if draft:
             def continue_draft():
-                state = self.call("typing-continue", id=draft["id"], layout=self.layout)
-                if state is None:
-                    return
-                self.typing_choice = draft["mode"]
-                self.typing_level.set_selected(draft.get("level", 0))
-                self.typing_cycles.set_selected(max(0, min(4, draft["cycles"] - 1)))
-                self.typing_time.set_selected([0, 60, 180, 300, 600].index(draft.get("timeLimit", 0)))
-                self.accept_typing_run(state)
+                system = draft["mode"] == "SystemHotkeys"
+                def resume():
+                    state = self.call("typing-continue", id=draft["id"], layout=self.layout, systemCapture=system)
+                    if state is None:
+                        self.release_system_typing_capture()
+                        return
+                    self.typing_choice = draft["mode"]
+                    self.typing_level.set_selected(draft.get("level", 0))
+                    self.typing_cycles.set_selected(max(0, min(4, draft["cycles"] - 1)))
+                    self.typing_time.set_selected([0, 60, 180, 300, 600].index(draft.get("timeLimit", 0)))
+                    self.accept_typing_run(state)
+                if system:
+                    self.request_system_typing_capture(resume)
+                else:
+                    resume()
             self.typing_continue = button(f'Продолжить · {draft["title"]} · {draft["done"]}/{draft["total"]}',
                                           continue_draft)
             self.typing_prep.append(self.typing_continue)
@@ -2148,6 +2176,56 @@ class Studio(Gtk.Application):
             control.set_tooltip_text(name + ". " + note)
             bind_name(control, name + ". " + note)
 
+    def system_typing_available(self):
+        return bool(self.system_typing_capture and self.window.is_active() and
+                    self.system_typing_capture.get_property("shortcuts-inhibited"))
+
+    def release_system_typing_capture(self):
+        surface, handler, timer = self.system_typing_capture, self.system_typing_handler, self.system_typing_timeout
+        self.system_typing_capture = self.system_typing_pending = None
+        self.system_typing_handler = self.system_typing_timeout = 0
+        if timer:
+            GLib.source_remove(timer)
+        if surface is not None:
+            surface.disconnect(handler)
+            surface.restore_system_shortcuts()
+
+    def request_system_typing_capture(self, begin):
+        if self.system_typing_pending:
+            return
+        surface = self.window.get_surface()
+        if not self.window.is_active() or not isinstance(surface, Gdk.Toplevel):
+            self.message("Захват системных клавиш недоступен. Можно выбрать обычные горячие клавиши.")
+            return
+        self.system_typing_capture, self.system_typing_pending = surface, begin
+        self.system_typing_handler = surface.connect("notify::shortcuts-inhibited",
+            lambda *_: GLib.idle_add(self.resolve_system_typing_capture))
+        self.system_typing_timeout = GLib.timeout_add_seconds(12, self.system_typing_expired)
+        self.message("Разрешите захват системных клавиш только для занятия Win/Super.")
+        surface.inhibit_system_shortcuts(None)
+        GLib.idle_add(self.resolve_system_typing_capture)
+
+    def system_typing_expired(self):
+        self.system_typing_timeout = 0
+        self.release_system_typing_capture()
+        self.message("Захват системных клавиш не подтверждён. Занятие Win/Super не запущено.")
+        return GLib.SOURCE_REMOVE
+
+    def resolve_system_typing_capture(self):
+        if self.system_typing_capture is None:
+            return GLib.SOURCE_REMOVE
+        if self.system_typing_pending:
+            if self.system_typing_available():
+                begin, self.system_typing_pending = self.system_typing_pending, None
+                GLib.source_remove(self.system_typing_timeout)
+                self.system_typing_timeout = 0
+                self.message()
+                begin()
+        elif not self.system_typing_available() and self.workout == "typing" and not self.paused:
+            self.typing_pause()
+            self.message("Захват системных клавиш прерван. Продолжите занятие, чтобы запросить его снова.")
+        return GLib.SOURCE_REMOVE
+
     def start_typing(self):
         if self.workout:
             self.stop()
@@ -2163,17 +2241,29 @@ class Studio(Gtk.Application):
         if active != self.layout:
             self.layout = active
             self.show_layout()
-        state = self.call("typing-start", mode=self.typing_choice, level=self.typing_level.get_selected(),
-                          cycles=choice + 1 if choice < 5 else 0, infinite=choice == 5,
-                          seconds=[0, 60, 180, 300, 600][self.typing_time.get_selected()], layout=self.layout)
-        if state is not None:
-            self.accept_typing_run(state)
+        mode = self.typing_choice
+        def begin():
+            state = self.call("typing-start", mode=mode, level=self.typing_level.get_selected(),
+                              cycles=choice + 1 if choice < 5 else 0, infinite=choice == 5,
+                              seconds=[0, 60, 180, 300, 600][self.typing_time.get_selected()], layout=self.layout,
+                              systemCapture=mode == "SystemHotkeys")
+            if state is not None:
+                self.accept_typing_run(state)
+            else:
+                self.release_system_typing_capture()
+        if mode == "SystemHotkeys":
+            self.request_system_typing_capture(begin)
+        else:
+            self.release_system_typing_capture()
+            begin()
+
 
     def start_mistake_review(self, source_id):
         if self.workout:  # ignore the second activation of a button just replaced
             return
         if not self.ensure_menu_engine():
             return
+        self.release_system_typing_capture()
         state = self.call("typing-review-start", sourceId=source_id, layout=self.layout)
         if state is None:
             return
@@ -2252,6 +2342,7 @@ class Studio(Gtk.Application):
         self.typing_resume() if self.paused else self.typing_pause()
 
     def typing_pause(self):
+        self.release_system_typing_capture()
         self.paused = True
         self.pressed.clear()
         state = self.call("typing-pause", layout=self.layout)
@@ -2259,11 +2350,19 @@ class Studio(Gtk.Application):
             self.render_typing_state(state)
 
     def typing_resume(self):
-        self.paused = False
-        state = self.call("typing-resume", layout=self.layout)
-        if state:
-            self.render_typing_state(state)
-        self.typing_hero.grab_focus()
+        system = self.state.get("mode") == "SystemHotkeys"
+        def resume():
+            state = self.call("typing-resume", layout=self.layout, systemCapture=system)
+            if state:
+                self.paused = False
+                self.render_typing_state(state)
+                self.typing_hero.grab_focus()
+            else:
+                self.release_system_typing_capture()
+        if system:
+            self.request_system_typing_capture(resume)
+        else:
+            resume()
 
     def build_editor(self):
         self.title("Редактор", "Соберите личные сочетания и тексты для тренировки.")
@@ -3633,8 +3732,10 @@ class LabPage(Gtk.Box):
         repeat = bool(key) and key in self.physical_down
         if key:
             self.physical_down.add(key)
-        if repeat and (not self.active or self.state["paused"] or key not in self.pressed or key not in (
-                "Left", "Right", "Up", "Down", "Home", "End", "PageUp", "PageDown", "Backspace", "Delete")):
+        editing_repeat = key in ("Left", "Right", "Up", "Down", "Home", "End", "PageUp", "PageDown", "Backspace", "Delete")
+        printable_repeat = bool(character) and character.isprintable()
+        if repeat and (not self.active or self.state["paused"] or key not in self.pressed
+                       or not (editing_repeat or printable_repeat)):
             return True
         if self.active and key:
             self.last_physical = (key, keycode)

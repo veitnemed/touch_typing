@@ -97,7 +97,7 @@ internal static partial class LabCatalog
             "find-next" => window?.Find.Length > 0,
             "panel" or "extensions" or "quick-open" or "palette" or "goto-line" or "explorer" or "project-search" or "sidebar" or "split" or "terminal-toggle" => window?.App == "code",
             "quick-next" or "quick-choose" => window?.App == "code" && window.Focus == "quick-open" && scene.Entries(window).Length > 0,
-            "palette-next" or "palette-choose" => window?.App == "code" && window.Focus == "palette",
+            "palette-next" or "palette-prev" or "palette-choose" => window?.App == "code" && window.Focus == "palette",
             "save" => window?.App == "code" && window.Tab?.Body != window.Tab?.SavedBody,
             "undo" => window?.Tab?.Undo.Count > 0,
             "redo" => window?.Tab?.Redo.Count > 0,

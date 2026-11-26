@@ -1567,6 +1567,36 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         else:
             self.python_file_icon(x, y)
 
+    def code_source_control(self, source, x, y, width, height):
+        changes = source.get("changes", [])
+        self.label("⑂ " + source.get("branch", "main") + " · учебный снимок", x + 12, y + 38, 10,
+                   CODE_MUTED, width=width - 24)
+        self.fill("#161b22", x, y + 56, width, 22)
+        self.label("⌄  CHANGES", x + 12, y + 61, 10, CODE_FG, width=width - 30)
+        self.label(str(len(changes)), x + width - 22, y + 61, 10, CODE_MUTED, width=18)
+        if not changes:
+            self.label("Рабочая копия без изменений", x + 12, y + 87, 10, CODE_MUTED, width=width - 22)
+        row = y + 81
+        for change in changes:
+            if row + 20 >= y + height - 18:
+                break
+            path = change["path"]
+            if path.endswith(".py"):
+                self.python_file_icon(x + 12, row + 1)
+            self.label(path, x + 27, row + 1, 11, CODE_FG, width=width - 48)
+            state = change["state"]
+            self.label(state, x + width - 21, row + 1, 11,
+                       {"D": "#ff7b72", "U": "#7ee787", "M": "#d29922"}[state], width=16)
+            row += 20
+            for line in change["diff"][:6]:
+                if row + 17 >= y + height - 18:
+                    break
+                addition = line.startswith("+")
+                self.fill("#173123" if addition else "#352020", x + 9, row, width - 17, 16)
+                self.label(line, x + 12, row + 1, 10,
+                           "#7ee787" if addition else "#ff7b72", width=width - 23, mono=True)
+                row += 16
+
     def python_file_icon(self, x, y):
         """Two-tone Python badge at the Explorer's file-icon size."""
         self.fill("#58a6ff", x + 1, y + 1, 9, 7, 2)
@@ -1627,7 +1657,9 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
                 shown = window.get("searchResults", [])
             else:
                 shown = window.get("projectFiles", [])
-            if view == "explorer" and window.get("explorerActions"):
+            if view == "changes" and window.get("sourceControl") is not None:
+                self.code_source_control(window["sourceControl"], x + rail, y, sidebar, h)
+            elif view == "explorer" and window.get("explorerActions"):
                 self.working_explorer(window,x+rail,y,sidebar,h)
             else:
                 project = window.get("projectName", "")

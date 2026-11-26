@@ -76,6 +76,11 @@ namespace TouchTypingStudio
                 view == "extensions" ? "EXTENSIONS" : "EXPLORER";
             Text(heading, x + 16, 41, 11, CodeForeground, width - 40);
             Text("···", x + width - 27, 39, 15, CodeMuted, 20);
+            if (view == "changes" && window.D("sourceControl").Exists)
+            {
+                DrawCodeSourceControl(window.D("sourceControl"), x, width, h);
+                return;
+            }
             bool projectView = view != "changes" && view != "project-search" && view != "extensions";
             if (projectView && window.B("explorerActions"))
             {
@@ -136,6 +141,37 @@ namespace TouchTypingStudio
                 DrawCodeFileIcon(file, itemX, row + 3);
                 Text(file, itemX + 17, row + 2, 13, selected ? CodeForeground : CodeMuted, x + width - itemX - 20);
                 row += 22;
+            }
+        }
+
+        private void DrawCodeSourceControl(Data source, double x, double width, double h)
+        {
+            var changes = source.Items("changes").ToArray();
+            DrawWorkbenchMark("branch", x + 12, 67, 14, CodeMuted);
+            Text(source.S("branch", "main") + " · учебный снимок", x + 32, 68, 11, CodeMuted, width - 41);
+            Rectangle(x, 89, width, 24, "#161B22");
+            Text("⌄  CHANGES", x + 12, 94, 11, CodeForeground, width - 37);
+            Text(changes.Length.ToString(CultureInfo.InvariantCulture), x + width - 26, 94, 11, CodeMuted, 20);
+            if (changes.Length == 0)
+                Text("Рабочая копия без изменений", x + 12, 121, 11, CodeMuted, width - 22);
+            double row = 117;
+            foreach (var change in changes)
+            {
+                if (row + 20 >= h - 25) break;
+                string state = change.S("state");
+                DrawCodeFileIcon(change.S("path"), x + 12, row + 3);
+                Text(change.S("path"), x + 30, row + 2, 12, CodeForeground, width - 51);
+                Text(state, x + width - 21, row + 2, 12, state == "D" ? "#FF7B72" : state == "U" ? "#7EE787" : "#D29922", 16);
+                row += 21;
+                foreach (var line in change.Items("diff").Take(6))
+                {
+                    if (row + 17 >= h - 25) break;
+                    string text = line.Value();
+                    bool addition = text.StartsWith("+", StringComparison.Ordinal);
+                    Rectangle(x + 10, row, width - 18, 16, addition ? "#173123" : "#352020");
+                    Text(text, x + 13, row + 1, 10, addition ? "#7EE787" : "#FF7B72", width - 24);
+                    row += 16;
+                }
             }
         }
 

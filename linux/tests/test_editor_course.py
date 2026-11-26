@@ -90,7 +90,7 @@ def advance(e, state):
           mission.startswith("code-notebook-") and task_id in ("quick-choose", "save") or
           mission == "code-find-exact-edit" and task_id in ("quick-choose", "exact-find-submit", "save")):
         enter(e, value)
-    if not keys and task_id not in ("notebook-type", "python-edit-write"):
+    if not keys and task_id != "notebook-type" and not task_id.startswith("python-edit-write"):
         keys = "Enter"
     for _ in range(32 if keys in ("Down", "Tab") else int(bool(keys))):
         result = chord(e, keys)

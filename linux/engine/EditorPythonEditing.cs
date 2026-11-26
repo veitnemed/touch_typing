@@ -207,6 +207,7 @@ internal sealed partial class LabScene
             case "home": return Text("Home", "");
             case "end": return Text("End", "");
             case "select-down": return Text("Down", "", extend: true);
+            case "select-end": return Text("End", "", extend: true);
             default: return false;
         }
     }

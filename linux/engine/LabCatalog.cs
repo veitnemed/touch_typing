@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace TouchTypingStudio;
 
-internal sealed record LabTask(string Id, string Title, string Keys, string Hint, string Text = "", string Action = "", int Level = 0)
+internal sealed record LabTask(string Id, string Title, string Keys, string Hint, string Text = "", string Action = "", int Level = 0, string TargetPath = null)
 {
     internal object Snapshot() => new { Id, Title, Keys, Hint, Text };
 }
@@ -139,7 +139,7 @@ internal static partial class LabCatalog
     ]);
     private static readonly HashSet<string> FilesIds = new(Shortcuts.Where(task => task.Id.StartsWith("file-") || task.Id is "trash" or "restore-trash").Select(task => task.Id));
     private static readonly HashSet<string> ChromeIds = new(["history", "downloads", "bookmark-manager", "link-next", "link-prev", "link-open", "new-tab", "close-tab", "restore-tab", "next-tab", "prev-tab", "first-tab", "last-tab", "url", "navigate-pasted", "find", "find-next", "refresh", "back", "forward", "fullscreen", "zoom-in", "zoom-out", "zoom-reset", "bookmark", "bookmarks", "select-all", "copy", "cut", "paste", "escape", "layout"]);
-    private static readonly HashSet<string> CodeIds = new(["file-undo", "file-next", "file-prev", "file-open", "file-cut", "file-copy", "file-paste", "file-name-start", "file-name-commit", "file-name-cancel", "document-start", "move-line-up", "move-line-down", "occurrence", "replace", "replace-field", "replace-one", "symbols", "symbol-next", "symbol-open", "changes", "focus-editor", "focus-second", "panel", "extensions", "select-line", "new-file", "close-tab", "next-tab", "prev-tab", "quick-open", "quick-next", "quick-choose", "palette", "palette-next", "palette-choose", "goto-line", "explorer", "project-search", "sidebar", "split", "terminal-toggle", "save", "select-all", "copy", "cut", "paste", "undo", "redo", "comment", "delete-line", "find", "escape", "layout"]);
+    private static readonly HashSet<string> CodeIds = new(["file-undo", "file-next", "file-prev", "file-open", "file-cut", "file-copy", "file-paste", "file-name-start", "file-name-commit", "file-name-cancel", "document-start", "move-line-up", "move-line-down", "occurrence", "replace", "replace-field", "replace-one", "symbols", "symbol-next", "symbol-open", "changes", "focus-editor", "focus-second", "panel", "extensions", "select-line", "new-file", "close-tab", "next-tab", "prev-tab", "quick-open", "quick-next", "quick-choose", "palette", "palette-next", "palette-prev", "palette-choose", "goto-line", "explorer", "project-search", "sidebar", "split", "terminal-toggle", "save", "select-all", "copy", "cut", "paste", "undo", "redo", "comment", "delete-line", "find", "escape", "layout"]);
     static LabCatalog()
     {
         ChromeIds.UnionWith(Shortcuts.Where(task => task.Id.StartsWith("browser-", StringComparison.Ordinal)).Select(task => task.Id));

@@ -67,7 +67,10 @@ internal sealed partial class LabRun
     }
 
     private bool UsesCsvExplorerScope(LiveGoal goal) => !replayLegacyCsvExplorer && goal.CsvExplorerTarget != null;
-    private string ObserveEvidence(LiveGoal goal, string command, bool strictReport) => UsesCsvExplorerScope(goal)
+    private bool UsesWindowsRecoveryScope(LiveGoal goal) => !replayLegacyWindowsRecovery && goal.WindowsRecoveryTarget != null;
+    private string ObserveEvidence(LiveGoal goal, string command, bool strictReport) => UsesWindowsRecoveryScope(goal)
+        ? LiveCourse.WindowsRecoveryProof(goal.Task, Scene)
+        : UsesCsvExplorerScope(goal)
         ? LiveCourse.CsvExplorerProof(goal.Task, Scene)
         : LiveCourse.Evidence(goal.Task, Scene, command, strictReport, goal.ArtifactPath);
 
@@ -82,13 +85,15 @@ internal sealed partial class LabRun
                 goal.Task.Id == "file-next" && actualTaskId == "file-prev";
             if (mission.Curated && actualTaskId != goal.Task.Id && !alternatePicker) continue;
             bool strictReport = goal.VerifyReport && !replayLegacyReport;
-            string target = csvExplorerScope ? goal.CsvExplorerTarget :
+            bool windowsRecovery = UsesWindowsRecoveryScope(goal);
+            string target = windowsRecovery ? goal.WindowsRecoveryTarget : csvExplorerScope ? goal.CsvExplorerTarget :
                 goal.VerifyReport && replayLegacyReport ? goal.LegacyTarget : goal.Target;
             bool recheckingArtifact = goal.ArtifactPath != null && goal.Task == Task && equivalentCommand != null;
             if (goal.ArtifactPath != null && !recheckingArtifact) continue;
             bool recheckingConflict = csvExplorerScope && renewedCsvConflict && goal.Task.Text == "!conflict";
             if (before == target && !(Scene.NotebookCourse && actualTaskId == goal.Task.Id && goal.Task.Action is "notebook-run" or "save") &&
-                !recheckingArtifact && !recheckingConflict && !(acceptExistingUrlSelection && goal.Task.Id == "url")) continue;
+                !recheckingArtifact && !recheckingConflict && !(acceptExistingUrlSelection && goal.Task.Id == "url") &&
+                !(windowsRecovery && goal.Task.Id == "win-explorer" && actualTaskId == goal.Task.Id)) continue;
             string command = goal.Task == Task ? equivalentCommand : null;
             if (ObserveEvidence(goal, command, strictReport) != target) continue;
             // Published drafts retain earned progress, but a report receipt is only issued

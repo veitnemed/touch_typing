@@ -43,6 +43,8 @@ internal sealed partial class MixedTypingRun
         catch (JsonException) { return null; }
     }
 
+    internal static bool NeedsSystemCapture(string json) => ReadDraft(json)?.Mode == SystemMode;
+
     internal static string DraftId(string json) => ReadDraft(json)?.Id;
 
     internal static object DraftSummary(string json)

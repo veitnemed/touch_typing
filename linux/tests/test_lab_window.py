@@ -140,6 +140,9 @@ class LabWindowTest(Studio):
                 yield from chord('Esc')
                 self.window.present()
                 yield
+            if "--system-typing-native" in sys.argv:
+                yield from self.exercise_system_typing(chord, capture_png, Path(os.environ["TOUCH_TYPING_QA_OUTPUT"]))
+                return
             self.navigate('lab')
             if '--gnome-profile' in sys.argv or '--gnome-profile-custom' in sys.argv:
                 yield from self.exercise_gnome_profile(chord, event, capture_png, Path(os.environ["TOUCH_TYPING_QA_OUTPUT"]))
@@ -353,6 +356,58 @@ class LabWindowTest(Studio):
                 self.stop()
                 assert self.result_kind=='shortcuts'
         finally:call(session,api+'.Session','Stop')
+
+    def exercise_system_typing(self, chord, capture_png, output):
+        """Use GNOME's real shortcut inhibition; never mock its permission."""
+        from time import monotonic
+        assert os.environ["WAYLAND_DISPLAY"] == "training-qa"
+        assert self.window.get_display().__gtype__.name == "GdkWaylandDisplay"
+        self.navigate("typing")
+        yield
+        assert self.typing_rows["SystemHotkeys"].grab_focus()
+        yield from chord("Enter")
+
+        def acquire():
+            acknowledged = False
+            started = monotonic()
+            while monotonic() - started < 13:
+                if self.system_typing_available() and self.workout == "typing" and not self.paused:
+                    return
+                if (not acknowledged and monotonic() - started > 0.4 and self.system_typing_pending
+                        and not self.window.is_active() and not self.system_typing_available()):
+                    yield from chord("Enter")
+                    acknowledged = True
+                yield
+            raise AssertionError(("system typing capture not granted", self.banner.get_label()))
+
+        yield from acquire()
+        assert (self.state["mode"], self.state["progressTotal"]) == ("SystemHotkeys", 36)
+        capture_png(output / "system-typing-native-captured.png")
+        seen = set()
+        for index in range(9):
+            chord_name = self.state["expected"]
+            assert self.state["expectedKind"] == "command"
+            yield from chord(chord_name)
+            assert self.state["progressDone"] == index + 1 and self.system_typing_available(), chord_name
+            seen.add(chord_name)
+        assert {"Super+H", "Super+Left", "Alt+Tab", "Alt+Home"} <= seen, seen
+
+        # Revoke actual GDK permission while the window still owns the exercise.
+        self.window.get_surface().restore_system_shortcuts()
+        for _ in range(180):
+            if self.paused:
+                break
+            yield
+        assert self.paused and self.system_typing_capture is None and self.state["progressDone"] == 9
+        yield from chord("F8")
+        yield from acquire()
+        assert self.state["progressDone"] == 9
+        yield from chord(self.state["expected"])
+        assert self.state["progressDone"] == 10
+        capture_png(output / "system-typing-native-resumed.png")
+        yield from chord("Esc")
+        assert self.workout is None and self.system_typing_capture is None
+        print("PASS GTK Wayland SystemHotkeys:", sorted(seen), "revocation pauses and explicit resume preserves progress", flush=True)
 
     def await_lesson_capture(self, chord):
         """Acknowledge GNOME in this owned remote-desktop QA session only."""

@@ -281,6 +281,8 @@ internal sealed partial class PracticeService
             case "shortcut-pause": run?.Pause(); return ShortcutState();
             case "shortcut-resume": run?.Resume(); return ShortcutState();
             case "typing-start":
+                if (Text(message, "mode") == MixedTypingRun.SystemMode && !Flag(message, "systemCapture"))
+                    throw new InvalidOperationException("Для упражнения Win/Super требуется захват системных клавиш.");
                 FinishTyping();
                 if ((typing?.CanSave == true || mixedTyping?.CanSave == true) && store.Error != null) throw new InvalidOperationException(store.Error);
                 profile = store.Read();
@@ -301,6 +303,8 @@ internal sealed partial class PracticeService
                 profile = store.Read();
                 if (store.Error != null) throw new InvalidOperationException(store.Error);
                 RequireRequestedTypingDraft(message, profile.ClassicTypingDraft);
+                if (MixedTypingRun.NeedsSystemCapture(profile.ClassicTypingDraft) && !Flag(message, "systemCapture"))
+                    throw new InvalidOperationException("Для продолжения Win/Super требуется захват системных клавиш.");
                 if (ContinueMixedTyping()) return TypingState(message);
                 mixedTyping = null;
                 typing = TypingRun.Continue(profile.ClassicTypingDraft);
@@ -314,7 +318,11 @@ internal sealed partial class PracticeService
             case "typing-state": verifyProfile = mixedTyping?.Finished ?? typing?.Finished == true; break;
             case "typing-pause": SuspendTyping(close: false); break;
             case "typing-suspend": SuspendTyping(); break;
-            case "typing-resume": if (mixedTyping != null) mixedTyping.Resume(); else typing?.Resume(); break;
+            case "typing-resume":
+                if (mixedTyping?.Mode == MixedTypingRun.SystemMode && !Flag(message, "systemCapture"))
+                    throw new InvalidOperationException("Для продолжения Win/Super требуется захват системных клавиш.");
+                if (mixedTyping != null) mixedTyping.Resume(); else typing?.Resume();
+                break;
             case "typing-stop": FinishTyping(); break;
             case "typing-records":
                 return TypingModeRecords.ForCards(profile, Number(message, "level"),

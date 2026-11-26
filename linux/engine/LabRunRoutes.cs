@@ -117,6 +117,7 @@ internal sealed partial class LabRun
                 trace.Add(new(NotebookActionsEvent));
                 trace.Add(new(StrictTriggersEvent));
                 trace.Add(new(DesktopFileSearchEvent));
+                if (LiveCourse.HasWindowsRecoveryScope(mission.Id)) trace.Add(new(WindowsRecoveryScopeEvent));
                 if (Scene.NotebookCourse) trace.Add(new(NotebookWordEraseEvent));
                 if (Scene.CsvNotebook) trace.Add(new(CsvExplorerScopeEvent));
             }

@@ -459,7 +459,7 @@ namespace TouchTypingStudio
             bool repeat = down && (nativeRepeat || pressed.Contains(key));
             if (repeat)
             {
-                if (!pressed.Contains(key) || !LabEditingRepeat(key)) return;
+                if (!pressed.Contains(key) || (!LabEditingRepeat(key) && (string.IsNullOrEmpty(value) || value.Any(char.IsControl)))) return;
             }
             else if (down ? !pressed.Add(key) : !pressed.Remove(key)) return;
             if (down && !repeat && !pressed.Any(IsModifier))

@@ -26,6 +26,12 @@ internal static partial class LiveCourse
         PythonEdit("left", "Перейдите внутрь строки", "Left", "Новая строка должна вставляться без разрыва выражения."),
         PythonEdit("home", "Перейдите к началу строки", "Home", "Начните выделение с левого края."),
         PythonEdit("end", "Перейдите к концу выражения", "End", "Встаньте за последним словом."),
+        PythonEdit("select-end", "Выделите до конца следующей строки, не захватывая return", "Shift+End",
+            "В выделении должны быть только fee и total, без перевода строки перед return."),
+        PythonEdit("write-fee", "Напишите строку комиссии: четыре пробела, затем fee = 2", "", "Замените выделенные строки. Не нажимайте Enter в конце.") with
+            { Text = "    fee = 2", Action = "python-edit-write" },
+        PythonEdit("write-total", "На готовом отступе напишите total = subtotal + fee", "", "Не вводите повторно отступ.") with
+            { Text = "total = subtotal + fee", Action = "python-edit-write" },
         PythonEdit("select-down", "Расширьте выделение на одну строку", "Shift+Down", "Проверьте, что выделение не захватывает лишнюю строку.")
     ];
 
@@ -39,7 +45,7 @@ internal static partial class LiveCourse
         {
             // Plain navigation remains uncredited outside this dedicated mission.
             if (task.Keys.Length == 0) return false;
-            if (!scene.PythonEditingExercise && task.Keys is "Enter" or "Up" or "Left" or "Home" or "End" or "Shift+Down") return false;
+            if (!scene.PythonEditingExercise && task.Keys is "Enter" or "Up" or "Left" or "Home" or "End" or "Shift+Down" or "Shift+End") return false;
             var chord = Gesture.Parse(task.Keys).Chords[0];
             return chord.Trigger == key && chord.FitsModifiers(held);
         });
@@ -93,6 +99,6 @@ internal sealed partial class LabScene
     {
         var w = Active;
         return new { Layout, w?.App, w?.Focus, w?.Url, w?.Body, w?.Anchor, w?.Cursor,
-            saved = w?.Tab?.SavedBody, disk = Terminal.ReadFile(PythonEditPath) };
+            saved = w?.Tab?.SavedBody, disk = Terminal.ReadFile(BlockRepair ? BlockRepairPath : PythonEditPath) };
     }
 }

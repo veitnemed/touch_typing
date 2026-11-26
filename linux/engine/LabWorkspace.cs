@@ -72,7 +72,8 @@ internal sealed partial class LabScene
     }
 
     private readonly Dictionary<string, string> originalFiles = [];
-    private string EditorProjectRoot => NotebookCourse ? NotebookRoot : RepoCloned ? CloneRoot : ExactEdit ? ExactRoot : PythonEditingExercise ? PythonEditRoot : DiagnosticWorkspace ? DiagnosticRoot : SearchProjectRoot ?? (symbolWorkspace ? SymbolProject : Project);
+    internal string EditorLessonRelativePath(string path) => path.StartsWith(EditorProjectRoot + "/", StringComparison.Ordinal) ? path[(EditorProjectRoot.Length + 1)..] : path;
+    private string EditorProjectRoot => NotebookCourse ? NotebookRoot : RepoCloned ? CloneRoot : ExactEdit ? ExactRoot : BlockRepair ? BlockRepairRoot : PythonEditingExercise ? PythonEditRoot : DiagnosticWorkspace ? DiagnosticRoot : SearchProjectRoot ?? (symbolWorkspace ? SymbolProject : Project);
     private IEnumerable<string> ProjectDocuments() => projectFileFamily != null || ContextHandoffActive || NotebookCourse ?
         ProjectTree(EditorProjectRoot, null, recursive: true).Where(e => e.Kind == "file").Select(e => e.Path) : DebugDay ? DebugProjectDocuments() :
         DiagnosticWorkspace ? Terminal.Entries(DiagnosticRoot).Where(path => !Terminal.DirectoryExists(path)) :
@@ -96,7 +97,57 @@ internal sealed partial class LabScene
             WindowsDesktop && w.App == "files" ? WindowsPath(w.Folder) : null, BrowserPracticeActive, EditorProjectRoot.Count(ch => ch == '/'),
             w.App == "code" ? ProjectTree(EditorProjectRoot, w.ExpandedProjectFolders).ToArray() : null, CanUndoProjectFile,
             CanPasteProjectFile, CanPasteNotebookCell,
-            tabSearch: ChromeTabsSnapshot(w), sourceReview: ChromeReviewSnapshot(w));
+            tabSearch: ChromeTabsSnapshot(w), sourceReview: ChromeReviewSnapshot(w),
+            sourceControl: w.App == "code" && w.View == "changes" ? SourceControlSnapshot(paths, Relative) : null);
+    }
+
+    // Model the local working tree against the lesson's starting files rather
+    // than against open tabs. Unsaved edits are deliberately not files in Git.
+    private object SourceControlSnapshot(string[] current, Func<string, string> relative)
+    {
+        var root = (DebugDay ? debugDay.Root : EditorProjectRoot) + "/";
+        var files = current.Concat(originalFiles.Keys.Where(path => path.StartsWith(root, StringComparison.Ordinal)))
+            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).Select(path =>
+            {
+                bool existed = originalFiles.TryGetValue(path, out var previous);
+                string saved = Terminal.ReadFile(path);
+                string state = !existed ? "U" : saved == null ? "D" : "M";
+                if (string.Equals(previous, saved, StringComparison.Ordinal)) return null;
+                return new { path = relative(path), state, diff = CompareWorkingLines(previous, saved) };
+            }).Where(row => row != null).ToArray();
+        return new { branch = "main", changes = files };
+    }
+
+    private static string[] CompareWorkingLines(string previous, string saved)
+    {
+        var a = previous?.TrimEnd('\n').Split('\n') ?? [];
+        var b = saved?.TrimEnd('\n').Split('\n') ?? [];
+        int start = 0;
+        while (start < a.Length && start < b.Length && a[start] == b[start]) start++;
+        int ae = a.Length, be = b.Length;
+        while (ae > start && be > start && a[ae - 1] == b[be - 1]) { ae--; be--; }
+        // Keep unchanged lines out of the preview, even when an earlier
+        // statement moved past them. Bound the quadratic comparison.
+        if (ae - start > 80 || be - start > 80)
+            return [.. a.Skip(start).Take(ae - start).Take(4).Select(line => "- " + line),
+                .. b.Skip(start).Take(be - start).Take(4).Select(line => "+ " + line)];
+        int removed = ae - start, added = be - start;
+        var common = new int[removed + 1, added + 1];
+        for (int i = removed - 1; i >= 0; i--)
+        for (int j = added - 1; j >= 0; j--)
+            common[i, j] = a[start + i] == b[start + j] ? 1 + common[i + 1, j + 1] :
+                Math.Max(common[i + 1, j], common[i, j + 1]);
+        var changes = new List<string>(8);
+        int from = 0, to = 0;
+        while ((from < removed || to < added) && changes.Count < 8)
+        {
+            if (from < removed && to < added && a[start + from] == b[start + to])
+            { from++; to++; }
+            else if (from < removed && (to == added || common[from + 1, to] >= common[from, to + 1]))
+                changes.Add("- " + a[start + from++]);
+            else changes.Add("+ " + b[start + to++]);
+        }
+        return changes.ToArray();
     }
 
     private static bool IsIdentifier(char c) => char.IsLetterOrDigit(c) || c == '_';

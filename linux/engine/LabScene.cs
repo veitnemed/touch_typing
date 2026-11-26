@@ -123,7 +123,7 @@ internal sealed class LabWindow(string app, int number, int workspace)
     internal string Url => Tab?.Url ?? "";
     internal object Snapshot(bool active, LabEntry[] entries, IEnumerable<string> projectFiles, IEnumerable<string> changedFiles, IEnumerable<string> searchResults, string projectName, string projectRelative, string windowsPath = null, bool browserPractice = false, int projectRootDepth = 3,
         LabEntry[] explorerEntries = null, bool canUndoExplorer = false, bool explorerCanPaste = false, bool canPasteCell = false,
-        object tabSearch = null, object sourceReview = null) => new { windowsPath, browserPractice, projectRootDepth, renamePath = RenamePath, tabSearch, sourceReview,
+        object tabSearch = null, object sourceReview = null, object sourceControl = null) => new { sourceControl, windowsPath, browserPractice, projectRootDepth, renamePath = RenamePath, tabSearch, sourceReview,
         explorerActions = App == "code", explorerEntries, canUndoExplorer, explorerCanPaste, expandedFolders = ExpandedProjectFolders, notebook = Tab?.Notebook?.Snapshot(canPasteCell), notebookDescription = Tab?.Notebook?.Describe(), syntax = App == "code" ? PythonHighlight.For(Body, Url) : [], projectFiles, changedFiles, searchResults, projectName, projectRelative, ProjectSearchQuery, Id, App, Title, Workspace, State, NormalSlot, canGoBack = App == "chrome" && Tab?.HistoryIndex > 0, restoreState = MinimizedFrom, active, Folder, folderCanBack = FolderBack.Count != 0, folderCanForward = FolderForward.Count != 0, Item, Group, ImagePreview, otherTab = Tabs.Find(tab => tab.Id == OtherTab)?.Snapshot(App == "code"), View, Query, matches = Tab?.ExtraMatches.ToArray() ?? [], entries,
         tabs = Tabs.Select(tab => tab.Snapshot()), ActiveTab, Url, Body, Focus, Input, HistorySearch, Find, Sidebar, Split, Status = StatusFor(entries), Zoom, Selected, Cursor, Anchor, Panel, bodyCursor = Tab?.Position.Caret ?? 0, bodyAnchor = Tab?.Position.Anchor ?? 0, OptionIndex, Bookmarks, savedBookmarks = SavedBookmarks.ToArray() };
     internal LabWindow Clone()
@@ -251,7 +251,7 @@ internal sealed partial class LabScene
         ReplayLegacyLineEditing = source.ReplayLegacyLineEditing;
         ReplayLegacyTerminalSearch = source.ReplayLegacyTerminalSearch;
         ReplayLegacyNotebookActions = source.ReplayLegacyNotebookActions;
-        ReplayLegacyPythonEditing = source.ReplayLegacyPythonEditing; PythonEditingExercise = source.PythonEditingExercise;
+        ReplayLegacyPythonEditing = source.ReplayLegacyPythonEditing; PythonEditingExercise = source.PythonEditingExercise; BlockRepair = source.BlockRepair;
         desktopFileSearchCase = source.desktopFileSearchCase; ReplayLegacyDesktopFileSearch = source.ReplayLegacyDesktopFileSearch;
         windowNumber = source.windowNumber;
         historyDraft = source.historyDraft; killedText = source.killedText;
@@ -508,7 +508,10 @@ internal sealed partial class LabScene
                 if (chosen == null) return false;
                 OpenDocument(chosen.Path); break;
             case "palette": if (!code) return false; window.PaletteFrom = window.Focus; window.Focus = "palette"; window.Cursor = 0; window.Input = ""; window.OptionIndex = 0; break;
-            case "palette-next": if (!code || window.Focus != "palette") return false; window.OptionIndex = (window.OptionIndex + 1) % 3; break;
+            case "palette-next": case "palette-prev":
+                if (!code || window.Focus != "palette") return false;
+                if (BrowserPracticeActive) return false; // Git: Clone is the sole command here.
+                window.OptionIndex = (window.OptionIndex + (action == "palette-next" ? 1 : 2)) % 3; break;
             case "palette-choose":
                 if (!code || window.Focus != "palette") return false;
                 if (window.OptionIndex == 1) window.Sidebar = !window.Sidebar;
@@ -699,6 +702,21 @@ internal sealed partial class LabScene
         Version++;
     }
 
+    private static bool EditableInputFocus(string focus) => focus is
+        "url" or "find" or "history" or "tab-search" or "source-review" or "palette" or "clone-url" or "quick-open" or "goto-line" or "symbols"
+        or "symbol-rename" or "file-name" or "file-search" or "project-search" or "replace-find" or "replace-with";
+
+    internal bool CanRepeatText()
+    {
+        if (Switcher || Screenshot || DesktopOverlay.Length > 0 || ShowDesktop && WindowsDesktop) return false;
+        if (Overview) return true;
+        var window = Active;
+        if (window == null) return false;
+        if (OnNotebook) return window.Tab.Notebook.Editing;
+        if (IsTerminal(window)) return !Terminal.FollowingLog;
+        return window.App == "code" && window.Focus == "body" || EditableInputFocus(window.Focus);
+    }
+
     internal bool CanRepeatEditing(string key)
     {
         if (Switcher || Screenshot || DesktopOverlay.Length > 0 || ShowDesktop && WindowsDesktop) return false;
@@ -708,15 +726,14 @@ internal sealed partial class LabScene
         if (OnNotebook) return window.Tab.Notebook.Editing && key is "Left" or "Right" or "Home" or "End" or "Up" or "Down" or "Delete" or "Backspace";
         if (window.Focus == "reverse-search") return key == "Backspace";
         bool editor = window.App == "code" && window.Focus == "body";
-        if (editor || IsTerminal(window))
-            return key is "Left" or "Right" or "Home" or "End" or "Delete" or "Backspace"
-                || editor && key is "Up" or "Down";
+        if (IsTerminal(window))
+            return !Terminal.FollowingLog && key is "Left" or "Right" or "Home" or "End" or "Delete" or "Backspace" or "Up" or "Down";
+        if (editor)
+            return key is "Left" or "Right" or "Home" or "End" or "Delete" or "Backspace" or "Up" or "Down";
         // Delete in a result list (or any other non-text surface) is not a
         // text repeat. In an actual field use the same caret, selection and
         // grapheme deletion as the first press, without another goal attempt.
-        return (key is "Backspace" or "Delete") && window.Focus is
-            "url" or "find" or "history" or "tab-search" or "source-review" or "palette" or "clone-url" or "quick-open" or "goto-line" or "symbols"
-            or "symbol-rename" or "file-name" or "file-search" or "project-search" or "replace-find" or "replace-with";
+        return EditableInputFocus(window.Focus) && key is "Backspace" or "Delete" or "Left" or "Right" or "Home" or "End";
     }
 
     internal bool Text(string key, string text, bool extend = false, bool word = false)

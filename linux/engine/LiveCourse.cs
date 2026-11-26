@@ -7,7 +7,7 @@ namespace TouchTypingStudio;
 
 internal sealed record LivePhase(string Title, string Route);
 internal sealed record LiveMission(string App, int Level, string Id, string Title, LivePhase[] Phases, bool FinishAfterRoute = false, bool Curated = false, Action<LabScene> Prepare = null);
-internal sealed record LiveGoal(int Phase, LabTask Task, string Target, string Layout, bool VerifyReport = false, string LegacyTarget = null, string ArtifactPath = null, string CsvExplorerTarget = null);
+internal sealed record LiveGoal(int Phase, LabTask Task, string Target, string Layout, bool VerifyReport = false, string LegacyTarget = null, string ArtifactPath = null, string CsvExplorerTarget = null, string WindowsRecoveryTarget = null);
 
 internal static partial class LiveCourse
 {
@@ -23,6 +23,7 @@ internal static partial class LiveCourse
         EditorExactEditMissions(result);
         LineEditMissions(result);
         PythonEditingMissions(result);
+        BlockRepairMissions(result);
         EditorDiagnosticMissions(result);
         EditorTracebackMissions(result);
         TerminalMissions(result);
@@ -46,8 +47,8 @@ internal static partial class LiveCourse
             foreach (string token in RouteTokens(mission.Phases[phase]))
             {
                 if (!nativeEnglishInput && (IsCommandToken(token) || token is "disk-capacity-query" or "source-log-command" or "source-config-test" || IsProjectSearchQuery(token) || token is "browser-search" or "code-clone-command" or "research-find" or "file-name-commit" ||
-                    NotebookEnglishToken(token) || token is "terminal-incident-filter" or "code-rename-confirm" or "debug-unit" or "debug-report-check"
-                    or "debug-project-query" or "debug-doc-submit" or "debug-rewrite" or "exact-find-submit" or "python-edit-write" or "notebook-file" or "notebook-report" or "notebook-type" or "notebook-report-save" or "moved-report-save" ||
+                    NotebookEnglishToken(token) || token is "checkout-expect" or "terminal-incident-filter" or "code-rename-confirm" or "debug-unit" or "debug-report-check"
+                    or "debug-project-query" or "debug-doc-submit" or "debug-rewrite" or "exact-find-submit" or "python-edit-write" or "python-edit-write-fee" or "python-edit-write-total" or "notebook-file" or "notebook-report" or "notebook-type" or "notebook-report-save" or "moved-report-save" ||
                     trial.ExactEdit && token is "quick-choose" or "save") && trial.Layout == "RU")
                 {
                     var change = trial.WithBinding(Actions["layout"]);
@@ -78,7 +79,8 @@ internal static partial class LiveCourse
                 string proof = Evidence(task, trial, verifyReport: verifyReport, artifactPath: artifactPath);
                 if (original == proof) { trial = before; continue; }
                 goals.Add(new(phase, task, proof, before.Layout, verifyReport, verifyReport ? Evidence(task, trial) : null,
-                    artifactPath, CsvExplorerProof(task, trial)));
+                    artifactPath, CsvExplorerProof(task, trial),
+                    HasWindowsRecoveryScope(mission.Id) ? WindowsRecoveryProof(task, trial) : null));
             }
         }
         if (goals.Count < (mission.Curated ? 1 : 20)) throw new InvalidOperationException(mission.Id + ": меньше 20 результатов");
@@ -122,6 +124,9 @@ internal static partial class LiveCourse
         if (scene.DescribeTracebackTask(token) is LabTask traceback) return traceback;
         if (NotebookTask(token, scene) is LabTask notebook) return notebook;
         if (PythonEditTask(token) is LabTask edit) return edit;
+        if (token == "checkout-expect") return new(token, "Найдите вызов checkout_total(4, 3) в тесте", "",
+            "Введите выражение без обёртки assertEqual и нажмите Enter. Сверьте значение 14.",
+            LabScene.CheckoutExpectedCall, token);
         if (token == "file-search-query")
             return new(token, "Введите номер заявки «" + scene.FileSearchQuery + "» в поле поиска", "",
                 "В результатах должны быть две версии отчёта из этой папки.", scene.FileSearchQuery, token);
@@ -188,13 +193,17 @@ internal static partial class LiveCourse
                 "history" => "Посмотрите, какие команды уже выполнялись",
                 "clear" => "Очистите экран, не удаляя файлы и историю",
                 "reboot" => "Перезапустите только учебную систему",
+                "cd " + LabScene.BlockRepairRoot when scene.BlockRepair => "Перейдите в папку checkout для запуска проверок",
+                "python3 -m unittest test_checkout" when scene.BlockRepair => "Запустите обе проверки сохранённого расчёта",
+                "python3 -m unittest test_checkout > " + LabScene.CheckoutReport when scene.BlockRepair => "Сохраните вывод проверок в checkout-test.txt",
+                "cat " + LabScene.CheckoutReport when scene.BlockRepair => "Убедитесь, что файл содержит две пройденные проверки",
                 "grep ERROR app.log" when scene.PracticalTerminal => "Выведите только строки ERROR из app.log",
                 "tail -f app.log" when scene.PracticalTerminal => "Следите за новыми строками app.log",
                 "Select-String ERROR sync.log" when scene.PracticalTerminal => "Покажите ошибки синхронизации с номерами строк",
                 "Get-Content sync.log -Wait" when scene.PracticalTerminal => "Следите за новыми строками sync.log",
                 _ => "Выполните «" + value + "»"
             };
-            return new(CommandId(value), objective, "", !scene.PracticalTerminal && value.Length > 12 ?
+            return new(CommandId(value), objective, "", !scene.BlockRepair && !scene.PracticalTerminal && value.Length > 12 ?
                 "Введите команду и нажмите Enter. Если она уже в истории: Ctrl+R, фрагмент, сверка строки, затем Enter." :
                 "Наберите команду целиком и нажмите Enter.", value, "command");
         }
@@ -220,6 +229,27 @@ internal static partial class LiveCourse
         if (scene.GnomeWindows && (token == "tile-left" && scene.Active?.State == "left" ||
             token == "tile-right" && scene.Active?.State == "right"))
             return task with { Title = "Снимите привязку окна повторным нажатием" };
+        if (task.Action is "file-cut" or "file-copy" or "file-paste")
+        {
+            var window = scene.Active;
+            var selected = window == null ? null : scene.Entries(window).ElementAtOrDefault(window.Item);
+            if (window?.App == "code" && window.Focus == "explorer" && selected != null)
+            {
+                string path = scene.EditorLessonRelativePath(selected.Path);
+                if (task.Action == "file-paste") return task with
+                {
+                    Title = "Вставьте файл «" + System.IO.Path.GetFileName(scene.Clipboard) + "» в папку «" + path + "»",
+                    Hint = "Фокус должен быть в проводнике проекта. После вставки проверьте путь, а не только открытую вкладку.",
+                    TargetPath = selected.Path
+                };
+                return task with
+                {
+                    Title = (task.Action == "file-cut" ? "Вырежьте файл «" : "Скопируйте файл «") + path + "» в проводнике",
+                    Hint = "Ctrl+Shift+E вернёт фокус в проводник. Затем выберите строку файла, не открывая его снова.",
+                    TargetPath = selected.Path
+                };
+            }
+        }
         if (task.Action == "item-open")
         {
             var item = scene.Entries(scene.Active).ElementAtOrDefault(scene.Active.Item);
@@ -228,12 +258,17 @@ internal static partial class LiveCourse
                 Hint = "Здесь Chrome откроет папку с выбранным файлом. Переименование делается в файловом менеджере." };
             if (item != null) return scene.DescribeDesktopSearchTask(task with { Title = (item.Kind == "download" ? "Скачайте" : "Откройте") + " «" + item.Title + "»" });
         }
-        return scene.DescribeDesktopSearchTask(task);
+        return scene.DescribeDesktopSearchTask(scene.DescribeBlockTask(task));
     }
 
     private static bool Demonstrate(LabTask task, LabScene trial)
     {
         trial.DemonstrateTabReview(task);
+        if (task.Action == "checkout-expect")
+        {
+            trial.Active.Input = task.Text;
+            return trial.Text("Enter", "");
+        }
         if (task.Action == "file-search-query") return trial.Text("Text", task.Text);
         if (task.Action == "file-search-verify")
         {
@@ -257,6 +292,7 @@ internal static partial class LiveCourse
                 trial.Insert(trial.Active, task.Text);
             }
         }
+        if (task.Action == "python-edit-write" && task.Id != task.Action) return trial.Text("Text", task.Text);
         if (task.Action.StartsWith("python-edit-", StringComparison.Ordinal)) return trial.PerformPythonEdit(task.Action);
         if (task.Action == "launch") { trial.Ensure(task.Id[5..]); return true; }
         if (task.Action == "gnome-write")
@@ -320,6 +356,7 @@ internal static partial class LiveCourse
         if (scene.NotebookCourse) return JsonSerializer.Serialize(scene.NotebookEvidence(task));
         if (scene.WindowsDesktop && (!scene.BrowserResearchActive || action.StartsWith("win-", StringComparison.Ordinal)))
             return JsonSerializer.Serialize(scene.WindowsDesktopEvidence());
+        if (scene.BlockRepair) return JsonSerializer.Serialize(scene.CheckoutEvidence(task, equivalentCommand));
         if (scene.PythonEditingExercise) return JsonSerializer.Serialize(scene.PythonEditEvidence());
         if (scene.GnomePractice is "workspaces" or "same-app")
             return JsonSerializer.Serialize(scene.GnomeScopeEvidence(task, equivalentCommand));

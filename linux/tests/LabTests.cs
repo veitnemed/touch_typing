@@ -463,8 +463,64 @@ internal static class LabTests
         Expect("code", "Ctrl+Shift+P", "palette", s => {}, s => s.Active.Focus=="palette");
     }
 
+    private static void ReviewCheckoutRepair()
+    {
+        var run = new LabRun("code", "sandbox", 1, 0, "EN", [], new Random(0), missionId: "code-repair-checkout", neutralProject: true);
+        run.Resume();
+        string tests = run.Scene.Terminal.ReadFile(LabScene.BlockRepairRoot + "/test_checkout.py");
+        int reviews = 0;
+        for (int i = 0; i < 40 && !run.Finished; i++)
+        {
+            var task = run.Task;
+            int before = run.Solved;
+            if (task.Action == "python-edit-write")
+            {
+                Type(run, task.Text.Substring(0, task.Text.Length - 1));
+                Check(run.Solved == before, "Partial text cannot earn the calibrated editor repair step");
+                Type(run, task.Text[^1..]);
+            }
+            else Complete(run);
+            Check(run.Solved == before + 1, "Checkout repair credits exactly one step: " + task.Id);
+            if (task.Id == "changes")
+            {
+                ++reviews;
+                using var snapshot = JsonDocument.Parse(JsonSerializer.Serialize(run.Scene.Snapshot()));
+                var active = snapshot.RootElement.GetProperty("windows").EnumerateArray().Single(w => w.GetProperty("active").GetBoolean());
+                var changes = active.GetProperty("sourceControl").GetProperty("changes").EnumerateArray().ToArray();
+                Check(changes.Length == 1 && changes[0].GetProperty("path").GetString() == "checkout.py" &&
+                    changes[0].GetProperty("state").GetString() == "M", "Source Control marks only the locally saved file as modified");
+                var diff = changes[0].GetProperty("diff").EnumerateArray().Select(line => line.GetString()).ToArray();
+                Check(diff.Any(line => line.StartsWith("- ")) && diff.Any(line => line.StartsWith("+ ")),
+                    "Source Control shows real before/after code, not only the name");
+            }
+        }
+        Check(run.Finished && run.Solved >= 30 && reviews == 2 && run.Errors == 0, "Complete the full practical editor repair exercise");
+        Check(run.Scene.Terminal.ReadFile(LabScene.BlockRepairPath) == LabScene.RepairedCheckout &&
+            tests == run.Scene.Terminal.ReadFile(LabScene.BlockRepairRoot + "/test_checkout.py"),
+            "Exact runnable function is saved; unrelated test remains unchanged");
+        Check(run.Scene.Active.Url == LabScene.BlockRepairRoot + "/" + LabScene.CheckoutReport &&
+            run.Scene.Active.Body == LabScene.CheckoutOutput,
+            "Terminal ran both checks, persisted the redirected output, and last opens that exact receipt");
+    }
+
+    private static void ReviewPaletteArrows()
+    {
+        var scene = new LabScene("code", "EN", neutralProject: true);
+        scene.PrepareCase(0, "code");
+        Check(scene.Apply("palette"), "Open ordinary palette");
+        Check(LabCatalog.Resolve("Up", ["Up"], scene)?.Action == "palette-prev", "Physical Up resolves to previous palette command");
+        Check(scene.Apply("palette-prev") && scene.Active.OptionIndex == 2 &&
+            scene.Apply("palette-next") && scene.Active.OptionIndex == 0, "Arrow pair moves selection only");
+        Check(scene.Active.Focus == "palette" && !scene.Active.Split, "Arrow keys do not execute any action");
+        scene.PrepareNotebookCourse(0);
+        Check(scene.Apply("palette") && scene.Text("J","J"), "Open filtered notebook palette");
+        Check(scene.Apply("palette-prev") && scene.Active.Focus == "palette", "Notebook-specific list handles backward motion without executing");
+    }
+
     private static void Main()
     {
+        ReviewCheckoutRepair();
+        ReviewPaletteArrows();
         TestTerminalEssentialsTimedRotation();
         TestOtherShortcutContexts();
         TestKeypadNavigation();

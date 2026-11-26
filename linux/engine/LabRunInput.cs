@@ -7,6 +7,8 @@ namespace TouchTypingStudio;
 
 internal sealed partial class LabRun
 {
+    private readonly HashSet<string> repeatTextHeld = new(StringComparer.Ordinal);
+
     internal ShortcutAttempt Input(string key, bool pressed, string text, string nativeLayout = "")
     {
         if (Finished || AwaitingLimitChoice || Paused || string.IsNullOrEmpty(key)) return null;
@@ -15,7 +17,11 @@ internal sealed partial class LabRun
             inputAtActiveMilliseconds = ActiveMilliseconds;
             if (inputAtActiveMilliseconds >= TimeLimit * 1000.0) return null;
         }
-        if (!pressed && layoutBlockedKeys.Remove(key)) return null;
+        if (!pressed)
+        {
+            repeatTextHeld.Remove(key);
+            if (layoutBlockedKeys.Remove(key)) return null;
+        }
         bool targetedText = pressed && (nativeLayout is "EN" or "RU") && RequiresEnglishText(key, text);
         if (pressed && (layoutBlockedKeys.Contains(key) || targetedText && nativeLayout == "RU"))
         {
@@ -27,12 +33,15 @@ internal sealed partial class LabRun
         }
         if (pressed && held.Contains(key))
         {
-            if (!replayLegacyUrl && Scene.CanRepeatEditing(key) && !held.Any(item => KeyChord.Family(item) is "Alt" or "Super")
+            bool repeatText = repeatTextHeld.Contains(key) && text?.Length > 0 && !text.Any(char.IsControl);
+            if (!replayLegacyUrl && (Scene.CanRepeatEditing(key) || repeatText && Scene.CanRepeatText()) && !held.Any(item => KeyChord.Family(item) is "Alt" or "Super")
                 && (!held.Any(item => KeyChord.Family(item) == "Ctrl") || key is "Left" or "Right" or "Home" or "End" ||
                     CanEraseNotebookWord(key, held.Any(item => KeyChord.Family(item) == "Shift"))))
             {
-                trace.Add(new(key, true, ""));
-                Scene.Text(key, "", held.Any(item => KeyChord.Family(item) == "Shift"),
+                string repeated = repeatText ? text : "";
+                bool nativeEnglish = repeatText && targetedText && nativeLayout == "EN";
+                trace.Add(new(key, true, repeated, nativeEnglish));
+                Scene.Text(key, nativeEnglish ? repeated : VirtualText(key, repeated), held.Any(item => KeyChord.Family(item) == "Shift"),
                     held.Any(item => KeyChord.Family(item) == "Ctrl"));
             }
             return null; // repeat edits can move the caret, never complete a lesson step
@@ -67,6 +76,7 @@ internal sealed partial class LabRun
             return null;
         }
         if (!held.Add(key)) return null;
+        repeatTextHeld.Remove(key);
         if (KeyChord.IsModifier(key))
         {
             if (KeyChord.Family(key) == "Super") superUsed = false;
@@ -103,6 +113,18 @@ internal sealed partial class LabRun
         }
         // Lock toggles affect the physical keyboard, not progress in a lesson.
         if (key is "NumLock" or "CapsLock" or "ScrollLock") return null;
+        if (!restoring && Task.TargetPath is string expectedFile &&
+            Gesture.TryParse(Task.Keys, out var transfer) && transfer.Chords.Length == 1 &&
+            transfer.Chords[0].Trigger == key && transfer.Chords[0].FitsModifiers(held))
+        {
+            string expected = Scene.EditorLessonRelativePath(expectedFile);
+            var window = Scene.Active;
+            if (window?.App != "code" || window.Focus != "explorer")
+                return Miss(key, "Действие относится к «" + expected + "» в проводнике, а не к тексту. Нажмите Ctrl+Shift+E.");
+            var actualFile = Scene.Entries(window).ElementAtOrDefault(window.Item);
+            if (actualFile?.Path != expectedFile)
+                return Miss(key, "Выберите «" + expected + "» в проводнике. Другие файлы не изменены.");
+        }
         if (Scene.OnNotebook && LiveCourse.ResolveNotebook(key, held, Scene) is LabTask notebook) return Perform(notebook, key);
         var pythonEdit = Scene.OnNotebook ? null : LiveCourse.ResolvePythonEdit(key, held, Scene);
         if (pythonEdit != null) return Perform(pythonEdit, key);
@@ -140,7 +162,11 @@ internal sealed partial class LabRun
             if (word && key == "X" && Scene.Active?.Focus == "url") return null;
             return Miss(key, WrongKeyMessage(key));
         }
+        bool editableText = !commandModifiers && text?.Length > 0 && !text.Any(char.IsControl)
+            && key is not ("Enter" or "NumEnter" or "Tab" or "Backspace" or "Delete" or "Print")
+            && Scene.CanRepeatText();
         bool changed = Scene.Text(key, useNativeEnglish ? text : VirtualText(key, text), shift, word);
+        if (editableText && changed) repeatTextHeld.Add(key);
         bool continuousTextGoal = Task.Action is "python-edit-write" or "notebook-type" or "file-search-query";
         bool typedEdit = changed && continuousTextGoal &&
             key is not ("Left" or "Right" or "Up" or "Down" or "Home" or "End" or "Enter" or "Backspace" or "Delete") &&
@@ -190,6 +216,7 @@ internal sealed partial class LabRun
             "code-clone-command" => Scene.BrowserPracticeActive && window.Focus == "palette",
             "palette-choose" => Scene.AdvancedNotebook && window.Focus == "palette" && Task.Text.Length > 0,
             "notebook-type" => Scene.OnNotebook && window.Tab.Notebook.Editing,
+            "checkout-expect" => window.App == "code" && window.Focus == "find",
             "python-edit-write" or "gnome-write" or "debug-rewrite" => window.App == "code" && window.Focus == "body",
             "debug-doc-submit" => window.App == "chrome" && window.Focus == "find",
             "project-search-submit" => window.Focus == "project-search",

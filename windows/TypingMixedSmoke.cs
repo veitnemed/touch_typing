@@ -221,6 +221,11 @@ internal static partial class LiveUiSmoke
             Check(everyday.SetEquals(new[] {"Ctrl+F","Ctrl+Y","Ctrl+T","Ctrl+W","Ctrl+Shift+T",
                 "Ctrl+Left","Ctrl+Right","Ctrl+Backspace","Ctrl+Delete","Shift+Home","Shift+End"}),
                 "ordinary Hotkeys card delivers the 11 everyday extensions");
+            foreach (string alt in new[] {"Alt+Home", "Alt+Right"})
+            {
+                Check(MixedAtom() == "⟦" + alt + "⟧", "ordinary Hotkeys includes " + alt);
+                MixedStep(thread, MixedAtom(), MixedLayoutTitle());
+            }
 
             MixedChoose("Digits");
             int digit = int.Parse(MixedAtom(), CultureInfo.InvariantCulture);
@@ -252,6 +257,30 @@ internal static partial class LiveUiSmoke
                 MixedLandmark("wpf-13-shift3-"+layout);
             }
             MixedLayout(thread,false);
+            MixedChoose("SystemHotkeys");
+            MixedLandmark("wpf-system-typing-start");
+            var captured = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < 9; i++)
+            {
+                string atom = MixedAtom();
+                Check(atom.StartsWith("⟦", StringComparison.Ordinal), "system mode has only physical chords");
+                captured.Add(atom.Trim('⟦', '⟧'));
+                MixedStep(thread, atom, MixedLayoutTitle());
+                Check(GetForegroundWindow() == trainer, "system gesture remains inside the trainer: " + atom);
+            }
+            Check(captured.Contains("Super+E") && captured.Contains("Alt+Tab") && !captured.Contains("Super+H"),
+                "native Windows typing recognizes Win+E and Alt+Tab and does not assign speech hotkey");
+            int beforeFocus = MixedCount();
+            FocusMixedNumLockProbe();
+            Until(MixedPaused, "system Typing pauses when the owned probe gets focus");
+            Focus();
+            Check(MixedPaused() && MixedCount() == beforeFocus, "system Typing does not auto-resume after focus loss");
+            Key("F8");
+            Until(delegate { return !MixedPaused(); }, "explicit F8 resumes system Typing");
+            MixedStep(thread, MixedAtom(), MixedLayoutTitle());
+            MixedLandmark("wpf-system-typing-credited");
+            Key("Esc");
+            Until(delegate { return Visible("TypingChoose"); }, "system Typing stops normally");
             Console.WriteLine("PASS " + count + " real WPF mixed checks; isolated profile, real HKLs, SendInput scan codes (no claim of physical laptop test).");
             return 0;
         }
