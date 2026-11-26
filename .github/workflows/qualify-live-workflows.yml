@@ -175,7 +175,7 @@ jobs:
             /usr/bin/python3 linux/tests/test_preview2_native.py
           ' | tee "$TOUCH_TYPING_QA_OUTPUT/gtk-test.log"
           native_failures=()
-          for scenario in test_editor_notebooks_x11.py test_project_files_x11.py test_editor_course_x11.py test_editor_checkout_x11.py test_typing_cycles_native.py test_typing_records_gtk.py test_typing_mixed_native.py test_typing_mixed_native.py:base test_live_guide_layout_native.py test_live_course_cards_x11.py test_notebook_workbench_native.py test_source_handoff_x11.py test_source_handoff_x11.py:course test_live_coach_x11.py test_notebook_file_handoff_x11.py test_live_pause_focus_x11.py test_menu_engine_recovery_x11.py test_ubuntu_window_switch_x11.py test_terminal_history_theory_x11.py test_terminal_practical_native_x11.py test_terminal_powershell_native_x11.py test_terminal_disk_space_x11.py test_chrome_history_native.py test_chrome_history_pointer_x11.py test_editor_traceback_x11.py test_desktop_file_search_x11.py test_workday_source_revision_x11.py test_chrome_tab_search_x11.py test_chrome_surface_x11.py test_typing_normal_launch_x11.py test_typing_work_note_native.py test_typing_review_native.py; do
+          for scenario in test_editor_notebooks_x11.py test_project_files_x11.py test_editor_course_x11.py test_editor_checkout_x11.py test_typing_cycles_native.py test_typing_records_gtk.py test_typing_mixed_native.py test_typing_mixed_native.py:base test_live_guide_layout_native.py test_live_course_cards_x11.py test_notebook_workbench_native.py test_source_handoff_x11.py test_source_handoff_x11.py:course test_live_coach_x11.py test_notebook_file_handoff_x11.py test_live_pause_focus_x11.py test_menu_engine_recovery_x11.py test_ubuntu_window_switch_x11.py test_terminal_history_theory_x11.py test_terminal_practical_native_x11.py test_terminal_powershell_native_x11.py test_terminal_disk_space_x11.py test_chrome_history_native.py test_chrome_history_pointer_x11.py test_editor_traceback_x11.py test_desktop_file_search_x11.py test_windows_folder_recovery_x11.py test_workday_source_revision_x11.py test_chrome_tab_search_x11.py test_chrome_surface_x11.py test_typing_normal_launch_x11.py test_typing_work_note_native.py test_typing_review_native.py; do
             script="${scenario%%:*}"
             proof_name="${script%.py}"
             unset TOUCH_TYPING_QA_SOURCE_MODE TOUCH_TYPING_QA_MIXED_BASE TOUCH_TYPING_QA_SEED
@@ -347,6 +347,7 @@ jobs:
           & "./windows/Test-Chrome-TabSearch.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/chrome-tab-search"
           & "./windows/Test-Chrome-Surface.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/chrome-surface"
           & "./windows/Test-Desktop-File-Search.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/desktop-file-search"
+          & "./windows/Test-Windows-Folder-Recovery.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/windows-folder-recovery"
           & "./windows/Test-EditorTraceback.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/editor-traceback"
           & "./windows/Test-WorkdaySourceRevision.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/workday-sourced-link"
       - name: Verify visible adaptive guidance in two ordinary Chrome routes

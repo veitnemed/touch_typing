@@ -1,4 +1,4 @@
-"""Check OS-generated Backspace autorepeat through a native GTK Live window.
+"""Check OS-generated editing autorepeat through a native GTK Live window.
 
 Run on an isolated authenticated Xvfb, with its PID in
 TOUCH_TYPING_QA_XVFB_PID, fresh absolute XDG_DATA_HOME, and
@@ -41,20 +41,23 @@ class BrowserRepeat(Recorder):
         assert before["input"] == "abcdefghij" * 2 and before["cursor"] == 19, before
         self.capture_widget_png(output / "backspace-01-before-hold.png")
 
-        observed = (next(code for code, key in PHYSICAL.items() if key == "Backspace"), True)
-        received = self.received.get(observed, 0)
-        self.send([("Backspace", True)])
-        try:
-            deadline = time.monotonic() + 5
-            while self.received.get(observed, 0) < received + 4 and time.monotonic() < deadline:
+        def held(name, n=4):
+            observed = (next(code for code, key in PHYSICAL.items() if key == name), True)
+            before_count = self.received.get(observed, 0)
+            self.send([(name, True)])
+            try:
+                deadline = time.monotonic() + 5
+                while self.received.get(observed, 0) < before_count + n and time.monotonic() < deadline:
+                    yield
+            finally:
+                self.send([(name, False)])
+            for _ in range(6):
                 yield
-        finally:
-            self.send([("Backspace", False)])
-        for _ in range(6):
-            yield
+            presses = self.received.get(observed, 0) - before_count
+            assert presses >= n, ("No OS-generated repeats reached GTK", name, presses)
+            return presses
 
-        presses = self.received.get(observed, 0) - received
-        assert presses >= 4, ("No OS-generated repeats reached GTK", presses)
+        presses = yield from held("Backspace")
         after = chrome()
         removed = len(before["input"]) - len(after["input"])
         assert removed == presses, ("Repeat ignored", presses, after["input"], after["cursor"])
@@ -70,6 +73,23 @@ class BrowserRepeat(Recorder):
         print(f"PASS native XTest/GDK: Backspace delivered {presses} keydowns "
               f"and left {after['input']!r} at caret {after['cursor']}; no extra goal credit",
               flush=True)
+
+        caret = after["cursor"]
+        left = yield from held("Left")
+        assert chrome()["cursor"] == max(0, caret - left) and chrome()["input"] == after["input"]
+        caret = chrome()["cursor"]
+        right = yield from held("Right")
+        assert chrome()["cursor"] == min(len(after["input"]), caret + right)
+        yield from chord("Home")
+        deletion = yield from held("Delete")
+        remaining = after["input"][deletion:]
+        assert chrome()["input"] == remaining and chrome()["cursor"] == 0, chrome()
+        insertion = yield from held("A")
+        final = chrome()
+        assert final["input"] == "a" * insertion + remaining and final["cursor"] == insertion, final
+        assert lab.state["solved"] == score
+        print(f"PASS native XTest/GDK: Left {left}, Right {right}, Delete {deletion}, A {insertion}; "
+              "exact edits, no extra goal credit", flush=True)
 
 
 if __name__ == "__main__":

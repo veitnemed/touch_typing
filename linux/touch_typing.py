@@ -3912,7 +3912,7 @@ class LabPage(Gtk.Box):
         x11_reserved = self.window_only_keys and guided and (
             "Super" in raw_keys or raw_keys in ("Alt+Tab", "Alt+Shift+Tab", "Alt+F4", "Print", "Alt+Print")
             or task.get("id", "").startswith("open-"))
-        important = state["paused"] or state.get("feedback") in ("error", "layout", "simulation")
+        important = state["paused"] or state.get("feedback") in ("error", "layout", "simulation", "recovery")
         if not important and (x11_reserved or demo_available):
             self.status.set_label("X11: сочетание может перехватить система.")
         self.status.set_visible(important or x11_reserved or demo_available)

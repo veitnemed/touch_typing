@@ -340,7 +340,8 @@ internal sealed partial class PracticeService
     {
         if (lab == null) return null;
         return new { lab.App, lab.Mode, lab.Level, desktopProfile = lab.EnvironmentProfile, task = lab.Task.Snapshot(), commandTheory = ConsoleTheory.For(lab.Task, lab.Scene, lab.ShowGuide), scene = lab.Scene.Snapshot(), held = lab.Held,
-            lab.LastKey, lab.Status, lab.Feedback, lab.Errors, lab.Solved, lab.Block, index = lab.Solved % 20 + 1,
+            lab.LastKey, lab.Status, feedback = lab.WindowsRecoveryHint() != null ? "recovery" : lab.Feedback,
+            lab.Errors, lab.Solved, lab.Block, index = lab.Solved % 20 + 1,
             lab.Seconds, lab.Remaining, lab.TimeLimit, lab.ActionLimit, lab.Guidance, lab.ShowGuide, lab.Finished, lab.Paused, lab.Saved, startBlocked, saveError = labSaveError, needsCapture = true,
             // A time cap may be crossed between polling and serialization.
             // Never show its decision until capture actually paused.

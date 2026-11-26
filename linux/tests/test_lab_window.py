@@ -390,7 +390,7 @@ class LabWindowTest(Studio):
             yield from chord(chord_name)
             assert self.state["progressDone"] == index + 1 and self.system_typing_available(), chord_name
             seen.add(chord_name)
-        assert {"Super+H", "Super+Left", "Alt+Tab", "Alt+Home"} <= seen, seen
+        assert {"Super+PageUp", "Super+PageDown", "Super+Left", "Alt+Tab", "Alt+Home"} <= seen, seen
 
         # Revoke actual GDK permission while the window still owns the exercise.
         self.window.get_surface().restore_system_shortcuts()

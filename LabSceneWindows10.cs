@@ -94,6 +94,7 @@ namespace TouchTypingStudio
                 foreach (Data window in ForegroundWindows(visible))
                     DrawWindows10Window(window, Windows10WindowBounds(window, index++));
             }
+            NotebookWindow(surface);
             DrawWindows10Taskbar(current);
             string overlay = scene.S("desktopOverlay");
             if (overlay == "start") DrawWindows10Start();
@@ -121,6 +122,9 @@ namespace TouchTypingStudio
             context.PushTransform(new TranslateTransform(bounds.X, bounds.Y));
             context.PushClip(new RectangleGeometry(new Rect(0, 0, bounds.Width, bounds.Height)));
             Rectangle(0, 0, bounds.Width, bounds.Height, "#20252B");
+            // Register in paint order: top windows block hits on anything they cover.
+            AddNotebookHit(new Rect(0, 0, bounds.Width, bounds.Height), ExplorerPrefix + "desktop-focus",
+                window.B("active") ? null : "Перейти в «" + window.S("title", AppTitle(app)) + "»", path: window.S("id"));
             if (app == "code" || app == "vscode") DrawCode(window, bounds.Width, bounds.Height);
             else if (app == "chrome")
             {
@@ -137,14 +141,28 @@ namespace TouchTypingStudio
             else Icon(app, 10, 5, 18);
             Text(app == "files" ? FilesCaption(window, true) : window.S("title", AppTitle(app)),
                 36, 6, 13, "#152438", Math.Max(10, bounds.Width - 170));
-            Text("—", bounds.Width - 104, 5, 14, "#152438");
-            string state = window.S("state");
-            Text(state == "maximized" || state == "max" ? "❐" : "□", bounds.Width - 72, 4, 14, "#152438");
-            if (app != "files") Rectangle(bounds.Width - 36, 0, 36, 29, "#AD2336");
-            Text("×", bounds.Width - 23, 3, 17, app == "files" ? "#152438" : "#FFFFFF");
+            for (int i = 0; i < 3; i++)
+            {
+                double left = bounds.Width - 108 + i * 36;
+                DrawChromeMark(WindowsCaptionIcon(window, i), left + 10, 6, 16, "#152438");
+                AddWindowsCaptionHit(window, i, new Rect(left, 0, 36, 29));
+            }
             context.DrawRectangle(null, new Pen(Ui.Brush(window.B("active") ? "#42A5E2" : "#798B9F"), 1),
                 new Rect(.5, .5, bounds.Width - 1, bounds.Height - 1));
             context.Pop(); context.Pop();
+        }
+
+        private static string WindowsCaptionIcon(Data window, int index)
+        {
+            return index == 0 ? "min" : index == 2 ? "close" : window.S("state") == "maximized" ? "restore" : "max";
+        }
+
+        private void AddWindowsCaptionHit(Data window, int index, Rect box)
+        {
+            var command = index == 0 ? "minimize" : index == 2 ? "close" : "maximize";
+            string label = index == 0 ? "Свернуть" : index == 2 ? "Закрыть" :
+                window.S("state") == "maximized" ? "Восстановить размер" : "Развернуть";
+            AddNotebookHit(box, ExplorerPrefix + "desktop-" + command, label, path: window.S("id"));
         }
 
         private void DrawWindows10Taskbar(Data[] windows)
@@ -163,6 +181,8 @@ namespace TouchTypingStudio
                 if (running.Any(w => w.B("active") && w.S("state") != "minimized" && !scene.B("showDesktop")))
                     Rectangle(x - 7, WindowsWorkHeight + 2, 40, 40, "#354860");
                 Icon(apps[i], x, WindowsWorkHeight + 9, 25);
+                AddNotebookHit(new Rect(x-7, WindowsWorkHeight, 40, HeightUnits-WindowsWorkHeight),
+                    ExplorerPrefix + "desktop-taskbar", AppTitle(apps[i]), path: apps[i]);
                 if (running.Length > 0) Rectangle(x, HeightUnits - 3, 25, 2, "#65C7FF");
             }
             Text(scene.S("layout", "EN") + "     ▰    ›", 1080, WindowsWorkHeight + 11, 13, "#FFFFFF");

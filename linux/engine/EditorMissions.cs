@@ -36,10 +36,17 @@ internal static partial class LiveCourse
         ["archive"] = new("Сохранить выдержку и восстановить исходник",
             "select-line cut new-file paste save close-tab undo save"),
     };
+    private static readonly LivePhase CheckedReorder = new("Переставьте пункт в порядке проверки релиза",
+        "quick-open quick:release-check.md quick-choose move-line-down move-line-down save changes focus-editor");
+    internal static LiveMission LegacyEditorReorder(LiveMission mission) =>
+        mission with { Phases = mission.Phases.Select(phase => phase.Route == CheckedReorder.Route ? EditorParts["reorder"] : phase).ToArray(), Prepare = null };
+
     private static void EditorMissions(List<LiveMission> list)
     {
         void Add(int level, string id, string title, params string[] parts) =>
-            list.Add(new("code", level, "code-" + id, title, parts.Select(p => EditorParts[p]).ToArray()));
+            list.Add(new("code", level, "code-" + id, title,
+                parts.Select(p => p == "reorder" ? CheckedReorder : EditorParts[p]).ToArray(),
+                Prepare: parts.Contains("reorder") ? scene => scene.PrepareSafeReorder() : null));
         Add(0,"guide","Составить заметку по проекту","signal","note","spectrum","readme","search");
         NotebookMission(list, 0);
         Add(0,"first-fix","Подготовить первую правку модели","model","patch","signal","review","tools");

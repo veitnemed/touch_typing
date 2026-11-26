@@ -318,6 +318,23 @@ class PracticeTest(unittest.TestCase):
         self.assertEqual((window["bodyAnchor"], window["bodyCursor"]),
                          (len(first) + 1, len(first) + len(middle) + 2))
 
+    def test_palette_arrows_repeat_without_extra_credit(self):
+        self.open_live("code")
+        opened = self.lab_chord("LCtrl", "LShift", "P")
+        def state_row(state):
+            return next(w for w in state["scene"]["windows"] if w["active"])
+        self.assertEqual(state_row(opened)["focus"], "palette")
+        def key(label, down=True):
+            return self.engine.call("lab-key", key=label, pressed=down, text="")
+        first = key("Down")
+        again = key("Down")
+        self.assertEqual(state_row(again)["optionIndex"], (state_row(first)["optionIndex"] + 1) % 3)
+        self.assertEqual((first["solved"], first["errors"]), (again["solved"], again["errors"]))
+        key("Down", False)
+        back = key("Up")
+        self.assertEqual(state_row(back)["optionIndex"], state_row(first)["optionIndex"])
+        key("Up", False)
+
     def test_live_repeated_edits_never_resubmit_or_credit(self):
         self.open_live("terminal")
         def key(name, text="", down=True):

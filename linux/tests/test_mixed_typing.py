@@ -162,7 +162,7 @@ class MixedTypingTest(unittest.TestCase):
             self.assertNotIn("Super", normal["expected"])
             normal = self.answer(normal)
         self.os = "EN"
-        for platform, expected in (("linux", "Super+H"), ("windows", "Super+E")):
+        for platform, expected in (("linux", "Super+PageUp"), ("windows", "Super+E")):
             with self.subTest(platform=platform):
                 self.engine.call("configure", platform=platform, layout="EN")
                 s = self.engine.call("typing-start", mode="SystemHotkeys", systemCapture=True, layout="EN", seed=17,

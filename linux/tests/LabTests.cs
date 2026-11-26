@@ -697,6 +697,25 @@ internal static class LabTests
             Chord(edit, "Left");
             Check(!edit.Scene.Active.Selected, "Focus loss clears held Shift before navigation");
         }
+        var historyEdit = new LabRun("terminal", "sandbox", 0, 0, "EN", [], new Random(3));
+        historyEdit.Resume();
+        Chord(historyEdit, "Ctrl+U");
+        Type(historyEdit, "whoami"); Chord(historyEdit, "Enter");
+        Type(historyEdit, "pwd"); Chord(historyEdit, "Enter");
+        historyEdit.Input("Up", true, "");
+        int afterRecall = historyEdit.Solved;
+        historyEdit.Input("Up", true, ""); historyEdit.Input("Up", true, "");
+        Check(historyEdit.Scene.TerminalInput == "pwd" && historyEdit.Scene.Active.Cursor == 3 &&
+            historyEdit.Solved == afterRecall, "Held Up retains the first recalled command without new credit");
+        historyEdit.Input("Up", false, "");
+        Chord(historyEdit, "Up");
+        Check(historyEdit.Scene.TerminalInput == "whoami", "A fresh Up can recall the preceding command");
+        historyEdit.Input("Down", true, "");
+        historyEdit.Input("Down", true, ""); historyEdit.Input("Down", true, "");
+        Check(historyEdit.Scene.TerminalInput == "pwd", "Held Down retains the first recalled command");
+        historyEdit.Input("Down", false, "");
+        Chord(historyEdit, "Down");
+        Check(historyEdit.Scene.TerminalInput == "", "A fresh Down restores the draft");
         var editor = Create("code");
         editor.Resume();
         string body = editor.Scene.Active.Body;

@@ -98,7 +98,7 @@ internal static partial class LiveCourse
 
 internal sealed partial class LabRun
 {
-    private string WindowsRecoveryHint()
+    internal string WindowsRecoveryHint()
     {
         if (Paused || Finished || AwaitingLimitChoice || Scene?.WindowsDesktop != true ||
             Task?.Id != "file-next" || Task.Text != "project") return null;
@@ -107,12 +107,12 @@ internal sealed partial class LabRun
             return "Показан рабочий стол. " + (ShowGuide ? "Нажмите Win+D, чтобы вернуть окна." : "Верните учебные окна.");
         var w = Scene.Active;
         if (w?.App != "files")
-            return "Проводник не в фокусе. " + (ShowGuide ? "Щёлкните его значок на панели или нажмите Alt+Tab." : "Вернитесь в Проводник.");
+            return "Проводник не в фокусе. " + (ShowGuide ? "Щёлкните его значок или нажмите Alt+Tab." : "Вернитесь в Проводник.");
         if (w.Focus != "body")
             return ShowGuide ? "Закройте режим поиска или ввода клавишей Esc и вернитесь к списку папок." : "Вернитесь к списку папок.";
         if (w.Folder != "/home/student")
             return "Папка project находится в C:\\Users\\Student. " +
-                (ShowGuide ? "Нажимайте Alt+↑, пока не вернётесь в домашнюю папку." : "Перейдите в домашнюю папку.");
+                (ShowGuide ? "Вернитесь туда через Alt+↑." : "Перейдите в домашнюю папку.");
         return null;
     }
 }

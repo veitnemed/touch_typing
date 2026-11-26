@@ -255,6 +255,46 @@ class ExpandedNotebookRoutes(unittest.TestCase):
         w = editor(s)
         return w["entries"][w["item"]]["path"].partition("/task-list/")[2]
 
+    def test_exact_csv_cut_rejects_wrong_focus_and_item_even_on_draft_replay(self):
+        for platform in ("linux", "windows"):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as profile, patch.dict(
+                    os.environ, {"TOUCH_TYPING_QA_DATA_ROOT": profile}):
+                e = Engine(verify=True)
+                try:
+                    e.call("configure", platform=platform, layout="EN")
+                    s = self.csv_start(e, "guided")
+                    for key in ("Down", "Down", "Enter", "Down"):
+                        s = gesture(e, key)
+                    while s["task"]["id"] != "file-cut" and s["solved"] < 6:
+                        s = gesture(e, s["task"]["keys"])
+                    self.assertEqual(s["task"]["id"], "file-cut")
+                    self.assertIn("incoming/sample-duration.csv", s["task"]["title"])
+                    csv = next(path for path in filemap(s) if path.endswith("/incoming/sample-duration.csv"))
+                    original, clip, solved = filemap(s), s["scene"]["clipboard"], s["solved"]
+                    gesture(e, "Ctrl+1")
+                    selected = gesture(e, "Ctrl+A")
+                    refused = gesture(e, "Ctrl+X")
+                    self.assertEqual((refused["solved"], editor(refused)["body"], refused["scene"]["clipboard"]),
+                                     (solved, editor(selected)["body"], clip))
+                    self.assertIn("Ctrl+Shift+E", refused["status"])
+                    e.call("lab-explorer-action", action="select", path=csv.rsplit("/", 1)[0])
+                    refused = gesture(e, "Ctrl+X")
+                    self.assertEqual((refused["solved"], filemap(refused), refused["scene"]["clipboard"]), (solved, original, clip))
+                    self.assertIn("Другие файлы не изменены", refused["status"])
+                    self.assertTrue(e.call("lab-stop")["saved"])
+                    e.close()
+                    e = Engine(verify=True)
+                    e.call("configure", platform=platform, layout="EN")
+                    restored = e.call("lab-start", **(self.csv_options("guided") | {"continue": True}))
+                    self.assertEqual((restored["solved"], filemap(restored), restored["scene"]["clipboard"]), (solved, original, clip))
+                    self.assertEqual(editor(restored)["body"], editor(selected)["body"])
+                    e.call("lab-resume")
+                    e.call("lab-explorer-action", action="select", path=csv)
+                    passed = gesture(e, "Ctrl+X")
+                    self.assertEqual((passed["solved"], filemap(passed), passed["scene"]["clipboard"]), (solved + 1, original, csv))
+                finally:
+                    e.close()
+
     def test_independent_can_use_up_after_inspecting_other_folder(self):
         for platform in ("linux", "windows"):
             with self.subTest(platform=platform), tempfile.TemporaryDirectory() as profile, patch.dict(

@@ -45,7 +45,7 @@ internal sealed partial class LabRun
     internal LiveDraft Draft() => new() { App = App, DesktopEnvironment = EnvironmentProfile, Level = Level, Mission = MissionId, Layout = initialLayout, Guidance = Guidance,
         Dock = Scene.Dock, ProjectFixture = neutralProject ? NeutralProject.FixtureId : null, DesktopProfile = Scene.GnomePractice.Length == 0 ? null : Scene.DesktopProfile, LayoutKey = Scene.LayoutKey, Variant = variant, VirtualLayout = initialVirtual, NativeEnglishInput = nativeEnglishInput, EditorCourse = EditorCourse, RouteKind = RouteKind,
         AdaptiveGuide = AdaptiveGuide, CoachStage = CoachStage, CoachReason = CoachReason,
-        MissionRevision = Scene.GuideNoteActive ? LabScene.GuideNoteRevision : null,
+        MissionRevision = Scene.GuideNoteActive ? LabScene.GuideNoteRevision : Scene.SafeReorder ? LabScene.SafeReorderRevision : null,
         Trace = JsonSerializer.Serialize(trace),
         Progress = new() { Session = Session, Mode = Mode, TimeLimit = TimeLimit, ActionLimit = ActionLimit, Solved = Solved,
             Errors = Errors, SimulatedWindowSwitches = SimulatedWindowSwitches, ActiveMilliseconds = ActiveMilliseconds,

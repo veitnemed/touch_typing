@@ -123,6 +123,12 @@ namespace TouchTypingStudio
                     editor.Items("tabs").Skip(Math.Max(0, editor.I("activeTab"))).Select(item => item.S("title")).FirstOrDefault();
                 System.Windows.Automation.AutomationProperties.SetHelpText(this, description ?? "");
             }
+            else if (terminal == null)
+            {
+                var files = scene.Items("windows").FirstOrDefault(w => w.B("active") && w.S("app") == "files");
+                if (files != null)
+                    System.Windows.Automation.AutomationProperties.SetHelpText(this, FilesLocationDescription(files));
+            }
             var history = scene.Items("windows").FirstOrDefault(w => w.B("active") && w.S("url") == "chrome://history");
             if (history != null)
                 System.Windows.Automation.AutomationProperties.SetHelpText(this, ChromeHistoryAccessible(history));
@@ -966,26 +972,30 @@ namespace TouchTypingStudio
         private static string AppTitle(string app)
         { return app == "chrome" ? "Google Chrome" : app == "code" || app == "vscode" ? "Visual Studio Code" : app == "terminal" ? "Терминал" : "Файлы"; }
 
+        private static readonly Geometry ChromeRed = Geometry.Parse("M 0.067,0.25 A 0.5,0.5 0 0 1 0.933,0.25 L 0.5,0.25 L 0.5,0.5 L 0.2835,0.625 Z");
+        private static readonly Geometry ChromeYellow = Geometry.Parse("M 0.933,0.25 A 0.5,0.5 0 0 1 0.5,1 L 0.7165,0.625 L 0.5,0.5 L 0.5,0.25 Z");
+        private static readonly Geometry ChromeGreen = Geometry.Parse("M 0.5,1 A 0.5,0.5 0 0 1 0.067,0.25 L 0.2835,0.625 L 0.5,0.5 L 0.7165,0.625 Z");
+
         private void Icon(string app, double x, double y, double size)
         {
             if (app == "chrome")
             {
-                context.DrawEllipse(Ui.Brush("#E9B840"), null, new Point(x + size / 2, y + size / 2), size / 2, size / 2);
-                context.DrawGeometry(Ui.Brush("#D65B52"), null, Triangle(x, y, size));
-                context.DrawEllipse(Ui.Brush("#3883BC"), new Pen(Ui.Brush("#E9EDF1"), size * .06), new Point(x + size / 2, y + size / 2), size * .23, size * .23);
+                context.PushTransform(new TranslateTransform(x, y));
+                context.PushTransform(new ScaleTransform(size, size));
+                var hub = new Point(.5, .5);
+                context.DrawEllipse(Ui.Brush("#EA4335"), null, hub, .5, .5);
+                context.DrawGeometry(Ui.Brush("#EA4335"), null, ChromeRed);
+                context.DrawGeometry(Ui.Brush("#FBBC05"), null, ChromeYellow);
+                context.DrawGeometry(Ui.Brush("#34A853"), null, ChromeGreen);
+                context.DrawEllipse(Ui.Brush("#E8F0FE"), null, hub, .26, .26);
+                context.DrawEllipse(Ui.Brush("#1A73E8"), null, hub, .213, .213);
+                context.Pop(); context.Pop();
             }
             else
             {
                 Rounded(x, y, size, size, app == "code" ? "#137AB3" : app == "terminal" ? "#372039" : app == "files" ? "#D89557" : "#41404D", size * .15);
                 Text(app == "code" ? "❯" : app == "terminal" ? ">_" : app == "apps" ? "⠿" : "▰", x + size * .16, y + size * .1, size * .55, "#F4F1F5");
             }
-        }
-        private static Geometry Triangle(double x, double y, double size)
-        {
-            var figure = new PathFigure { StartPoint = new Point(x, y + size * .2), IsClosed = true };
-            figure.Segments.Add(new LineSegment(new Point(x + size, y + size * .2), true));
-            figure.Segments.Add(new LineSegment(new Point(x + size * .5, y + size * .5), true));
-            return new PathGeometry(new[] { figure });
         }
         private void Rectangle(double x, double y, double w, double h, string fill)
         { context.DrawRectangle(Ui.Brush(fill), null, new Rect(x, y, Math.Max(0, w), Math.Max(0, h))); }

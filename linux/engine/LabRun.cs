@@ -35,6 +35,8 @@ internal sealed partial class LabRun
     private const string NotebookPointerEvent = "@notebook-pointer", NotebookKernelStepEvent = "@notebook-kernel-step",
         ExplorerPointerEvent = "@explorer-pointer";
     private bool replayLegacyNotebookWordErase, replayLegacyCsvExplorer;
+    private bool replayLegacyExplorerTargetGuard;
+    private const string ExplorerTargetGuardEvent = "@explorer-target-guard-v1";
     private const string CsvExplorerScopeEvent = "@csv-explorer-scope";
     private const string StrictTriggersEvent = "@strict-triggers";
     private const string DesktopFileSearchEvent = "@desktop-file-search";
@@ -42,13 +44,13 @@ internal sealed partial class LabRun
     private bool replayLegacyWindowsRecovery;
     private bool replayLegacyTriggers;
     private bool replayLegacyLineEditing, replayLegacyPythonEditing;
-    private readonly bool neutralProject, nativeEnglishInput, restoreOriginalGuide;
+    private readonly bool neutralProject, nativeEnglishInput, restoreOriginalGuide, restoreLegacyEditorReorder;
     private int variant;
     private string initialLayout, attemptLayout;
     private bool initialVirtual;
     internal bool HasDraft => !CompletedRoute && !limitAccepted && (!ReachedLimit || softFinish || FinishingMission) &&
         (Solved > 0 || Errors > 0 || ActiveMilliseconds > 0 ||
-        trace.Any(item => item.Key is not (ChromeTabSearchEvent or ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent or DesktopFileSearchEvent or WindowsRecoveryScopeEvent)));
+        trace.Any(item => item.Key is not (ChromeTabSearchEvent or ChromeHistoryEvent or TerminalHistoryEvent or ExactUrlEvent or ExactQuickOpenEvent or StrictReportEvent or ClusterNavigationEvent or NativeLayoutEvent or LineEditingEvent or PythonEditingEvent or NotebookWordEraseEvent or NotebookActionsEvent or StrictTriggersEvent or CsvExplorerScopeEvent or DesktopFileSearchEvent or WindowsRecoveryScopeEvent or ExplorerTargetGuardEvent)));
     private readonly HashSet<string> used = [];
     private readonly ShortcutAttempt[] past;
     private double activeMilliseconds, sinceTask, inputAtActiveMilliseconds;

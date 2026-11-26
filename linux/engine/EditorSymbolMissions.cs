@@ -135,6 +135,30 @@ internal sealed partial class LabScene
         }).ToArray();
     }
 
+    internal LabTask DescribeSymbolTarget(LabTask task)
+    {
+        var w = Active;
+        if (w?.App != "code") return task;
+        if (task.Action == "code-back" && w.SymbolBack.TryPeek(out var origin))
+            return task with { Title = "Вернитесь к вызову в «" + EditorLessonRelativePath(origin.Path) + "»",
+                Hint = "Вернётся исходный файл и позиция курсора." };
+        if (task.Action is not ("code-definition" or "code-references" or "code-rename")) return task;
+        if (task.Action == "code-definition" && CsvNotebook && w.Tab?.Notebook != null)
+            return task with { Title = "Откройте определение «" + csvNotebook.Function + "» в " + CsvModuleName,
+                Hint = "Курсор должен быть на вызове в ячейке; одноимённая функция в другом модуле не подходит." };
+        if (w.Tab?.Notebook != null || ResolveSymbol(w) is not SymbolBinding symbol) return task;
+        string name = "«" + symbol.Name + "»";
+        string path = EditorLessonRelativePath(symbol.Definition.Path);
+        return task.Action switch
+        {
+            "code-definition" => task with { Title = "Откройте определение " + name + " в " + path,
+                Hint = "Проверьте модуль из импорта; одноимённое определение в соседнем файле не подходит." },
+            "code-references" => task with { Title = "Покажите вызовы " + name + " из " + path },
+            "code-rename" => task with { Title = "Переименуйте " + name + " из " + path },
+            _ => task
+        };
+    }
+
     private bool? ApplySymbols(string action, LabWindow w)
     {
         if (w?.App != "code") return null;

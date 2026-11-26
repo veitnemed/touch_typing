@@ -96,6 +96,8 @@ internal sealed partial class LabRun
                 mission = courses.FirstOrDefault(m => m.Id == requestedMission) ?? throw new ArgumentException("Поручение недоступно для выбранного уровня.");
                 if (restoring && restoreOriginalGuide && mission.Id == "code-guide")
                     mission = NeutralProject.LegacyMission(LiveCourse.Missions.Single(m => m.Id == "code-guide"));
+                if (restoring && restoreLegacyEditorReorder)
+                    mission = LiveCourse.LegacyEditorReorder(mission);
                 if (!restoring) variant = random.Next(3);
                 Scene = PrepareMissionScene();
                 mission.Prepare?.Invoke(Scene);
@@ -120,6 +122,7 @@ internal sealed partial class LabRun
                 if (LiveCourse.HasWindowsRecoveryScope(mission.Id)) trace.Add(new(WindowsRecoveryScopeEvent));
                 if (Scene.NotebookCourse) trace.Add(new(NotebookWordEraseEvent));
                 if (Scene.CsvNotebook) trace.Add(new(CsvExplorerScopeEvent));
+                if (App == "code") trace.Add(new(ExplorerTargetGuardEvent));
             }
             foreach (string key in held) trace.Add(new("@held/" + key, superUsed));
             missionLength = pending.Count;

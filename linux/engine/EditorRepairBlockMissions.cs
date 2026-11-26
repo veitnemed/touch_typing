@@ -6,7 +6,28 @@ namespace TouchTypingStudio;
 
 internal sealed partial class LabScene
 {
-    internal bool BlockRepair;
+    internal bool BlockRepair, SafeReorder;
+    internal const string SafeReorderRevision = "editor-reorder-markdown/v1";
+    private const string SafeReorderFile = Project + "/release-check.md";
+    private const string SafeReorderDocument = "3. Read the test report\n1. Save changes\n2. Run the tests\n";
+    internal bool OnReorderChecklist => SafeReorder && Active?.App == "code" && Active.Focus == "body" &&
+        Active.Url == SafeReorderFile;
+
+    internal void PrepareSafeReorder()
+    {
+        SafeReorder = true;
+        Terminal.StoreFile(SafeReorderFile, SafeReorderDocument);
+        originalFiles[SafeReorderFile] = SafeReorderDocument;
+    }
+
+    internal LabTask DescribeChecklistTask(LabTask task) => OnReorderChecklist ? task.Id switch
+    {
+        "move-line-down" => task with { Title = "Опустите пункт 3 на одну строку в release-check.md",
+            Hint = "Задача: восстановить порядок 1 → 2 → 3. Исходный Python-код менять не нужно." },
+        "save" => task with { Title = "Сохраните упорядоченный список проверки релиза" },
+        "changes" => task with { Title = "Сверьте diff release-check.md в Source Control" },
+        _ => task
+    } : task;
     internal const string BlockRepairRoot = Project + "/checkout";
     internal const string BlockRepairPath = BlockRepairRoot + "/checkout.py";
     internal const string BrokenCheckout =

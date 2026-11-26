@@ -24,7 +24,7 @@ internal sealed partial class MixedTypingRun
     private static readonly string[] SystemCommon = ["Super+Left", "Super+Right", "Super+Up",
         "Alt+Tab", "Alt+Left", "Alt+Right", "Alt+Home"];
     private static readonly string[] SystemWindows = ["Super+E", "Super+D"];
-    private static readonly string[] SystemUbuntu = ["Super+H", "Super+PageDown"];
+    private static readonly string[] SystemUbuntu = ["Super+PageUp", "Super+PageDown"];
     internal static readonly IReadOnlyDictionary<string, string> Modes = new Dictionary<string, string>
     {
         ["Digits"] = "Цифры", ["TopRow"] = "Цифры и знаки верхнего ряда",

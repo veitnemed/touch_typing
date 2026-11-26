@@ -123,7 +123,7 @@ internal static partial class LiveCourse
                 scene.TerminalIncidentFilter, "command");
         if (scene.DescribeTracebackTask(token) is LabTask traceback) return traceback;
         if (NotebookTask(token, scene) is LabTask notebook) return notebook;
-        if (PythonEditTask(token) is LabTask edit) return edit;
+        if (PythonEditTask(token) is LabTask edit) return edit.Action == "python-edit-write" ? edit with { Id = edit.Action } : edit;
         if (token == "checkout-expect") return new(token, "Найдите вызов checkout_total(4, 3) в тесте", "",
             "Введите выражение без обёртки assertEqual и нажмите Enter. Сверьте значение 14.",
             LabScene.CheckoutExpectedCall, token);
@@ -258,7 +258,7 @@ internal static partial class LiveCourse
                 Hint = "Здесь Chrome откроет папку с выбранным файлом. Переименование делается в файловом менеджере." };
             if (item != null) return scene.DescribeDesktopSearchTask(task with { Title = (item.Kind == "download" ? "Скачайте" : "Откройте") + " «" + item.Title + "»" });
         }
-        return scene.DescribeDesktopSearchTask(scene.DescribeBlockTask(task));
+        return scene.DescribeDesktopSearchTask(scene.DescribeChecklistTask(scene.DescribeBlockTask(scene.DescribeSymbolTarget(task))));
     }
 
     private static bool Demonstrate(LabTask task, LabScene trial)
@@ -292,7 +292,7 @@ internal static partial class LiveCourse
                 trial.Insert(trial.Active, task.Text);
             }
         }
-        if (task.Action == "python-edit-write" && task.Id != task.Action) return trial.Text("Text", task.Text);
+        if (task.Action == "python-edit-write" && trial.BlockRepair) return trial.Text("Text", task.Text);
         if (task.Action.StartsWith("python-edit-", StringComparison.Ordinal)) return trial.PerformPythonEdit(task.Action);
         if (task.Action == "launch") { trial.Ensure(task.Id[5..]); return true; }
         if (task.Action == "gnome-write")

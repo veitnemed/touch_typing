@@ -251,7 +251,7 @@ internal sealed partial class LabScene
         ReplayLegacyLineEditing = source.ReplayLegacyLineEditing;
         ReplayLegacyTerminalSearch = source.ReplayLegacyTerminalSearch;
         ReplayLegacyNotebookActions = source.ReplayLegacyNotebookActions;
-        ReplayLegacyPythonEditing = source.ReplayLegacyPythonEditing; PythonEditingExercise = source.PythonEditingExercise; BlockRepair = source.BlockRepair;
+        ReplayLegacyPythonEditing = source.ReplayLegacyPythonEditing; PythonEditingExercise = source.PythonEditingExercise; BlockRepair = source.BlockRepair; SafeReorder = source.SafeReorder;
         desktopFileSearchCase = source.desktopFileSearchCase; ReplayLegacyDesktopFileSearch = source.ReplayLegacyDesktopFileSearch;
         windowNumber = source.windowNumber;
         historyDraft = source.historyDraft; killedText = source.killedText;
@@ -726,8 +726,11 @@ internal sealed partial class LabScene
         if (OnNotebook) return window.Tab.Notebook.Editing && key is "Left" or "Right" or "Home" or "End" or "Up" or "Down" or "Delete" or "Backspace";
         if (window.Focus == "reverse-search") return key == "Backspace";
         bool editor = window.App == "code" && window.Focus == "body";
+        // Up/Down recall distinct command records rather than move an editable
+        // caret. Another record requires a fresh press; a held key must not
+        // move past the command just credited by a lesson.
         if (IsTerminal(window))
-            return !Terminal.FollowingLog && key is "Left" or "Right" or "Home" or "End" or "Delete" or "Backspace" or "Up" or "Down";
+            return !Terminal.FollowingLog && key is "Left" or "Right" or "Home" or "End" or "Delete" or "Backspace";
         if (editor)
             return key is "Left" or "Right" or "Home" or "End" or "Delete" or "Backspace" or "Up" or "Down";
         // Delete in a result list (or any other non-text surface) is not a

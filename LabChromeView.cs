@@ -58,6 +58,7 @@ namespace TouchTypingStudio
                     new double[] {7,14,7,10,9,10,9,14} }; break;
                 case "min": contours = new[] { new double[] {3,12,13,12} }; break;
                 case "max": contours = new[] { new double[] {3,3,13,3,13,13,3,13,3,3} }; break;
+                case "restore": contours = new[] { new double[] {7,2,14,2,14,9,11,9}, new double[] {3,6,11,6,11,14,3,14,3,6} }; break;
                 case "close": contours = new[] { new double[] {4,4,12,12}, new double[] {12,4,4,12} }; break;
                 case "plus": contours = new[] { new double[] {3,8,13,8}, new double[] {8,3,8,13} }; break;
                 case "download": contours = new[] { new double[] {8,2,8,10}, new double[] {4,7,8,11,12,7}, new double[] {3,13,13,13} }; break;
@@ -164,9 +165,14 @@ namespace TouchTypingStudio
                 Rounded(plus,7*unit,28*unit,28*unit,"#646464",14*unit);
                 DrawChromeMark("plus",plus+6*unit,13*unit,16*unit,ChromeText,"#646464");
             }
-            string[] controlsIcons = { "min","max","close" };
+            bool win10 = scene.S("desktopStyle") == "win10";
+            string[] controlsIcons = { "min",win10 && window.S("state") == "maximized" ? "restore" : "max","close" };
             for (int index = 0; index < controlsIcons.Length; index++)
-                DrawChromeMark(controlsIcons[index],w-(90-32*index)*unit,13*unit,16*unit,ChromeText,ChromeTray);
+            {
+                double cx = w-(90-32*index)*unit;
+                DrawChromeMark(controlsIcons[index],cx,13*unit,16*unit,ChromeText,ChromeTray);
+                if (win10) AddWindowsCaptionHit(window, index, new Rect(cx-8*unit, 0, 32*unit, tabsHeight));
+            }
 
             double nav = tabsHeight;
             Rectangle(0,nav,w,navHeight,ChromeStrap);

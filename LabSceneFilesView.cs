@@ -32,6 +32,14 @@ namespace TouchTypingStudio
                     .Select(entry => entry.S("title") + " («" + entry.S("path") + "»)")) + "." : "");
         }
 
+        private static string FilesLocationDescription(Data window)
+        {
+            string folder = window.S("windowsPath");
+            if (folder.Length == 0) folder = window.S("folder", FilesHome);
+            var selected = window.Items("entries").ElementAtOrDefault(Math.Max(-1, window.I("item", -1)));
+            return "Папка «" + folder + "»." + (selected == null ? "" : " Выбран объект «" + selected.S("title") + "».");
+        }
+
         private static string FilesCaption(Data window, bool windows)
         {
             if (window.S("focus") == "image-preview") return windows ? "Просмотр фотографий" : "Просмотр изображения";
@@ -253,8 +261,11 @@ namespace TouchTypingStudio
                         Rectangle(x + 5, y + 8, 5, 1, icon);
                     }
                     break;
+                case "download":
+                    DrawChromeMark("download", x, y - 1, 15, icon);
+                    break;
                 default:
-                    Text(kind == "home" ? "⌂" : kind == "download" ? "↓" : kind == "desktop" ? "▣" :
+                    Text(kind == "home" ? "⌂" : kind == "desktop" ? "▣" :
                         kind == "star" ? "★" : kind == "clock" ? "◷" : "▤", x, y - 3, 15, icon, 18);
                     break;
             }

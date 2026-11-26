@@ -33,6 +33,15 @@ internal sealed partial class LabRun
         }
         if (pressed && held.Contains(key))
         {
+            // A held palette arrow scrolls, but only a fresh qualifying
+            // gesture can earn a lesson step or execute a command.
+            if (key is "Up" or "Down" && Scene.Active?.Focus == "palette" && !Scene.Switcher &&
+                !held.Any(KeyChord.IsModifier))
+            {
+                if (Scene.Apply(key == "Up" ? "palette-prev" : "palette-next"))
+                    trace.Add(new(key, true, ""));
+                return null;
+            }
             bool repeatText = repeatTextHeld.Contains(key) && text?.Length > 0 && !text.Any(char.IsControl);
             if (!replayLegacyUrl && (Scene.CanRepeatEditing(key) || repeatText && Scene.CanRepeatText()) && !held.Any(item => KeyChord.Family(item) is "Alt" or "Super")
                 && (!held.Any(item => KeyChord.Family(item) == "Ctrl") || key is "Left" or "Right" or "Home" or "End" ||
@@ -113,7 +122,7 @@ internal sealed partial class LabRun
         }
         // Lock toggles affect the physical keyboard, not progress in a lesson.
         if (key is "NumLock" or "CapsLock" or "ScrollLock") return null;
-        if (!restoring && Task.TargetPath is string expectedFile &&
+        if (!replayLegacyExplorerTargetGuard && Task.TargetPath is string expectedFile &&
             Gesture.TryParse(Task.Keys, out var transfer) && transfer.Chords.Length == 1 &&
             transfer.Chords[0].Trigger == key && transfer.Chords[0].FitsModifiers(held))
         {

@@ -54,7 +54,7 @@ class CheckoutWindow(QA):
             if not lab.active:
                 break
             task, before = lab.state["task"], lab.state["solved"]
-            if task["id"] == "python-edit-write-fee":
+            if task["id"] == "python-edit-write" and task["text"].startswith("    fee"):
                 w = editor(lab)
                 start, end = sorted((w["bodyCursor"], w["bodyAnchor"]))
                 assert w["body"][start:end] == "    fee = 0\n    total = subtotal", w

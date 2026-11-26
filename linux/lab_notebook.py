@@ -135,7 +135,7 @@ class NotebookSurface:
     def _on_nb_pointer_move(self, _controller, x, y):
         self._notebook_pointer_pos = (x, y)
         hit = next((part for part in reversed(self._notebook_hits) if contains(part[0], x, y)), None)
-        self.set_cursor_from_name(("text" if hit[1] in ("edit", "browser-history:search", "browser-surface:address") else "pointer") if hit else "default")
+        self.set_cursor_from_name(("text" if hit[1] in ("edit", "browser-history:search", "browser-surface:address") else "pointer") if hit and hit[2] else "default")
         tip = hit[2] if hit else None
         if self.get_tooltip_text() != tip:
             self.set_tooltip_text(tip)
@@ -238,7 +238,10 @@ class NotebookSurface:
         return True
 
     def _nb_hit(self, box, action, title, cell=-1, clicks=1, offset=None, path=""):
-        if not (self.notebook_command or self.explorer_command or self.browser_history_command or self.chrome_surface_command) or not self.notebook_interaction_clear():
+        desktop_pin = action=="explorer:desktop-taskbar" and self.scene.get("showDesktop") and not any(
+            self.scene.get(key) for key in ("overview","switcher","screenshot","desktopOverlay"))
+        if (not (self.notebook_command or self.explorer_command or self.browser_history_command or self.chrome_surface_command)
+                or not self.notebook_interaction_clear() and not desktop_pin):
             return
         box = overlap(box, (0, 0, self.get_width(), self.get_height()))
         if min(box[2:]) >= 1:

@@ -1,7 +1,7 @@
 """Native snapshots of simulated Ubuntu and Windows desktops and application windows."""
 import base64
-from functools import partial
-from math import atan2, ceil, degrees, hypot
+from functools import lru_cache, partial
+from math import atan2, ceil, degrees, hypot, sqrt
 from urllib.parse import urlsplit
 
 import gi
@@ -29,6 +29,42 @@ def ink(value):
     result = Gdk.RGBA()
     result.parse(value)
     return result
+
+
+@lru_cache(maxsize=1)
+def chrome_badge():
+    """Create the same three tangent color fields as the WPF vector.
+
+    A small anti-aliased texture works on the minimum GTK version without
+    a host browser icon, SVG loader or optional PyGObject Cairo converter.
+    """
+    size = 72
+    root3 = sqrt(3)
+    red, yellow, green = (234,67,53), (251,188,5), (52,168,83)
+    blue, ring = (26,115,232), (232,240,254)
+    rgba = bytearray()
+    for row in range(size):
+        for col in range(size):
+            count, r, g, b = 0, 0, 0, 0
+            for ox, oy in ((.25,.25),(.75,.25),(.25,.75),(.75,.75)):
+                x, y = (col+ox)/size, (row+oy)/size
+                radius = (x-.5)**2+(y-.5)**2
+                if radius > .25:
+                    continue
+                if radius < .213**2:
+                    color = blue
+                elif radius < .26**2:
+                    color = ring
+                elif (y <= .25 if x >= .5 else y <= .25+root3*(x-(.5-root3/4))):
+                    color = red
+                elif x >= .5 and (y <= .625 or x > .5+(1-y)/root3):
+                    color = yellow
+                else:
+                    color = green
+                count += 1
+                r += color[0]; g += color[1]; b += color[2]
+            rgba.extend((r//count,g//count,b//count,round(255*count/4)) if count else (0,0,0,0))
+    return Gdk.MemoryTexture.new(size,size,Gdk.MemoryFormat.R8G8B8A8,GLib.Bytes.new(bytes(rgba)),size*4)
 
 
 class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
@@ -210,8 +246,11 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         self.snapshot.pop()
 
     def app_icon(self, app, x, y, size=30):
+        if app == "chrome":
+            self.snapshot.append_texture(chrome_badge(), self.rect(x,y,size,size))
+            return
         if app not in self.icons:
-            names = {"chrome": ["google-chrome", "chromium", "web-browser"], "code": ["code", "com.microsoft.VSCode"],
+            names = {"code": ["code", "com.microsoft.VSCode"],
                      "files": ["org.gnome.Nautilus", "system-file-manager"], "terminal": ["org.gnome.Ptyxis", "utilities-terminal"]}
             theme = Gtk.IconTheme.get_for_display(self.get_display())
             candidates = names.get(app, [app])
@@ -233,17 +272,10 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
             paintable.snapshot(self.snapshot, size, size)
             self.snapshot.restore()
             return
-        colors = {"chrome": "#4285f4", "code": "#007acc", "terminal": "#4a2347", "ubuntu": "#e95420"}
+        colors = {"code": "#007acc", "terminal": "#4a2347", "ubuntu": "#e95420"}
         self.fill(colors.get(app, "#555763"), x, y, size, size, 7)
-        if app == "chrome":
-            self.fill("#ea4335", x + 2, y + 2, size - 4, (size - 4) / 2, 5)
-            self.fill("#fbbc05", x + size / 2, y + size / 2, size / 2 - 2, size / 2 - 2, 4)
-            self.fill("#34a853", x + 2, y + size / 2, size / 2 - 2, size / 2 - 2, 4)
-            self.fill("#e8f0fe", x + size * .27, y + size * .27, size * .46, size * .46, size)
-            self.fill("#4285f4", x + size * .34, y + size * .34, size * .32, size * .32, size)
-        else:
-            self.label({"code": "‹›", "terminal": ">_", "ubuntu": "●"}.get(app, "□"),
-                       x + 4, y + size * .13, size * .55, bold=True)
+        self.label({"code": "‹›", "terminal": ">_", "ubuntu": "●"}.get(app, "□"),
+                   x + 4, y + size * .13, size * .55, bold=True)
 
     def capture_png(self, active_only=False):
         if active_only:
@@ -380,6 +412,7 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
             if opened:
                 self.fill("#4cb9fa", x + 7, top + height - 2, 19, 2)
             self.win10_app_icon(app, x + 7, mid - 9, 19)
+            self._nb_hit((x,top,33,height),"explorer:desktop-taskbar",self.win10_caption(app),path=app)
         self.label(self.scene.get("layout", "EN"), width - 80, mid - 8, 11, "#e2eaf3", width=25)
         self.label("10:00", width - 49, mid - 8, 11, "#e2eaf3", width=44)
         self.fill("#748395", width - 4, top, 1, height)
@@ -650,6 +683,10 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         self.fill("#569ace" if win10 and window.get("active") else "#303036", x, y, w, h, radius)
         self.snapshot.push_clip(self.rect(x + 1, y + 1, w - 2, h - 2))
         app = window.get("app", "terminal")
+        if win10:
+            self._nb_hit((x,y,w,h),"explorer:desktop-focus",
+                         None if window.get("active") else "Перейти в «"+window.get("title",self.win10_caption(app))+"»",
+                         path=window["id"])
         if app == "chrome":
             self.chrome(window, x, y, w, h)
             self.snapshot.pop()
@@ -660,9 +697,10 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
             title = self.files_caption(window, True) if app == "files" else window.get("title", self.win10_caption(app))
             self.label(title, x + 27, y + 6, 11,
                        "#1c2937", width=w - 111)
-            for i, glyph in enumerate(("−", "□", "×")):
-                bx = x + w - 77 + i * 24
-                self.label(glyph, bx + 6, y + 3, 14, "#263648")
+            for i, icon in enumerate(("min", "restore" if window.get("state")=="maximized" else "max", "close")):
+                bx = x+w-78+i*26
+                self.chrome_mark(icon, bx+5, y+6, 16, "#263648", "#f4f7fa")
+                self.win10_caption_hit(window,i,(bx,y,26,27))
         elif app == "files":
             self.fill("#f6f4f2" if window.get("active") else "#eceae7", x, y, w, 27)
             title = self.files_caption(window, False)
@@ -685,6 +723,11 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         else:
             self.terminal(window, x, y + 27, w, h - 27)
         self.snapshot.pop()
+
+    def win10_caption_hit(self, window, index, bounds):
+        command = ("minimize", "maximize", "close")[index]
+        label = ("Свернуть", "Восстановить размер" if window.get("state")=="maximized" else "Развернуть", "Закрыть")[index]
+        self._nb_hit(bounds, "explorer:desktop-"+command, label, path=window["id"])
 
     @staticmethod
     def files_caption(window, win10):
@@ -852,8 +895,10 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
             else:
                 self.fill(icon, x + 4, y + 4, 5, 1)
                 self.fill(icon, x + 4, y + 7, 5, 1)
+        elif kind == "download":
+            self.chrome_mark("download", x, y-1, 14, icon)
         else:
-            self.label({"home": "⌂", "download": "↓", "desktop": "▣", "star": "★",
+            self.label({"home": "⌂", "desktop": "▣", "star": "★",
                         "clock": "◷", "bin": "▤"}[kind], x, y - 3, 13, icon)
 
     def chrome_mark(self, kind, x, y, size, color, background="#3d3d3d"):
@@ -867,6 +912,7 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
                      ((7, 14), (7, 10), (9, 10), (9, 14))),
             "min": (((3, 12), (13, 12)),),
             "max": (((3, 3), (13, 3), (13, 13), (3, 13), (3, 3)),),
+            "restore": (((7,2),(14,2),(14,9),(11,9)), ((3,6),(11,6),(11,14),(3,14),(3,6))),
             "close": (((4, 4), (12, 12)), ((12, 4), (4, 12))),
             "plus": (((3, 8), (13, 8)), ((8, 3), (8, 13))),
             "download": (((8, 2), (8, 10)), ((4, 7), (8, 11), (12, 7)), ((3, 13), (13, 13))),
@@ -992,8 +1038,12 @@ class DesktopView(Gtk.Widget, NotebookSurface, ExplorerSurface):
         if plus+28*unit <= x+w-controls+8*unit:
             self.fill("#646464", plus, y+7*unit, 28*unit, 28*unit, 14*unit)
             self.chrome_mark("plus", plus+6*unit, y+13*unit, 16*unit, "#e2e2e2", "#646464")
-        for i, icon in enumerate(("min","max","close")):
-            self.chrome_mark(icon, x+w-(90-32*i)*unit, y+13*unit, 16*unit, "#e1e1e1", "#272727")
+        win10 = self.scene.get("desktopStyle") == "win10"
+        for i, icon in enumerate(("min","restore" if win10 and window.get("state")=="maximized" else "max","close")):
+            cx = x+w-(90-32*i)*unit
+            self.chrome_mark(icon, cx, y+13*unit, 16*unit, "#e1e1e1", "#272727")
+            if win10:
+                self.win10_caption_hit(window,i,(cx-8*unit,y,32*unit,tabs_h))
         nav_y = y+tabs_h
         self.fill(strap, x, nav_y, w, nav_h)
         steps = ("back", "forward", "refresh", "home") if w>=460 else ("back","refresh")
