@@ -504,6 +504,19 @@ button.reference-footer-control:hover, button.reference-footer-control:focus-vis
 .reference-window .lesson-page .lesson-timer { background: @graph_card; border-color: @graph_edge; }
 window.reference-light .reference-home { background: #f6f3f8; color: #2b2430; }
 window.reference-light .reference-header { background: #eee9f0; color: #2b2430; }
+/* Light-surface controls must not inherit the dark theme's pale focus ring
+   and hover fill. Selected tabs still have a dark plum surface. */
+window.reference-light .reference-header button.reference-nav:not(.active):focus-visible,
+window.reference-light .reference-header button.reference-brand:focus-visible,
+window.reference-light .reference-header button.reference-icon-control:focus-visible,
+window.reference-light .reference-header .reference-window-controls button:focus-visible,
+window.reference-light button.reference-card:focus-visible { outline-color: @graph_cta; }
+window.reference-light .reference-header button.reference-nav:not(.active):hover,
+window.reference-light .reference-header button.reference-icon-control:hover,
+window.reference-light .reference-header .reference-window-controls button:hover { background: #e2d8e7; }
+window.reference-light .reference-header button.reference-icon-control,
+window.reference-light .reference-catalog-actions > box > .reference-config-caption,
+window.reference-light .reference-progress { color: #594961; }
 window.reference-light .reference-hero-subtitle,
 window.reference-light .reference-card-description,
 window.reference-light .reference-progress-label { color: #4b4055; }

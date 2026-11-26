@@ -50,6 +50,10 @@ internal sealed partial class PracticeService
     private int persistedLabAttempts;
     private bool labFinishAttempted;
     private string labSaveError;
+    // Batch unsubmitted terminal edits. Active GTK/WPF lessons poll lab-state,
+    // so even a single edit followed by idle time gets a durable checkpoint.
+    private const long TerminalDraftIntervalMs = 650;
+    private long? terminalDraftDue;
     private string[] dock, desktopProfile;
     internal string StorageError => typingConflictNotice ?? store.Error;
 
@@ -160,6 +164,7 @@ internal sealed partial class PracticeService
                 labLimitCheckpointAttempted = draft?.Progress?.LimitDecisionPending == true;
                 labFinishAttempted = false;
                 labSaveError = null;
+                terminalDraftDue = null;
                 FinishLabAutomatically();
                 return LabState();
             case "lab-native-layout":
@@ -171,10 +176,17 @@ internal sealed partial class PracticeService
                 return LabState();
             case "lab-key":
                 if (lab == null) throw new InvalidOperationException("Сначала выберите учебный класс.");
+                var beforeTerminal = TerminalDraftPosition();
                 var labAttempt = lab.Input(Text(message, "key"), Flag(message, "pressed"), Text(message, "text"), Text(message, "nativeLayout"));
                 if (lab.Finished) FinishLabAutomatically();
                 else if (lab.AwaitingLimitChoice) CheckLabLimit();
                 else if (labAttempt != null) SaveLabCheckpoint();
+                else
+                {
+                    if (TerminalDraftPosition() is { } after && after != beforeTerminal)
+                        terminalDraftDue ??= Environment.TickCount64 + TerminalDraftIntervalMs;
+                    CheckTerminalDraft();
+                }
                 return LabState();
             case "lab-switch-demonstration":
                 CheckLabLimit();
@@ -205,7 +217,7 @@ internal sealed partial class PracticeService
                 if (lab?.NotebookPointer(Text(message, "action"), Number(message, "cell", -1), Number(message, "offset", -1)) == true) SaveLabCheckpoint();
                 return LabState();
             case "lab-state":
-                CheckLabLimit(); lab?.TickNotebook(); lab?.TickTerminal(); FinishLabAutomatically(); return LabState();
+                CheckLabLimit(); lab?.TickNotebook(); lab?.TickTerminal(); FinishLabAutomatically(); CheckTerminalDraft(); return LabState();
             case "lab-hint":
                 CheckLabLimit();
                 if (lab?.AwaitingLimitChoice != true) lab?.Hint();
@@ -361,10 +373,26 @@ internal sealed partial class PracticeService
         if (store.Error == null) lab.MarkSaved();
     }
 
-    // The profile is atomically replaced before returning a successful acknowledgement.
-    // Use the attempt's existing write cadence, plus explicit pause; do not sync every keystroke.
+    private (string Window, string Focus, string Line, int Cursor, int Anchor)? TerminalDraftPosition()
+    {
+        var window = lab?.Scene.Active;
+        return window != null && (window.App == "terminal" || window.Focus == "terminal")
+            ? (window.Id, window.Focus, lab.Scene.TerminalInput, window.Cursor, window.Anchor)
+            : null;
+    }
+
+    private void CheckTerminalDraft()
+    {
+        if (terminalDraftDue is long due && Environment.TickCount64 >= due && lab is { Paused: false, Finished: false, HasDraft: true, Saved: false }
+            && !lab.AwaitingLimitChoice)
+            SaveLabCheckpoint();
+    }
+
+    // The profile is atomically replaced before acknowledging a successful save.
+    // Keep immediate scored checkpoints and explicit pause; never write on every edit.
     private void SaveLabCheckpoint(LabSessionRecord record = null)
     {
+        terminalDraftDue = null;
         var pending = lab.Attempts.Skip(persistedLabAttempts).ToArray();
         var draft = lab.HasDraft ? lab.Draft() : null;
         if (draft != null) draft.Progress.Revision = Guid.NewGuid().ToString("N");

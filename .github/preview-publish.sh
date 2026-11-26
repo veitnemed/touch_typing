@@ -1,16 +1,25 @@
 #!/usr/bin/env bash
 # Publish exactly the archives from the build job, never a rebuilt package.
 set -euo pipefail
-trap 'echo "Preview publication failed at line $LINENO" >&2' ERR
+trap 'echo "Release publication failed at line $LINENO" >&2' ERR
 
 pkg=${1:?archive directory required}
 subject=$(git show -s --format=%s "$PRODUCT_SHA")
-if [[ ! $subject =~ ^Release\ (v1\.9\.0-preview\.([1-9][0-9]*))$ ]]; then
-    echo 'No preview requested by this commit.'; exit 0
+if [[ $subject =~ ^Release\ (v1\.9\.0-preview\.([1-9][0-9]*))$ ]]; then
+    tag=${BASH_REMATCH[1]}
+    number=${BASH_REMATCH[2]}
+    ((number >= 4))
+    previous="v1.9.0-preview.$((number - 1))"
+    title="TouchTyping 1.9.0 Preview $number"
+    flags=(--prerelease --latest=false)
+elif [[ $subject == 'Release v1.9.0' ]]; then
+    tag=v1.9.0
+    previous=v1.9.0-preview.14
+    title="TouchTyping 1.9.0 — Код вслепую"
+    flags=(--draft --latest=false)
+else
+    echo 'No release requested by this commit.'; exit 0
 fi
-tag=${BASH_REMATCH[1]}
-number=${BASH_REMATCH[2]}
-((number >= 4))
 test "$GITHUB_REF" = refs/heads/feature/live-ux-acceptance
 test "$(git rev-parse HEAD)" = "$PRODUCT_SHA"
 # A retry is allowed only when no tag was created. Never modify an existing tag or release.
@@ -19,7 +28,6 @@ if git ls-remote --exit-code origin "refs/tags/$tag" >/dev/null; then
 else
     test "$?" -eq 2
 fi
-previous="v1.9.0-preview.$((number - 1))"
 git ls-remote --exit-code origin "refs/tags/$previous" >/dev/null
 test "$(tr -d '\r\n' < "$pkg/SOURCE-SHA.txt")" = "$PRODUCT_SHA"
 notes="docs/releases/$tag.md"
@@ -37,9 +45,9 @@ git diff-tree --no-commit-id --name-only -r "$PRODUCT_SHA" | grep -Fx "$notes"
 {
     cat "$notes"
     printf '\n**Коммит:** `%s`\n\n[Проверки архивов, GTK/X11 и Windows Server](%s/%s/actions/runs/%s).\n' "$PRODUCT_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
-} > "$RUNNER_TEMP/preview-notes.md"
-gh release create "$tag" --target "$PRODUCT_SHA" --title "TouchTyping 1.9.0 Preview $number" \
-    --prerelease --latest=false --notes-file "$RUNNER_TEMP/preview-notes.md" \
+} > "$RUNNER_TEMP/release-notes.md"
+gh release create "$tag" --target "$PRODUCT_SHA" --title "$title" \
+    "${flags[@]}" --notes-file "$RUNNER_TEMP/release-notes.md" \
     "$pkg/touch-typing-$tag-linux-x64.tar.gz" "$pkg/touch-typing-$tag-windows-x64.zip" \
     "$pkg/SHA256SUMS.txt" "$pkg/SOURCE-SHA.txt"
 # Verify the public downloads, not only the inputs to gh release create.
@@ -48,4 +56,14 @@ gh release download "$tag" --dir "$redownload"
 cmp "$redownload/SHA256SUMS.txt" "$pkg/SHA256SUMS.txt"
 cmp "$redownload/SOURCE-SHA.txt" "$pkg/SOURCE-SHA.txt"
 (cd "$redownload" && sha256sum -c SHA256SUMS.txt)
+if [[ $tag == v1.9.0 ]]; then
+    # Make the stable release public only after the draft assets have downloaded intact.
+    gh release edit "$tag" --draft=false --latest
+    public=$(mktemp -d)
+    gh release download "$tag" --dir "$public"
+    cmp "$public/SHA256SUMS.txt" "$pkg/SHA256SUMS.txt"
+    cmp "$public/SOURCE-SHA.txt" "$pkg/SOURCE-SHA.txt"
+    (cd "$public" && sha256sum -c SHA256SUMS.txt)
+    gh release view "$tag" --json isDraft,isPrerelease --jq '(.isDraft or .isPrerelease) | not' | grep -Fx true
+fi
 test "$(git ls-remote origin "refs/tags/$tag" | cut -f1)" = "$PRODUCT_SHA"

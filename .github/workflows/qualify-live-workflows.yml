@@ -1,4 +1,4 @@
-name: Qualify TouchTyping archives and publish explicit previews
+name: Qualify and publish TouchTyping archives
 on:
   push:
     branches: [feature/live-ux-acceptance]
@@ -339,7 +339,7 @@ jobs:
           if-no-files-found: warn
 
   publish-preview:
-    if: startsWith(github.event.head_commit.message, 'Release v1.9.0-preview.')
+    if: github.event.head_commit.message == 'Release v1.9.0' || startsWith(github.event.head_commit.message, 'Release v1.9.0-preview.')
     needs: [build, engine-regression, linux-native, windows-native]
     runs-on: ubuntu-24.04
     timeout-minutes: 10

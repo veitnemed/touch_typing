@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import monotonic, sleep
+from xml.etree import ElementTree
 import unittest
 from unittest.mock import patch
 
@@ -152,6 +153,38 @@ class TerminalPracticalTests(unittest.TestCase):
                 for solution in ("grep", "Select-String", "sync.log", "app.log", "Ctrl+R"):
                     self.assertNotIn(solution, copy)
                 e.call("lab-stop")
+
+    def test_unsubmitted_line_and_caret_survive_crash_after_checkpoint(self):
+        for desktop, platform, successful, typo in (
+            ("ubuntu", "linux", "grep ERROR app.log", "tial -f app.log"),
+            ("windows", "windows", "Select-String ERROR sync.log", "Get-Contnet sync.log"),
+        ):
+            with self.subTest(desktop=desktop):
+                e = self.open(platform)
+                begin(e, desktop, 0)
+                self.assertEqual(submit(e, successful)["solved"], 1)
+                enter(e, typo)
+                chord(e, "Home")
+                chord(e, "Right")
+                expected = chord(e, "Right")
+                state = lambda s: (s["mission"], s["task"]["id"], s["solved"],
+                                   s["scene"]["terminalInput"], active(s)["cursor"])
+                self.assertEqual(state(expected)[-3:], (1, typo, 2))
+                sleep(.8)
+                e.call("lab-state")  # same periodic call issued by GTK and WPF
+                self.assertFalse(e.storage_error)
+                # Kill before pause, stop, or graceful shutdown can save the line.
+                e.process.kill()
+                profile = self.profile / "TouchTypingStudio-QA" / "progress.xml"
+                def earned():
+                    return [row.findtext("Skill") for row in ElementTree.parse(profile).findall("./ShortcutHistory/ShortcutAttempt")
+                            if row.findtext("Correct") == "true" and successful in (row.findtext("Skill") or "")]
+                self.assertEqual(len(earned()), 1)
+                for _ in range(2):
+                    e = self.open(platform)
+                    restored = e.call("lab-start", **options(desktop, **{"continue": True}))
+                    self.assertEqual(state(restored), state(expected))
+                    self.assertEqual(len(earned()), 1)
 
     def test_old_ordinary_draft_preserves_command_pointer_and_buffer(self):
         fixture = Path(__file__).with_name("fixtures") / "preview9-original-terminal-course.xml.gz"

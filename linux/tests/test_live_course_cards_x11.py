@@ -1,6 +1,7 @@
 """Hosted X11: use real ordinary cards and continue active practice past the first task."""
 import json
 from test_preview2_native import QA, alias, codes, out
+from test_home_focus_x11 import exercise_header_focus
 
 TEXT_PREFIX = {"code-rename-confirm", "project-search-submit", "exact-find-submit", "quick-choose"}
 TYPED_FINISH = {"notebook-type", "python-edit-write", "file-search-query"}
@@ -62,6 +63,7 @@ class CourseCards(QA):
         return self.lab
 
     def exercise(self):
+        yield from exercise_header_focus(self)
         witness = []
         for environment, apps in (
             ("ubuntu", ("chrome","code","terminal","ubuntu","workday")),

@@ -24,7 +24,7 @@ if ($StageDirectory) {
     $appPath = Join-Path $PSScriptRoot ('TouchTyping-' + (Get-Date -Format 'yyyyMMddHHmmssfff') + '.exe')
 }
 $compilerOutput = & $compiler /nologo /target:winexe /optimize+ /platform:x64 /codepage:65001 `
-    "/win32manifest:$PSScriptRoot\app.manifest" "/out:$appPath" "/resource:$PSScriptRoot\linux\hands.png,TouchTyping.Hands.png" `
+    "/win32icon:$PSScriptRoot\assets\brand\touch-typing.ico" "/win32manifest:$PSScriptRoot\app.manifest" "/out:$appPath" "/resource:$PSScriptRoot\linux\hands.png,TouchTyping.Hands.png" `
     "/resource:$PSScriptRoot\linux\result-time.png,TouchTyping.Result.time.png" `
     "/resource:$PSScriptRoot\linux\result-count.png,TouchTyping.Result.count.png" `
     "/resource:$PSScriptRoot\linux\result-speed.png,TouchTyping.Result.speed.png" `

@@ -8,6 +8,7 @@
     <AssemblyName>TouchTyping</AssemblyName>
     <RootNamespace>TouchTypingStudio</RootNamespace>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <ApplicationIcon>../assets/brand/touch-typing.ico</ApplicationIcon>
     <ApplicationManifest>../app.manifest</ApplicationManifest>
     <AppConfig>../TouchTyping.exe.config</AppConfig>
   </PropertyGroup>
