@@ -59,6 +59,7 @@ internal static partial class LiveUiSmoke
                     else if(mode=="chrome") Check(!Visible("LabTerminalTheory") && !Visible("LabTheoryTitle"),"No command sidebar in browser");
                     CaptureReferenceFrame("course-"+environment+"-"+mode+"-start");
                     bool shellCourse = mode=="terminal";
+                    int shellInputRetries = 1;
                     for(int cap=0;cap<100 && !Visible("LabResult") && (ReadSolved()<(shellCourse?30:20)||CourseScenario()==initial);cap++)
                     {
                         int before=ReadSolved();
@@ -80,7 +81,9 @@ internal static partial class LiveUiSmoke
                         }
                         if (prompt.StartsWith("text:",StringComparison.Ordinal))
                         {
-                            EnterCharacters(prompt.Substring(5));
+                            if (shellCourse && Visible("LabTheoryTitle"))
+                                TypeShellWithVisibleReceipt(prompt.Substring(5), ref shellInputRetries);
+                            else EnterCharacters(prompt.Substring(5));
                             if (!Visible("LabResult") && ReadSolved()==before) Key("Enter");
                         }
                         else
@@ -134,6 +137,37 @@ internal static partial class LiveUiSmoke
             return 1;
         }
         finally { if(app!=null && !app.HasExited){app.Kill();app.WaitForExit(4000);} }
+    }
+
+    private static void TypeShellWithVisibleReceipt(string command, ref int retries)
+    {
+        string previous = Find("LabDesktop").Current.HelpText;
+        Check(previous.Length == 0, "Shell command starts at an empty prompt");
+        foreach (char character in command)
+        {
+            string expected = previous + character;
+            while (true)
+            {
+                Send(Character(character));
+                var deadline = Stopwatch.StartNew();
+                bool observed = false;
+                while (deadline.ElapsedMilliseconds < 1400)
+                {
+                    string actual = Find("LabDesktop").Current.HelpText;
+                    if (actual == expected) { observed = true; break; }
+                    if (actual != previous)
+                        throw new InvalidOperationException("Unexpected visible shell prefix: " + actual + "; needed " + expected);
+                    Wait(40);
+                }
+                if (observed) break;
+                if (retries-- == 0)
+                    throw new TimeoutException("No visible shell input for character " + character + " after " + previous);
+                Console.WriteLine("RETRY a missing synthetic physical key only after the visible shell field did not change: " +
+                                  ((int)character).ToString("X4"));
+            }
+            previous = expected;
+        }
+        Check(Find("LabDesktop").Current.HelpText == command, "WPF received the exact command before Enter");
     }
 
     private static void CheckDiskCapacityMission(string desktop, bool repeat)

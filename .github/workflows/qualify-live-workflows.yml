@@ -341,36 +341,40 @@ jobs:
           $app = "$env:RUNNER_TEMP/TouchTyping Live Candidate"
           Expand-Archive -LiteralPath $zip -DestinationPath $app
           $proof = "$env:RUNNER_TEMP/windows-proof"
-          & "./windows/Test-Typing-Session.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-session"
-          & "./windows/Test-TypingCardRecords.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-records"
-          & "./windows/Test-Typing-Mixed.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-mixed"
-          & "./windows/Test-TypingReview.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-review"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -NativeLayout -Seed 0 -OutputDirectory "$proof/live-layout"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -NotebookMission -Seed 0 -OutputDirectory "$proof/notebook"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -ProjectFileMission -Seed 0 -OutputDirectory "$proof/project-files"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -EditorProjectFileMission -Seed 0 -OutputDirectory "$proof/editor-project-files"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -EditorCourse -Seed 0 -OutputDirectory "$proof/editor-course"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -BrowserClone -Seed 0 -OutputDirectory "$proof/browser"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock off -Seed 0 -OutputDirectory "$proof/keypad-off"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock on -Seed 0 -OutputDirectory "$proof/keypad-on"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock dedicated -Seed 0 -OutputDirectory "$proof/dedicated-home"
-          & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -LiveUxSmall -OutputDirectory "$proof/compact"
-          & "./windows/Test-LiveCourseCards.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/course-cards"
-          & "./windows/Test-LiveSourceHandoffs.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/source-handoffs"
-          & "./windows/Test-Notebook-Workbench.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/notebook-workbench"
-          & "./windows/Test-Notebook-File-Handoff.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/notebook-file-handoff"
-          python linux/tests/test_delivery_real_tools.py --require-native
-          if ($LASTEXITCODE) { throw "Real PowerShell/Robocopy delivery fixture failed" }
-          & "./windows/Test-OrdinaryWpfLaunch.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/ordinary-launch"
-          & "./windows/Test-ChromeHistory.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/chrome-history"
-          & "./windows/Test-Chrome-History-View.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/chrome-history-frame"
-          & "./windows/Test-Chrome-TabSearch.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/chrome-tab-search"
-          & "./windows/Test-Chrome-Surface.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/chrome-surface"
-          & "./windows/Test-Desktop-File-Search.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/desktop-file-search"
-          & "./windows/Test-Windows-Folder-Recovery.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/windows-folder-recovery"
-          & "./windows/Test-EditorGitRelease.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/editor-git-release"
-          & "./windows/Test-EditorTraceback.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/editor-traceback"
-          & "./windows/Test-WorkdaySourceRevision.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/workday-sourced-link"
+          $failures = @()
+          try { & "./windows/Test-Typing-Session.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-session" } catch { $failures += "typing-session: $_" }
+          try { & "./windows/Test-TypingCardRecords.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-records" } catch { $failures += "typing-records: $_" }
+          try { & "./windows/Test-Typing-Mixed.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-mixed" } catch { $failures += "typing-mixed: $_" }
+          try { & "./windows/Test-TypingReview.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/typing-review" } catch { $failures += "typing-review: $_" }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -NativeLayout -Seed 0 -OutputDirectory "$proof/live-layout" } catch { $failures += "live-layout: $_" }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -NotebookMission -Seed 0 -OutputDirectory "$proof/notebook" } catch { $failures += "notebook: $_" }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -ProjectFileMission -Seed 0 -OutputDirectory "$proof/project-files" } catch { $failures += "project-files: $_" }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -EditorProjectFileMission -Seed 0 -OutputDirectory "$proof/editor-project-files" } catch { $failures += "editor-project-files: $_" }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -EditorCourse -Seed 0 -OutputDirectory "$proof/editor-course" } catch { $failures += "editor-course: $_" }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -BrowserClone -Seed 0 -OutputDirectory "$proof/browser" } catch { $failures += "browser: $_" }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock off -Seed 0 -OutputDirectory "$proof/keypad-off" } catch { $failures += "keypad-off: $_" }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock on -Seed 0 -OutputDirectory "$proof/keypad-on" } catch { $failures += "keypad-on: $_" }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -WorkdayNumLock dedicated -Seed 0 -OutputDirectory "$proof/dedicated-home" } catch { $failures += "dedicated-home: $_" }
+          try { & "$app/Test-Live-UI.ps1" -Application "$app/TouchTyping.exe" -LiveUxSmall -OutputDirectory "$proof/compact" } catch { $failures += "compact: $_" }
+          try { & "./windows/Test-LiveCourseCards.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/course-cards" } catch { $failures += "course-cards: $_" }
+          try { & "./windows/Test-LiveSourceHandoffs.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/source-handoffs" } catch { $failures += "source-handoffs: $_" }
+          try { & "./windows/Test-Notebook-Workbench.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/notebook-workbench" } catch { $failures += "notebook-workbench: $_" }
+          try { & "./windows/Test-Notebook-File-Handoff.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/notebook-file-handoff" } catch { $failures += "notebook-file-handoff: $_" }
+          try {
+            python linux/tests/test_delivery_real_tools.py --require-native
+            if ($LASTEXITCODE) { throw "Real PowerShell/Robocopy delivery fixture failed" }
+          } catch { $failures += "real-windows-shell: $_" }
+          try { & "./windows/Test-OrdinaryWpfLaunch.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/ordinary-launch" } catch { $failures += "ordinary-launch: $_" }
+          try { & "./windows/Test-ChromeHistory.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/chrome-history" } catch { $failures += "chrome-history: $_" }
+          try { & "./windows/Test-Chrome-History-View.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/chrome-history-frame" } catch { $failures += "chrome-history-frame: $_" }
+          try { & "./windows/Test-Chrome-TabSearch.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/chrome-tab-search" } catch { $failures += "chrome-tab-search: $_" }
+          try { & "./windows/Test-Chrome-Surface.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/chrome-surface" } catch { $failures += "chrome-surface: $_" }
+          try { & "./windows/Test-Desktop-File-Search.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/desktop-file-search" } catch { $failures += "desktop-file-search: $_" }
+          try { & "./windows/Test-Windows-Folder-Recovery.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/windows-folder-recovery" } catch { $failures += "windows-folder-recovery: $_" }
+          try { & "./windows/Test-EditorGitRelease.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/editor-git-release" } catch { $failures += "editor-git-release: $_" }
+          try { & "./windows/Test-EditorTraceback.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/editor-traceback" } catch { $failures += "editor-traceback: $_" }
+          try { & "./windows/Test-WorkdaySourceRevision.ps1" -Application "$app/TouchTyping.exe" -OutputDirectory "$proof/workday-sourced-link" } catch { $failures += "workday-sourced-link: $_" }
+          if ($failures.Count -gt 0) { throw ($failures -join "; ") }
       - name: Verify visible adaptive guidance in two ordinary Chrome routes
         if: always()
         shell: powershell
