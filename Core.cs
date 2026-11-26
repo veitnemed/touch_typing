@@ -169,7 +169,7 @@ namespace TouchTypingStudio
         private static readonly XmlSerializer Serializer = new XmlSerializer(typeof(StudioProfile));
         private readonly string path;
         private readonly Mutex gate;
-        internal string GateName { get; }
+        internal readonly string GateName;
         public readonly string Root;
         public string Error { get; private set; }
 
