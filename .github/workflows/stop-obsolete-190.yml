@@ -1,0 +1,20 @@
+name: Stop superseded TouchTyping 1.9.0 candidate
+on:
+  push:
+    branches: [ops/stop-obsolete-190]
+permissions:
+  actions: write
+jobs:
+  stop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Verify exact old run and request cancellation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=repos/veitnemed/touch_typing/actions/runs/45740712031
+          test "$(gh api "$run" --jq .head_sha)" = 0dcaf30e1740b86e94a2a2b3cc444b43b07eed5d
+          if [ "$(gh api "$run" --jq .status)" != completed ]; then
+            gh api --method POST "$run/cancel"
+          fi
