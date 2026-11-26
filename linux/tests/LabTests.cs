@@ -484,14 +484,23 @@ internal static class LabTests
             if (task.Id == "changes")
             {
                 ++reviews;
-                using var snapshot = JsonDocument.Parse(JsonSerializer.Serialize(run.Scene.Snapshot()));
+                using var snapshot = JsonDocument.Parse(JsonSerializer.Serialize(run.Scene.Snapshot(),
+                    new JsonSerializerOptions(JsonSerializerDefaults.Web)));
                 var active = snapshot.RootElement.GetProperty("windows").EnumerateArray().Single(w => w.GetProperty("active").GetBoolean());
-                var changes = active.GetProperty("sourceControl").GetProperty("changes").EnumerateArray().ToArray();
+                var source = active.GetProperty("sourceControl");
+                var changes = source.GetProperty("changes").EnumerateArray().ToArray();
                 Check(changes.Length == 1 && changes[0].GetProperty("path").GetString() == "checkout.py" &&
                     changes[0].GetProperty("state").GetString() == "M", "Source Control marks only the locally saved file as modified");
                 var diff = changes[0].GetProperty("diff").EnumerateArray().Select(line => line.GetString()).ToArray();
                 Check(diff.Any(line => line.StartsWith("- ")) && diff.Any(line => line.StartsWith("+ ")),
                     "Source Control shows real before/after code, not only the name");
+                var rows = changes[0].GetProperty("rows").EnumerateArray().ToArray();
+                Check(source.GetProperty("selected").GetInt32() == 0 &&
+                    rows.Any(row => row.GetProperty("changed").GetBoolean()) &&
+                    rows.Any(row => !row.GetProperty("changed").GetBoolean() &&
+                        row.GetProperty("before").GetProperty("text").GetString() ==
+                        row.GetProperty("after").GetProperty("text").GetString()),
+                    "Source Control selects the changed file and aligns true unchanged context");
             }
         }
         Check(run.Finished && run.Solved >= 30 && reviews == 2 && run.Errors == 0, "Complete the full practical editor repair exercise");
