@@ -12,16 +12,19 @@ if [[ $subject =~ ^Release\ (v1\.9\.0-preview\.([1-9][0-9]*))$ ]]; then
     previous="v1.9.0-preview.$((number - 1))"
     title="TouchTyping 1.9.0 Preview $number"
     flags=(--prerelease --latest=false)
-elif [[ $subject == 'Release v1.9.0' ]]; then
-    tag=v1.9.0
+elif [[ $subject =~ ^Release\ (v1\.9\.[01])$ ]]; then
+    tag=${BASH_REMATCH[1]}
     previous=v1.9.0-preview.14
-    title="TouchTyping 1.9.0 — Код вслепую"
+    title="TouchTyping ${tag#v} — Код вслепую"
     flags=(--draft --latest=false)
 else
     echo 'No release requested by this commit.'; exit 0
 fi
 test "$GITHUB_REF" = refs/heads/feature/live-ux-acceptance
 test "$(git rev-parse HEAD)" = "$PRODUCT_SHA"
+if [[ $tag != *-preview.* ]]; then
+    test "$(git ls-remote origin "$GITHUB_REF" | cut -f1)" = "$PRODUCT_SHA"
+fi
 # A retry is allowed only when no tag was created. Never modify an existing tag or release.
 if git ls-remote --exit-code origin "refs/tags/$tag" >/dev/null; then
     echo "$tag already exists; refusing to replace it." >&2; exit 1
@@ -56,7 +59,7 @@ gh release download "$tag" --dir "$redownload"
 cmp "$redownload/SHA256SUMS.txt" "$pkg/SHA256SUMS.txt"
 cmp "$redownload/SOURCE-SHA.txt" "$pkg/SOURCE-SHA.txt"
 (cd "$redownload" && sha256sum -c SHA256SUMS.txt)
-if [[ $tag == v1.9.0 ]]; then
+if [[ $tag != *-preview.* ]]; then
     # Make the stable release public only after the draft assets have downloaded intact.
     gh release edit "$tag" --draft=false --latest
     public=$(mktemp -d)

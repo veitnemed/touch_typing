@@ -30,6 +30,11 @@ internal sealed partial class MixedTypingRun
     // (e.g. Alt+Tab) match by the same mechanism if delivered, but are not made a
     // prerequisite in the course: don't train an impossible shortcut under a compositor.
     private static readonly string[] BasicCommands = ["Ctrl+C", "Ctrl+V", "Ctrl+X", "Ctrl+Z", "Ctrl+S", "Ctrl+A", "F2"];
+    // Useful everyday actions that stay in an ordinary foreground window.
+    // They extend only the standalone Hotkeys course, not word exercises.
+    private static readonly string[] EverydayCommands = [
+        "Ctrl+F", "Ctrl+Y", "Ctrl+T", "Ctrl+W", "Ctrl+Shift+T",
+        "Ctrl+Left", "Ctrl+Right", "Ctrl+Backspace", "Ctrl+Delete", "Shift+Home", "Shift+End"];
     private static readonly string[] MoreCommands = ["Ctrl+Shift+P", "Ctrl+Enter", "Ctrl+P", "Ctrl+F", "F3", "Shift+F3", "F12", "Ctrl+2", "Alt+Left"];
     private static readonly string[] RussianWords = ["отчёт", "готово", "этап", "смета", "итог", "план", "срок", "файл", "задача", "смена", "строка"];
     private static readonly string[] EnglishWords = ["report", "total", "ready", "plan", "item", "batch", "draft", "file", "row", "task", "order", "stock"];
@@ -94,7 +99,7 @@ internal sealed partial class MixedTypingRun
         if (!Modes.TryGetValue(mode, out string title)) throw new ArgumentException("Выберите режим практики.");
         layout = layout == "RU" ? "RU" : "EN"; level = Math.Clamp(level, 0, 2);
         var plans = Enumerable.Range(0, infinite ? 1 : Math.Clamp(cycles, 1, 5))
-            .Select(_ => (IReadOnlyList<TypingAtom>)Generate(mode, layout, level, random, rightAltMode == "alt")).ToArray();
+            .Select(_ => (IReadOnlyList<TypingAtom>)Generate(mode, layout, level, random, rightAltMode)).ToArray();
         return new(mode, title, layout, level, seconds, infinite, plans, random);
     }
 
@@ -102,20 +107,25 @@ internal sealed partial class MixedTypingRun
         int position = 0, int errors = 0, double activeSeconds = 0, IReadOnlyDictionary<TypingAtom,int> mistakes = null, string attemptId = null)
         => new(mode, title, units.FirstOrDefault()?.Layout, 0, 0, false, [units], null, position, errors, activeSeconds, mistakes, attemptId);
 
-    private static List<TypingAtom> Generate(string mode, string firstLayout, int level, Random random, bool rightAltAvailable)
+    private static List<TypingAtom> Generate(string mode, string firstLayout, int level, Random random, string actualRightAltMode)
     {
         int goal = random.Next(350, 551);
         var atoms = new List<TypingAtom>(goal);
         string[] commands = (level == 0 ? BasicCommands : [.. BasicCommands, .. MoreCommands]).OrderBy(_ => random.Next()).ToArray();
-        // The usual visit through «Печать → Горячие клавиши» adds hands-on
-        // navigation practice. Keep every original key and its early coverage;
-        // a host with AltGr retains left-Alt practice instead of an impossible step.
-        string[] navigation = mode != "Hotkeys" ? [] : rightAltAvailable ? ["LAlt+Right", "RAlt+D"] : ["LAlt+Right", "LAlt+Left"];
-        string Command(int index)
+        // Repeat the foundation in both layouts, then practice explicit sides
+        // followed by the everyday extensions. AltGr may teach the physical
+        // right-thumb position, but must never stand in for a normal Alt chord.
+        string[] navigation = ["LAlt+Right", actualRightAltMode switch
         {
-            int offset = index % (2 * commands.Length + navigation.Length);
-            return offset < 2 * commands.Length ? commands[offset % commands.Length] : navigation[offset - 2 * commands.Length];
-        }
+            "alt" => "RAlt+D",
+            "altgr" => "RAlt",
+            _ => "LAlt+Left"
+        }];
+        string[] rotation = mode == "Hotkeys"
+            ? [.. commands, .. commands, .. navigation,
+                .. EverydayCommands.Except(commands).OrderBy(_ => random.Next())]
+            : commands;
+        string Command(int index) => rotation[index % rotation.Length];
         void Text(string text, string lang)
         {
             foreach (char c in text)
@@ -208,7 +218,9 @@ internal sealed partial class MixedTypingRun
         if (chord != null)
         {
             if (!modifier) consumedTriggers.Add(key);
-            bool unavailable = matches && rightAltMode != "alt" && chord.Trigger != null && chord.Modifiers.Contains("RAlt");
+            // A mapped AltGr can arrive as physical RAlt alone (GTK) or
+            // with a synthetic Ctrl (Windows). It is not a system Alt in either case.
+            bool unavailable = rightAltMode != "alt" && chord.Trigger != null && held.Contains("RAlt");
             if (matches && !unavailable) Advance();
             else if (!modifier && !unavailable) Miss();
         }
@@ -230,7 +242,7 @@ internal sealed partial class MixedTypingRun
         {
             carry = string.Concat(plan.TakeLast(9).Select(a=>a.Display));
             absoluteOffset += plan.Count; cycleIndex++;
-            plan.Clear(); plan.AddRange(Generate(Mode, StartLayout, Level, random, rightAltMode == "alt"));
+            plan.Clear(); plan.AddRange(Generate(Mode, StartLayout, Level, random, rightAltMode));
         }
         else if (!IsInfinite && Position == cycleStart + lengths[cycleIndex]) cycleStart += lengths[cycleIndex++];
     }
@@ -247,7 +259,12 @@ internal sealed partial class MixedTypingRun
         string expectedNote = atom?.Value switch
         {
             "LAlt+Right" => "Вперёд по истории: левый Alt большим пальцем, правая рука на стрелке.",
+            "LAlt+Left" when rightAltMode == "unknown" =>
+                "Назад по истории: левый Alt большим пальцем. Роль правой клавиши не подтверждена; этот цикл не требует её.",
             "LAlt+Left" => "Назад по истории: левый Alt большим пальцем, правая рука на стрелке.",
+            "RAlt" when rightAltMode == "altgr" =>
+                "Нажмите AltGr правым большим пальцем. Здесь проверяем только положение клавиши, а не сочетание с Alt.",
+            "RAlt" => "Нащупайте правую клавишу Alt большим пальцем. Нажмите только её.",
             "RAlt+D" when rightAltMode == "alt" => "В адресную строку: правый Alt большим пальцем, D левым средним.",
             "RAlt+D" => "Правый Alt этой раскладки не подтверждён как обычный Alt. Выберите стандартную раскладку EN или RU.",
             _ => atom?.Command == true ? ShortcutCatalog.AltGuideNote(atom.Chord, rightAltMode) : ""

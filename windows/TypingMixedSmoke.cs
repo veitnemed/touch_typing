@@ -201,6 +201,27 @@ internal static partial class LiveUiSmoke
             }
             Check(ruV && enV && f2, "Ctrl+V is displayed/accepted in both exercise layouts; physical F2 also works");
 
+            MixedLayout(thread, false);
+            foreach (var pair in new[] { new[] {"LAlt+Right", "RAlt+Right"}, new[] {"RAlt+D", "LAlt+D"} })
+            {
+                string atom = "⟦" + pair[0] + "⟧";
+                Check(MixedAtom() == atom, "default course includes explicit " + pair[0]);
+                int before = MixedCount();
+                Chord(pair[1]);
+                Check(MixedCount() == before && MixedAtom() == atom, "opposite-side Alt cannot score " + pair[0]);
+                MixedStep(thread, atom, MixedLayoutTitle());
+            }
+            var everyday = new HashSet<string>(StringComparer.Ordinal);
+            for (int i=0; i<11; i++)
+            {
+                string atom = MixedAtom();
+                everyday.Add(atom.Trim('⟦','⟧'));
+                MixedStep(thread, atom, MixedLayoutTitle());
+            }
+            Check(everyday.SetEquals(new[] {"Ctrl+F","Ctrl+Y","Ctrl+T","Ctrl+W","Ctrl+Shift+T",
+                "Ctrl+Left","Ctrl+Right","Ctrl+Backspace","Ctrl+Delete","Shift+Home","Shift+End"}),
+                "ordinary Hotkeys card delivers the 11 everyday extensions");
+
             MixedChoose("Digits");
             int digit = int.Parse(MixedAtom(), CultureInfo.InvariantCulture);
             int[] keypad = {0x52,0x4f,0x50,0x51,0x4b,0x4c,0x4d,0x47,0x48,0x49};

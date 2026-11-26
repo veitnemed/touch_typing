@@ -168,7 +168,8 @@ internal static class ShortcutCatalog
                 int fingerPenalty = 0;
                 foreach (int finger in fingers.Distinct())
                 {
-                    yield return (key, finger, sidePenalty + fingerPenalty);
+                    if (KeyChord.Family(key) != "Alt" || finger == primary)
+                        yield return (key, finger, sidePenalty + fingerPenalty);
                     fingerPenalty += overrides.ContainsKey(key) ? 10 : 3;
                 }
                 sidePenalty += 2;
@@ -198,6 +199,7 @@ internal static class ShortcutCatalog
     {
         if (key == "RSuper") return 7;
         if (key is "LSuper" or "LAlt" or "Space") return 8;
+        if (key == "RAlt") return 9;
         var cap = TypingKeyboard.Rows.SelectMany(row => row).FirstOrDefault(candidate => KeyName(candidate) == key);
         if (cap != null) return cap.Finger;
         return key switch

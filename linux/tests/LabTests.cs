@@ -530,7 +530,7 @@ internal static class LabTests
             var writer = new ProfileStore(true, System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N")));
             var lockThread = System.Threading.Tasks.Task.Run(() =>
             {
-                using var occupied = new System.Threading.Mutex(false, @"Local\TouchTypingStudio.QA.Profile");
+                using var occupied = new System.Threading.Mutex(false, writer.GateName);
                 occupied.WaitOne();
                 try { ready.Set(); release.Wait(); }
                 finally { occupied.ReleaseMutex(); }
@@ -538,6 +538,15 @@ internal static class LabTests
             try
             {
                 Check(ready.Wait(5000), "Another thread locked the QA profile");
+                if (System.IO.Path.DirectorySeparatorChar == '/' &&
+                    string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TOUCH_TYPING_QA_DATA_ROOT")))
+                {
+                    var other = new ProfileStore(true, System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+                    other.Update(_ => { });
+                    Check(other.Error == null && other.GateName != writer.GateName,
+                        "Independent disposable Linux QA profiles do not block one another");
+                    System.IO.Directory.Delete(other.Root, true);
+                }
                 bool changed = false;
                 var snapshot = writer.Update(_ => changed = true);
                 Check(snapshot != null && !changed && writer.Error?.Contains("Профиль занят") == true,

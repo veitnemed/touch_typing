@@ -18,6 +18,7 @@ gi.require_version("Graphene", "1.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, GdkX11, Graphene, Gtk
 from test_typing_cycles_native import TypingCycles, x, xt, ptr, out
+from test_preview2_native import alias, codes
 
 # XkbUseCoreKbd; a new Xvfb with US/RU and the standard Mod2 NumLock mapping.
 DEV = 0x0100
@@ -52,6 +53,19 @@ class NativeMixed(TypingCycles):
                                text=chr(u) if (u := Gdk.keyval_to_unicode(keyval)) else "",
                                group=controller.get_group())
         return super().key_pressed(controller, keyval, keycode, modifiers)
+
+    def chord(self, label):
+        # GTK can defer queued XTest events while redrawing the keyboard.
+        # Wait for actual press/release delivery before judging a native chord.
+        keys = [codes[alias.get(key, key)] for key in label.split("+")]
+        receipts = {(key, down): self.received.get((key, down), 0)
+                    for key in keys for down in (True, False)}
+        yield from super().chord(label)
+        for _ in range(100):
+            if all(self.received.get(event, 0) > prior for event, prior in receipts.items()):
+                return
+            yield
+        raise AssertionError(("undelivered keyboard input", label, self.last_event))
 
     def os_layout(self, layout):
         group = 1 if layout == "RU" else 0
@@ -235,6 +249,30 @@ class NativeMixed(TypingCycles):
         self.evidence.append(dict(case="right-ctrl-v-russian", physical=self.last_event.copy(),
                                   before=before, after=self.state["progressDone"]))
 
+        # The ordinary card teaches both physical Alt positions without
+        # foreground capture. Keep native US in this part to exercise Alt_R.
+        yield from self.os_layout("EN")
+        assert self.physical_keyboard.right_alt_mode() == "alt"
+        while self.state["progressDone"] < 14:
+            yield from self.type_unit()
+        for label, wrong, finger in (("LAlt+Right", "RAlt+Right", 8), ("RAlt+D", "LAlt+D", 9)):
+            s = self.state
+            assert s["expected"] == label and s["expectedTargets"][0] == {
+                "key": label.split("+")[0], "finger": finger}
+            assert len({k["finger"] for k in s["expectedTargets"]}) == len(s["expectedTargets"])
+            assert "большим пальцем" in self.typing_detail.get_label()
+            yield from self.landmark("12-alt-" + label.split("+")[0])
+            yield from self.chord(wrong)
+            assert self.state["progressDone"] == s["progressDone"], (label, wrong)
+            yield from self.type_unit()
+        extra = set()
+        for _ in range(11):
+            extra.add(self.state["expected"])
+            yield from self.type_unit()
+        assert extra == {"Ctrl+F", "Ctrl+Y", "Ctrl+T", "Ctrl+W", "Ctrl+Shift+T",
+                         "Ctrl+Left", "Ctrl+Right", "Ctrl+Backspace", "Ctrl+Delete", "Shift+Home", "Shift+End"}
+        self.evidence.append(dict(case="physical-left-right-alt-and-everyday-chords", shortcuts=sorted(extra)))
+
         # NumLock off: keypad navigation is not a typed digit. Turn it on and
         # use the same key; report the GDK key symbols that were actually delivered.
         yield from self.choose("Digits")
@@ -270,6 +308,30 @@ class NativeMixed(TypingCycles):
         # Cover switching the other way immediately before Space on older GDK:
         # the Space event itself may still report a single effective group 0.
         yield from self.choose("TopRow", layout="RU")
+
+        # AltGr is now actually mapped on the disposable X server. It must
+        # reach the physical position lesson, but never drive an Alt command.
+        subprocess.run(["setxkbmap", "-layout", "us,ru", "-option", "",
+                        "-option", "lv3:ralt_switch"], check=True)
+        yield from self.os_layout("EN")
+        assert self.physical_keyboard.right_alt_mode() == "altgr"
+        yield from self.choose("Hotkeys", layout="EN")
+        for _ in range(14):
+            yield from self.type_unit()
+        s = self.state
+        assert s["expected"] == "LAlt+Right"
+        yield from self.chord("RAlt+Right")
+        assert (self.state["progressDone"], self.state["errors"]) == (14, s["errors"])
+        yield from self.type_unit()
+        assert self.state["expected"] == "RAlt" and self.state["expectedTargets"] == [{"key":"RAlt","finger":9}]
+        assert "только положение" in self.typing_detail.get_label()
+        yield from self.landmark("14-altgr-position")
+        yield from self.chord("LAlt")
+        assert self.state["progressDone"] == 15
+        yield from self.type_unit()
+        assert self.state["progressDone"] == 16 and self.last_event["keysym"] == "ISO_Level3_Shift"
+        self.evidence.append(dict(case="altgr-is-position-only", physical=self.last_event,
+                                  after=self.state["progressDone"]))
         (out / "mixed-native-results.json").write_text(json.dumps(self.evidence, ensure_ascii=False, indent=2))
         print("PASS GTK/XTest: native mixed RU/EN, physical Ctrl+V, NumLock off/on, RU № and EN #.", flush=True)
 

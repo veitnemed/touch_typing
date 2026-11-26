@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Xml.Serialization;
@@ -168,6 +169,7 @@ namespace TouchTypingStudio
         private static readonly XmlSerializer Serializer = new XmlSerializer(typeof(StudioProfile));
         private readonly string path;
         private readonly Mutex gate;
+        internal string GateName { get; }
         public readonly string Root;
         public string Error { get; private set; }
 
@@ -185,7 +187,16 @@ namespace TouchTypingStudio
             Root = Path.Combine(dataRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 verification ? "TouchTypingStudio-QA" : "TouchTypingStudio");
             path = Path.Combine(Root, "progress.xml");
-            gate = new Mutex(false, verification ? @"Local\TouchTypingStudio.QA.Profile" : @"Local\TouchTypingStudio.Profile");
+            GateName = verification ? @"Local\TouchTypingStudio.QA.Profile" : @"Local\TouchTypingStudio.Profile";
+            // Linux native QA uses separate disposable trees, some running in
+            // parallel or killed on purpose. Only writers of the same tree may contend.
+            // Keep the existing Windows lock name for its app/engine/UITest participants.
+            if (verification && Path.DirectorySeparatorChar == '/')
+            {
+                using (var hash = SHA256.Create())
+                    GateName += "." + BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(Path.GetFullPath(Root)))).Replace("-", "");
+            }
+            gate = new Mutex(false, GateName);
         }
 
         public StudioProfile Read()
